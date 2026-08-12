@@ -1,12 +1,15 @@
-use crate::core::tests::{setup, snapshot, titled};
+use crate::core::node::WindowRestrictions;
+use crate::core::tests::{default_dim, setup, snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
 fn delete_window_removes_from_container() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    let w1 = hub
+        .insert_window(titled("w1"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
@@ -52,8 +55,10 @@ fn delete_window_removes_from_container() {
 #[test]
 fn delete_window_removes_parent_container() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    let w1 = hub
+        .insert_window(titled("w4"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -97,9 +102,15 @@ fn delete_window_removes_parent_container() {
 #[test]
 fn delete_all_windows() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w5"));
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w6"));
-    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w7"));
+    let w0 = hub
+        .insert_window(titled("w5"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w1 = hub
+        .insert_window(titled("w6"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w2 = hub
+        .insert_window(titled("w7"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.delete_window(w0);
     hub.delete_window(w1);
     hub.delete_window(w2);
@@ -112,8 +123,12 @@ fn delete_all_windows() {
 #[test]
 fn delete_all_windows_cleanup_unfocused_workspace() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w8"));
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w9"));
+    let w0 = hub
+        .insert_window(titled("w8"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w1 = hub
+        .insert_window(titled("w9"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.focus_workspace("1");
     hub.delete_window(w0);
     hub.delete_window(w1);
@@ -126,15 +141,19 @@ fn delete_all_windows_cleanup_unfocused_workspace() {
 #[test]
 fn clean_up_parent_container_when_only_child_is_container() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w10"));
-    hub.insert_tiling(hub.current_workspace(), titled("w11"));
+    let w0 = hub
+        .insert_window(titled("w10"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None);
     // Create new child container
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w12"));
+    hub.insert_window(titled("w12"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
     hub.toggle_spawn_mode();
     // Should be inserted in the root container
-    let w3 = hub.insert_tiling(hub.current_workspace(), titled("w13"));
+    let w3 = hub
+        .insert_window(titled("w13"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.delete_window(w0);
     hub.delete_window(w3);
     assert_snapshot!(snapshot(&hub), @r"
@@ -181,9 +200,11 @@ fn clean_up_parent_container_when_only_child_is_container() {
 #[test]
 fn delete_focused_window_change_focus_to_previous_window() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w14"));
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w15"));
-    hub.insert_tiling(hub.current_workspace(), titled("w16"));
+    hub.insert_window(titled("w14"), default_dim(), WindowRestrictions::None);
+    let w1 = hub
+        .insert_window(titled("w15"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("w16"), default_dim(), WindowRestrictions::None);
     hub.focus_left();
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"
@@ -230,9 +251,11 @@ fn delete_focused_window_change_focus_to_previous_window() {
 #[test]
 fn delete_focused_window_change_focus_to_next_window() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w17"));
-    hub.insert_tiling(hub.current_workspace(), titled("w18"));
-    hub.insert_tiling(hub.current_workspace(), titled("w19"));
+    let w0 = hub
+        .insert_window(titled("w17"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("w18"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w19"), default_dim(), WindowRestrictions::None);
     hub.focus_left();
     hub.focus_left();
     hub.delete_window(w0);
@@ -280,12 +303,14 @@ fn delete_focused_window_change_focus_to_next_window() {
 #[test]
 fn delete_focused_window_focus_last_window_of_preceding_container() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w20"));
+    hub.insert_window(titled("w20"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w21"));
+    hub.insert_window(titled("w21"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
     hub.toggle_spawn_mode();
-    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w22"));
+    let w2 = hub
+        .insert_window(titled("w22"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -372,10 +397,12 @@ fn delete_focused_window_focus_last_window_of_preceding_container() {
 #[test]
 fn delete_focused_window_focus_following_container_focused_node() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w23"));
-    hub.insert_tiling(hub.current_workspace(), titled("w24"));
+    let w0 = hub
+        .insert_window(titled("w23"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("w24"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w25"));
+    hub.insert_window(titled("w25"), default_dim(), WindowRestrictions::None);
     hub.focus_left();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
@@ -463,8 +490,10 @@ fn delete_focused_window_focus_following_container_focused_node() {
 #[test]
 fn delete_window_when_parent_focused_gives_focus_to_last_child() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w26"));
-    hub.insert_tiling(hub.current_workspace(), titled("w27"));
+    let w0 = hub
+        .insert_window(titled("w26"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("w27"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
     hub.delete_window(w0);
     assert_snapshot!(snapshot(&hub), @"
@@ -510,13 +539,15 @@ fn delete_window_when_parent_focused_gives_focus_to_last_child() {
 fn container_replaced_by_child_keeps_position_in_parent() {
     let mut hub = setup();
     // Create: [w0] [w1, w2] [w3]
-    hub.insert_tiling(hub.current_workspace(), titled("w28"));
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w29"));
+    hub.insert_window(titled("w28"), default_dim(), WindowRestrictions::None);
+    let w1 = hub
+        .insert_window(titled("w29"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w30"));
+    hub.insert_window(titled("w30"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w31"));
+    hub.insert_window(titled("w31"), default_dim(), WindowRestrictions::None);
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
@@ -564,10 +595,12 @@ fn container_replaced_by_child_keeps_position_in_parent() {
 fn delete_window_focus_sibling_containers_last_window() {
     let mut hub = setup();
 
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w32"));
-    hub.insert_tiling(hub.current_workspace(), titled("w33"));
+    let w0 = hub
+        .insert_window(titled("w32"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("w33"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w34"));
+    hub.insert_window(titled("w34"), default_dim(), WindowRestrictions::None);
 
     // Delete W0, container collapses, should focus W2 (last window of sibling container)
     hub.delete_window(w0);
@@ -616,10 +649,12 @@ fn delete_window_focus_sibling_containers_last_window() {
 fn delete_window_focus_sibling_container_if_last_focused_container() {
     let mut hub = setup();
 
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w35"));
-    hub.insert_tiling(hub.current_workspace(), titled("w36"));
+    let w0 = hub
+        .insert_window(titled("w35"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("w36"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w37"));
+    hub.insert_window(titled("w37"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
 
     hub.delete_window(w0);
@@ -668,13 +703,15 @@ fn delete_window_focus_sibling_container_if_last_focused_container() {
 fn promoted_container_toggles_direction_to_differ_from_grandparent() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w38"));
+    hub.insert_window(titled("w38"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w39"));
+    let w1 = hub
+        .insert_window(titled("w39"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w40"));
+    hub.insert_window(titled("w40"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w41"));
+    hub.insert_window(titled("w41"), default_dim(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -770,12 +807,14 @@ fn promote_child_to_tabbed_grandparent() {
 
     // Create 3 nested containers: tabbed grandparent > split parent > split child
     // tabbed: [W0] [[W1] [W2 W3]]
-    hub.insert_tiling_titled();
-    let w1 = hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    let w1 = hub
+        .insert_window(titled("W1"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
 
     // Make grandparent tabbed
     hub.focus_parent();
@@ -876,12 +915,16 @@ fn promote_child_from_tabbed_parent_to_split_grandparent_does_nothing_when_direc
 
     // Create 3 nested containers: split grandparent > tabbed parent > split child
     // [W0] [tabbed: [W1] [W2 W3]]
-    hub.insert_tiling_titled();
-    let w1 = hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    let w1 = hub
+        .insert_window(titled("W1"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.toggle_spawn_mode();
-    let w2 = hub.insert_tiling_titled();
+    let w2 = hub
+        .insert_window(titled("W2"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
 
     // Make parent tabbed
     hub.focus_parent();
@@ -986,12 +1029,14 @@ fn promote_tabbed_child_to_split_grandparent() {
 
     // Create 3 nested containers: split grandparent > split parent > tabbed child
     // [W0] [[W1] [tabbed: W2 W3]]
-    hub.insert_tiling_titled();
-    let w1 = hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    let w1 = hub
+        .insert_window(titled("W1"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
 
     // Make child tabbed
     hub.focus_parent();
@@ -1088,10 +1133,12 @@ fn promote_tabbed_child_to_split_grandparent() {
 fn promote_child_of_tabbed_to_workspace_root_expand_child_to_full_screen() {
     let mut hub = setup();
 
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w42"));
-    hub.insert_tiling(hub.current_workspace(), titled("w43"));
+    let w0 = hub
+        .insert_window(titled("w42"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("w43"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w44"));
+    hub.insert_window(titled("w44"), default_dim(), WindowRestrictions::None);
 
     hub.set_focus(w0);
     hub.toggle_container_layout();
@@ -1141,10 +1188,12 @@ fn promote_child_of_tabbed_to_workspace_root_expand_child_to_full_screen() {
 fn delete_window_after_orientation_change() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w45"));
-    hub.insert_tiling(hub.current_workspace(), titled("w46"));
+    hub.insert_window(titled("w45"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w46"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w47"));
+    let w2 = hub
+        .insert_window(titled("w47"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

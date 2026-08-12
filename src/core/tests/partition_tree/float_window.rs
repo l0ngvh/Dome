@@ -1,27 +1,39 @@
-use crate::core::node::{Dimension, Length};
-use crate::core::tests::{setup, snapshot, titled};
+use crate::core::GlobalLayoutConfig;
+use crate::core::node::{Dimension, Length, WindowRestrictions};
+use crate::core::tests::{
+    LayoutConfigBuilder, default_dim, setup, setup_with_layout, snapshot, titled, titled_matcher,
+};
 use insta::assert_snapshot;
+
+/// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
+fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
+    LayoutConfigBuilder::new()
+        .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
+        .build()
+}
 
 #[test]
 fn focus_falls_back_to_container_focus_after_float_delete() {
-    let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    let mut hub = setup_with_layout(layout_floating(&["w3"]));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
 
     // Focus W1 (middle window)
     hub.focus_left();
 
-    let f0 = hub.insert_float(
-        hub.current_workspace(),
-        Dimension::new(
-            Length::new(50.0),
-            Length::new(5.0),
-            Length::new(40.0),
-            Length::new(15.0),
-        ),
-        titled("w3"),
-    );
+    let f0 = hub
+        .insert_window(
+            titled("w3"),
+            Dimension::new(
+                Length::new(50.0),
+                Length::new(5.0),
+                Length::new(40.0),
+                Length::new(15.0),
+            ),
+            WindowRestrictions::None,
+        )
+        .unwrap();
 
     hub.delete_window(f0);
 
@@ -70,22 +82,23 @@ fn focus_falls_back_to_container_focus_after_float_delete() {
 
 #[test]
 fn toggle_float_to_tiling_with_nested_containers() {
-    let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    let mut hub = setup_with_layout(layout_floating(&["w7"]));
+    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w5"));
+    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w6"));
-    hub.insert_float(
-        hub.current_workspace(),
+    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(
+        titled("w7"),
         Dimension::new(
             Length::new(50.0),
             Length::new(5.0),
             Length::new(40.0),
             Length::new(15.0),
         ),
-        titled("w7"),
-    );
+        WindowRestrictions::None,
+    )
+    .unwrap();
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
@@ -135,8 +148,8 @@ fn toggle_float_to_tiling_with_nested_containers() {
 fn toggle_float_with_container_focused() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w8"));
-    hub.insert_tiling(hub.current_workspace(), titled("w9"));
+    hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
     // After focus_parent, focused_tiling_window() returns None (container highlighted).
     // toggle_float is a no-op: both windows stay tiling, container stays highlighted.
@@ -186,11 +199,17 @@ fn toggle_float_with_container_focused() {
 #[test]
 fn toggle_float_with_scrolled_viewport() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w10"));
+    let w0 = hub
+        .insert_window(titled("w10"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w11"));
+    let w1 = hub
+        .insert_window(titled("w11"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.set_window_constraint(w1, Some(100.0), None, None, None);
-    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w12"));
+    let w2 = hub
+        .insert_window(titled("w12"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.set_window_constraint(w2, Some(100.0), None, None, None);
 
     // Focus w2 scrolls viewport right (offset = 150, since total 300px, screen 150px)
@@ -243,9 +262,13 @@ fn toggle_float_with_scrolled_viewport() {
 #[test]
 fn toggle_float_to_tiling_with_scrolled_viewport() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w13"));
+    let w0 = hub
+        .insert_window(titled("w13"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w14"));
+    let w1 = hub
+        .insert_window(titled("w14"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.set_window_constraint(w1, Some(100.0), None, None, None);
 
     // Make w1 a float

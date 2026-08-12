@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, setup_hub,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim, setup_hub,
     setup_logger_with_level, titled, validate_hub,
 };
 use crate::action::MonitorTarget;
@@ -179,7 +179,6 @@ fn reduce_smoke_failure() {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum OpKind {
     InsertTiling,
-    InsertFloat,
     InsertFullscreen,
     DeleteWindow,
     FocusLeft,
@@ -222,7 +221,6 @@ enum OpKind {
 
 const ALL_OP_KINDS: &[OpKind] = &[
     OpKind::InsertTiling,
-    OpKind::InsertFloat,
     OpKind::InsertFullscreen,
     OpKind::DeleteWindow,
     OpKind::FocusLeft,
@@ -268,10 +266,6 @@ enum RecordedOp {
     InsertTiling {
         producer_id: usize,
         title: Option<String>,
-    },
-    InsertFloat {
-        producer_id: usize,
-        dim: Dimension,
     },
     InsertFullscreen {
         producer_id: usize,
@@ -528,22 +522,12 @@ fn build_op(
                 title: None,
             })
         }
-        OpKind::InsertFloat => {
-            let dim = Dimension::new(
-                Length::new(rng.random_range(0.0f32..100.0)),
-                Length::new(rng.random_range(0.0f32..20.0)),
-                Length::new(rng.random_range(10.0f32..50.0)),
-                Length::new(rng.random_range(5.0f32..15.0)),
-            );
-            Some(RecordedOp::InsertFloat {
-                producer_id: next_op_index,
-                dim,
-            })
-        }
         OpKind::InsertFullscreen => {
-            let restrictions = match rng.random_range(0..3u8) {
-                0 => WindowRestrictions::None,
-                1 => WindowRestrictions::BlockAll,
+            // No matcher is configured here, so `None` restrictions would take the
+            // default-tiling branch and silently tile under an op named `InsertFullscreen`.
+            // `SetFullscreen` still draws all three values.
+            let restrictions = match rng.random_range(0..2u8) {
+                0 => WindowRestrictions::BlockAll,
                 _ => WindowRestrictions::ProtectFullscreen,
             };
             Some(RecordedOp::InsertFullscreen {
@@ -785,13 +769,13 @@ fn apply_op(
     match op {
         RecordedOp::InsertTiling { producer_id, title } => {
             let window_title = title.as_deref().unwrap_or("w1");
-            let id = hub.insert_tiling(hub.current_workspace(), titled(window_title));
-            windows.push(id);
-            window_origin.push(*producer_id);
-            window_minimized.push(false);
-        }
-        RecordedOp::InsertFloat { producer_id, dim } => {
-            let id = hub.insert_float(hub.current_workspace(), *dim, titled("w2"));
+            let id = hub
+                .insert_window(
+                    titled(window_title),
+                    default_dim(),
+                    WindowRestrictions::None,
+                )
+                .expect("test ignore list is empty");
             windows.push(id);
             window_origin.push(*producer_id);
             window_minimized.push(false);
@@ -800,7 +784,9 @@ fn apply_op(
             producer_id,
             restrictions,
         } => {
-            let id = hub.insert_fullscreen(hub.current_workspace(), *restrictions, titled("w3"));
+            let id = hub
+                .insert_window(titled("w3"), default_dim(), *restrictions)
+                .expect("test ignore list is empty");
             windows.push(id);
             window_origin.push(*producer_id);
             window_minimized.push(false);
@@ -1095,7 +1081,6 @@ fn max_producer_id(ops: &[RecordedOp]) -> Option<usize> {
     ops.iter()
         .filter_map(|op| match op {
             RecordedOp::InsertTiling { producer_id, .. }
-            | RecordedOp::InsertFloat { producer_id, .. }
             | RecordedOp::InsertFullscreen { producer_id, .. }
             | RecordedOp::AddMonitor { producer_id, .. } => Some(*producer_id),
             _ => None,
@@ -1148,20 +1133,23 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
     for op in ops {
         match op {
             RecordedOp::InsertTiling { producer_id, title } => {
-                let window_title = title.as_deref().unwrap_or("w4");
-                let id = hub.insert_tiling(hub.current_workspace(), titled(window_title));
-                live_window[*producer_id] = Some(id);
-            }
-            RecordedOp::InsertFloat { producer_id, dim } => {
-                let id = hub.insert_float(hub.current_workspace(), *dim, titled("w5"));
+                let window_title = title.as_deref().unwrap_or("w1");
+                let id = hub
+                    .insert_window(
+                        titled(window_title),
+                        default_dim(),
+                        WindowRestrictions::None,
+                    )
+                    .expect("test ignore list is empty");
                 live_window[*producer_id] = Some(id);
             }
             RecordedOp::InsertFullscreen {
                 producer_id,
                 restrictions,
             } => {
-                let id =
-                    hub.insert_fullscreen(hub.current_workspace(), *restrictions, titled("w6"));
+                let id = hub
+                    .insert_window(titled("w3"), default_dim(), *restrictions)
+                    .expect("test ignore list is empty");
                 live_window[*producer_id] = Some(id);
             }
             RecordedOp::AddMonitor {

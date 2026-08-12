@@ -1,9 +1,9 @@
 use crate::config::{Strategy, WindowMatcher};
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, TestMetadata,
-    setup_logger_with_level, snapshot, titled,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim,
+    setup_logger_with_level, snapshot, titled, titled_process,
 };
-use crate::core::{Hub, MonitorLayout, WindowId, WindowMetadata};
+use crate::core::{Hub, MonitorLayout, WindowId, WindowRestrictions};
 use insta::assert_snapshot;
 
 #[test]
@@ -15,8 +15,8 @@ fn swap_secondary_and_master() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w11")); // W0 = master
-    hub.insert_tiling(hub.current_workspace(), titled("w12")); // W1 = stack (focused)
+    hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None); // W0 = master
+    hub.insert_window(titled("w12"), default_dim(), WindowRestrictions::None); // W1 = stack (focused)
 
     // Move W1 left: swaps with last master (W0). W1 becomes master, W0 becomes stack.
     hub.move_left();
@@ -69,9 +69,9 @@ fn move_direction_up_down() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w13")); // W0 = master
-    hub.insert_tiling(hub.current_workspace(), titled("w14")); // W1 = stack
-    hub.insert_tiling(hub.current_workspace(), titled("w15")); // W2 = stack (focused)
+    hub.insert_window(titled("w13"), default_dim(), WindowRestrictions::None); // W0 = master
+    hub.insert_window(titled("w14"), default_dim(), WindowRestrictions::None); // W1 = stack
+    hub.insert_window(titled("w15"), default_dim(), WindowRestrictions::None); // W2 = stack (focused)
 
     // Move W2 up within stack: swap with W1.
     hub.move_up();
@@ -131,11 +131,21 @@ fn move_direction_up_down_wraps_within_three_window_pane() {
                 .build(),
         ])
         .build();
-    let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    let _w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w2"));
-    let w3 = hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    let w4 = hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    let _w0 = hub
+        .insert_window(titled("w0"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let _w1 = hub
+        .insert_window(titled("w1"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w2 = hub
+        .insert_window(titled("w2"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w3 = hub
+        .insert_window(titled("w3"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w4 = hub
+        .insert_window(titled("w4"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     let ws = hub.current_workspace();
 
     // Three windows in the secondary pane. On a two-window pane both vertical directions resolve
@@ -165,7 +175,7 @@ fn single_window_focus_move_noop() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w16"));
+    hub.insert_window(titled("w16"), default_dim(), WindowRestrictions::None);
 
     let before = snapshot(&hub);
 
@@ -192,8 +202,8 @@ fn move_window_to_workspace() {
                     .build(),
             )
             .build();
-        hub.insert_tiling(hub.current_workspace(), titled("w28")); // W0 = master
-        hub.insert_tiling(hub.current_workspace(), titled("w29")); // W1 = stack (focused)
+        hub.insert_window(titled("w28"), default_dim(), WindowRestrictions::None); // W0 = master
+        hub.insert_window(titled("w29"), default_dim(), WindowRestrictions::None); // W1 = stack (focused)
         hub.focus_left();
         hub.move_focused_to_workspace("1");
         assert_snapshot!(snapshot(&hub), @"
@@ -283,9 +293,9 @@ fn move_window_to_workspace() {
                     .build(),
             )
             .build();
-        hub.insert_tiling(hub.current_workspace(), titled("w30")); // W0 = master
-        hub.insert_tiling(hub.current_workspace(), titled("w31")); // W1 = stack
-        hub.insert_tiling(hub.current_workspace(), titled("w32")); // W2 = stack (focused)
+        hub.insert_window(titled("w30"), default_dim(), WindowRestrictions::None); // W0 = master
+        hub.insert_window(titled("w31"), default_dim(), WindowRestrictions::None); // W1 = stack
+        hub.insert_window(titled("w32"), default_dim(), WindowRestrictions::None); // W2 = stack (focused)
         hub.move_focused_to_workspace("1");
         assert_snapshot!(snapshot(&hub), @"
         Hub(focused=WindowId(1))
@@ -376,7 +386,7 @@ fn move_only_window_to_workspace() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w33")); // W0
+    hub.insert_window(titled("w33"), default_dim(), WindowRestrictions::None); // W0
 
     hub.move_focused_to_workspace("1");
 
@@ -453,9 +463,15 @@ fn promote_secondary_to_master_when_there_is_room() {
                 .build(),
         ])
         .build();
-    let _w0 = hub.insert_tiling(hub.current_workspace(), titled("A"));
-    let _w1 = hub.insert_tiling(hub.current_workspace(), titled("B"));
-    let _w2 = hub.insert_tiling(hub.current_workspace(), titled("C"));
+    let _w0 = hub
+        .insert_window(titled("A"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let _w1 = hub
+        .insert_window(titled("B"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let _w2 = hub
+        .insert_window(titled("C"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.move_left();
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -533,19 +549,34 @@ fn move_matched_master_to_secondary_rematches() {
         ])
         .build();
 
-    let _w0 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Filler", "other.exe"),
-    );
-    let w1 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Editor", "editor.exe"),
-    );
-    let _w2 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Browser", "browser.exe"),
-    );
-    let _w3 = hub.insert_tiling(hub.current_workspace(), titled_process("Code", "code.exe"));
+    let _w0 = hub
+        .insert_window(
+            titled_process("Filler", "other.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let w1 = hub
+        .insert_window(
+            titled_process("Editor", "editor.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w2 = hub
+        .insert_window(
+            titled_process("Browser", "browser.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w3 = hub
+        .insert_window(
+            titled_process("Code", "code.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
 
     hub.set_focus(w1);
 
@@ -668,19 +699,34 @@ fn move_matched_secondary_to_master_rematches() {
         ])
         .build();
 
-    let _w0 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Filler", "other.exe"),
-    );
-    let w1 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Editor", "editor.exe"),
-    );
-    let _w2 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Browser", "browser.exe"),
-    );
-    let _w3 = hub.insert_tiling(hub.current_workspace(), titled_process("Code", "code.exe"));
+    let _w0 = hub
+        .insert_window(
+            titled_process("Filler", "other.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let w1 = hub
+        .insert_window(
+            titled_process("Editor", "editor.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w2 = hub
+        .insert_window(
+            titled_process("Browser", "browser.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w3 = hub
+        .insert_window(
+            titled_process("Code", "code.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
 
     hub.set_focus(w1);
     hub.move_right();
@@ -787,11 +833,4 @@ fn top_to_bottom(hub: &Hub, ids: &[WindowId]) -> Vec<WindowId> {
     assert_eq!(found.len(), ids.len(), "every id must have a placement");
     found.sort_by(|a, b| a.0.total_cmp(&b.0));
     found.into_iter().map(|(_, id)| id).collect()
-}
-
-fn titled_process(title: &str, process: &str) -> Box<dyn WindowMetadata> {
-    Box::new(TestMetadata {
-        title: Some(title.into()),
-        process: Some(process.into()),
-    })
 }

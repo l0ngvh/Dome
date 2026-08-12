@@ -1,7 +1,16 @@
 use crate::action::MonitorTarget;
-use crate::core::WorkspaceInfo;
 use crate::core::node::{Dimension, Length, WindowRestrictions};
-use crate::core::tests::{setup, titled};
+use crate::core::tests::{
+    LayoutConfigBuilder, default_dim, setup, setup_with_layout, titled, titled_matcher,
+};
+use crate::core::{GlobalLayoutConfig, WorkspaceInfo};
+
+/// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
+fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
+    LayoutConfigBuilder::new()
+        .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
+        .build()
+}
 
 #[test]
 fn empty_hub() {
@@ -17,9 +26,9 @@ fn empty_hub() {
 #[test]
 fn single_workspace_with_windows() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 1);
     assert_eq!(ws[0].window_count, 3);
@@ -30,10 +39,10 @@ fn single_workspace_with_windows() {
 #[test]
 fn multiple_workspaces() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
     hub.focus_workspace("web");
-    hub.insert_tiling(hub.current_workspace(), titled("w5"));
+    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);
 
@@ -50,19 +59,22 @@ fn multiple_workspaces() {
 
 #[test]
 fn workspace_with_floats_and_fullscreen() {
-    let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w6"));
-    hub.insert_float(
-        hub.current_workspace(),
+    let mut hub = setup_with_layout(layout_floating(&["w7"]));
+    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(
+        titled("w7"),
         Dimension::new(
             Length::new(0.0),
             Length::new(0.0),
             Length::new(200.0),
             Length::new(100.0),
         ),
-        titled("w7"),
-    );
-    let third = hub.insert_tiling(hub.current_workspace(), titled("w8"));
+        WindowRestrictions::None,
+    )
+    .unwrap();
+    let third = hub
+        .insert_window(titled("w8"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.set_fullscreen(third, WindowRestrictions::None);
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 1);
@@ -73,7 +85,7 @@ fn workspace_with_floats_and_fullscreen() {
 #[test]
 fn focused_vs_visible_multi_monitor() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w9"));
+    hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
     hub.add_monitor(
         "secondary".to_string(),
         Dimension::new(
@@ -85,7 +97,7 @@ fn focused_vs_visible_multi_monitor() {
         1.0,
     );
     hub.focus_monitor(&MonitorTarget::Name("secondary".into()));
-    hub.insert_tiling(hub.current_workspace(), titled("w10"));
+    hub.insert_window(titled("w10"), default_dim(), WindowRestrictions::None);
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);
 
@@ -103,7 +115,7 @@ fn focused_vs_visible_multi_monitor() {
 #[test]
 fn empty_non_active_workspace_persists() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w11"));
+    hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None);
     hub.focus_workspace("empty");
     hub.focus_workspace("0");
     let ws = hub.query_workspaces();
@@ -133,27 +145,29 @@ fn workspace_info_json_shape() {
 
 #[test]
 fn workspace_with_only_floats() {
-    let mut hub = setup();
-    hub.insert_float(
-        hub.current_workspace(),
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(200.0),
-            Length::new(100.0),
-        ),
+    let mut hub = setup_with_layout(layout_floating(&["w12", "w13"]));
+    hub.insert_window(
         titled("w12"),
-    );
-    hub.insert_float(
-        hub.current_workspace(),
         Dimension::new(
             Length::new(0.0),
             Length::new(0.0),
             Length::new(200.0),
             Length::new(100.0),
         ),
+        WindowRestrictions::None,
+    )
+    .unwrap();
+    hub.insert_window(
         titled("w13"),
-    );
+        Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(200.0),
+            Length::new(100.0),
+        ),
+        WindowRestrictions::None,
+    )
+    .unwrap();
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 1);
     assert_eq!(ws[0].window_count, 2);
@@ -162,8 +176,12 @@ fn workspace_with_only_floats() {
 #[test]
 fn workspace_with_only_fullscreen() {
     let mut hub = setup();
-    let first = hub.insert_tiling(hub.current_workspace(), titled("w14"));
-    let second = hub.insert_tiling(hub.current_workspace(), titled("w15"));
+    let first = hub
+        .insert_window(titled("w14"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let second = hub
+        .insert_window(titled("w15"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.set_fullscreen(first, WindowRestrictions::None);
     hub.set_fullscreen(second, WindowRestrictions::None);
     let ws = hub.query_workspaces();

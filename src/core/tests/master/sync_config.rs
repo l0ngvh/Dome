@@ -1,7 +1,9 @@
 use crate::config::{MasterConfig, Strategy};
+use crate::core::WindowRestrictions;
 use crate::core::strategy::TilingAction;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, snapshot, titled,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim, snapshot,
+    titled,
 };
 use insta::assert_snapshot;
 
@@ -16,11 +18,11 @@ fn sync_config_fill_master() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w36"));
-    hub.insert_tiling(hub.current_workspace(), titled("w37"));
-    hub.insert_tiling(hub.current_workspace(), titled("w38"));
-    hub.insert_tiling(hub.current_workspace(), titled("w39"));
-    hub.insert_tiling(hub.current_workspace(), titled("w40"));
+    hub.insert_window(titled("w36"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w37"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w38"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w39"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w40"), default_dim(), WindowRestrictions::None);
 
     let ws = hub.current_workspace();
     let focus_before = hub.focused_window(ws);
@@ -101,9 +103,9 @@ fn sync_config_drop_masters() {
     hub.sync_configuration(l);
 
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w41"));
-    hub.insert_tiling(hub.current_workspace(), titled("w42"));
-    hub.insert_tiling(hub.current_workspace(), titled("w43"));
+    hub.insert_window(titled("w41"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w42"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w43"), default_dim(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -156,8 +158,8 @@ fn sync_config_preserves_runtime_tuned_master_ratio() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w49"));
-    hub.insert_tiling(hub.current_workspace(), titled("w50"));
+    hub.insert_window(titled("w49"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w50"), default_dim(), WindowRestrictions::None);
 
     // GrowMaster 3 times: 0.5 -> 0.55 -> 0.60 -> 0.65
     hub.handle_tiling_action(TilingAction::GrowMaster);
@@ -226,10 +228,10 @@ fn sync_config_preserves_runtime_tuned_master_count() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w51"));
-    hub.insert_tiling(hub.current_workspace(), titled("w52"));
-    hub.insert_tiling(hub.current_workspace(), titled("w53"));
-    hub.insert_tiling(hub.current_workspace(), titled("w54"));
+    hub.insert_window(titled("w51"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w52"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w53"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w54"), default_dim(), WindowRestrictions::None);
 
     // MoreMaster: master_count 1 -> 2
     hub.handle_tiling_action(TilingAction::MoreMaster);
@@ -305,10 +307,10 @@ fn sync_config_preserves_workspace_master_count_override() {
                 .build(),
         ])
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w51"));
-    hub.insert_tiling(hub.current_workspace(), titled("w52"));
-    hub.insert_tiling(hub.current_workspace(), titled("w53"));
-    hub.insert_tiling(hub.current_workspace(), titled("w54"));
+    hub.insert_window(titled("w51"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w52"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w53"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w54"), default_dim(), WindowRestrictions::None);
 
     hub.sync_configuration(
         LayoutConfigBuilder::new()
@@ -381,10 +383,10 @@ fn sync_config_preserves_workspace_master_ratio_override() {
                 .build(),
         ])
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w51"));
-    hub.insert_tiling(hub.current_workspace(), titled("w52"));
-    hub.insert_tiling(hub.current_workspace(), titled("w53"));
-    hub.insert_tiling(hub.current_workspace(), titled("w54"));
+    hub.insert_window(titled("w51"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w52"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w53"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w54"), default_dim(), WindowRestrictions::None);
 
     hub.sync_configuration(
         LayoutConfigBuilder::new()
@@ -454,10 +456,10 @@ fn sync_config_global_count_decrease() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
-    hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
 
     let l = LayoutConfigBuilder::new()
         .with_strategy(Strategy::Master)

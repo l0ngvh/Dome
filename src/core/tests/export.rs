@@ -1,10 +1,9 @@
 use crate::config::{TreeLayoutNode, WindowMatcher};
-use crate::core::WindowMetadata;
 use crate::core::node::{Dimension, Length, WindowRestrictions};
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, TestMetadata, process_meta,
-    titled,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, process_meta, titled,
+    titled_process,
 };
 
 struct CleanupFile(std::path::PathBuf);
@@ -23,13 +22,6 @@ fn dim() -> Dimension {
     )
 }
 
-fn titled_process(title: &str, process: &str) -> Box<dyn WindowMetadata> {
-    Box::new(TestMetadata {
-        title: Some(title.into()),
-        process: Some(process.into()),
-    })
-}
-
 #[test]
 fn export_reemits_config_matchers_across_float_and_fullscreen() {
     let float_matcher = WindowMatcher {
@@ -41,7 +33,16 @@ fn export_reemits_config_matchers_across_float_and_fullscreen() {
         ..Default::default()
     };
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_layout(
+            LayoutConfigBuilder::new()
+                // Global, so the hit carries `matcher_id: None` and export
+                // synthesises this window's matcher from live metadata.
+                .with_float(vec![WindowMatcher {
+                    process: Some("orphan.exe".into()),
+                    ..Default::default()
+                }])
+                .build(),
+        )
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_float(vec![float_matcher.clone()])
@@ -62,7 +63,8 @@ fn export_reemits_config_matchers_across_float_and_fullscreen() {
         dim(),
         WindowRestrictions::None,
     );
-    hub.insert_float(ws_id, dim(), process_meta("orphan.exe"));
+    hub.insert_window(process_meta("orphan.exe"), dim(), WindowRestrictions::None)
+        .unwrap();
     hub.insert_window(
         process_meta("fs-window-alpha"),
         dim(),

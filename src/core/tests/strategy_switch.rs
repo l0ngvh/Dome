@@ -4,16 +4,32 @@ use crate::core::hub::Hub;
 use crate::core::node::{Dimension, Length, WindowRestrictions};
 use crate::core::tests::setup_logger_with_level;
 
-use super::{LayoutConfigBuilder, setup_hub, snapshot, titled};
+use super::{
+    LayoutConfigBuilder, default_dim, setup_hub, setup_with_layout, snapshot, titled,
+    titled_matcher,
+};
 use insta::assert_snapshot;
 
-fn layout(strategy: Strategy, ratio: f32, count: usize) -> GlobalLayoutConfig {
+/// Layout config for this file, threaded through so the same config serves both
+/// hub-build and `sync_configuration`. Titles are exact because this file also
+/// inserts tiling windows named `wN`.
+fn layout(
+    strategy: Strategy,
+    ratio: f32,
+    count: usize,
+    floats: &[&str],
+    fullscreens: &[&str],
+) -> GlobalLayoutConfig {
     LayoutConfigBuilder::new()
         .with_strategy(strategy)
         .with_master_config(MasterConfig {
             master_ratio: ratio,
             master_count: count,
         })
+        // One call each with every title, `with_float` and `with_fullscreen`
+        // replace their field.
+        .with_float(floats.iter().map(|t| titled_matcher(t)).collect())
+        .with_fullscreen(fullscreens.iter().map(|t| titled_matcher(t)).collect())
         .build()
 }
 
@@ -34,8 +50,8 @@ fn setup_hub_with_layout(layout: GlobalLayoutConfig, overrides: Vec<LayoutWorksp
 #[test]
 fn sync_config_no_op_when_layout_unchanged() {
     let mut hub = setup_hub();
-    hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    hub.insert_tiling(hub.current_workspace(), titled("w1"));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
     let ws = hub.current_workspace();
     let focus_before = hub.focused_window(ws);
     let snap_before = snapshot(&hub);
@@ -47,8 +63,8 @@ fn sync_config_no_op_when_layout_unchanged() {
 #[test]
 fn sync_config_inactive_master_field_change_preserves_tree() {
     let mut hub = setup_hub();
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
-    hub.insert_tiling(hub.current_workspace(), titled("w3"));
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
     // Create a tabbed container to verify tree state survives.
     hub.toggle_container_layout();
     let ws = hub.current_workspace();
@@ -109,12 +125,12 @@ fn sync_config_inactive_master_field_change_preserves_tree() {
 fn sync_config_switches_partition_tree_to_master() {
     let mut hub = setup_hub();
     setup_logger_with_level("trace");
-    hub.insert_tiling(hub.current_workspace(), titled("w4"));
-    hub.insert_tiling(hub.current_workspace(), titled("w5"));
-    hub.insert_tiling(hub.current_workspace(), titled("w6"));
-    hub.insert_tiling(hub.current_workspace(), titled("w7"));
+    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w7"), default_dim(), WindowRestrictions::None);
 
-    let l = layout(Strategy::Master, 0.5, 1);
+    let l = layout(Strategy::Master, 0.5, 1, &[], &[]);
     hub.sync_configuration(l);
 
     assert_snapshot!(snapshot(&hub), @"
@@ -161,11 +177,11 @@ fn sync_config_switches_partition_tree_to_master() {
 
 #[test]
 fn sync_config_switches_master_to_partition_tree() {
-    let mut hub = setup_hub_with_layout(layout(Strategy::Master, 0.5, 1), Vec::new());
-    hub.insert_tiling(hub.current_workspace(), titled("w8"));
-    hub.insert_tiling(hub.current_workspace(), titled("w9"));
-    hub.insert_tiling(hub.current_workspace(), titled("w10"));
-    hub.insert_tiling(hub.current_workspace(), titled("w11"));
+    let mut hub = setup_hub_with_layout(layout(Strategy::Master, 0.5, 1, &[], &[]), Vec::new());
+    hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w10"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None);
 
     hub.sync_configuration(GlobalLayoutConfig::default());
 
@@ -214,20 +230,20 @@ fn sync_config_switches_master_to_partition_tree() {
 
 #[test]
 fn sync_config_swap_preserves_float_and_fullscreen() {
-    let mut hub = setup_hub();
+    let mut hub = setup_with_layout(layout(Strategy::PartitionTree, 0.5, 1, &["w13"], &["w14"]));
     let float_dim = Dimension::new(
         Length::new(10.0),
         Length::new(5.0),
         Length::new(30.0),
         Length::new(20.0),
     );
-    hub.insert_tiling(hub.current_workspace(), titled("w12"));
-    let _float_id = hub.insert_float(hub.current_workspace(), float_dim, titled("w13"));
-    let _fs_id = hub.insert_fullscreen(
-        hub.current_workspace(),
-        WindowRestrictions::None,
-        titled("w14"),
-    );
+    hub.insert_window(titled("w12"), default_dim(), WindowRestrictions::None);
+    let _float_id = hub
+        .insert_window(titled("w13"), float_dim, WindowRestrictions::None)
+        .unwrap();
+    let _fs_id = hub
+        .insert_window(titled("w14"), default_dim(), WindowRestrictions::None)
+        .unwrap();
 
     // With fullscreen on top, only it is visible.
     assert_snapshot!(snapshot(&hub), @"
@@ -268,7 +284,7 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
 
-    let l = layout(Strategy::Master, 0.5, 1);
+    let l = layout(Strategy::Master, 0.5, 1, &["w13"], &["w14"]);
     hub.sync_configuration(l);
 
     // Remove fullscreen to expose tiling + float layer.
@@ -318,7 +334,7 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
 fn sync_config_swap_empty_workspace_no_panic() {
     let mut hub = setup_hub();
     // No windows inserted.
-    let l = layout(Strategy::Master, 0.5, 1);
+    let l = layout(Strategy::Master, 0.5, 1, &[], &[]);
     hub.sync_configuration(l);
 
     assert_snapshot!(snapshot(&hub), @"
@@ -329,30 +345,32 @@ fn sync_config_swap_empty_workspace_no_panic() {
 
 #[test]
 fn sync_config_swap_iterates_every_active_workspace() {
-    let mut hub = setup_hub();
+    let mut hub = setup_with_layout(layout(Strategy::PartitionTree, 0.5, 1, &["w23"], &[]));
     // Workspace "0": two tiling windows.
-    hub.insert_tiling(hub.current_workspace(), titled("w15"));
-    hub.insert_tiling(hub.current_workspace(), titled("w16"));
-    hub.insert_tiling(hub.current_workspace(), titled("w17"));
-    hub.insert_tiling(hub.current_workspace(), titled("w18"));
+    hub.insert_window(titled("w15"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w16"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w17"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w18"), default_dim(), WindowRestrictions::None);
 
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w19"));
-    hub.insert_tiling(hub.current_workspace(), titled("w20"));
-    hub.insert_tiling(hub.current_workspace(), titled("w21"));
-    hub.insert_tiling(hub.current_workspace(), titled("w22"));
+    hub.insert_window(titled("w19"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w20"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w21"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w22"), default_dim(), WindowRestrictions::None);
     let float_dim = Dimension::new(
         Length::new(10.0),
         Length::new(5.0),
         Length::new(30.0),
         Length::new(20.0),
     );
-    let _float_id = hub.insert_float(hub.current_workspace(), float_dim, titled("w23"));
+    let _float_id = hub
+        .insert_window(titled("w23"), float_dim, WindowRestrictions::None)
+        .unwrap();
 
     // Go back to workspace "0" so post-swap snapshot shows it.
     hub.focus_workspace("0");
 
-    let l = layout(Strategy::Master, 0.5, 1);
+    let l = layout(Strategy::Master, 0.5, 1, &["w23"], &[]);
     hub.sync_configuration(l);
 
     // Workspace "0" re-laid-out by master-stack.
@@ -456,12 +474,12 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
         }],
     );
 
-    hub.insert_tiling(hub.current_workspace(), titled("w26"));
-    hub.insert_tiling(hub.current_workspace(), titled("w27"));
+    hub.insert_window(titled("w26"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w27"), default_dim(), WindowRestrictions::None);
 
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w28"));
-    hub.insert_tiling(hub.current_workspace(), titled("w29"));
+    hub.insert_window(titled("w28"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w29"), default_dim(), WindowRestrictions::None);
 
     // Reload with same config: workspace "1" stays master, "0" stays partition-tree.
     let l = LayoutConfigBuilder::new().build();
@@ -555,8 +573,8 @@ fn same_kind_cross_workspace_move_preserves_container() {
     let mut hub = setup_hub();
 
     // Build a tabbed container with two windows on workspace "0".
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
 
     // Focus the container so focused_tiling is Child::Container.

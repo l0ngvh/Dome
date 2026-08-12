@@ -1,19 +1,30 @@
 use insta::assert_snapshot;
 
+use super::LayoutConfigBuilder;
 #[cfg(target_os = "windows")]
-use super::{LayoutConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder};
+use super::{PartitionTreeConfigBuilder, TestHubBuilder};
 #[cfg(target_os = "windows")]
 use crate::config::SizeConstraint;
+use crate::core::GlobalLayoutConfig;
 #[cfg(target_os = "windows")]
 use crate::core::node::Logical;
-use crate::core::node::{Dimension, Length};
+use crate::core::node::{Dimension, Length, WindowRestrictions};
 
-use crate::core::tests::{setup, snapshot, snapshot_text, titled};
+use crate::core::tests::{
+    default_dim, setup, setup_with_layout, snapshot, snapshot_text, titled, titled_matcher,
+};
+
+/// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
+fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
+    LayoutConfigBuilder::new()
+        .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
+        .build()
+}
 
 #[test]
 fn add_monitor_creates_workspace_on_new_monitor() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
 
     hub.add_monitor(
         "monitor-1".to_string(),
@@ -27,7 +38,7 @@ fn add_monitor_creates_workspace_on_new_monitor() {
     );
 
     hub.focus_workspace("monitor-1");
-    hub.insert_tiling(hub.current_workspace(), titled("w1"));
+    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -74,7 +85,7 @@ fn add_monitor_creates_workspace_on_new_monitor() {
 #[test]
 fn remove_monitor_migrates_workspaces_to_fallback() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
 
     let primary = hub.focused_monitor();
     let m1 = hub.add_monitor(
@@ -89,8 +100,8 @@ fn remove_monitor_migrates_workspaces_to_fallback() {
     );
 
     hub.focus_workspace("monitor-1");
-    hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
 
     hub.remove_monitor(m1, primary);
 
@@ -177,8 +188,8 @@ fn remove_monitor_panics_if_fallback_same_as_removed() {
 #[test]
 fn update_monitor_dimension_adjusts_workspaces() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w5"));
-    hub.insert_tiling(hub.current_workspace(), titled("w6"));
+    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
 
     hub.add_monitor(
         "external".to_string(),
@@ -219,7 +230,7 @@ fn focus_monitor_by_direction() {
     use crate::action::MonitorTarget;
 
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w7"));
+    hub.insert_window(titled("w7"), default_dim(), WindowRestrictions::None);
 
     // Monitor to the right
     hub.add_monitor(
@@ -297,7 +308,7 @@ fn focus_monitor_by_name() {
     use crate::action::MonitorTarget;
 
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w8"));
+    hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None);
 
     hub.add_monitor(
         "external".to_string(),
@@ -326,8 +337,8 @@ fn move_to_monitor_moves_focused_window() {
     use crate::action::MonitorTarget;
 
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w9"));
-    hub.insert_tiling(hub.current_workspace(), titled("w10"));
+    hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w10"), default_dim(), WindowRestrictions::None);
 
     hub.add_monitor(
         "right-monitor".to_string(),
@@ -358,7 +369,7 @@ fn move_to_monitor_by_name() {
     use crate::action::MonitorTarget;
 
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w11"));
+    hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None);
 
     hub.add_monitor(
         "external".to_string(),
@@ -387,17 +398,18 @@ fn move_float_to_monitor() {
     use crate::action::MonitorTarget;
     use crate::core::Dimension;
 
-    let mut hub = setup();
-    hub.insert_float(
-        hub.current_workspace(),
+    let mut hub = setup_with_layout(layout_floating(&["w12"]));
+    hub.insert_window(
+        titled("w12"),
         Dimension::new(
             Length::new(10.0),
             Length::new(10.0),
             Length::new(50.0),
             Length::new(20.0),
         ),
-        titled("w12"),
-    );
+        WindowRestrictions::None,
+    )
+    .unwrap();
 
     hub.add_monitor(
         "external".to_string(),
@@ -426,7 +438,7 @@ fn monitor_noop_cases() {
     // Single monitor: focus_monitor is no-op
     {
         let mut hub = setup();
-        hub.insert_tiling(hub.current_workspace(), titled("w13"));
+        hub.insert_window(titled("w13"), default_dim(), WindowRestrictions::None);
         let before = snapshot_text(&hub);
         hub.focus_monitor(&MonitorTarget::Right);
         assert_eq!(snapshot_text(&hub), before);
@@ -435,7 +447,7 @@ fn monitor_noop_cases() {
     // Single monitor with tiling: move_focused_to_monitor is no-op
     {
         let mut hub = setup();
-        hub.insert_tiling(hub.current_workspace(), titled("w14"));
+        hub.insert_window(titled("w14"), default_dim(), WindowRestrictions::None);
         let before = snapshot_text(&hub);
         hub.move_focused_to_monitor(&MonitorTarget::Right);
         assert_eq!(snapshot_text(&hub), before);
@@ -444,7 +456,7 @@ fn monitor_noop_cases() {
     // Two monitors, move to same monitor: no-op
     {
         let mut hub = setup();
-        hub.insert_tiling(hub.current_workspace(), titled("w15"));
+        hub.insert_window(titled("w15"), default_dim(), WindowRestrictions::None);
         hub.add_monitor(
             "external".to_string(),
             Dimension::new(
@@ -492,8 +504,8 @@ fn monitor_scale_multiplies_tab_bar_height() {
         )
         .build();
     let mut hub = TestHubBuilder::new().with_scale(2.0).with_layout(l).build();
-    hub.insert_tiling(hub.current_workspace(), titled("w16"));
-    hub.insert_tiling(hub.current_workspace(), titled("w17"));
+    hub.insert_window(titled("w16"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w17"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
     assert_snapshot!(snapshot_text(&hub), @r"
     Hub(focused=WindowId(1))
@@ -542,7 +554,11 @@ fn monitor_scale_multiplies_size_constraints() {
         )
         .build();
     for i in 0..6 {
-        hub.insert_tiling(hub.current_workspace(), titled(format!("w{i}").as_str()));
+        hub.insert_window(
+            titled(format!("w{i}").as_str()),
+            default_dim(),
+            WindowRestrictions::None,
+        );
     }
     assert_snapshot!(snapshot_text(&hub), @r"
     Hub(focused=WindowId(5))
