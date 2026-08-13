@@ -660,6 +660,112 @@ impl<U> Default for Dimension<U> {
     }
 }
 
+/// A rectangle whose four edges lie on integer unit boundaries, so the on-grid
+/// invariant is carried by the representation rather than by a rounding call at
+/// each producer. The integer backing is load-bearing: placements are compared
+/// for exact equality after an OS round-trip, which is not sound on `f32`.
+pub(crate) struct PixelRect<U = Unit> {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    _unit: PhantomData<fn() -> U>,
+}
+
+// Manual impls avoid the `U: Trait` bounds a derive would infer, as on Dimension above.
+impl<U> std::fmt::Debug for PixelRect<U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PixelRect")
+            .field("x", &self.x)
+            .field("y", &self.y)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish()
+    }
+}
+
+impl<U> PartialEq for PixelRect<U> {
+    fn eq(&self, other: &Self) -> bool {
+        self.x == other.x
+            && self.y == other.y
+            && self.width == other.width
+            && self.height == other.height
+    }
+}
+
+impl<U> Eq for PixelRect<U> {}
+
+impl<U> Copy for PixelRect<U> {}
+impl<U> Clone for PixelRect<U> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+#[cfg_attr(
+    target_os = "windows",
+    expect(
+        dead_code,
+        reason = "only the macOS layer consumes PixelRect until the placement DTOs carry it"
+    )
+)]
+impl<U> PixelRect<U> {
+    pub(crate) const fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+            _unit: PhantomData,
+        }
+    }
+
+    /// Snapping lives in `Dimension::round` so one implementation owns it. The
+    /// casts are exact because every field is whole by then.
+    pub(crate) fn from_dimension(dim: Dimension<U>) -> Self {
+        let r = dim.round();
+        Self::new(
+            r.x.v as i32,
+            r.y.v as i32,
+            r.width.v as i32,
+            r.height.v as i32,
+        )
+    }
+
+    pub(crate) fn to_dimension(self) -> Dimension<U> {
+        Dimension::new(
+            Length::new(self.x as f32),
+            Length::new(self.y as f32),
+            Length::new(self.width as f32),
+            Length::new(self.height as f32),
+        )
+    }
+
+    pub(crate) const fn x(self) -> i32 {
+        self.x
+    }
+
+    pub(crate) const fn y(self) -> i32 {
+        self.y
+    }
+
+    pub(crate) const fn width(self) -> i32 {
+        self.width
+    }
+
+    pub(crate) const fn height(self) -> i32 {
+        self.height
+    }
+
+    pub(crate) const fn right(self) -> i32 {
+        self.x + self.width
+    }
+
+    pub(crate) const fn bottom(self) -> i32 {
+        self.y + self.height
+    }
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]

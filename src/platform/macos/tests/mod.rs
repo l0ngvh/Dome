@@ -14,13 +14,13 @@ use objc2_core_graphics::CGWindowID;
 
 use crate::action::Action;
 use crate::config::Config;
-use crate::core::{Dimension, Length, Logical, MonitorId, WindowId};
+use crate::core::{Dimension, Length, Logical, MonitorId, PixelRect, WindowId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::{
     BarGeometry, DebounceBurst, Dome, ExitNativeFullscreen, FrameSender, HubMessage, MacOSMetadata,
-    NewWindow, PendingAdd, RoundedDimension, WindowMove,
+    NewWindow, PendingAdd, WindowMove,
 };
 
 const SCREEN_WIDTH: Length = Length::new(1920.0);
@@ -508,12 +508,7 @@ fn new_window(macos: &MacOS, cg_id: CGWindowID) -> PendingAdd {
                 bundle_id: None,
             },
         },
-        dim: RoundedDimension {
-            x: pos.0,
-            y: pos.1,
-            width: size.0,
-            height: size.1,
-        },
+        dim: PixelRect::new(pos.0, pos.1, size.0, size.1),
     }
 }
 

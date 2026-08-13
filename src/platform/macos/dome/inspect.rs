@@ -3,10 +3,11 @@ use std::sync::Arc;
 
 use objc2_core_graphics::CGWindowID;
 
+use crate::core::{Dimension, PixelRect};
 use crate::platform::macos::accessibility::{AXApp, ExternalWindow};
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::registry::ManagedWindow;
-use crate::platform::macos::dome::window::{RoundedDimension, WindowState};
+use crate::platform::macos::dome::window::WindowState;
 use crate::platform::macos::dome::{MacOSMetadata, NewWindow, PendingAdd};
 use crate::platform::macos::running_application::RunningApp;
 
@@ -177,12 +178,7 @@ pub(in crate::platform::macos) fn compute_reconciliation(
         };
         to_add.push(PendingAdd::Positioned {
             new,
-            dim: RoundedDimension {
-                x: x.value() as i32,
-                y: y.value() as i32,
-                width: w.value() as i32,
-                height: h.value() as i32,
-            },
+            dim: PixelRect::from_dimension(Dimension::new(x, y, w, h)),
         });
     }
 

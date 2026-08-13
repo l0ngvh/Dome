@@ -28,7 +28,7 @@ use crate::action::{
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig, WindowMatcher, pattern_matches};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
-    ContainerId, Dimension, Direction, Hub, Length, Logical, TilingAction, WindowId,
+    ContainerId, Dimension, Direction, Hub, Length, Logical, PixelRect, TilingAction, WindowId,
     WindowMetadata, WindowRestrictions,
 };
 use crate::platform::macos::accessibility::ExternalWindow;
@@ -36,8 +36,6 @@ use crate::platform::macos::accessibility::ExternalWindow;
 use monitor::MonitorRegistry;
 use recovery::Recovery;
 use registry::{ManagedWindow, WindowRegistry};
-
-pub(in crate::platform::macos) use window::RoundedDimension;
 
 pub(in crate::platform::macos) struct NewWindow {
     pub(in crate::platform::macos) ax: Arc<dyn ExternalWindow>,
@@ -127,10 +125,12 @@ impl WindowMetadata for MacOSMetadata {
 pub(in crate::platform::macos) enum PendingAdd {
     Positioned {
         new: NewWindow,
-        dim: RoundedDimension,
+        dim: PixelRect,
     },
     /// Native fullscreen windows lives on their own space and thus has no dimension
-    NativeFullscreen { new: NewWindow },
+    NativeFullscreen {
+        new: NewWindow,
+    },
 }
 
 /// Keyed by display id so a bar that moves between monitors or draws on
@@ -320,8 +320,8 @@ impl Dome {
                     self.finalize_added_window(new, id, state);
                     self.recovery.track(
                         ax_for_recovery,
-                        dim.width,
-                        dim.height,
+                        dim.width(),
+                        dim.height(),
                         self.monitor_registry.primary_monitor().work_area(),
                     );
                 }

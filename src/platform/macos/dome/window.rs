@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 
 use crate::core::{
-    Dimension, Length, LimitObservation, LimitUpdate, MonitorId, WindowId, WindowRestrictions,
+    Dimension, Length, LimitObservation, LimitUpdate, MonitorId, PixelRect, WindowId,
+    WindowRestrictions,
 };
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
@@ -41,22 +42,22 @@ pub(super) enum PositionedState {
 
 #[derive(Clone, Copy)]
 pub(super) struct OffscreenPlacement {
-    actual: RoundedDimension,
+    actual: PixelRect,
     retries: u8,
 }
 
 impl OffscreenPlacement {
-    pub(super) fn new(actual: RoundedDimension) -> Self {
+    pub(super) fn new(actual: PixelRect) -> Self {
         Self { actual, retries: 0 }
     }
 
     /// Check if the window drifted from the hidden position. Updates `actual`
     /// unconditionally. Returns true if the window is NOT at the hidden
     /// position (i.e. it fought back). Increments retries on drift.
-    fn record_drift(&mut self, new_actual: RoundedDimension, monitors: &[MonitorInfo]) -> bool {
+    fn record_drift(&mut self, new_actual: PixelRect, monitors: &[MonitorInfo]) -> bool {
         self.actual = new_actual;
         let (hidden_x, hidden_y) = hidden_position(monitors);
-        if new_actual.x == hidden_x.value() as i32 || new_actual.y == hidden_y.value() as i32 {
+        if new_actual.x() == hidden_x.value() as i32 || new_actual.y() == hidden_y.value() as i32 {
             return false;
         }
         self.retries = self.retries.saturating_add(1);
@@ -74,8 +75,8 @@ impl OffscreenPlacement {
 
 #[derive(Clone, Copy)]
 pub(super) struct Placement {
-    target: RoundedDimension,
-    actual: RoundedDimension,
+    target: PixelRect,
+    actual: PixelRect,
     retries: u8,
     /// When the last placement was issued. AX position-change notifications
     /// generated before this timestamp reflect pre-placement state and are ignored.
@@ -91,7 +92,7 @@ pub(super) struct FloatPlacement {
     /// `set_frame` or adopted from a drag observation. Used for outbound
     /// idempotence in `show_tiling` / `show_float` and to skip no-op
     /// observations in `window_moved`.
-    pub(super) target: RoundedDimension,
+    pub(super) target: PixelRect,
     /// When `target` was last bumped by an outbound `set_frame`. The
     /// initial-placement stale filter in `window_moved` ignores AX bursts
     /// whose `observed_at.last` predates this timestamp. User-drag
@@ -101,7 +102,7 @@ pub(super) struct FloatPlacement {
 }
 
 impl FloatPlacement {
-    pub(super) fn new(target: RoundedDimension) -> Self {
+    pub(super) fn new(target: PixelRect) -> Self {
         Self {
             target,
             placed_at: Instant::now(),
@@ -110,7 +111,7 @@ impl FloatPlacement {
 
     /// Record a new target. Returns true if set_frame is needed.
     /// Bumps `placed_at` only when the target actually changes.
-    fn set_target(&mut self, target: RoundedDimension) -> bool {
+    fn set_target(&mut self, target: PixelRect) -> bool {
         if self.target == target {
             return false;
         }
@@ -121,7 +122,7 @@ impl FloatPlacement {
 }
 
 impl Placement {
-    fn new(actual: RoundedDimension, target: RoundedDimension) -> Self {
+    fn new(actual: PixelRect, target: PixelRect) -> Self {
         Self {
             target,
             actual,
@@ -131,7 +132,7 @@ impl Placement {
     }
 
     /// Record a new target. Returns true if set_frame is needed.
-    fn set_target(&mut self, target: RoundedDimension) -> bool {
+    fn set_target(&mut self, target: PixelRect) -> bool {
         let target_changed = self.target != target;
         self.target = target;
         if target_changed {
@@ -148,12 +149,12 @@ impl Placement {
     /// (i.e. this is drift, not just an edge-anchored size delta). Pure —
     /// no mutation; caller must follow up with `observe_drift` to consume a
     /// retry.
-    fn has_drifted(&self, new_actual: RoundedDimension) -> bool {
+    fn has_drifted(&self, new_actual: PixelRect) -> bool {
         let target = self.target;
-        let left = new_actual.x == target.x;
-        let right = new_actual.x + new_actual.width == target.x + target.width;
-        let top = new_actual.y == target.y;
-        let bottom = new_actual.y + new_actual.height == target.y + target.height;
+        let left = new_actual.x() == target.x();
+        let right = new_actual.right() == target.right();
+        let top = new_actual.y() == target.y();
+        let bottom = new_actual.bottom() == target.bottom();
         !((left || right) && (top || bottom))
     }
 
@@ -162,7 +163,7 @@ impl Placement {
     /// returns `None` once the budget is exhausted (logging the give-up
     /// message once). Shared by the edge-based and late-event drift paths
     /// so a single helper owns the retry accounting and logging.
-    fn observe_drift(&mut self, new_actual: RoundedDimension) -> Option<RoundedDimension> {
+    fn observe_drift(&mut self, new_actual: PixelRect) -> Option<PixelRect> {
         self.retries = self.retries.saturating_add(1);
         self.actual = new_actual;
         if self.should_retry() {
@@ -189,10 +190,10 @@ impl Placement {
     /// Compare actual vs target, return the limits learned if size mismatched.
     fn detect_constraint(&self) -> Option<LimitObservation> {
         let (actual, target) = (self.actual, self.target);
-        let min_w = (actual.width > target.width).then_some(actual.width as f32);
-        let min_h = (actual.height > target.height).then_some(actual.height as f32);
-        let max_w = (actual.width < target.width).then_some(actual.width as f32);
-        let max_h = (actual.height < target.height).then_some(actual.height as f32);
+        let min_w = (actual.width() > target.width()).then_some(actual.width() as f32);
+        let min_h = (actual.height() > target.height()).then_some(actual.height() as f32);
+        let max_w = (actual.width() < target.width()).then_some(actual.width() as f32);
+        let max_h = (actual.height() < target.height()).then_some(actual.height() as f32);
         if min_w.is_none() && min_h.is_none() && max_w.is_none() && max_h.is_none() {
             return None;
         }
@@ -218,49 +219,15 @@ impl Placement {
     }
 }
 
-/// Window position/size with integer coordinates. Integers are used for
-/// pixel-exact comparison — floating-point coordinates would introduce rounding
-/// ambiguity in drift detection.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub(in crate::platform::macos) struct RoundedDimension {
-    pub(in crate::platform::macos) x: i32,
-    pub(in crate::platform::macos) y: i32,
-    pub(in crate::platform::macos) width: i32,
-    pub(in crate::platform::macos) height: i32,
-}
-
-impl RoundedDimension {
-    /// Reconstruct a `Dimension<Logical>` from the stored i32 fields.
-    /// Used for drift correction: the stored target must be sent back to
-    /// `set_frame` which now speaks `Dimension<Logical>`.
-    pub(super) fn to_dimension(self) -> Dimension {
-        Dimension::new(
-            Length::new(self.x as f32),
-            Length::new(self.y as f32),
-            Length::new(self.width as f32),
-            Length::new(self.height as f32),
-        )
-    }
-}
-
-fn round_dim(dim: Dimension) -> RoundedDimension {
-    RoundedDimension {
-        x: dim.x.round().value() as i32,
-        y: dim.y.round().value() as i32,
-        width: dim.width.round().value() as i32,
-        height: dim.height.round().value() as i32,
-    }
-}
-
 pub(super) fn move_offscreen(
     monitors: &[MonitorInfo],
-    actual: &RoundedDimension,
+    actual: &PixelRect,
     ax: &dyn ExternalWindow,
 ) -> Result<()> {
     let (hidden_x, hidden_y) = hidden_position(monitors);
     // When spaces change or monitors are connected/disconnected, hidden windows
     // may be moved to visible state, so we need to re-hide them
-    if actual.x == hidden_x.value() as i32 || actual.y == hidden_y.value() as i32 {
+    if actual.x() == hidden_x.value() as i32 || actual.y() == hidden_y.value() as i32 {
         return Ok(());
     }
     ax.hide_at(hidden_x, hidden_y)
@@ -341,7 +308,7 @@ impl Dome {
                 tracing::trace!("Failed to unminimize window: {e:#}");
             }
         }
-        let target = round_dim(dim);
+        let target = PixelRect::from_dimension(dim);
 
         match &mut window.state {
             WindowState::Positioned(PositionedState::Tiling(p)) => {
@@ -409,7 +376,7 @@ impl Dome {
                 tracing::trace!("Failed to unminimize window: {e:#}");
             }
         }
-        let target = round_dim(dim);
+        let target = PixelRect::from_dimension(dim);
 
         match &mut window.state {
             WindowState::Positioned(PositionedState::Float(fp)) => {
@@ -461,7 +428,7 @@ impl Dome {
             }
             WindowState::Positioned(PositionedState::Offscreen(offscreen)) => {
                 let actual = offscreen.actual;
-                let target = round_dim(monitor_dim);
+                let target = PixelRect::from_dimension(monitor_dim);
                 // Fullscreen is tiling-shaped: always use Tiling placement
                 window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
                     actual, target,
@@ -471,7 +438,7 @@ impl Dome {
                 }
             }
             WindowState::Positioned(PositionedState::Tiling(p)) => {
-                let target = round_dim(monitor_dim);
+                let target = PixelRect::from_dimension(monitor_dim);
                 if p.set_target(target)
                     && let Err(err) = window.ext.set_frame(monitor_dim.round())
                 {
@@ -479,7 +446,7 @@ impl Dome {
                 }
             }
             WindowState::Positioned(PositionedState::Float(fp)) => {
-                let target = round_dim(monitor_dim);
+                let target = PixelRect::from_dimension(monitor_dim);
                 if fp.set_target(target)
                     && let Err(err) = window.ext.set_frame(monitor_dim.round())
                 {
@@ -524,12 +491,7 @@ impl Dome {
         h: i32,
         observed_at: DebounceBurst,
     ) {
-        let new_placement = RoundedDimension {
-            x,
-            y,
-            width: w,
-            height: h,
-        };
+        let new_placement = PixelRect::new(x, y, w, h);
         let is_borderless_fullscreen = self.is_borderless_fullscreen_at(new_placement);
         let monitors = self.monitor_registry.all_monitors();
         let Some(window) = self.registry.by_id_mut(window_id) else {
@@ -637,12 +599,7 @@ impl Dome {
                 // Write target directly -- placed_at is NOT bumped because
                 // this is an observation, not an outbound set_frame.
                 fp.target = new_placement;
-                let dim = Dimension::new(
-                    Length::new(new_placement.x as f32),
-                    Length::new(new_placement.y as f32),
-                    Length::new(new_placement.width as f32),
-                    Length::new(new_placement.height as f32),
-                );
+                let dim = new_placement.to_dimension();
                 let monitor_id = self
                     .monitor_registry
                     .find_closest_monitor(dim)
@@ -802,7 +759,7 @@ impl Dome {
         window.is_minimized = true;
     }
 
-    pub(super) fn is_borderless_fullscreen_at(&self, dim: RoundedDimension) -> bool {
+    pub(super) fn is_borderless_fullscreen_at(&self, dim: PixelRect) -> bool {
         self.monitor_registry.is_borderless_fullscreen_at(dim)
     }
 }

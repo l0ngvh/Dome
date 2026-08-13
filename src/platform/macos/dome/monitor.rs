@@ -5,10 +5,10 @@ use objc2_app_kit::NSScreen;
 use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
 use objc2_foundation::{NSNumber, NSString};
 
-use crate::core::{Dimension, Hub, Length, MonitorId, WindowId};
+use crate::core::{Dimension, Hub, Length, MonitorId, PixelRect, WindowId};
 use crate::platform::reserve_for_bar;
 
-use super::{Dome, RoundedDimension};
+use super::Dome;
 
 #[derive(Clone, Debug)]
 pub(in crate::platform::macos) struct MonitorInfo {
@@ -272,10 +272,10 @@ impl MonitorRegistry {
         best.map(|(m, _)| m)
     }
 
-    pub(super) fn is_borderless_fullscreen_at(&self, dim: RoundedDimension) -> bool {
+    pub(super) fn is_borderless_fullscreen_at(&self, dim: PixelRect) -> bool {
         let point = Dimension::new(
-            Length::new(dim.x as f32),
-            Length::new(dim.y as f32),
+            Length::new(dim.x() as f32),
+            Length::new(dim.y() as f32),
             Length::new(1.0),
             Length::new(1.0),
         );
@@ -283,10 +283,10 @@ impl MonitorRegistry {
         monitor.is_some_and(|m| {
             let mon = &m.info.work_area;
             let tolerance = 2;
-            (dim.x - mon.x.value() as i32).abs() <= tolerance
-                && (dim.y - mon.y.value() as i32).abs() <= tolerance
-                && (dim.width - mon.width.value() as i32).abs() <= tolerance
-                && (dim.height - mon.height.value() as i32).abs() <= tolerance
+            (dim.x() - mon.x.value() as i32).abs() <= tolerance
+                && (dim.y() - mon.y.value() as i32).abs() <= tolerance
+                && (dim.width() - mon.width.value() as i32).abs() <= tolerance
+                && (dim.height() - mon.height.value() as i32).abs() <= tolerance
         })
     }
 
