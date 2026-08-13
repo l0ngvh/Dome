@@ -105,7 +105,9 @@ impl MasterStrategy {
                         border_box,
                         visible_border_box,
                         content_box,
-                        visible_content_box: clip(content_box, screen).unwrap_or_default(),
+                        visible_content_box: clip(content_box, screen)
+                            .map(Dimension::round)
+                            .unwrap_or_default(),
                         is_highlighted,
                         spawn_indicator: None,
                     });

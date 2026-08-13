@@ -660,13 +660,15 @@ impl InspectExternalWindow for ExternalHwnd {
         let (left, top, right, bottom) = get_invisible_border(hwnd);
         let horizontal = left + right;
         let vertical = top + bottom;
-        // Win32 reports a zero track size when the app set no limit on that axis.
+        // Win32 reports a zero track size when the app set no limit on that axis. A positive
+        // track size that does not exceed the invisible frame has no content-box equivalent, so
+        // it is reported as no limit rather than as a zero-sized one.
         let limit = |track: i32, border: i32| {
             let track = (track as f32 * scale) as i32;
-            if track <= 0 {
+            if track <= 0 || track <= border {
                 return LimitUpdate::Cleared;
             }
-            LimitUpdate::Set(Length::new((track - border).max(0) as f32))
+            LimitUpdate::Set(Length::new((track - border) as f32))
         };
         LimitObservation {
             min_width: limit(info.ptMinTrackSize.x, horizontal),

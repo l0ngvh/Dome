@@ -7,7 +7,7 @@ use crate::core::GlobalLayoutConfig;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::master::MasterStrategy;
 use crate::core::node::{
-    Child, Constraints, ContainerId, Dimension, Direction, Length, WindowId, WindowMetadata,
+    Child, Constraints, ContainerId, Dimension, Direction, Length, Unit, WindowId, WindowMetadata,
     WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
@@ -209,10 +209,16 @@ pub(crate) fn window_constraints(
 
     let outset = hub.border(monitor_id) * 2.0;
     let limits = hub.windows.get(wid).limits();
-    let win_min_w = limits.min_width.map_or(Length::ZERO, |v| v + outset);
-    let win_min_h = limits.min_height.map_or(Length::ZERO, |v| v + outset);
-    let win_max_w = limits.max_width.map_or(Length::ZERO, |v| v + outset);
-    let win_max_h = limits.max_height.map_or(Length::ZERO, |v| v + outset);
+    // Filter before the outset: a non-positive stored limit is not a limit at all, and outsetting
+    // it first would turn it into a spurious `2 * border` cap that collapses the slot.
+    let outset_limit = |v: Option<Length<Unit>>| {
+        v.filter(|v| *v > Length::ZERO)
+            .map_or(Length::ZERO, |v| v + outset)
+    };
+    let win_min_w = outset_limit(limits.min_width);
+    let win_min_h = outset_limit(limits.min_height);
+    let win_max_w = outset_limit(limits.max_width);
+    let win_max_h = outset_limit(limits.max_height);
 
     let max_w = if win_max_w > Length::ZERO {
         win_max_w

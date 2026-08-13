@@ -2025,6 +2025,31 @@ fn window_max_width_smaller_than_global_min_width() {
 }
 
 #[test]
+fn zero_valued_max_leaves_the_window_unconstrained() {
+    let mut hub = setup();
+    let w0 = hub
+        .insert_window(titled("w62"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("w63"), default_dim(), WindowRestrictions::None);
+    let unconstrained = snapshot(&hub);
+
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::ZERO),
+            max_height: LimitUpdate::Set(Length::ZERO),
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(
+        snapshot(&hub),
+        unconstrained,
+        "a zero-valued max must not become a 2 * border cap"
+    );
+}
+
+#[test]
 fn constraint_survives_border_size_change() {
     let mut hub = setup();
     let w0 = hub
