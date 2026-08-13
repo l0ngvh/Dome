@@ -9,7 +9,7 @@ use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotific
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, MONITORINFOF_PRIMARY};
 use windows::core::BOOL;
 
-use crate::core::{Dimension, Hub, MonitorId, Physical, WindowId};
+use crate::core::{Dimension, Hub, MonitorId, Physical, PixelRect, WindowId};
 use crate::platform::windows::external::HwndId;
 use crate::platform::windows::handle;
 
@@ -147,17 +147,18 @@ impl MonitorRegistry {
 
     pub(super) fn is_borderless_fullscreen_at(
         &self,
-        rect: Dimension<Physical>,
+        rect: PixelRect<Physical>,
         handle: isize,
     ) -> bool {
         self.monitors
             .values()
             .find(|m| m.handle == handle)
             .map(|m| {
-                rect.x <= m.dimension.x
-                    && rect.y <= m.dimension.y
-                    && rect.x + rect.width >= m.dimension.x + m.dimension.width
-                    && rect.y + rect.height >= m.dimension.y + m.dimension.height
+                let mon = PixelRect::from_dimension(m.dimension);
+                rect.x() <= mon.x()
+                    && rect.y() <= mon.y()
+                    && rect.right() >= mon.right()
+                    && rect.bottom() >= mon.bottom()
             })
             .unwrap_or(false)
     }

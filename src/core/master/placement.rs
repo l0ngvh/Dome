@@ -1,5 +1,5 @@
 use crate::core::{
-    Dimension, Length, TilingWindowPlacement, WindowId,
+    Dimension, Length, PixelRect, TilingWindowPlacement, WindowId,
     hub::HubAccess,
     master::{MasterStrategy, WindowState},
     node::WorkspaceId,
@@ -96,8 +96,11 @@ impl MasterStrategy {
         let mut push_pane = |vec: &[WindowId], y_offset: Length| {
             for &wid in vec.iter() {
                 let dim = self.window_states[&wid].dimension;
-                let border_box = translate(dim, Length::ZERO, y_offset, screen).round();
-                if let Some(visible_border_box) = clip(border_box, screen).map(Dimension::round) {
+                let border_box =
+                    PixelRect::from_dimension(translate(dim, Length::ZERO, y_offset, screen));
+                if let Some(visible_border_box) =
+                    clip(border_box.to_dimension(), screen).map(PixelRect::from_dimension)
+                {
                     let is_highlighted = focused_id == Some(wid);
                     let content_box = border_box.inset_by(border);
                     windows.push(TilingWindowPlacement {
@@ -105,9 +108,9 @@ impl MasterStrategy {
                         border_box,
                         visible_border_box,
                         content_box,
-                        visible_content_box: clip(content_box, screen)
-                            .map(Dimension::round)
-                            .unwrap_or_default(),
+                        visible_content_box: clip(content_box.to_dimension(), screen)
+                            .map(PixelRect::from_dimension)
+                            .unwrap_or(PixelRect::ZERO),
                         is_highlighted,
                         spawn_indicator: None,
                     });

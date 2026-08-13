@@ -8,7 +8,8 @@ use super::allocator::{Allocator, NodeId};
 use super::matcher::{FloatFullscreenMatcherId, MatcherHit};
 use super::node::{
     ContainerId, Dimension, DisplayMode, Length, LimitObservation, LimitUpdate, Logical, Monitor,
-    MonitorId, Unit, Window, WindowId, WindowMetadata, WindowRestrictions, Workspace, WorkspaceId,
+    MonitorId, PixelRect, Unit, Window, WindowId, WindowMetadata, WindowRestrictions, Workspace,
+    WorkspaceId,
 };
 use super::partition_tree::Child;
 use super::strategy::{StrategySet, TilingAction, WorkspaceExport, clip};
@@ -24,9 +25,9 @@ pub(crate) struct VisiblePlacements {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TilingWindowPlacement {
     pub(crate) id: WindowId,
-    pub(crate) border_box: Dimension,
-    pub(crate) visible_border_box: Dimension,
-    pub(crate) content_box: Dimension,
+    pub(crate) border_box: PixelRect,
+    pub(crate) visible_border_box: PixelRect,
+    pub(crate) content_box: PixelRect,
     /// `content_box` trimmed to the monitor. Zero-area when nothing remains.
     /// macOS places this. Windows places `content_box` and ignores it.
     #[cfg_attr(
@@ -36,7 +37,7 @@ pub(crate) struct TilingWindowPlacement {
             reason = "macOS trims tiling placements to the work area, Windows places them unclipped"
         )
     )]
-    pub(crate) visible_content_box: Dimension,
+    pub(crate) visible_content_box: PixelRect,
     /// Whether to highlight the window, for example when the window is focused. Doesn't require
     /// that the window has keyboard focus.
     pub(crate) is_highlighted: bool,
@@ -46,17 +47,17 @@ pub(crate) struct TilingWindowPlacement {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FloatWindowPlacement {
     pub(crate) id: WindowId,
-    pub(crate) border_box: Dimension,
-    pub(crate) visible_border_box: Dimension,
-    pub(crate) content_box: Dimension,
+    pub(crate) border_box: PixelRect,
+    pub(crate) visible_border_box: PixelRect,
+    pub(crate) content_box: PixelRect,
     pub(crate) is_highlighted: bool,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct ContainerPlacement {
     pub(crate) id: ContainerId,
-    pub(crate) border_box: Dimension,
-    pub(crate) visible_border_box: Dimension,
+    pub(crate) border_box: PixelRect,
+    pub(crate) visible_border_box: PixelRect,
     pub(crate) is_highlighted: bool,
     pub(crate) spawn_indicator: Option<SpawnIndicator>,
     pub(crate) is_tabbed: bool,
@@ -684,8 +685,9 @@ impl Hub {
                     let DisplayMode::Float { dim, .. } = window.mode else {
                         panic!("window {id} in float_windows but mode is not Float");
                     };
-                    let border_box = dim.round();
-                    if let Some(visible_border_box) = clip(border_box, screen).map(Dimension::round)
+                    let border_box = PixelRect::from_dimension(dim);
+                    if let Some(visible_border_box) =
+                        clip(border_box.to_dimension(), screen).map(PixelRect::from_dimension)
                     {
                         let is_highlighted = focused == Some(id);
                         float_windows.push(FloatWindowPlacement {

@@ -1,7 +1,7 @@
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST};
 
-use crate::core::{Dimension, LimitObservation, Physical};
+use crate::core::{Dimension, LimitObservation, Physical, PixelRect};
 
 /// Opaque window identity. Replaces `ManagedHwnd` throughout the codebase.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -73,7 +73,7 @@ pub(crate) enum ShowCmd {
 pub(crate) trait ManageExternalWindow: Send + Sync {
     fn id(&self) -> HwndId;
     fn pid(&self) -> u32;
-    fn set_position(&self, z: ZOrder, dim: Dimension<Physical>);
+    fn set_position(&self, z: ZOrder, dim: PixelRect<Physical>);
     fn move_offscreen(&self);
     fn show_cmd(&self, cmd: ShowCmd);
     fn close(&self);

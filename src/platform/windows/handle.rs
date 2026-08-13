@@ -30,13 +30,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PCWSTR, w};
 
-use crate::core::{Dimension, Length, LimitObservation, LimitUpdate, Physical};
+use crate::core::{Dimension, Length, LimitObservation, LimitUpdate, PixelRect};
 use crate::platform::windows::external::{
     HwndId, InspectExternalWindow, ManageExternalWindow, ShowCmd, ZOrder,
 };
 
 // Unlike macOS, we are allowed to move windows completely offscreen on Windows
-pub(crate) const OFFSCREEN_POS: Length<Physical> = Length::new(-32000.0);
+pub(crate) const OFFSCREEN_POS: i32 = -32000;
 
 /// Returns the window's physical-pixel frame.
 ///
@@ -108,8 +108,8 @@ pub(crate) fn move_window_offscreen(hwnd: HWND) {
         SetWindowPos(
             hwnd,
             Some(HWND_BOTTOM),
-            OFFSCREEN_POS.value() as i32,
-            OFFSCREEN_POS.value() as i32,
+            OFFSCREEN_POS,
+            OFFSCREEN_POS,
             0,
             0,
             SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
@@ -321,14 +321,14 @@ impl ManageExternalWindow for ExternalHwnd {
     /// child windows by the same delta.
     ///
     /// Single `.value() as i32` site for all `SetWindowPos` placement calls on the managed-window path.
-    fn set_position(&self, z: ZOrder, dim: Dimension) {
+    fn set_position(&self, z: ZOrder, dim: PixelRect) {
         let hwnd = self.0;
         let old = get_dimension(hwnd);
         let (bl, bt, br, bb) = get_invisible_border(hwnd);
-        let x = dim.x.value() as i32 - bl;
-        let y = dim.y.value() as i32 - bt;
-        let cx = dim.width.value() as i32 + bl + br;
-        let cy = dim.height.value() as i32 + bt + bb;
+        let x = dim.x() - bl;
+        let y = dim.y() - bt;
+        let cx = dim.width() + bl + br;
+        let cy = dim.height() + bt + bb;
 
         let insert_after: Option<HWND> = z.into();
         let mut flags = SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS;

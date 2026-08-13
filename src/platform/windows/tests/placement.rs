@@ -236,10 +236,10 @@ fn only_recorded_tiling(env: &TestEnv) -> TilingWindowPlacement {
 /// Holds whatever the border resolves to, so it pins the shape of the inset
 /// without restating the scale multiply the assertion is meant to check.
 fn assert_content_box_centered_in_border_box(wp: &TilingWindowPlacement) {
-    let inset = wp.content_box.x - wp.border_box.x;
-    assert_eq!(wp.content_box.y - wp.border_box.y, inset);
-    assert_eq!(wp.content_box.width, wp.border_box.width - inset * 2.0);
-    assert_eq!(wp.content_box.height, wp.border_box.height - inset * 2.0);
+    let inset = wp.content_box.x() - wp.border_box.x();
+    assert_eq!(wp.content_box.y() - wp.border_box.y(), inset);
+    assert_eq!(wp.content_box.width(), wp.border_box.width() - inset * 2);
+    assert_eq!(wp.content_box.height(), wp.border_box.height() - inset * 2);
 }
 
 #[test]
@@ -252,12 +252,12 @@ fn tiling_border_scales_with_dpi() {
         );
         let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
         let wp = only_recorded_tiling(&env);
-        let expected_inset = Length::new(env.config.border_size.logical() * scale).round();
+        let expected_inset = (env.config.border_size.logical() * scale).round() as i32;
 
-        assert_eq!(env.dim(w1), wp.content_box, "scale {scale}");
+        assert_eq!(env.dim(w1), wp.content_box.to_dimension(), "scale {scale}");
         assert_content_box_centered_in_border_box(&wp);
         assert_eq!(
-            wp.content_box.x - wp.border_box.x,
+            wp.content_box.x() - wp.border_box.x(),
             expected_inset,
             "scale {scale}"
         );
@@ -288,11 +288,9 @@ fn painted_thickness_matches_core_inset() {
 
     // The painter strokes a band of exactly this thickness inside border_box, so any
     // disagreement with the inset core already applied shows up as a hairline.
-    assert_eq!(border_thickness, wp.content_box.x - wp.border_box.x);
-    assert_eq!(
-        border_thickness * 2.0,
-        wp.border_box.width - wp.content_box.width
-    );
+    let painted = border_thickness.value() as i32;
+    assert_eq!(painted, wp.content_box.x() - wp.border_box.x());
+    assert_eq!(painted * 2, wp.border_box.width() - wp.content_box.width());
 }
 
 #[test]
@@ -318,7 +316,7 @@ fn degenerate_content_box_hides_window() {
 
     let wp = only_recorded_tiling(&env);
     assert!(!env.is_offscreen(w1));
-    assert_eq!(env.dim(w1), wp.content_box);
+    assert_eq!(env.dim(w1), wp.content_box.to_dimension());
     assert_content_box_centered_in_border_box(&wp);
 }
 
@@ -661,13 +659,14 @@ fn float_move_monitor_same_dpi_preserves_content_rect() {
     let float_overlays = env.float_overlays();
     let float_overlay = &float_overlays[0];
     let FloatOverlayState::Visible {
-        visible_border_box: overlay_dim,
+        visible_border_box: overlay_rect,
         ..
     } = float_overlay.state
     else {
         panic!("Float invisible");
     };
 
+    let overlay_dim = overlay_rect.to_dimension();
     let border = Length::new(env.config.border_size.logical());
     assert_eq!(overlay_dim.x, Length::new(200.0) - border);
     assert_eq!(overlay_dim.y, Length::new(150.0) - border);
@@ -681,13 +680,14 @@ fn float_move_monitor_same_dpi_preserves_content_rect() {
     let float_overlays = env.float_overlays();
     let float_overlay = &float_overlays[0];
     let FloatOverlayState::Visible {
-        visible_border_box: overlay_dim,
+        visible_border_box: overlay_rect,
         ..
     } = float_overlay.state
     else {
         panic!("Float invisible");
     };
 
+    let overlay_dim = overlay_rect.to_dimension();
     assert_eq!(overlay_dim.x, Length::new(2020.0) - border);
     assert_eq!(overlay_dim.y, Length::new(100.0) - border);
     assert_eq!(overlay_dim.width, Length::new(400.0) + 2.0 * border);
@@ -755,13 +755,14 @@ fn float_move_monitor_different_dpi_rescales_border() {
     let float_overlays = env.float_overlays();
     let float_overlay = &float_overlays[0];
     let FloatOverlayState::Visible {
-        visible_border_box: overlay_dim,
+        visible_border_box: overlay_rect,
         ..
     } = float_overlay.state
     else {
         panic!("Float invisible");
     };
 
+    let overlay_dim = overlay_rect.to_dimension();
     // On the target monitor at scale 2.0 core resolves the border to border * 2.0, so the content
     // rect is the outer box inset by that, which differs from the inset it had at scale 1.0.
     let scaled_border = border * 2.0;
@@ -884,7 +885,8 @@ fn float_drift_repositions_overlay() {
         panic!("float overlay must be visible after drag, got {:?}", state);
     };
     assert_eq!(
-        visible_border_box, expected_outer,
+        visible_border_box.to_dimension(),
+        expected_outer,
         "overlay should receive the emitted border box as visible_border_box"
     );
 }
@@ -929,7 +931,8 @@ fn float_dragged_past_the_screen_origin_paints_a_clipped_overlay() {
         panic!("float overlay must be visible after drag, got {:?}", state);
     };
     assert_eq!(
-        visible_border_box, expected_clipped,
+        visible_border_box.to_dimension(),
+        expected_clipped,
         "overlay surface must match core's clipped border box, not the unclipped one"
     );
 }

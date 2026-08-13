@@ -194,18 +194,20 @@ impl Dome {
                         placement: *wp,
                         cocoa_frame: dimension_to_ns_rect_cocoa(
                             Length::new(self.primary_full_height),
-                            wp.border_box,
+                            wp.border_box.to_dimension(),
                         ),
                         scale,
                         border_thickness: mp.border_thickness,
-                        content_dim: wp.content_box,
+                        content_dim: wp.content_box.to_dimension(),
                     });
                 }
 
                 let mut container_data = Vec::with_capacity(containers.len());
                 for cp in containers {
-                    let tab_bar_dim =
-                        tab_bar_dimension(cp.border_box, self.config.partition_tree.tab_bar_height);
+                    let tab_bar_dim = tab_bar_dimension(
+                        cp.border_box.to_dimension(),
+                        self.config.partition_tree.tab_bar_height,
+                    );
                     let tab_bar_cocoa_frame = dimension_to_ns_rect_cocoa(
                         Length::new(self.primary_full_height),
                         tab_bar_dim,

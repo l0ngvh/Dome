@@ -17,7 +17,7 @@ use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Length, LimitObservation, LimitUpdate, Logical,
-    Physical, TilingWindowPlacement, WindowId, WorkspaceInfo,
+    Physical, PixelRect, TilingWindowPlacement, WindowId, WorkspaceInfo,
 };
 use crate::font::FontConfig;
 use crate::platform::windows::dome::MonitorInfo;
@@ -50,7 +50,7 @@ enum FloatOverlayState {
     Hidden,
     Visible {
         window_id: WindowId,
-        visible_border_box: Dimension,
+        visible_border_box: PixelRect,
         z_order: ZOrder,
     },
 }
@@ -819,16 +819,20 @@ impl ManageExternalWindow for MockExternalHwnd {
         1
     }
 
-    fn set_position(&self, z: ZOrder, dim: Dimension) {
+    fn set_position(&self, z: ZOrder, dim: PixelRect) {
         self.minimized.store(false, Ordering::Relaxed);
-        let dim = self.override_position.lock().unwrap().map_or(dim, |pos| {
-            Dimension::new(
-                Length::new(pos.0 as f32),
-                Length::new(pos.1 as f32),
-                Length::new(pos.2 as f32),
-                Length::new(pos.3 as f32),
-            )
-        });
+        let dim = self
+            .override_position
+            .lock()
+            .unwrap()
+            .map_or(dim.to_dimension(), |pos| {
+                Dimension::new(
+                    Length::new(pos.0 as f32),
+                    Length::new(pos.1 as f32),
+                    Length::new(pos.2 as f32),
+                    Length::new(pos.3 as f32),
+                )
+            });
         *self.dimension.lock().unwrap() = dim;
         self.z_stack.apply(self.hwnd_id, z);
         self.moves.lock().unwrap().push((self.hwnd_id, dim));
@@ -1211,7 +1215,7 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
         &self,
         config: Config,
         _scale: f32,
-        _visible_border_box: Dimension,
+        _visible_border_box: PixelRect,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
         let this = self.borrow();
         let id_val = this.next_float_overlay_id.get();

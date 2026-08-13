@@ -22,7 +22,7 @@ use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, Length,
-    LimitObservation, Logical, MonitorId, MonitorLayout, Physical, TilingAction,
+    LimitObservation, Logical, MonitorId, MonitorLayout, Physical, PixelRect, TilingAction,
     TilingWindowPlacement, WindowId, WindowRestrictions, WorkspaceInfo,
 };
 
@@ -94,7 +94,7 @@ pub(super) trait CreateOverlay {
         &self,
         config: Config,
         scale: f32,
-        visible_border_box: Dimension,
+        visible_border_box: PixelRect,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>>;
     fn create_tab_bar(
         &self,
@@ -363,7 +363,9 @@ impl Dome {
         if self.registry.contains_hwnd(ext.id()) {
             return;
         }
-        let borderless_fs = self.monitors.is_borderless_fullscreen_at(rect, monitor);
+        let borderless_fs = self
+            .monitors
+            .is_borderless_fullscreen_at(PixelRect::from_dimension(rect), monitor);
         let restrictions = if borderless_fs {
             WindowRestrictions::ProtectFullscreen
         } else {
@@ -382,7 +384,7 @@ impl Dome {
         } else {
             WindowState::Positioned(PositionedState::Offscreen {
                 retries: 0,
-                actual: rect,
+                actual: PixelRect::from_dimension(rect),
             })
         };
         let id_key = ext.id();
@@ -801,7 +803,11 @@ impl Dome {
                 );
             let tab_bar_h_logical = self.config.partition_tree.tab_bar_height;
             for (placement, titles) in data.containers.iter().filter(|(p, _)| p.is_tabbed) {
-                let rect = compute_tab_bar_rect(placement.border_box, tab_bar_h_logical, scale);
+                let rect = compute_tab_bar_rect(
+                    placement.border_box.to_dimension(),
+                    tab_bar_h_logical,
+                    scale,
+                );
                 let tab_bar = match self.tab_bars.entry(placement.id) {
                     std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
                     std::collections::hash_map::Entry::Vacant(e) => {
@@ -851,7 +857,12 @@ impl Dome {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
         };
-        self.window_moved(id, new_placement, monitor_handle, observed_at);
+        self.window_moved(
+            id,
+            PixelRect::from_dimension(new_placement),
+            monitor_handle,
+            observed_at,
+        );
         self.apply_layout();
     }
 

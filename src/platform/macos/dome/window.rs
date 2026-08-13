@@ -287,9 +287,9 @@ impl Dome {
     }
 
     #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
-    pub(super) fn show_tiling(&mut self, window_id: WindowId, dim: Dimension) {
+    pub(super) fn show_tiling(&mut self, window_id: WindowId, target: PixelRect) {
         debug_assert!(
-            !dim.is_empty(),
+            !target.is_empty(),
             "caller must guard against an empty content box"
         );
         let Some(window) = self.registry.by_id_mut(window_id) else {
@@ -308,12 +308,10 @@ impl Dome {
                 tracing::trace!("Failed to unminimize window: {e:#}");
             }
         }
-        let target = PixelRect::from_dimension(dim);
-
         match &mut window.state {
             WindowState::Positioned(PositionedState::Tiling(p)) => {
                 if p.set_target(target)
-                    && let Err(e) = window.ext.set_frame(dim.round())
+                    && let Err(e) = window.ext.set_frame(target.to_dimension())
                 {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
@@ -325,7 +323,7 @@ impl Dome {
                 window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
                     target, target,
                 )));
-                if let Err(e) = window.ext.set_frame(dim.round()) {
+                if let Err(e) = window.ext.set_frame(target.to_dimension()) {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
             }
@@ -336,7 +334,7 @@ impl Dome {
                 window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
                     actual, target,
                 )));
-                if let Err(e) = window.ext.set_frame(dim.round()) {
+                if let Err(e) = window.ext.set_frame(target.to_dimension()) {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
             }
@@ -355,9 +353,9 @@ impl Dome {
     }
 
     #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
-    pub(super) fn show_float(&mut self, window_id: WindowId, dim: Dimension) {
+    pub(super) fn show_float(&mut self, window_id: WindowId, target: PixelRect) {
         debug_assert!(
-            !dim.is_empty(),
+            !target.is_empty(),
             "caller must guard against an empty content box"
         );
         let Some(window) = self.registry.by_id_mut(window_id) else {
@@ -376,12 +374,10 @@ impl Dome {
                 tracing::trace!("Failed to unminimize window: {e:#}");
             }
         }
-        let target = PixelRect::from_dimension(dim);
-
         match &mut window.state {
             WindowState::Positioned(PositionedState::Float(fp)) => {
                 if fp.set_target(target)
-                    && let Err(e) = window.ext.set_frame(dim.round())
+                    && let Err(e) = window.ext.set_frame(target.to_dimension())
                 {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
@@ -389,7 +385,7 @@ impl Dome {
             WindowState::Positioned(PositionedState::Tiling(_) | PositionedState::Offscreen(_)) => {
                 window.state =
                     WindowState::Positioned(PositionedState::Float(FloatPlacement::new(target)));
-                if let Err(e) = window.ext.set_frame(dim.round()) {
+                if let Err(e) = window.ext.set_frame(target.to_dimension()) {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
             }

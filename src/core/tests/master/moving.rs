@@ -856,18 +856,18 @@ fn move_matched_secondary_to_master_rematches() {
 /// `ids` sorted by on-screen y, which is the only observable that exposes pane order.
 fn top_to_bottom(hub: &Hub, ids: &[WindowId]) -> Vec<WindowId> {
     let placements = hub.get_visible_placements();
-    let mut found: Vec<(f32, WindowId)> = Vec::new();
+    let mut found: Vec<(i32, WindowId)> = Vec::new();
     for monitor in &placements.monitors {
         let MonitorLayout::Normal { tiling_windows, .. } = &monitor.layout else {
             continue;
         };
         for placement in tiling_windows {
             if ids.contains(&placement.id) {
-                found.push((placement.visible_border_box.y.value(), placement.id));
+                found.push((placement.visible_border_box.y(), placement.id));
             }
         }
     }
     assert_eq!(found.len(), ids.len(), "every id must have a placement");
-    found.sort_by(|a, b| a.0.total_cmp(&b.0));
+    found.sort_by_key(|&(y, _)| y);
     found.into_iter().map(|(_, id)| id).collect()
 }

@@ -1,6 +1,6 @@
 use crate::core::hub::HubAccess;
 use crate::core::node::Constraints;
-use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
+use crate::core::node::{ContainerId, Dimension, Direction, Length, PixelRect, WorkspaceId};
 use crate::core::partition_tree::{Child, SpawnMode};
 use crate::core::strategy::{
     TilingPlacements, clip, distribute_space, translate, window_constraints,
@@ -108,9 +108,14 @@ impl PartitionTreeStrategy {
             let Some(child) = stack.pop() else { break };
             match child {
                 Child::Window(id) => {
-                    let border_box =
-                        translate(self.child_dimension(child), offset_x, offset_y, screen).round();
-                    if let Some(visible_border_box) = clip(border_box, screen).map(Dimension::round)
+                    let border_box = PixelRect::from_dimension(translate(
+                        self.child_dimension(child),
+                        offset_x,
+                        offset_y,
+                        screen,
+                    ));
+                    if let Some(visible_border_box) =
+                        clip(border_box.to_dimension(), screen).map(PixelRect::from_dimension)
                     {
                         let is_highlighted = focused == Some(Child::Window(id));
                         let content_box = border_box.inset_by(border);
@@ -119,9 +124,9 @@ impl PartitionTreeStrategy {
                             border_box,
                             visible_border_box,
                             content_box,
-                            visible_content_box: clip(content_box, screen)
-                                .map(Dimension::round)
-                                .unwrap_or_default(),
+                            visible_content_box: clip(content_box.to_dimension(), screen)
+                                .map(PixelRect::from_dimension)
+                                .unwrap_or(PixelRect::ZERO),
                             is_highlighted,
                             spawn_indicator: if is_highlighted {
                                 Some(SpawnIndicator::from(self.child_spawn_mode(child)))
@@ -133,9 +138,14 @@ impl PartitionTreeStrategy {
                 }
                 Child::Container(id) => {
                     let container = self.containers.get(id);
-                    let border_box =
-                        translate(self.child_dimension(child), offset_x, offset_y, screen).round();
-                    let Some(visible_border_box) = clip(border_box, screen).map(Dimension::round)
+                    let border_box = PixelRect::from_dimension(translate(
+                        self.child_dimension(child),
+                        offset_x,
+                        offset_y,
+                        screen,
+                    ));
+                    let Some(visible_border_box) =
+                        clip(border_box.to_dimension(), screen).map(PixelRect::from_dimension)
                     else {
                         continue;
                     };

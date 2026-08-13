@@ -26,7 +26,7 @@ use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
 use crate::core::node::{Dimension, Direction, Length, Logical, WindowId};
 use crate::core::strategy::TilingAction;
 use crate::core::{
-    ContainerPlacement, FloatWindowPlacement, TilingWindowPlacement, WindowMetadata,
+    ContainerPlacement, FloatWindowPlacement, PixelRect, TilingWindowPlacement, WindowMetadata,
 };
 
 const ASCII_WIDTH: usize = 150;
@@ -54,13 +54,14 @@ pub(super) fn snapshot(hub: &Hub) -> String {
             containers.as_slice(),
         ),
         MonitorLayout::Fullscreen(id) => {
-            let screen = hub.access.monitors.get(mp.monitor_id).dimension;
+            let screen =
+                PixelRect::from_dimension(hub.access.monitors.get(mp.monitor_id).dimension);
             draw_rect(
                 &mut grid,
-                screen.x.value(),
-                screen.y.value(),
-                screen.width.value(),
-                screen.height.value(),
+                screen.x(),
+                screen.y(),
+                screen.width(),
+                screen.height(),
                 &format!("W{}", id.get()),
                 [false; 4],
             );
@@ -82,10 +83,10 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         let clip = clip_edges(wp.border_box, wp.visible_border_box);
         draw_rect(
             &mut grid,
-            d.x.value(),
-            d.y.value(),
-            d.width.value(),
-            d.height.value(),
+            d.x(),
+            d.y(),
+            d.width(),
+            d.height(),
             &format!("W{}", wp.id.get()),
             clip,
         );
@@ -97,9 +98,9 @@ pub(super) fn snapshot(hub: &Hub) -> String {
             let d = cp.visible_border_box;
             draw_tab_bar(
                 &mut grid,
-                d.x.value(),
-                d.y.value(),
-                d.width.value(),
+                d.x(),
+                d.y(),
+                d.width(),
                 &cp.titles,
                 cp.active_tab_index,
             );
@@ -112,25 +113,11 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         if let Some(wp) = tiling_windows.iter().find(|p| p.is_highlighted) {
             let d = wp.visible_border_box;
             let clip = clip_edges(wp.border_box, wp.visible_border_box);
-            draw_focused_border(
-                &mut grid,
-                d.x.value(),
-                d.y.value(),
-                d.width.value(),
-                d.height.value(),
-                clip,
-            );
+            draw_focused_border(&mut grid, d.x(), d.y(), d.width(), d.height(), clip);
         } else if let Some(cp) = containers.iter().find(|p| p.is_highlighted) {
             let d = cp.visible_border_box;
             let clip = clip_edges(cp.border_box, cp.visible_border_box);
-            draw_focused_border(
-                &mut grid,
-                d.x.value(),
-                d.y.value(),
-                d.width.value(),
-                d.height.value(),
-                clip,
-            );
+            draw_focused_border(&mut grid, d.x(), d.y(), d.width(), d.height(), clip);
         }
     }
 
@@ -140,10 +127,10 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         let clip = clip_edges(wp.border_box, wp.visible_border_box);
         let grid_w = grid[0].len() as isize;
         let grid_h = grid.len() as isize;
-        let x1 = d.x.round().value() as isize;
-        let y1 = d.y.round().value() as isize;
-        let x2 = (d.x + d.width).round().value() as isize - 1;
-        let y2 = (d.y + d.height).round().value() as isize - 1;
+        let x1 = d.x() as isize;
+        let y1 = d.y() as isize;
+        let x2 = d.right() as isize - 1;
+        let y2 = d.bottom() as isize - 1;
         for row in (y1 + 1).max(0)..y2.min(grid_h) {
             for col in (x1 + 1).max(0)..x2.min(grid_w) {
                 grid[row as usize][col as usize] = ' ';
@@ -151,10 +138,10 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         }
         draw_rect(
             &mut grid,
-            d.x.value(),
-            d.y.value(),
-            d.width.value(),
-            d.height.value(),
+            d.x(),
+            d.y(),
+            d.width(),
+            d.height(),
             &format!("F{}", wp.id.get()),
             clip,
         );
@@ -164,14 +151,7 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     if let Some(wp) = focused_float {
         let d = wp.visible_border_box;
         let clip = clip_edges(wp.border_box, wp.visible_border_box);
-        draw_focused_border(
-            &mut grid,
-            d.x.value(),
-            d.y.value(),
-            d.width.value(),
-            d.height.value(),
-            clip,
-        );
+        draw_focused_border(&mut grid, d.x(), d.y(), d.width(), d.height(), clip);
     }
 
     s.push('\n');
@@ -260,7 +240,7 @@ fn fmt_spawn(indicator: &SpawnIndicator) -> String {
 }
 
 fn fmt_tiling_placement(wp: &TilingWindowPlacement) -> String {
-    let d = wp.visible_border_box;
+    let d = wp.visible_border_box.to_dimension();
     let mut parts = format!(
         "    Window(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
         wp.id, d.x, d.y, d.width, d.height
@@ -276,7 +256,7 @@ fn fmt_tiling_placement(wp: &TilingWindowPlacement) -> String {
 }
 
 fn fmt_float_placement(wp: &FloatWindowPlacement) -> String {
-    let d = wp.visible_border_box;
+    let d = wp.visible_border_box.to_dimension();
     let mut parts = format!(
         "    Window(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
         wp.id, d.x, d.y, d.width, d.height
@@ -290,7 +270,7 @@ fn fmt_float_placement(wp: &FloatWindowPlacement) -> String {
 }
 
 fn fmt_container_placement(cp: &ContainerPlacement) -> String {
-    let d = cp.visible_border_box;
+    let d = cp.visible_border_box.to_dimension();
     let mut parts = format!(
         "    Container(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
         cp.id, d.x, d.y, d.width, d.height
@@ -316,16 +296,16 @@ fn fmt_container_placement(cp: &ContainerPlacement) -> String {
 )]
 fn draw_tab_bar(
     grid: &mut [Vec<char>],
-    x: f32,
-    y: f32,
-    width: f32,
+    x: i32,
+    y: i32,
+    width: i32,
     labels: &[String],
     active: usize,
 ) {
-    let x1 = x.round() as usize;
-    let y1 = y.round() as usize;
+    let x1 = x as usize;
+    let y1 = y as usize;
     let y2 = y1 + TAB_BAR_HEIGHT as usize - 1;
-    let x2 = (x + width).round() as usize - 1;
+    let x2 = (x + width) as usize - 1;
     let inner_width = x2 - x1 - 1;
     let tab_count = labels.len();
 
@@ -377,25 +357,26 @@ fn draw_tab_bar(
     }
 }
 
-fn clip_edges(border_box: Dimension, visible: Dimension) -> [bool; 4] {
-    let half = Length::new(0.5);
+/// Integral edges make these comparisons exact, where the `Dimension` form needed a
+/// half-unit tolerance to avoid reporting a clip that rounding had already removed.
+fn clip_edges(border_box: PixelRect, visible: PixelRect) -> [bool; 4] {
     [
-        visible.x > border_box.x + half,
-        (visible.x + visible.width) < (border_box.x + border_box.width) - half,
-        visible.y > border_box.y + half,
-        (visible.y + visible.height) < (border_box.y + border_box.height) - half,
+        visible.x() > border_box.x(),
+        visible.right() < border_box.right(),
+        visible.y() > border_box.y(),
+        visible.bottom() < border_box.bottom(),
     ]
 }
 
-fn draw_rect(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, label: &str, clip: [bool; 4]) {
+fn draw_rect(grid: &mut [Vec<char>], x: i32, y: i32, w: i32, h: i32, label: &str, clip: [bool; 4]) {
     let grid_w = grid[0].len() as isize;
     let grid_h = grid.len() as isize;
     let [clip_l, clip_r, clip_t, clip_b] = clip;
 
-    let x1 = x.round() as isize;
-    let y1 = y.round() as isize;
-    let x2 = (x + w).round() as isize - 1;
-    let y2 = (y + h).round() as isize - 1;
+    let x1 = x as isize;
+    let y1 = y as isize;
+    let x2 = (x + w) as isize - 1;
+    let y2 = (y + h) as isize - 1;
 
     if !clip_t {
         for col in x1.max(0)..=x2.min(grid_w - 1) {
@@ -438,8 +419,8 @@ fn draw_rect(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, label: &str
         grid[y2 as usize][x2 as usize] = '+';
     }
 
-    let mid_x = (x + w / 2.0).round() as isize;
-    let mid_y = (y + h / 2.0).round() as isize;
+    let mid_x = (x as f32 + w as f32 / 2.0).round() as isize;
+    let mid_y = (y as f32 + h as f32 / 2.0).round() as isize;
     if mid_y >= 0 && mid_y < grid_h {
         let start_x = mid_x - (label.len() / 2) as isize;
         for (i, ch) in label.chars().enumerate() {
@@ -451,15 +432,15 @@ fn draw_rect(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, label: &str
     }
 }
 
-fn draw_focused_border(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, clip: [bool; 4]) {
+fn draw_focused_border(grid: &mut [Vec<char>], x: i32, y: i32, w: i32, h: i32, clip: [bool; 4]) {
     let grid_w = grid[0].len() as isize;
     let grid_h = grid.len() as isize;
     let [clip_l, clip_r, clip_t, clip_b] = clip;
 
-    let x1 = x.round() as isize;
-    let y1 = y.round() as isize;
-    let x2 = (x + w).round() as isize - 1;
-    let y2 = (y + h).round() as isize - 1;
+    let x1 = x as isize;
+    let y1 = y as isize;
+    let x2 = (x + w) as isize - 1;
+    let y2 = (y + h) as isize - 1;
 
     if !clip_t {
         for col in x1.max(0)..=x2.min(grid_w - 1) {
@@ -533,7 +514,7 @@ fn validate_visible_placements(hub: &Hub) {
                 wp.id
             );
             assert_eq!(
-                clip(wp.border_box, screen),
+                clip(wp.border_box.to_dimension(), screen).map(PixelRect::from_dimension),
                 Some(wp.visible_border_box),
                 "Window {} visible_border_box doesn't match clip(border_box, screen)",
                 wp.id
@@ -546,7 +527,7 @@ fn validate_visible_placements(hub: &Hub) {
                 wp.id
             );
             assert_eq!(
-                clip(wp.border_box, screen),
+                clip(wp.border_box.to_dimension(), screen).map(PixelRect::from_dimension),
                 Some(wp.visible_border_box),
                 "Window {} visible_border_box doesn't match clip(border_box, screen)",
                 wp.id
@@ -554,7 +535,7 @@ fn validate_visible_placements(hub: &Hub) {
         }
         for cp in containers {
             assert_eq!(
-                clip(cp.border_box, screen),
+                clip(cp.border_box.to_dimension(), screen).map(PixelRect::from_dimension),
                 Some(cp.visible_border_box),
                 "Container {} visible_border_box doesn't match clip(border_box, screen)",
                 cp.id

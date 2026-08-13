@@ -622,24 +622,6 @@ impl<U> Dimension<U> {
         Self::new(left, top, right - left, bottom - top)
     }
 
-    /// `<=` rather than `==` so an inverted extent counts as empty, matching what
-    /// `strategy::clip` rejects.
-    pub(crate) fn is_empty(self) -> bool {
-        self.width <= Length::ZERO || self.height <= Length::ZERO
-    }
-
-    /// Clamps extent at zero rather than going negative. The origin is still
-    /// pushed inward, so a box narrower than `2 * border` ends up empty at an
-    /// origin past its own far edge.
-    pub(crate) fn inset_by(self, border: Length<U>) -> Self {
-        Self::new(
-            self.x + border,
-            self.y + border,
-            (self.width - border * 2.0).max(Length::ZERO),
-            (self.height - border * 2.0).max(Length::ZERO),
-        )
-    }
-
     /// The exact left inverse of `inset_by` for any box wider and taller than
     /// `2 * border`. Below that `inset_by` clamps its extents and the original is lost.
     pub(crate) fn outset_by(self, border: Length<U>) -> Self {
@@ -702,14 +684,9 @@ impl<U> Clone for PixelRect<U> {
     }
 }
 
-#[cfg_attr(
-    target_os = "windows",
-    expect(
-        dead_code,
-        reason = "only the macOS layer consumes PixelRect until the placement DTOs carry it"
-    )
-)]
 impl<U> PixelRect<U> {
+    pub(crate) const ZERO: Self = Self::new(0, 0, 0, 0);
+
     pub(crate) const fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
         Self {
             x,
@@ -764,6 +741,36 @@ impl<U> PixelRect<U> {
     pub(crate) const fn bottom(self) -> i32 {
         self.y + self.height
     }
+
+    /// `<=` rather than `==` so an inverted extent counts as empty, matching what
+    /// `strategy::clip` rejects.
+    pub(crate) const fn is_empty(self) -> bool {
+        self.width <= 0 || self.height <= 0
+    }
+
+    /// Clamps extent at zero rather than going negative. The origin is still pushed
+    /// inward, so a box narrower than `2 * border` ends up empty at an origin past
+    /// its own far edge.
+    pub(crate) fn inset_by(self, border: Length<U>) -> Self {
+        let b = whole_units(border);
+        Self::new(
+            self.x + b,
+            self.y + b,
+            (self.width - b * 2).max(0),
+            (self.height - b * 2).max(0),
+        )
+    }
+}
+
+/// Insetting a `PixelRect` by a fractional border would take it off the grid, so a
+/// caller that skipped `Hub::border`'s rounding is a bug rather than a value to snap.
+fn whole_units<U>(border: Length<U>) -> i32 {
+    assert!(
+        border.v.fract() == 0.0,
+        "border {} is not a whole number of units",
+        border.v
+    );
+    border.v as i32
 }
 
 #[derive(

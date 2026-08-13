@@ -5,7 +5,7 @@ use super::Dome;
 use super::display_from_process;
 use crate::config::{WindowMatcher, pattern_matches};
 use crate::core::{
-    Dimension, FloatWindowPlacement, Length, LimitObservation, MonitorId, Physical,
+    Dimension, FloatWindowPlacement, Length, LimitObservation, MonitorId, Physical, PixelRect,
     TilingWindowPlacement, WindowId, WindowRestrictions,
 };
 use crate::platform::windows::external::{ManageExternalWindow, ShowCmd, ZOrder};
@@ -129,9 +129,9 @@ pub(crate) const MAX_DRIFT_RETRIES: u8 = 5;
 #[derive(Clone, Copy)]
 pub(super) struct DriftState {
     /// Target state of the window, controlled by the tiling strategy.
-    pub(super) target: Dimension<Physical>,
+    pub(super) target: PixelRect<Physical>,
     /// The window's last known position reported by the OS.
-    pub(super) actual: Dimension<Physical>,
+    pub(super) actual: PixelRect<Physical>,
     pub(super) retries: u8,
     /// Monitor this window was last placed on.
     pub(super) monitor: MonitorId,
@@ -142,8 +142,8 @@ pub(super) struct DriftState {
 
 impl DriftState {
     pub(super) fn new(
-        target: Dimension<Physical>,
-        actual: Dimension<Physical>,
+        target: PixelRect<Physical>,
+        actual: PixelRect<Physical>,
         monitor: MonitorId,
     ) -> Self {
         Self {
@@ -162,8 +162,8 @@ impl DriftState {
 /// dropped by the window; the drift retry timer catches that gap.
 #[derive(Clone, Copy)]
 pub(super) struct FloatPlacement {
-    pub(super) target: Dimension<Physical>,
-    pub(super) actual: Dimension<Physical>,
+    pub(super) target: PixelRect<Physical>,
+    pub(super) actual: PixelRect<Physical>,
     pub(super) retries: u8,
     pub(super) monitor: MonitorId,
     pub(super) placed_at: Instant,
@@ -171,8 +171,8 @@ pub(super) struct FloatPlacement {
 
 impl FloatPlacement {
     pub(super) fn new(
-        target: Dimension<Physical>,
-        actual: Dimension<Physical>,
+        target: PixelRect<Physical>,
+        actual: PixelRect<Physical>,
         monitor: MonitorId,
     ) -> Self {
         Self {
@@ -225,7 +225,7 @@ pub(super) enum PositionedState {
     /// fullscreen window).
     Offscreen {
         retries: u8,
-        actual: Dimension<Physical>,
+        actual: PixelRect<Physical>,
     },
 }
 
@@ -361,7 +361,7 @@ impl Dome {
         };
         let new_target = wp.content_box;
 
-        let tiling_state = |actual: Dimension<Physical>| {
+        let tiling_state = |actual: PixelRect<Physical>| {
             WindowState::Positioned(PositionedState::Tiling(DriftState::new(
                 new_target, actual, monitor,
             )))
@@ -480,7 +480,7 @@ impl Dome {
             | WindowState::BorderlessMinimized { .. }
             | WindowState::ExclusiveFullscreen => {}
             WindowState::Positioned(ps) => {
-                let new_target = dimension.round();
+                let new_target = PixelRect::from_dimension(dimension);
                 if matches!(ps, PositionedState::Tiling(d) if d.target == new_target) {
                     return;
                 }
@@ -534,7 +534,7 @@ impl Dome {
                 entry.state = WindowState::BorderlessMinimized { retries: 0 };
             }
             WindowState::Positioned(PositionedState::Offscreen { actual, .. }) => {
-                if actual.x > OFFSCREEN_POS && actual.y > OFFSCREEN_POS {
+                if actual.x() > OFFSCREEN_POS && actual.y() > OFFSCREEN_POS {
                     entry.ext.move_offscreen();
                 }
             }
@@ -548,7 +548,7 @@ impl Dome {
     pub(in crate::platform::windows) fn window_moved(
         &mut self,
         id: WindowId,
-        new_placement: Dimension<Physical>,
+        new_placement: PixelRect<Physical>,
         monitor_handle: isize,
         observed_at: Instant,
     ) {
@@ -682,7 +682,8 @@ impl Dome {
                 fp.monitor = resolved;
                 fp.actual = new_placement;
                 fp.target = new_placement;
-                self.hub.update_float_dimension(id, new_placement, resolved);
+                self.hub
+                    .update_float_dimension(id, new_placement.to_dimension(), resolved);
             }
 
             (
@@ -701,7 +702,7 @@ impl Dome {
 
             (WindowState::Positioned(PositionedState::Offscreen { retries, actual }), false) => {
                 *actual = new_placement;
-                if actual.x > OFFSCREEN_POS && actual.y > OFFSCREEN_POS {
+                if actual.x() > OFFSCREEN_POS && actual.y() > OFFSCREEN_POS {
                     *retries = retries.saturating_add(1);
                     if *retries >= MAX_DRIFT_RETRIES {
                         tracing::debug!("Offscreen re-hide retries exhausted");
@@ -739,7 +740,7 @@ impl Dome {
                 entry.ext.set_position(ZOrder::Unchanged, fp.target);
             }
             WindowState::Positioned(PositionedState::Offscreen { retries, actual }) => {
-                if actual.x <= OFFSCREEN_POS || actual.y <= OFFSCREEN_POS {
+                if actual.x() <= OFFSCREEN_POS || actual.y() <= OFFSCREEN_POS {
                     return;
                 }
                 if *retries >= MAX_DRIFT_RETRIES {

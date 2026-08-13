@@ -30,7 +30,7 @@ use windows::core::{Interface, PCWSTR};
 
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, Physical,
-    TilingWindowPlacement,
+    PixelRect, TilingWindowPlacement,
 };
 use crate::overlay;
 use crate::platform::windows::dome::CreateOverlay;
@@ -903,7 +903,7 @@ impl CreateOverlay for WgpuOverlayFactory {
         &self,
         config: Config,
         _scale: f32,
-        visible_border_box: Dimension,
+        visible_border_box: PixelRect,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
         let (x_phys, y_phys, w_phys, h_phys) = visible_border_box.to_surface_size();
         Ok(FloatOverlay::new(
@@ -939,8 +939,8 @@ impl CreateOverlay for WgpuOverlayFactory {
     }
 }
 
-/// Windows-only conversions on physical-pixel dimensions for the wgpu/egui overlay pipeline.
-trait PhysicalDimensionExt {
+/// Windows-only conversions on physical-pixel rectangles for the wgpu/egui overlay pipeline.
+trait PhysicalRectExt {
     fn to_logical(self, scale: f32) -> Dimension<Logical>;
     fn to_surface_size(self) -> (i32, i32, u32, u32);
 }
@@ -959,7 +959,7 @@ impl PhysicalLengthExt for Length<Physical> {
     }
 }
 
-impl PhysicalDimensionExt for Dimension<Physical> {
+impl PhysicalRectExt for Dimension<Physical> {
     fn to_logical(self, scale: f32) -> Dimension<Logical> {
         debug_assert!(scale > 0.0, "scale must be positive, got {scale}");
         Dimension::new(
@@ -982,6 +982,36 @@ impl PhysicalDimensionExt for Dimension<Physical> {
             self.y.round().value() as i32,
             w,
             h,
+        )
+    }
+}
+
+impl PhysicalRectExt for PixelRect<Physical> {
+    /// Does not round, for the reason `PhysicalLengthExt::to_logical` gives.
+    fn to_logical(self, scale: f32) -> Dimension<Logical> {
+        debug_assert!(scale > 0.0, "scale must be positive, got {scale}");
+        Dimension::new(
+            Length::new(self.x() as f32 / scale),
+            Length::new(self.y() as f32 / scale),
+            Length::new(self.width() as f32 / scale),
+            Length::new(self.height() as f32 / scale),
+        )
+    }
+
+    fn to_surface_size(self) -> (i32, i32, u32, u32) {
+        // Assert before the cast, not after: `i32 as u32` wraps a negative extent
+        // into a huge positive one, where the `f32` path saturates to zero.
+        assert!(
+            self.width() > 0 && self.height() > 0,
+            "overlay surface size must be positive; got {}x{}",
+            self.width(),
+            self.height()
+        );
+        (
+            self.x(),
+            self.y(),
+            self.width() as u32,
+            self.height() as u32,
         )
     }
 }
