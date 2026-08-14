@@ -288,9 +288,11 @@ fn painted_thickness_matches_core_inset() {
 
     // The painter strokes a band of exactly this thickness inside border_box, so any
     // disagreement with the inset core already applied shows up as a hairline.
-    let painted = Pixels::new(border_thickness.value() as i32);
-    assert_eq!(painted, wp.content_box.x() - wp.border_box.x());
-    assert_eq!(painted * 2, wp.border_box.width() - wp.content_box.width());
+    assert_eq!(border_thickness, wp.content_box.x() - wp.border_box.x());
+    assert_eq!(
+        border_thickness * 2,
+        wp.border_box.width() - wp.content_box.width()
+    );
 }
 
 #[test]

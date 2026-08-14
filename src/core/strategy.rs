@@ -207,7 +207,7 @@ pub(crate) fn window_constraints(
         .maximum_height
         .resolve(screen.height, scale);
 
-    let outset = hub.border(monitor_id) * 2.0;
+    let outset = Length::from_pixels(hub.border(monitor_id) * 2);
     let limits = hub.windows.get(wid).limits();
     // Filter before the outset: a non-positive stored limit is not a limit at all, and outsetting
     // it first would turn it into a spurious `2 * border` cap that collapses the slot.

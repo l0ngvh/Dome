@@ -68,7 +68,7 @@ pub(crate) struct MonitorPlacements {
     pub(crate) monitor_id: MonitorId,
     /// Resolved once per monitor. Emitted so the overlay paints the exact gap the
     /// inset left rather than re-deriving it from config.
-    pub(crate) border_thickness: Length<Unit>,
+    pub(crate) border_thickness: Pixels<Unit>,
     pub(crate) layout: MonitorLayout,
 }
 
@@ -179,11 +179,12 @@ impl HubAccess {
     /// `border_box - content_box` exactly the thickness on every edge: a
     /// thickness ending in `.5` would otherwise round the two opposite edges
     /// apart by a pixel.
-    pub(super) fn border(&self, monitor: MonitorId) -> Length<Unit> {
-        self.layout
-            .border_size
-            .to_unit(self.monitors.get(monitor).scale)
-            .round()
+    pub(super) fn border(&self, monitor: MonitorId) -> Pixels<Unit> {
+        Pixels::round(
+            self.layout
+                .border_size
+                .to_unit(self.monitors.get(monitor).scale),
+        )
     }
 }
 

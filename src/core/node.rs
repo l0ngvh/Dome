@@ -384,6 +384,13 @@ impl<U> Length<U> {
         Self::new(self.v.abs())
     }
 
+    #[cfg_attr(
+        not(target_os = "windows"),
+        expect(
+            dead_code,
+            reason = "only the Windows tab bar height derivation rounds a Length"
+        )
+    )]
     pub(crate) fn round(self) -> Self {
         Self::new(self.v.round())
     }
@@ -539,13 +546,15 @@ impl<U> SubAssign for Length<U> {
 }
 
 impl<'de> serde::Deserialize<'de> for Length<Logical> {
-    /// Deserializes a non-negative `f32` from TOML/serde into `Length<Logical>`.
+    /// Deserializes a finite, non-negative `f32` from TOML/serde into `Length<Logical>`.
     /// Lives next to the type definition to keep serialisation coherent with the type.
     /// Only `serde::Deserialize`/`Deserializer`/`Error::custom` are used -- no OS deps.
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v = f32::deserialize(d)?;
-        if v < 0.0 {
-            return Err(serde::de::Error::custom("length must be non-negative"));
+        if !v.is_finite() || v < 0.0 {
+            return Err(serde::de::Error::custom(
+                "length must be a finite non-negative number",
+            ));
         }
         Ok(Length::new(v))
     }
@@ -607,6 +616,10 @@ impl<U> Pixels<U> {
     /// Narrows toward zero.
     pub(crate) fn truncate(length: Length<U>) -> Self {
         Self::new(length.v as i32)
+    }
+
+    pub(crate) fn round(length: Length<U>) -> Self {
+        Self::new(length.v.round() as i32)
     }
 
     pub(crate) const fn value(self) -> i32 {
@@ -901,26 +914,14 @@ impl<U> PixelRect<U> {
     /// Clamps extent at zero rather than going negative. The origin is still pushed
     /// inward, so a box narrower than `2 * border` ends up empty at an origin past
     /// its own far edge.
-    pub(crate) fn inset_by(self, border: Length<U>) -> Self {
-        let b = whole_units(border);
+    pub(crate) fn inset_by(self, border: Pixels<U>) -> Self {
         Self::from_pixels(
-            self.x + b,
-            self.y + b,
-            (self.width - b * 2).max(Pixels::ZERO),
-            (self.height - b * 2).max(Pixels::ZERO),
+            self.x + border,
+            self.y + border,
+            (self.width - border * 2).max(Pixels::ZERO),
+            (self.height - border * 2).max(Pixels::ZERO),
         )
     }
-}
-
-/// Insetting a `PixelRect` by a fractional border would take it off the grid, so a
-/// caller that skipped `Hub::border`'s rounding is a bug rather than a value to snap.
-fn whole_units<U>(border: Length<U>) -> Pixels<U> {
-    assert!(
-        border.v.fract() == 0.0,
-        "border {} is not a whole number of units",
-        border.v
-    );
-    Pixels::truncate(border)
 }
 
 #[derive(

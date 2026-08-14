@@ -5,7 +5,7 @@ use super::Dome;
 use super::display_from_process;
 use crate::config::{WindowMatcher, pattern_matches};
 use crate::core::{
-    FloatWindowPlacement, Length, LimitObservation, MonitorId, Physical, PixelRect,
+    FloatWindowPlacement, LimitObservation, MonitorId, Physical, PixelRect, Pixels,
     TilingWindowPlacement, WindowId, WindowRestrictions,
 };
 use crate::platform::windows::external::{ManageExternalWindow, ShowCmd, ZOrder};
@@ -255,7 +255,7 @@ impl Dome {
         focus_changed: bool,
         is_focused: bool,
         monitor: MonitorId,
-        border_thickness: Length<Physical>,
+        border_thickness: Pixels<Physical>,
     ) {
         debug_assert!(
             !wp.content_box.is_empty(),

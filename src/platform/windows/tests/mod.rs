@@ -17,7 +17,7 @@ use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Length, LimitObservation, LimitUpdate, Logical,
-    Physical, PixelRect, TilingWindowPlacement, WindowId, WorkspaceInfo,
+    Physical, PixelRect, Pixels, TilingWindowPlacement, WindowId, WorkspaceInfo,
 };
 use crate::font::FontConfig;
 use crate::platform::windows::dome::MonitorInfo;
@@ -39,7 +39,7 @@ enum TilingOverlayState {
     Hidden,
     Visible {
         windows: Vec<TilingWindowPlacement>,
-        border_thickness: Length<Physical>,
+        border_thickness: Pixels<Physical>,
     },
 }
 
@@ -991,7 +991,7 @@ impl FloatOverlayApi for MockFloatOverlay {
         _: &Config,
         z_order: ZOrder,
         _scale: f32,
-        _border_thickness: Length<Physical>,
+        _border_thickness: Pixels<Physical>,
     ) {
         self.shared.state.set(FloatOverlayState::Visible {
             window_id: wp.id,
@@ -1075,7 +1075,7 @@ impl TilingOverlayApi for MockTilingOverlay {
         windows: &[TilingWindowPlacement],
         _containers: &[(ContainerPlacement, Vec<String>)],
         _scale: f32,
-        border_thickness: Length<Physical>,
+        border_thickness: Pixels<Physical>,
     ) {
         if self.monitor.get() != monitor {
             self.monitor.set(monitor);
@@ -1156,7 +1156,7 @@ impl TabBarOverlayApi for MockTabBarHandle {
         active_index: usize,
         _is_highlighted: bool,
         _scale: f32,
-        _border_thickness: Length<Physical>,
+        _border_thickness: Pixels<Physical>,
     ) {
         *self.inner.last_update.borrow_mut() = Some(TabBarUpdate {
             titles,

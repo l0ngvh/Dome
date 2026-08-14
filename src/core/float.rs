@@ -2,7 +2,7 @@ use crate::core::{
     Hub, WindowId,
     hub::RestrictedAction,
     matcher::FloatFullscreenMatcherId,
-    node::{Dimension, DisplayMode, MonitorId, WorkspaceId},
+    node::{Dimension, DisplayMode, Length, MonitorId, WorkspaceId},
 };
 
 impl Hub {
@@ -78,7 +78,7 @@ impl Hub {
         monitor_id: MonitorId,
     ) {
         let border = self.access.border(monitor_id);
-        let dim = content_box.outset_by(border);
+        let dim = content_box.outset_by(Length::from_pixels(border));
         let old_ws = {
             let window = self.access.windows.get_mut(window_id);
             assert!(

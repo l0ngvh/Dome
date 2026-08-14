@@ -1471,6 +1471,26 @@ mod tests {
     }
 
     #[test]
+    fn non_finite_border_size_falls_back_to_default() {
+        for literal in ["nan", "inf", "-inf"] {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path =
+                std::env::temp_dir().join(format!("dome_config_border_nonfinite_{nanos}.toml"));
+            std::fs::write(&path, format!("border_size = {literal}\n")).unwrap();
+            let _cleanup = CleanupFile(path.clone());
+            let config = load_or_default(path.to_str().unwrap(), Config::load);
+            assert_eq!(
+                config.border_size,
+                default_border_size(),
+                "border_size = {literal} should have fallen back to the default"
+            );
+        }
+    }
+
+    #[test]
     fn removed_top_level_layout_fields_rejected() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

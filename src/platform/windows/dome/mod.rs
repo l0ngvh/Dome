@@ -76,7 +76,7 @@ pub(super) enum HubEvent {
 struct MonitorPositionData {
     monitor_id: MonitorId,
     work_area: PixelRect,
-    border_thickness: Length<Physical>,
+    border_thickness: Pixels<Physical>,
     tiling_windows: Vec<TilingWindowPlacement>,
     float_windows: Vec<FloatWindowPlacement>,
     containers: Vec<(ContainerPlacement, Vec<String>)>,
