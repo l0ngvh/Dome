@@ -4,7 +4,7 @@ use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim,
     setup_logger_with_level, snapshot, titled, titled_matcher, titled_process,
 };
-use crate::core::{Hub, MonitorLayout, WindowId, WindowRestrictions};
+use crate::core::{Hub, MonitorLayout, Pixels, WindowId, WindowRestrictions};
 use insta::assert_snapshot;
 
 #[test]
@@ -856,7 +856,7 @@ fn move_matched_secondary_to_master_rematches() {
 /// `ids` sorted by on-screen y, which is the only observable that exposes pane order.
 fn top_to_bottom(hub: &Hub, ids: &[WindowId]) -> Vec<WindowId> {
     let placements = hub.get_visible_placements();
-    let mut found: Vec<(i32, WindowId)> = Vec::new();
+    let mut found: Vec<(Pixels, WindowId)> = Vec::new();
     for monitor in &placements.monitors {
         let MonitorLayout::Normal { tiling_windows, .. } = &monitor.layout else {
             continue;

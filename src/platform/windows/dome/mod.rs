@@ -22,7 +22,7 @@ use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, Length,
-    LimitObservation, Logical, MonitorId, MonitorLayout, Physical, PixelRect, TilingAction,
+    LimitObservation, Logical, MonitorId, MonitorLayout, Physical, PixelRect, Pixels, TilingAction,
     TilingWindowPlacement, WindowId, WindowRestrictions, WorkspaceInfo,
 };
 
@@ -999,11 +999,11 @@ fn compute_tab_bar_rect(
     scale: f32,
 ) -> PixelRect {
     let h_phys = tab_bar_h_logical.to_unit(scale).round();
-    PixelRect::new(
+    PixelRect::from_pixels(
         border_box.x(),
         border_box.y(),
         border_box.width(),
-        h_phys.value() as i32,
+        Pixels::truncate(h_phys),
     )
 }
 

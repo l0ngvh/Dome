@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use objc2_core_graphics::CGWindowID;
 
-use crate::core::PixelRect;
+use crate::core::{PixelRect, Pixels};
 
 use super::super::accessibility::ExternalWindow;
 
@@ -31,8 +31,8 @@ impl Recovery {
     pub(super) fn track(
         &mut self,
         window: Arc<dyn ExternalWindow>,
-        w: i32,
-        h: i32,
+        w: Pixels,
+        h: Pixels,
         monitor: PixelRect,
     ) {
         let original_dim = default_position(monitor, w, h);
@@ -56,8 +56,8 @@ impl Recovery {
     }
 }
 
-fn default_position(monitor: PixelRect, width: i32, height: i32) -> PixelRect {
-    PixelRect::new(
+fn default_position(monitor: PixelRect, width: Pixels, height: Pixels) -> PixelRect {
+    PixelRect::from_pixels(
         monitor.x() + (monitor.width() - width) / 2,
         monitor.y() + (monitor.height() - height) / 2,
         width,

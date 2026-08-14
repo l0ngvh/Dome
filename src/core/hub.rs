@@ -8,8 +8,8 @@ use super::allocator::{Allocator, NodeId};
 use super::matcher::{FloatFullscreenMatcherId, MatcherHit};
 use super::node::{
     ContainerId, Dimension, DisplayMode, Length, LimitObservation, LimitUpdate, Logical, Monitor,
-    MonitorId, PixelRect, Unit, Window, WindowId, WindowMetadata, WindowRestrictions, Workspace,
-    WorkspaceId,
+    MonitorId, PixelRect, Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions,
+    Workspace, WorkspaceId,
 };
 use super::partition_tree::Child;
 use super::strategy::{StrategySet, TilingAction, WorkspaceExport};
@@ -905,14 +905,14 @@ impl Hub {
                         let dy = 2 * m.y() + m.height() - cy2;
 
                         let valid = match direction {
-                            MonitorTarget::Left => dx < 0,
-                            MonitorTarget::Right => dx > 0,
-                            MonitorTarget::Up => dy < 0,
-                            MonitorTarget::Down => dy > 0,
+                            MonitorTarget::Left => dx < Pixels::ZERO,
+                            MonitorTarget::Right => dx > Pixels::ZERO,
+                            MonitorTarget::Up => dy < Pixels::ZERO,
+                            MonitorTarget::Down => dy > Pixels::ZERO,
                             MonitorTarget::Name(_) => false,
                         };
-                        let dx = i64::from(dx);
-                        let dy = i64::from(dy);
+                        let dx = i64::from(dx.value());
+                        let dy = i64::from(dy.value());
                         valid.then_some((*id, dx * dx + dy * dy))
                     })
                     .min_by_key(|(_, dist_sq)| *dist_sq)

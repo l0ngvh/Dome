@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::{GlobalLayoutConfig, Length, Logical};
+use crate::core::{GlobalLayoutConfig, Length, Logical, Pixels};
 
 #[test]
 fn single_window_fills_screen() {
@@ -252,7 +252,7 @@ fn tiling_border_scales_with_dpi() {
         );
         let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
         let wp = only_recorded_tiling(&env);
-        let expected_inset = (env.config.border_size.logical() * scale).round() as i32;
+        let expected_inset = Pixels::new((env.config.border_size.logical() * scale).round() as i32);
 
         assert_eq!(env.dim(w1), wp.content_box.to_dimension(), "scale {scale}");
         assert_content_box_centered_in_border_box(&wp);
@@ -288,7 +288,7 @@ fn painted_thickness_matches_core_inset() {
 
     // The painter strokes a band of exactly this thickness inside border_box, so any
     // disagreement with the inset core already applied shows up as a hairline.
-    let painted = border_thickness.value() as i32;
+    let painted = Pixels::new(border_thickness.value() as i32);
     assert_eq!(painted, wp.content_box.x() - wp.border_box.x());
     assert_eq!(painted * 2, wp.border_box.width() - wp.content_box.width());
 }

@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 
 use crate::core::{
-    Dimension, Length, LimitObservation, LimitUpdate, MonitorId, PixelRect, WindowId,
+    Dimension, Length, LimitObservation, LimitUpdate, MonitorId, PixelRect, Pixels, WindowId,
     WindowRestrictions,
 };
 use crate::platform::macos::MonitorInfo;
@@ -57,7 +57,9 @@ impl OffscreenPlacement {
     fn record_drift(&mut self, new_actual: PixelRect, monitors: &[MonitorInfo]) -> bool {
         self.actual = new_actual;
         let (hidden_x, hidden_y) = hidden_position(monitors);
-        if new_actual.x() == hidden_x.value() as i32 || new_actual.y() == hidden_y.value() as i32 {
+        if new_actual.x() == Pixels::truncate(hidden_x)
+            || new_actual.y() == Pixels::truncate(hidden_y)
+        {
             return false;
         }
         self.retries = self.retries.saturating_add(1);
@@ -190,10 +192,10 @@ impl Placement {
     /// Compare actual vs target, return the limits learned if size mismatched.
     fn detect_constraint(&self) -> Option<LimitObservation> {
         let (actual, target) = (self.actual, self.target);
-        let min_w = (actual.width() > target.width()).then_some(actual.width() as f32);
-        let min_h = (actual.height() > target.height()).then_some(actual.height() as f32);
-        let max_w = (actual.width() < target.width()).then_some(actual.width() as f32);
-        let max_h = (actual.height() < target.height()).then_some(actual.height() as f32);
+        let min_w = (actual.width() > target.width()).then_some(actual.width());
+        let min_h = (actual.height() > target.height()).then_some(actual.height());
+        let max_w = (actual.width() < target.width()).then_some(actual.width());
+        let max_h = (actual.height() < target.height()).then_some(actual.height());
         if min_w.is_none() && min_h.is_none() && max_w.is_none() && max_h.is_none() {
             return None;
         }
@@ -208,8 +210,11 @@ impl Placement {
         );
         // AX reports the content box, which is the space core stores limits in,
         // so the observation needs no border conversion.
-        let observed =
-            |v: Option<f32>| v.map_or(LimitUpdate::Unchanged, |v| LimitUpdate::Set(Length::new(v)));
+        let observed = |v: Option<Pixels>| {
+            v.map_or(LimitUpdate::Unchanged, |v| {
+                LimitUpdate::Set(Length::from_pixels(v))
+            })
+        };
         Some(LimitObservation {
             min_width: observed(min_w),
             min_height: observed(min_h),
@@ -227,7 +232,7 @@ pub(super) fn move_offscreen(
     let (hidden_x, hidden_y) = hidden_position(monitors);
     // When spaces change or monitors are connected/disconnected, hidden windows
     // may be moved to visible state, so we need to re-hide them
-    if actual.x() == hidden_x.value() as i32 || actual.y() == hidden_y.value() as i32 {
+    if actual.x() == Pixels::truncate(hidden_x) || actual.y() == Pixels::truncate(hidden_y) {
         return Ok(());
     }
     ax.hide_at(hidden_x, hidden_y)

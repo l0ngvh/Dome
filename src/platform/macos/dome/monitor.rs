@@ -5,7 +5,7 @@ use objc2_app_kit::NSScreen;
 use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
 use objc2_foundation::{NSNumber, NSString};
 
-use crate::core::{Dimension, Hub, Length, MonitorId, PixelRect, WindowId};
+use crate::core::{Dimension, Hub, Length, MonitorId, PixelRect, Pixels, WindowId};
 use crate::platform::reserve_for_bar;
 
 use super::Dome;
@@ -287,15 +287,15 @@ impl MonitorRegistry {
 
     pub(super) fn is_borderless_fullscreen_at(&self, dim: PixelRect) -> bool {
         let point = Dimension::new(
-            Length::new(dim.x() as f32),
-            Length::new(dim.y() as f32),
+            Length::from_pixels(dim.x()),
+            Length::from_pixels(dim.y()),
             Length::new(1.0),
             Length::new(1.0),
         );
         let monitor = self.find_closest_monitor(point);
         monitor.is_some_and(|m| {
             let mon = m.info.work_area_snapped();
-            let tolerance = 2;
+            let tolerance = Pixels::new(2);
             (dim.x() - mon.x()).abs() <= tolerance
                 && (dim.y() - mon.y()).abs() <= tolerance
                 && (dim.width() - mon.width()).abs() <= tolerance

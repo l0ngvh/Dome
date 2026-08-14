@@ -168,10 +168,10 @@ impl ExternalWindow for MockAXWindow {
         Ok((Length::new(w as f32), Length::new(h as f32)))
     }
     fn set_frame(&self, rect: PixelRect<Logical>) -> Result<()> {
-        let x = rect.x();
-        let y = rect.y();
-        let w = rect.width();
-        let h = rect.height();
+        let x = rect.x().value();
+        let y = rect.y().value();
+        let w = rect.width().value();
+        let h = rect.height().value();
         let (x, y, w, h) = if let Some(ovr) = self.override_frame.get() {
             ovr
         } else {

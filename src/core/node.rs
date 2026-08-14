@@ -391,6 +391,10 @@ impl<U> Length<U> {
     pub(crate) fn clamp(self, lo: Self, hi: Self) -> Self {
         Self::new(self.v.clamp(lo.v, hi.v))
     }
+
+    pub(crate) fn from_pixels(px: Pixels<U>) -> Self {
+        Self::new(px.v as f32)
+    }
 }
 
 impl<U> Sum for Length<U> {
@@ -547,6 +551,123 @@ impl<'de> serde::Deserialize<'de> for Length<Logical> {
     }
 }
 
+/// A whole number of units, tagged with the same unit marker as `Length`. Where a
+/// `Length` holds any `f32`, this holds only a value already on the pixel grid.
+pub(crate) struct Pixels<U = Unit> {
+    v: i32,
+    _unit: PhantomData<fn() -> U>,
+}
+
+// Manual impls avoid the `U: Trait` bounds a derive would infer, as on `Length` above.
+impl<U> Clone for Pixels<U> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<U> Copy for Pixels<U> {}
+
+impl<U> std::fmt::Debug for Pixels<U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pixels").field("v", &self.v).finish()
+    }
+}
+
+impl<U> PartialEq for Pixels<U> {
+    fn eq(&self, other: &Self) -> bool {
+        self.v == other.v
+    }
+}
+
+impl<U> Eq for Pixels<U> {}
+
+impl<U> PartialOrd for Pixels<U> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<U> Ord for Pixels<U> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.v.cmp(&other.v)
+    }
+}
+
+// Intentionally no From<i32> and no From<Pixels> for Length. An Into would put the two
+// named crossings, Pixels::truncate and Length::from_pixels, back out of sight.
+impl<U> Pixels<U> {
+    pub(crate) const ZERO: Self = Self::new(0);
+
+    pub(crate) const fn new(v: i32) -> Self {
+        Self {
+            v,
+            _unit: PhantomData,
+        }
+    }
+
+    /// Narrows toward zero.
+    pub(crate) fn truncate(length: Length<U>) -> Self {
+        Self::new(length.v as i32)
+    }
+
+    pub(crate) const fn value(self) -> i32 {
+        self.v
+    }
+
+    #[cfg_attr(
+        target_os = "windows",
+        expect(
+            dead_code,
+            reason = "only the macOS borderless-fullscreen tolerance check compares distances"
+        )
+    )]
+    pub(crate) fn abs(self) -> Self {
+        Self::new(self.v.abs())
+    }
+
+    pub(crate) fn max(self, other: Self) -> Self {
+        Self::new(self.v.max(other.v))
+    }
+
+    pub(crate) fn min(self, other: Self) -> Self {
+        Self::new(self.v.min(other.v))
+    }
+}
+
+impl<U> Add for Pixels<U> {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        Self::new(self.v + rhs.v)
+    }
+}
+
+impl<U> Sub for Pixels<U> {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self {
+        Self::new(self.v - rhs.v)
+    }
+}
+
+impl<U> Mul<i32> for Pixels<U> {
+    type Output = Self;
+    fn mul(self, rhs: i32) -> Self {
+        Self::new(self.v * rhs)
+    }
+}
+
+impl<U> Mul<Pixels<U>> for i32 {
+    type Output = Pixels<U>;
+    fn mul(self, rhs: Pixels<U>) -> Pixels<U> {
+        Pixels::new(self * rhs.v)
+    }
+}
+
+impl<U> Div<i32> for Pixels<U> {
+    type Output = Self;
+    fn div(self, rhs: i32) -> Self {
+        Self::new(self.v / rhs)
+    }
+}
+
 /// A rectangle tagged with a compile-time unit marker (`Logical` or `Physical`).
 /// The default type parameter `Unit` is cfg-aliased per target so core code can
 /// spell plain `Dimension` without an explicit generic.
@@ -561,8 +682,6 @@ pub(crate) struct Dimension<U = Unit> {
 // The phantom field contributes nothing to the output.
 impl<U> std::fmt::Debug for Dimension<U> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Reaches into Length's private v field to keep inline @"" snapshots byte-stable
-        // across the Dimension->Length retag; .value() is not available for Length<Logical>.
         f.debug_struct("Dimension")
             .field("x", &self.x.v)
             .field("y", &self.y.v)
@@ -636,21 +755,20 @@ impl<U> Default for Dimension<U> {
 /// each producer. The integer backing is load-bearing: placements are compared
 /// for exact equality after an OS round-trip, which is not sound on `f32`.
 pub(crate) struct PixelRect<U = Unit> {
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-    _unit: PhantomData<fn() -> U>,
+    x: Pixels<U>,
+    y: Pixels<U>,
+    width: Pixels<U>,
+    height: Pixels<U>,
 }
 
 // Manual impls avoid the `U: Trait` bounds a derive would infer, as on Dimension above.
 impl<U> std::fmt::Debug for PixelRect<U> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PixelRect")
-            .field("x", &self.x)
-            .field("y", &self.y)
-            .field("width", &self.width)
-            .field("height", &self.height)
+            .field("x", &self.x.v)
+            .field("y", &self.y.v)
+            .field("width", &self.width.v)
+            .field("height", &self.height.v)
             .finish()
     }
 }
@@ -676,13 +794,28 @@ impl<U> Clone for PixelRect<U> {
 impl<U> PixelRect<U> {
     pub(crate) const ZERO: Self = Self::new(0, 0, 0, 0);
 
+    /// Deliberately stays on `i32`. This is the raw entry point, where a caller asserts
+    /// gridness by choosing it, and `from_pixels` is the sibling for typed callers.
     pub(crate) const fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
+        Self {
+            x: Pixels::new(x),
+            y: Pixels::new(y),
+            width: Pixels::new(width),
+            height: Pixels::new(height),
+        }
+    }
+
+    pub(crate) const fn from_pixels(
+        x: Pixels<U>,
+        y: Pixels<U>,
+        width: Pixels<U>,
+        height: Pixels<U>,
+    ) -> Self {
         Self {
             x,
             y,
             width,
             height,
-            _unit: PhantomData,
         }
     }
 
@@ -713,35 +846,36 @@ impl<U> PixelRect<U> {
 
     pub(crate) fn to_dimension(self) -> Dimension<U> {
         Dimension::new(
-            Length::new(self.x as f32),
-            Length::new(self.y as f32),
-            Length::new(self.width as f32),
-            Length::new(self.height as f32),
+            Length::from_pixels(self.x),
+            Length::from_pixels(self.y),
+            Length::from_pixels(self.width),
+            Length::from_pixels(self.height),
         )
     }
 
-    pub(crate) const fn x(self) -> i32 {
+    pub(crate) const fn x(self) -> Pixels<U> {
         self.x
     }
 
-    pub(crate) const fn y(self) -> i32 {
+    pub(crate) const fn y(self) -> Pixels<U> {
         self.y
     }
 
-    pub(crate) const fn width(self) -> i32 {
+    pub(crate) const fn width(self) -> Pixels<U> {
         self.width
     }
 
-    pub(crate) const fn height(self) -> i32 {
+    pub(crate) const fn height(self) -> Pixels<U> {
         self.height
     }
 
-    pub(crate) const fn right(self) -> i32 {
-        self.x + self.width
+    // Adds through the private fields because the `Add` impl is not const-callable.
+    pub(crate) const fn right(self) -> Pixels<U> {
+        Pixels::new(self.x.v + self.width.v)
     }
 
-    pub(crate) const fn bottom(self) -> i32 {
-        self.y + self.height
+    pub(crate) const fn bottom(self) -> Pixels<U> {
+        Pixels::new(self.y.v + self.height.v)
     }
 
     /// Mirrors `strategy::clip`, including returning `None` on an empty intersection,
@@ -755,13 +889,13 @@ impl<U> PixelRect<U> {
         if x1 >= x2 || y1 >= y2 {
             return None;
         }
-        Some(Self::new(x1, y1, x2 - x1, y2 - y1))
+        Some(Self::from_pixels(x1, y1, x2 - x1, y2 - y1))
     }
 
     /// `<=` rather than `==` so an inverted extent counts as empty, matching what
     /// `strategy::clip` rejects.
     pub(crate) const fn is_empty(self) -> bool {
-        self.width <= 0 || self.height <= 0
+        self.width.v <= 0 || self.height.v <= 0
     }
 
     /// Clamps extent at zero rather than going negative. The origin is still pushed
@@ -769,24 +903,24 @@ impl<U> PixelRect<U> {
     /// its own far edge.
     pub(crate) fn inset_by(self, border: Length<U>) -> Self {
         let b = whole_units(border);
-        Self::new(
+        Self::from_pixels(
             self.x + b,
             self.y + b,
-            (self.width - b * 2).max(0),
-            (self.height - b * 2).max(0),
+            (self.width - b * 2).max(Pixels::ZERO),
+            (self.height - b * 2).max(Pixels::ZERO),
         )
     }
 }
 
 /// Insetting a `PixelRect` by a fractional border would take it off the grid, so a
 /// caller that skipped `Hub::border`'s rounding is a bug rather than a value to snap.
-fn whole_units<U>(border: Length<U>) -> i32 {
+fn whole_units<U>(border: Length<U>) -> Pixels<U> {
     assert!(
         border.v.fract() == 0.0,
         "border {} is not a whole number of units",
         border.v
     );
-    border.v as i32
+    Pixels::truncate(border)
 }
 
 #[derive(

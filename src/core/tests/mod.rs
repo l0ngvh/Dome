@@ -7,7 +7,6 @@ mod minimize;
 mod monitor;
 mod move_to_workspace;
 mod partition_tree;
-mod pixel_rect;
 mod preferred_layout;
 mod query;
 mod set_focus;
@@ -55,15 +54,7 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         ),
         MonitorLayout::Fullscreen(id) => {
             let screen = hub.access.monitors.get(mp.monitor_id).work_area;
-            draw_rect(
-                &mut grid,
-                screen.x(),
-                screen.y(),
-                screen.width(),
-                screen.height(),
-                &format!("W{}", id.get()),
-                [false; 4],
-            );
+            draw_rect(&mut grid, screen, &format!("W{}", id.get()), [false; 4]);
             s.push('\n');
             s.push_str(
                 &grid
@@ -80,29 +71,14 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     for wp in tiling_windows {
         let d = wp.visible_border_box;
         let clip = clip_edges(wp.border_box, wp.visible_border_box);
-        draw_rect(
-            &mut grid,
-            d.x(),
-            d.y(),
-            d.width(),
-            d.height(),
-            &format!("W{}", wp.id.get()),
-            clip,
-        );
+        draw_rect(&mut grid, d, &format!("W{}", wp.id.get()), clip);
     }
 
     // Draw tab bars
     for cp in containers {
         if cp.is_tabbed {
             let d = cp.visible_border_box;
-            draw_tab_bar(
-                &mut grid,
-                d.x(),
-                d.y(),
-                d.width(),
-                &cp.titles,
-                cp.active_tab_index,
-            );
+            draw_tab_bar(&mut grid, d, &cp.titles, cp.active_tab_index);
         }
     }
 
@@ -112,11 +88,11 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         if let Some(wp) = tiling_windows.iter().find(|p| p.is_highlighted) {
             let d = wp.visible_border_box;
             let clip = clip_edges(wp.border_box, wp.visible_border_box);
-            draw_focused_border(&mut grid, d.x(), d.y(), d.width(), d.height(), clip);
+            draw_focused_border(&mut grid, d, clip);
         } else if let Some(cp) = containers.iter().find(|p| p.is_highlighted) {
             let d = cp.visible_border_box;
             let clip = clip_edges(cp.border_box, cp.visible_border_box);
-            draw_focused_border(&mut grid, d.x(), d.y(), d.width(), d.height(), clip);
+            draw_focused_border(&mut grid, d, clip);
         }
     }
 
@@ -126,31 +102,23 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         let clip = clip_edges(wp.border_box, wp.visible_border_box);
         let grid_w = grid[0].len() as isize;
         let grid_h = grid.len() as isize;
-        let x1 = d.x() as isize;
-        let y1 = d.y() as isize;
-        let x2 = d.right() as isize - 1;
-        let y2 = d.bottom() as isize - 1;
+        let x1 = d.x().value() as isize;
+        let y1 = d.y().value() as isize;
+        let x2 = d.right().value() as isize - 1;
+        let y2 = d.bottom().value() as isize - 1;
         for row in (y1 + 1).max(0)..y2.min(grid_h) {
             for col in (x1 + 1).max(0)..x2.min(grid_w) {
                 grid[row as usize][col as usize] = ' ';
             }
         }
-        draw_rect(
-            &mut grid,
-            d.x(),
-            d.y(),
-            d.width(),
-            d.height(),
-            &format!("F{}", wp.id.get()),
-            clip,
-        );
+        draw_rect(&mut grid, d, &format!("F{}", wp.id.get()), clip);
     }
 
     // Draw focus border for float focused (on top of everything)
     if let Some(wp) = focused_float {
         let d = wp.visible_border_box;
         let clip = clip_edges(wp.border_box, wp.visible_border_box);
-        draw_focused_border(&mut grid, d.x(), d.y(), d.width(), d.height(), clip);
+        draw_focused_border(&mut grid, d, clip);
     }
 
     s.push('\n');
@@ -300,14 +268,8 @@ fn fmt_container_placement(cp: &ContainerPlacement) -> String {
     clippy::needless_range_loop,
     reason = "grid indexing requires row/col indices"
 )]
-fn draw_tab_bar(
-    grid: &mut [Vec<char>],
-    x: i32,
-    y: i32,
-    width: i32,
-    labels: &[String],
-    active: usize,
-) {
+fn draw_tab_bar(grid: &mut [Vec<char>], rect: PixelRect, labels: &[String], active: usize) {
+    let (x, y, width) = (rect.x().value(), rect.y().value(), rect.width().value());
     let x1 = x as usize;
     let y1 = y as usize;
     let y2 = y1 + TAB_BAR_HEIGHT as usize - 1;
@@ -374,7 +336,13 @@ fn clip_edges(border_box: PixelRect, visible: PixelRect) -> [bool; 4] {
     ]
 }
 
-fn draw_rect(grid: &mut [Vec<char>], x: i32, y: i32, w: i32, h: i32, label: &str, clip: [bool; 4]) {
+fn draw_rect(grid: &mut [Vec<char>], rect: PixelRect, label: &str, clip: [bool; 4]) {
+    let (x, y, w, h) = (
+        rect.x().value(),
+        rect.y().value(),
+        rect.width().value(),
+        rect.height().value(),
+    );
     let grid_w = grid[0].len() as isize;
     let grid_h = grid.len() as isize;
     let [clip_l, clip_r, clip_t, clip_b] = clip;
@@ -438,7 +406,13 @@ fn draw_rect(grid: &mut [Vec<char>], x: i32, y: i32, w: i32, h: i32, label: &str
     }
 }
 
-fn draw_focused_border(grid: &mut [Vec<char>], x: i32, y: i32, w: i32, h: i32, clip: [bool; 4]) {
+fn draw_focused_border(grid: &mut [Vec<char>], rect: PixelRect, clip: [bool; 4]) {
+    let (x, y, w, h) = (
+        rect.x().value(),
+        rect.y().value(),
+        rect.width().value(),
+        rect.height().value(),
+    );
     let grid_w = grid[0].len() as isize;
     let grid_h = grid.len() as isize;
     let [clip_l, clip_r, clip_t, clip_b] = clip;

@@ -30,7 +30,7 @@ use windows::core::{Interface, PCWSTR};
 
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, Physical,
-    PixelRect, TilingWindowPlacement,
+    PixelRect, Pixels, TilingWindowPlacement,
 };
 use crate::overlay;
 use crate::platform::windows::dome::CreateOverlay;
@@ -962,12 +962,11 @@ impl PhysicalLengthExt for Length<Physical> {
 impl PhysicalRectExt for PixelRect<Physical> {
     /// Does not round, for the reason `PhysicalLengthExt::to_logical` gives.
     fn to_logical(self, scale: f32) -> Dimension<Logical> {
-        debug_assert!(scale > 0.0, "scale must be positive, got {scale}");
         Dimension::new(
-            Length::new(self.x() as f32 / scale),
-            Length::new(self.y() as f32 / scale),
-            Length::new(self.width() as f32 / scale),
-            Length::new(self.height() as f32 / scale),
+            Length::from_pixels(self.x()).to_logical(scale),
+            Length::from_pixels(self.y()).to_logical(scale),
+            Length::from_pixels(self.width()).to_logical(scale),
+            Length::from_pixels(self.height()).to_logical(scale),
         )
     }
 
@@ -975,16 +974,16 @@ impl PhysicalRectExt for PixelRect<Physical> {
         // Assert before the cast, not after: `i32 as u32` wraps a negative extent
         // into a huge positive one, where the `f32` path saturates to zero.
         assert!(
-            self.width() > 0 && self.height() > 0,
+            self.width() > Pixels::ZERO && self.height() > Pixels::ZERO,
             "overlay surface size must be positive; got {}x{}",
-            self.width(),
-            self.height()
+            self.width().value(),
+            self.height().value()
         );
         (
-            self.x(),
-            self.y(),
-            self.width() as u32,
-            self.height() as u32,
+            self.x().value(),
+            self.y().value(),
+            self.width().value() as u32,
+            self.height().value() as u32,
         )
     }
 }
