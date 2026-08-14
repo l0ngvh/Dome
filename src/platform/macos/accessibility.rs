@@ -289,8 +289,7 @@ impl AXWindow {
 
     /// Hide the window by moving it offscreen.
     /// We don't minimize windows as there is no way to disable minimizing animation. When hiding
-    /// multiple windows, it gets triggered in a staggered manner, which is extremely slow, and
-    /// causes event tap to be timed out.
+    /// multiple windows, it gets triggered in a staggered manner, which is extremely slow.
     pub(super) fn hide_at(&self, x: Length<Logical>, y: Length<Logical>) -> Result<()> {
         self.with_animation_disabled(|| self.set_position(x, y))
             .with_context(|| format!("hide for {self}"))

@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::marker::PhantomData;
@@ -6,6 +6,7 @@ use std::pin::Pin;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use calloop::channel::Sender as CalloopSender;
@@ -30,7 +31,6 @@ use objc2_foundation::{
     NSDistributedNotificationCenter, NSNotification, NSNotificationCenter, NSObjectProtocol,
     NSOperationQueue, NSString,
 };
-use std::cell::RefCell;
 
 use crate::platform::macos::accessibility::AXApp;
 use crate::platform::macos::dome::{HubEvent, get_all_monitors};
@@ -50,7 +50,7 @@ const FRAME_THROTTLE: Duration = Duration::from_millis(16);
 const SYNC_INTERVAL: Duration = Duration::from_secs(5);
 
 struct ListenerCtx {
-    is_suspended: Rc<Cell<bool>>,
+    is_suspended: Arc<AtomicBool>,
     observers: Observers,
     // Prevent feedback loop when Mac queue a focus event, but by the time the event is processed
     // the focus have been given to another window. This window then tries to take focus and
@@ -116,7 +116,7 @@ type FocusThrottle = Pin<Box<Throttle<i32>>>;
 type TitleThrottle = Pin<Box<Throttle<CGWindowID>>>;
 
 impl EventListener {
-    pub(super) fn new(hub_sender: CalloopSender<HubEvent>, is_suspended: Rc<Cell<bool>>) -> Self {
+    pub(super) fn new(hub_sender: CalloopSender<HubEvent>, is_suspended: Arc<AtomicBool>) -> Self {
         let (focus_throttle, title_throttle) = setup_throttles(hub_sender.clone());
 
         let mut ctx = Box::new(ListenerCtx {
@@ -231,7 +231,7 @@ fn setup_app_observers(ctx: &mut ListenerCtx) -> (WorkspaceObservers, Distribute
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 tracing::info!("System will sleep, suspending window management");
-                (*ctx_ptr).is_suspended.set(true);
+                (*ctx_ptr).is_suspended.store(true, Ordering::Relaxed);
             }),
         )
     });
@@ -243,7 +243,7 @@ fn setup_app_observers(ctx: &mut ListenerCtx) -> (WorkspaceObservers, Distribute
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 tracing::info!("Screen did sleep, suspending window management");
-                (*ctx_ptr).is_suspended.set(true);
+                (*ctx_ptr).is_suspended.store(true, Ordering::Relaxed);
             }),
         )
     });
@@ -271,7 +271,7 @@ fn setup_app_observers(ctx: &mut ListenerCtx) -> (WorkspaceObservers, Distribute
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 tracing::info!("Screen locked, suspending window management");
-                (*ctx_ptr).is_suspended.set(true);
+                (*ctx_ptr).is_suspended.store(true, Ordering::Relaxed);
             }),
         )
     });
@@ -283,7 +283,7 @@ fn setup_app_observers(ctx: &mut ListenerCtx) -> (WorkspaceObservers, Distribute
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 tracing::info!("Screen unlocked, resuming window management");
-                (*ctx_ptr).is_suspended.set(false);
+                (*ctx_ptr).is_suspended.store(false, Ordering::Relaxed);
                 send_hub_event(&(*ctx_ptr).hub_sender, HubEvent::Sync);
             }),
         )
@@ -353,7 +353,7 @@ fn schedule_sync_timer(ctx: &ListenerCtx) -> Option<CFRetained<CFRunLoopTimer>> 
 
 unsafe extern "C-unwind" fn sync_timer_callback(_timer: *mut CFRunLoopTimer, info: *mut c_void) {
     let ctx: &mut ListenerCtx = unsafe { &mut *(info as *mut ListenerCtx) };
-    if ctx.is_suspended.get() {
+    if ctx.is_suspended.load(Ordering::Relaxed) {
         return;
     }
     send_hub_event(&ctx.hub_sender, HubEvent::Sync);
@@ -388,7 +388,7 @@ fn handle_app_terminated(ctx: &ListenerCtx, notification: &NSNotification) {
 }
 
 fn handle_app_activated(ctx: &mut ListenerCtx, notification: &NSNotification) {
-    if ctx.is_suspended.get() {
+    if ctx.is_suspended.load(Ordering::Relaxed) {
         return;
     }
     let Some(app) = RunningApp::from_notification(notification) else {
@@ -461,7 +461,7 @@ unsafe extern "C-unwind" fn observer_callback(
     refcon: *mut std::ffi::c_void,
 ) {
     let ctx: &mut ListenerCtx = unsafe { &mut *(refcon as *mut ListenerCtx) };
-    if ctx.is_suspended.get() {
+    if ctx.is_suspended.load(Ordering::Relaxed) {
         return;
     }
 

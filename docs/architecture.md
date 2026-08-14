@@ -139,14 +139,12 @@ restrictive to drive from a process, so the shell implements virtual workspaces
 of its own. The obvious AX options for taking a window out of view don't fit
 either. `hide` affects every window in the application rather than just the one
 being moved, and `minimize` animates each window separately, so switching a
-multi-window workspace becomes slow enough to stall the `CGEvent` tap and time
-out the keystroke that triggered it (see [Handling
-keymaps](#macos-handling-keymaps)). The shell instead parks windows offscreen
-when their workspace becomes inactive. macOS refuses to position a window fully
-offscreen and snaps it back to the nearest monitor, so the shell moves the
-window to the bottom-right corner of the furthest monitor and leaves a
-one-pixel sliver visible, the same trick AeroSpace uses for its virtual
-workspaces.
+multi-window workspace becomes slow enough that the user waits on it. The shell
+instead parks windows offscreen when their workspace becomes inactive. macOS
+refuses to position a window fully offscreen and snaps it back to the nearest
+monitor, so the shell moves the window to the bottom-right corner of the
+furthest monitor and leaves a one-pixel sliver visible, the same trick AeroSpace
+uses for its virtual workspaces.
 
 Parking alone is not enough when the destination workspace has no managed
 window to take focus. macOS leaves focus on the previously focused window,
@@ -223,17 +221,13 @@ each keystroke against the configured keymaps in the tap's callback. macOS
 holds each keystroke until the callback returns or the tap's timeout fires. If
 the callback's thread is busy with other work, every keystroke arrives late and
 the user sees visible stutter. Long enough delays trip the timeout and cause
-macOS to disable the tap (see [Virtual workspaces](#macos-virtual-workspaces)).
+macOS to disable the tap, which drops every keymap until the callback re-enables
+it.
 
 The callback therefore does only matching work and dispatches every action to
-the background thread that owns `Hub`. UI rendering stays on the main thread
-because AppKit requires it.
-
-The tap could run on its own thread to isolate it from rendering, but the shell
-keeps it on the main thread with rendering and the AX listener. Main-thread
-contention has not been a problem in practice, and projects that use `CGEvent`
-taps typically keep them on the main thread. Splitting the tap off remains an
-option if that changes.
+the background thread that owns `Hub`. The shell also runs the tap on its own
+thread rather than sharing the main one, since AppKit owns the main thread for
+rendering and the AX listener runs there too.
 
 ### Displaying visual indicators {#macos-displaying-visual-indicators}
 

@@ -15,8 +15,7 @@ mod ui;
 #[cfg(test)]
 mod tests;
 
-use std::cell::Cell;
-use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -33,7 +32,6 @@ use crate::keymap::KeymapState;
 use crate::logging::Logger;
 pub(in crate::platform::macos) use dome::MonitorInfo;
 use dome::{Dome, HubEvent, get_all_monitors};
-use keyboard::KeyboardListener;
 use listeners::EventListener;
 use ui::Ui;
 
@@ -66,12 +64,17 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
         );
     }));
 
-    tracing::debug!("Accessibility: {}", unsafe {
+    let trusted = unsafe {
         AXIsProcessTrustedWithOptions(Some(
             CFDictionary::from_slices(&[kAXTrustedCheckOptionPrompt], &[kCFBooleanTrue.unwrap()])
                 .as_opaque(),
         ))
-    });
+    };
+    if !trusted {
+        return Err(anyhow::anyhow!(
+            "Accessibility permission required. Please grant permission in System Settings > Privacy & Security > Accessibility, then restart Dome."
+        ));
+    }
 
     if !CGPreflightScreenCaptureAccess() {
         tracing::info!("Screen recording permission not granted, requesting...");
@@ -141,10 +144,16 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
         return Err(anyhow::anyhow!("No monitors detected"));
     }
 
-    let is_suspended = Rc::new(Cell::new(false));
+    let is_suspended = Arc::new(AtomicBool::new(false));
     let event_listener = EventListener::new(event_tx.clone(), is_suspended.clone());
-    let _keyboard_listener =
-        KeyboardListener::new(keymap_state.clone(), is_suspended, event_tx.clone())?;
+
+    thread::Builder::new()
+        .name("dome-event-tap".to_owned())
+        .spawn({
+            let keymap_state = keymap_state.clone();
+            let hub_sender = event_tx.clone();
+            move || keyboard::run_event_tap(keymap_state, is_suspended, hub_sender)
+        })?;
 
     let (ui, sender) = Ui::new(mtm, event_tx, event_listener, config.clone());
 
@@ -165,7 +174,10 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
 fn send_hub_event(hub_sender: &calloop::channel::Sender<HubEvent>, event: HubEvent) {
     if hub_sender.send(event).is_err() {
         tracing::error!("Hub thread died, shutting down");
-        let mtm = MainThreadMarker::new().unwrap();
-        objc2_app_kit::NSApplication::sharedApplication(mtm).terminate(None);
+        // Off-main callers leave termination to the main thread, which hits the
+        // same closed channel on its next send.
+        if let Some(mtm) = MainThreadMarker::new() {
+            objc2_app_kit::NSApplication::sharedApplication(mtm).terminate(None);
+        }
     }
 }
