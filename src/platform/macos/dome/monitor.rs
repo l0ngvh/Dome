@@ -27,6 +27,15 @@ pub(in crate::platform::macos) struct MonitorInfo {
     pub(in crate::platform::macos) scale: f64,
 }
 
+impl MonitorInfo {
+    /// The work area core places windows into. Rounds inward, so a window can
+    /// never be placed onto a fraction of a pixel the menu bar, the dock or a
+    /// status bar reserved.
+    pub(in crate::platform::macos) fn work_area_snapped(&self) -> PixelRect {
+        PixelRect::from_dimension_inward(self.work_area)
+    }
+}
+
 impl std::fmt::Display for MonitorInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -102,6 +111,10 @@ impl Monitor {
 
     pub(in crate::platform::macos) fn work_area(&self) -> Dimension {
         self.info.work_area
+    }
+
+    pub(in crate::platform::macos) fn work_area_snapped(&self) -> PixelRect {
+        self.info.work_area_snapped()
     }
 
     /// NSScreen.backingScaleFactor for egui render density. Not the Hub-side
@@ -281,12 +294,12 @@ impl MonitorRegistry {
         );
         let monitor = self.find_closest_monitor(point);
         monitor.is_some_and(|m| {
-            let mon = &m.info.work_area;
+            let mon = m.info.work_area_snapped();
             let tolerance = 2;
-            (dim.x() - mon.x.value() as i32).abs() <= tolerance
-                && (dim.y() - mon.y.value() as i32).abs() <= tolerance
-                && (dim.width() - mon.width.value() as i32).abs() <= tolerance
-                && (dim.height() - mon.height.value() as i32).abs() <= tolerance
+            (dim.x() - mon.x()).abs() <= tolerance
+                && (dim.y() - mon.y()).abs() <= tolerance
+                && (dim.width() - mon.width()).abs() <= tolerance
+                && (dim.height() - mon.height()).abs() <= tolerance
         })
     }
 
@@ -320,7 +333,11 @@ impl MonitorRegistry {
         if let Some(new_primary) = monitors.iter().find(|s| s.is_primary) {
             if !self.contains(new_primary.display_id) {
                 self.replace_primary(new_primary);
-                hub.update_monitor(self.primary_monitor_id(), new_primary.work_area, 1.0);
+                hub.update_monitor(
+                    self.primary_monitor_id(),
+                    new_primary.work_area_snapped(),
+                    1.0,
+                );
             } else {
                 self.set_primary_display_id(new_primary.display_id);
             }
@@ -329,7 +346,7 @@ impl MonitorRegistry {
         // Add new monitors first to prevent exhausting all monitors
         for monitor in monitors {
             if !self.contains(monitor.display_id) {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, 1.0);
+                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area_snapped(), 1.0);
                 self.insert(monitor, id);
                 tracing::info!(%monitor, "Monitor added");
             }
@@ -352,7 +369,7 @@ impl MonitorRegistry {
                         "Monitor dimension changed"
                     );
                 }
-                hub.update_monitor(monitor_id, monitor.work_area, 1.0);
+                hub.update_monitor(monitor_id, monitor.work_area_snapped(), 1.0);
             }
         }
     }

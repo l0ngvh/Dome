@@ -132,7 +132,12 @@ fn default_monitor() -> MonitorInfo {
     MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
-        dimension: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
+        work_area: PixelRect::from_dimension(Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT,
+        )),
         bounds: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
         is_primary: true,
         scale: 1.0,
@@ -143,12 +148,12 @@ fn second_monitor() -> MonitorInfo {
     MonitorInfo {
         handle: 2,
         name: "External".to_string(),
-        dimension: Dimension::new(
+        work_area: PixelRect::from_dimension(Dimension::new(
             SCREEN_WIDTH,
             Length::ZERO,
             Length::new(2560.0),
             Length::new(1440.0),
-        ),
+        )),
         bounds: Dimension::new(
             SCREEN_WIDTH,
             Length::ZERO,
@@ -356,7 +361,7 @@ impl TestEnv {
         monitors
             .iter()
             .find(|m| {
-                let d = m.dimension;
+                let d = m.work_area.to_dimension();
                 x >= d.x && x < d.x + d.width && y >= d.y && y < d.y + d.height
             })
             .map(|m| m.handle)
@@ -902,7 +907,8 @@ impl Drop for MockExternalHwnd {
 }
 
 /// Assert that windows tile horizontally across the screen.
-fn assert_h_tiled(dims: &[Dimension], screen: Dimension, border: Length<Logical>) {
+fn assert_h_tiled(dims: &[Dimension], screen: PixelRect, border: Length<Logical>) {
+    let screen = screen.to_dimension();
     // Every caller passes the `default_monitor`/`TestEnv::new` fixture, which is
     // scale 1.0, so the logical border is also the physical one.
     let border_len = border.to_unit(1.0);
@@ -1015,7 +1021,7 @@ impl Drop for MockFloatOverlay {
     }
 }
 
-/// `monitor` is shared (not just `Cell<Dimension>`) so the struct stays
+/// `monitor` is shared (not just `Cell<PixelRect>`) so the struct stays
 /// cheaply `Clone`: the factory hands clones to the Hub while `TestEnv`
 /// retains one for inspection.
 #[derive(Clone)]
@@ -1025,7 +1031,7 @@ struct MockTilingOverlay {
     state: Rc<RefCell<TilingOverlayState>>,
     flavor: Rc<Cell<Flavor>>,
     font: Rc<RefCell<FontConfig>>,
-    monitor: Rc<Cell<Dimension>>,
+    monitor: Rc<Cell<PixelRect>>,
     config: Rc<RefCell<Config>>,
     focus_target: Arc<Mutex<FocusTarget>>,
 }
@@ -1043,7 +1049,7 @@ impl MockTilingOverlay {
             state: Rc::new(RefCell::new(TilingOverlayState::Hidden)),
             flavor: Rc::new(Cell::new(config.theme)),
             font: Rc::new(RefCell::new(config.font.clone())),
-            monitor: Rc::new(Cell::new(Dimension::default())),
+            monitor: Rc::new(Cell::new(PixelRect::ZERO)),
             config: Rc::new(RefCell::new(config)),
             focus_target,
         }
@@ -1065,7 +1071,7 @@ impl MockTilingOverlay {
 impl TilingOverlayApi for MockTilingOverlay {
     fn update(
         &mut self,
-        monitor: Dimension,
+        monitor: PixelRect,
         windows: &[TilingWindowPlacement],
         _containers: &[(ContainerPlacement, Vec<String>)],
         _scale: f32,
@@ -1145,7 +1151,7 @@ struct MockTabBarHandle {
 impl TabBarOverlayApi for MockTabBarHandle {
     fn update(
         &mut self,
-        _rect: Dimension,
+        _rect: PixelRect,
         titles: Vec<String>,
         active_index: usize,
         _is_highlighted: bool,
@@ -1183,7 +1189,7 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
         &self,
         config: Config,
         _tab_bar_height: Length<Logical>,
-        monitor: Dimension,
+        monitor: PixelRect,
         _scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
         let this = self.borrow();
@@ -1197,7 +1203,7 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
             config.clone(),
             this.tiling_focus_target.clone(),
         );
-        // Record monitor dimension from create call (also updated on
+        // Record monitor work area from create call (also updated on
         // subsequent `update` calls).
         overlay.monitor.set(monitor);
         // Mirror production: CreateWindowExW seeds at top of normal band,
@@ -1236,7 +1242,7 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
         &self,
         _config: Config,
         container_id: ContainerId,
-        _rect: Dimension,
+        _rect: PixelRect,
         _scale: f32,
     ) -> anyhow::Result<Box<dyn TabBarOverlayApi>> {
         let this = self.borrow();

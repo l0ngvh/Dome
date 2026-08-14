@@ -8,7 +8,7 @@ use crate::config::SizeConstraint;
 use crate::core::GlobalLayoutConfig;
 #[cfg(target_os = "windows")]
 use crate::core::node::Logical;
-use crate::core::node::{Dimension, Length, WindowRestrictions};
+use crate::core::node::{Length, PixelRect, WindowRestrictions};
 
 use crate::core::tests::{
     default_dim, setup, setup_with_layout, snapshot, snapshot_text, titled, titled_matcher,
@@ -28,12 +28,7 @@ fn add_monitor_creates_workspace_on_new_monitor() {
 
     hub.add_monitor(
         "monitor-1".to_string(),
-        Dimension::new(
-            Length::new(150.0),
-            Length::new(0.0),
-            Length::new(100.0),
-            Length::new(30.0),
-        ),
+        PixelRect::new(150, 0, 100, 30),
         1.0,
     );
 
@@ -90,12 +85,7 @@ fn remove_monitor_migrates_workspaces_to_fallback() {
     let primary = hub.focused_monitor();
     let m1 = hub.add_monitor(
         "monitor-1".to_string(),
-        Dimension::new(
-            Length::new(150.0),
-            Length::new(0.0),
-            Length::new(100.0),
-            Length::new(30.0),
-        ),
+        PixelRect::new(150, 0, 100, 30),
         1.0,
     );
 
@@ -148,16 +138,7 @@ fn remove_monitor_migrates_workspaces_to_fallback() {
 fn remove_non_focused_monitor() {
     let mut hub = setup();
     let primary = hub.focused_monitor();
-    let m1 = hub.add_monitor(
-        "external".to_string(),
-        Dimension::new(
-            Length::new(150.0),
-            Length::new(0.0),
-            Length::new(100.0),
-            Length::new(30.0),
-        ),
-        1.0,
-    );
+    let m1 = hub.add_monitor("external".to_string(), PixelRect::new(150, 0, 100, 30), 1.0);
 
     // Stay on primary, remove external
     hub.remove_monitor(m1, primary);
@@ -174,12 +155,7 @@ fn remove_monitor_panics_if_fallback_same_as_removed() {
     let mut hub = setup();
     let m1 = hub.add_monitor(
         "monitor-1".to_string(),
-        Dimension::new(
-            Length::new(150.0),
-            Length::new(0.0),
-            Length::new(100.0),
-            Length::new(30.0),
-        ),
+        PixelRect::new(150, 0, 100, 30),
         1.0,
     );
     hub.remove_monitor(m1, m1);
@@ -191,28 +167,10 @@ fn update_monitor_dimension_adjusts_workspaces() {
     hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
     hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
 
-    hub.add_monitor(
-        "external".to_string(),
-        Dimension::new(
-            Length::new(150.0),
-            Length::new(0.0),
-            Length::new(100.0),
-            Length::new(30.0),
-        ),
-        1.0,
-    );
+    hub.add_monitor("external".to_string(), PixelRect::new(150, 0, 100, 30), 1.0);
 
     let primary = hub.focused_monitor();
-    hub.update_monitor(
-        primary,
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(200.0),
-            Length::new(50.0),
-        ),
-        1.0,
-    );
+    hub.update_monitor(primary, PixelRect::new(0, 0, 200, 50), 1.0);
 
     assert_snapshot!(snapshot_text(&hub), @r"
     Hub(focused=WindowId(1))
@@ -235,24 +193,14 @@ fn focus_monitor_by_direction() {
     // Monitor to the right
     hub.add_monitor(
         "right-monitor".to_string(),
-        Dimension::new(
-            Length::new(150.0),
-            Length::new(0.0),
-            Length::new(100.0),
-            Length::new(30.0),
-        ),
+        PixelRect::new(150, 0, 100, 30),
         1.0,
     );
 
     // Monitor below
     hub.add_monitor(
         "bottom-monitor".to_string(),
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(30.0),
-            Length::new(150.0),
-            Length::new(30.0),
-        ),
+        PixelRect::new(0, 30, 150, 30),
         1.0,
     );
 
@@ -310,16 +258,7 @@ fn focus_monitor_by_name() {
     let mut hub = setup();
     hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None);
 
-    hub.add_monitor(
-        "external".to_string(),
-        Dimension::new(
-            Length::new(150.0),
-            Length::new(0.0),
-            Length::new(100.0),
-            Length::new(30.0),
-        ),
-        1.0,
-    );
+    hub.add_monitor("external".to_string(), PixelRect::new(150, 0, 100, 30), 1.0);
 
     hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
 
@@ -342,12 +281,7 @@ fn move_to_monitor_moves_focused_window() {
 
     hub.add_monitor(
         "right-monitor".to_string(),
-        Dimension::new(
-            Length::new(150.0),
-            Length::new(0.0),
-            Length::new(100.0),
-            Length::new(30.0),
-        ),
+        PixelRect::new(150, 0, 100, 30),
         1.0,
     );
 
@@ -371,16 +305,7 @@ fn move_to_monitor_by_name() {
     let mut hub = setup();
     hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None);
 
-    hub.add_monitor(
-        "external".to_string(),
-        Dimension::new(
-            Length::new(150.0),
-            Length::new(0.0),
-            Length::new(100.0),
-            Length::new(30.0),
-        ),
-        1.0,
-    );
+    hub.add_monitor("external".to_string(), PixelRect::new(150, 0, 100, 30), 1.0);
 
     hub.move_focused_to_monitor(&MonitorTarget::Name("external".to_string()));
 
@@ -411,16 +336,7 @@ fn move_float_to_monitor() {
     )
     .unwrap();
 
-    hub.add_monitor(
-        "external".to_string(),
-        Dimension::new(
-            Length::new(150.0),
-            Length::new(0.0),
-            Length::new(100.0),
-            Length::new(30.0),
-        ),
-        1.0,
-    );
+    hub.add_monitor("external".to_string(), PixelRect::new(150, 0, 100, 30), 1.0);
 
     hub.move_focused_to_monitor(&MonitorTarget::Name("external".to_string()));
 
@@ -457,16 +373,7 @@ fn monitor_noop_cases() {
     {
         let mut hub = setup();
         hub.insert_window(titled("w15"), default_dim(), WindowRestrictions::None);
-        hub.add_monitor(
-            "external".to_string(),
-            Dimension::new(
-                Length::new(150.0),
-                Length::new(0.0),
-                Length::new(100.0),
-                Length::new(30.0),
-            ),
-            1.0,
-        );
+        hub.add_monitor("external".to_string(), PixelRect::new(150, 0, 100, 30), 1.0);
         let before = snapshot_text(&hub);
         hub.move_focused_to_monitor(&MonitorTarget::Name("primary".to_string()));
         assert_eq!(snapshot_text(&hub), before);
@@ -477,12 +384,7 @@ fn monitor_noop_cases() {
         let mut hub = setup();
         hub.add_monitor(
             "right-monitor".to_string(),
-            Dimension::new(
-                Length::new(150.0),
-                Length::new(0.0),
-                Length::new(100.0),
-                Length::new(30.0),
-            ),
+            PixelRect::new(150, 0, 100, 30),
             1.0,
         );
         let before = snapshot_text(&hub);
@@ -516,16 +418,7 @@ fn monitor_scale_multiplies_tab_bar_height() {
     ");
 
     let monitor_id = hub.focused_monitor();
-    hub.update_monitor(
-        monitor_id,
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(1000.0),
-            Length::new(1000.0),
-        ),
-        3.0,
-    );
+    hub.update_monitor(monitor_id, PixelRect::new(0, 0, 1000, 1000), 3.0);
     assert_snapshot!(snapshot_text(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=1000.00 h=1000.00),
@@ -572,12 +465,7 @@ fn monitor_scale_multiplies_size_constraints() {
     let monitor_id = hub.focused_monitor();
     hub.update_monitor(
         monitor_id,
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(500.0),
-            Length::new(1000.0),
-        ),
+        PixelRect::new(0, 0, 500, 1000),
         // At scale of 3.0, min width should be 120
         3.0,
     );

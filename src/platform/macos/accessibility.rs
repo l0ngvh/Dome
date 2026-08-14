@@ -12,7 +12,7 @@ use objc2_core_foundation::{
 };
 use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
 
-use crate::core::{Dimension, Length, Logical};
+use crate::core::{Length, Logical, PixelRect};
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::objc2_wrapper::{
     AXError, get_attribute, get_cg_window_id, is_attribute_settable, kAXCloseButtonAttribute,
@@ -268,7 +268,8 @@ impl AXWindow {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(super) fn set_frame(&self, dim: Dimension<Logical>) -> Result<()> {
+    pub(super) fn set_frame(&self, rect: PixelRect<Logical>) -> Result<()> {
+        let dim = rect.to_dimension();
         self.with_animation_disabled(|| {
             self.set_position(dim.x, dim.y)?;
             self.set_size(dim.width, dim.height)
@@ -517,7 +518,7 @@ pub(crate) trait ExternalWindow: Send + Sync + std::fmt::Display {
     fn get_size(&self, marker: &DispatcherMarker) -> Result<(Length<Logical>, Length<Logical>)>;
     /// Positions and resizes the window via AX. Owns the `Dimension<Logical>` to
     /// `CGPoint`/`CGSize` conversion (f64 casts happen inside the impl).
-    fn set_frame(&self, dim: Dimension<Logical>) -> Result<()>;
+    fn set_frame(&self, rect: PixelRect<Logical>) -> Result<()>;
     fn focus(&self) -> Result<()>;
     /// Moves the window offscreen to hide it (no minimize animation).
     fn hide_at(&self, x: Length<Logical>, y: Length<Logical>) -> Result<()>;
@@ -554,8 +555,8 @@ impl ExternalWindow for AXWindow {
     fn get_size(&self, _marker: &DispatcherMarker) -> Result<(Length<Logical>, Length<Logical>)> {
         self.get_size()
     }
-    fn set_frame(&self, dim: Dimension<Logical>) -> Result<()> {
-        self.set_frame(dim)
+    fn set_frame(&self, rect: PixelRect<Logical>) -> Result<()> {
+        self.set_frame(rect)
     }
     fn focus(&self) -> Result<()> {
         self.focus()

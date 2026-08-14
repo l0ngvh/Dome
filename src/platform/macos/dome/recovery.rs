@@ -3,13 +3,13 @@ use std::sync::Arc;
 
 use objc2_core_graphics::CGWindowID;
 
-use crate::core::{Dimension, Length};
+use crate::core::PixelRect;
 
 use super::super::accessibility::ExternalWindow;
 
 struct WindowState {
     window: Arc<dyn ExternalWindow>,
-    original_dim: Dimension,
+    original_dim: PixelRect,
 }
 
 pub(super) struct Recovery {
@@ -33,9 +33,9 @@ impl Recovery {
         window: Arc<dyn ExternalWindow>,
         w: i32,
         h: i32,
-        monitor: Dimension,
+        monitor: PixelRect,
     ) {
-        let original_dim = default_position(monitor, w as f32, h as f32);
+        let original_dim = default_position(monitor, w, h);
         self.state.insert(
             window.cg_id(),
             WindowState {
@@ -56,11 +56,11 @@ impl Recovery {
     }
 }
 
-fn default_position(monitor: Dimension, width: f32, height: f32) -> Dimension {
-    Dimension::new(
-        monitor.x + (monitor.width - Length::new(width)) / 2.0,
-        monitor.y + (monitor.height - Length::new(height)) / 2.0,
-        Length::new(width),
-        Length::new(height),
+fn default_position(monitor: PixelRect, width: i32, height: i32) -> PixelRect {
+    PixelRect::new(
+        monitor.x() + (monitor.width() - width) / 2,
+        monitor.y() + (monitor.height() - height) / 2,
+        width,
+        height,
     )
 }

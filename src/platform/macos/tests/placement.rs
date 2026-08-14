@@ -14,6 +14,27 @@ fn single_window_placed_in_view() {
 }
 
 #[test]
+fn a_fractional_work_area_keeps_the_window_inside_it() {
+    let mut macos = MacOS::new();
+    // Zero border so the sole tile fills the work area exactly, leaving no inset to
+    // absorb a sub-point rounding error.
+    let mut dome = macos.setup_dome_with_config(Config {
+        border_size: Length::ZERO,
+        ..Config::default()
+    });
+
+    let mut monitor = default_monitor();
+    monitor.work_area = FRACTIONAL_WORK_AREA;
+    dome.monitors_changed(vec![monitor]);
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    assert_inside_work_area(macos.window_frame(cg1), FRACTIONAL_WORK_AREA);
+}
+
+#[test]
 fn degenerate_content_box_parks_window() {
     let mut macos = MacOS::new();
     // 600 per edge against a 1080-tall work area leaves no content height at all.

@@ -106,7 +106,7 @@ fn move_window_to_other_workspace() {
     assert!(env.is_bottom(w2));
     assert_h_tiled(
         &[env.dim(w1)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
 }

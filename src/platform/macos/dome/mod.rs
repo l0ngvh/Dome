@@ -217,7 +217,7 @@ impl Dome {
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(
-            primary.work_area,
+            primary.work_area_snapped(),
             1.0,
             GlobalLayoutConfig::from(&config),
             workspace_overrides.clone(),
@@ -226,7 +226,7 @@ impl Dome {
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         for monitor in monitors {
             if monitor.display_id != primary.display_id {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, 1.0);
+                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area_snapped(), 1.0);
                 monitor_registry.insert(monitor, id);
             }
         }
@@ -322,7 +322,7 @@ impl Dome {
                         ax_for_recovery,
                         dim.width(),
                         dim.height(),
-                        self.monitor_registry.primary_monitor().work_area(),
+                        self.monitor_registry.primary_monitor().work_area_snapped(),
                     );
                 }
             }

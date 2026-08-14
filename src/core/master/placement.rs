@@ -3,7 +3,7 @@ use crate::core::{
     hub::HubAccess,
     master::{MasterStrategy, WindowState},
     node::WorkspaceId,
-    strategy::{TilingPlacements, clip, distribute_space, translate, window_constraints},
+    strategy::{TilingPlacements, distribute_space, translate, window_constraints},
 };
 
 impl MasterStrategy {
@@ -20,7 +20,8 @@ impl MasterStrategy {
         let screen = hub
             .monitors
             .get(hub.workspaces.get(ws_id).monitor)
-            .dimension;
+            .work_area
+            .to_dimension();
         let h = screen.height;
 
         let master_ids: Vec<WindowId> = state.master.clone();
@@ -82,7 +83,8 @@ impl MasterStrategy {
         };
 
         let ws = hub.workspaces.get(ws_id);
-        let screen = hub.monitors.get(ws.monitor).dimension;
+        let screen = hub.monitors.get(ws.monitor).work_area;
+        let screen_dim = screen.to_dimension();
         let border = hub.border(ws.monitor);
 
         let mut windows = Vec::with_capacity(state.master.len() + state.secondary.len());
@@ -97,10 +99,8 @@ impl MasterStrategy {
             for &wid in vec.iter() {
                 let dim = self.window_states[&wid].dimension;
                 let border_box =
-                    PixelRect::from_dimension(translate(dim, Length::ZERO, y_offset, screen));
-                if let Some(visible_border_box) =
-                    clip(border_box.to_dimension(), screen).map(PixelRect::from_dimension)
-                {
+                    PixelRect::from_dimension(translate(dim, Length::ZERO, y_offset, screen_dim));
+                if let Some(visible_border_box) = border_box.clip(screen) {
                     let is_highlighted = focused_id == Some(wid);
                     let content_box = border_box.inset_by(border);
                     windows.push(TilingWindowPlacement {
@@ -108,9 +108,7 @@ impl MasterStrategy {
                         border_box,
                         visible_border_box,
                         content_box,
-                        visible_content_box: clip(content_box.to_dimension(), screen)
-                            .map(PixelRect::from_dimension)
-                            .unwrap_or(PixelRect::ZERO),
+                        visible_content_box: content_box.clip(screen).unwrap_or(PixelRect::ZERO),
                         is_highlighted,
                         spawn_indicator: None,
                     });
@@ -179,7 +177,8 @@ impl MasterStrategy {
         let pane_height = hub
             .monitors
             .get(hub.workspaces.get(ws_id).monitor)
-            .dimension
+            .work_area
+            .to_dimension()
             .height;
 
         let master_ids: Vec<WindowId> = state.master.clone();

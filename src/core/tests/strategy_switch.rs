@@ -1,7 +1,7 @@
 use crate::config::{LayoutWorkspaceConfig, MasterConfig, SplitMode, Strategy, TreeLayoutNode};
 use crate::core::GlobalLayoutConfig;
 use crate::core::hub::Hub;
-use crate::core::node::{Dimension, Length, WindowRestrictions};
+use crate::core::node::{Dimension, Length, PixelRect, WindowRestrictions};
 use crate::core::tests::setup_logger_with_level;
 
 use super::{
@@ -34,17 +34,7 @@ fn layout(
 }
 
 fn setup_hub_with_layout(layout: GlobalLayoutConfig, overrides: Vec<LayoutWorkspaceConfig>) -> Hub {
-    Hub::new(
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(150.0),
-            Length::new(30.0),
-        ),
-        1.0,
-        layout,
-        overrides,
-    )
+    Hub::new(PixelRect::new(0, 0, 150, 30), 1.0, layout, overrides)
 }
 
 #[test]

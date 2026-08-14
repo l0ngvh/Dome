@@ -196,7 +196,7 @@ pub(crate) fn window_constraints(
     let monitor_id = hub.workspaces.get(ws_id).monitor;
     let monitor = hub.monitors.get(monitor_id);
     let scale = monitor.scale;
-    let screen = monitor.dimension;
+    let screen = monitor.work_area.to_dimension();
 
     let global_min_w = size_constraints.minimum_width.resolve(screen.width, scale);
     let global_min_h = size_constraints

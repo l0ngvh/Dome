@@ -54,8 +54,7 @@ pub(super) fn snapshot(hub: &Hub) -> String {
             containers.as_slice(),
         ),
         MonitorLayout::Fullscreen(id) => {
-            let screen =
-                PixelRect::from_dimension(hub.access.monitors.get(mp.monitor_id).dimension);
+            let screen = hub.access.monitors.get(mp.monitor_id).work_area;
             draw_rect(
                 &mut grid,
                 screen.x(),
@@ -173,7 +172,14 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
     };
     let mut s = format!("Hub({focused})\n");
     for mp in &vp.monitors {
-        let screen = hub.access.monitors.get(mp.monitor_id).dimension;
+        // `{:.2}` is a no-op on integer Display, so the printed screen goes through
+        // `to_dimension` to keep the snapshot format stable.
+        let screen = hub
+            .access
+            .monitors
+            .get(mp.monitor_id)
+            .work_area
+            .to_dimension();
         match &mp.layout {
             MonitorLayout::Normal {
                 tiling_windows,
@@ -479,22 +485,11 @@ fn validate_hub(hub: &Hub) {
 }
 
 fn validate_visible_placements(hub: &Hub) {
-    fn clip(dim: Dimension, bounds: Dimension) -> Option<Dimension> {
-        let x1 = dim.x.max(bounds.x);
-        let y1 = dim.y.max(bounds.y);
-        let x2 = (dim.x + dim.width).min(bounds.x + bounds.width);
-        let y2 = (dim.y + dim.height).min(bounds.y + bounds.height);
-        if x1 >= x2 || y1 >= y2 {
-            return None;
-        }
-        Some(Dimension::new(x1, y1, x2 - x1, y2 - y1))
-    }
-
     let all_placements = hub.get_visible_placements();
     let mut seen_window_ids = HashSet::new();
 
     for mp in &all_placements.monitors {
-        let screen = hub.access.monitors.get(mp.monitor_id).dimension;
+        let screen = hub.access.monitors.get(mp.monitor_id).work_area;
         let (tiling_windows, float_windows, containers) = match &mp.layout {
             MonitorLayout::Normal {
                 tiling_windows,
@@ -514,7 +509,7 @@ fn validate_visible_placements(hub: &Hub) {
                 wp.id
             );
             assert_eq!(
-                clip(wp.border_box.to_dimension(), screen).map(PixelRect::from_dimension),
+                wp.border_box.clip(screen),
                 Some(wp.visible_border_box),
                 "Window {} visible_border_box doesn't match clip(border_box, screen)",
                 wp.id
@@ -527,7 +522,7 @@ fn validate_visible_placements(hub: &Hub) {
                 wp.id
             );
             assert_eq!(
-                clip(wp.border_box.to_dimension(), screen).map(PixelRect::from_dimension),
+                wp.border_box.clip(screen),
                 Some(wp.visible_border_box),
                 "Window {} visible_border_box doesn't match clip(border_box, screen)",
                 wp.id
@@ -535,7 +530,7 @@ fn validate_visible_placements(hub: &Hub) {
         }
         for cp in containers {
             assert_eq!(
-                clip(cp.border_box.to_dimension(), screen).map(PixelRect::from_dimension),
+                cp.border_box.clip(screen),
                 Some(cp.visible_border_box),
                 "Container {} visible_border_box doesn't match clip(border_box, screen)",
                 cp.id
@@ -708,12 +703,7 @@ impl TestHubBuilder {
 
     fn build(self) -> Hub {
         Hub::new(
-            Dimension::new(
-                Length::new(0.0),
-                Length::new(0.0),
-                Length::new(ASCII_WIDTH as f32),
-                Length::new(ASCII_HEIGHT as f32),
-            ),
+            PixelRect::new(0, 0, ASCII_WIDTH as i32, ASCII_HEIGHT as i32),
             self.scale,
             self.layout,
             self.preferred_layout,

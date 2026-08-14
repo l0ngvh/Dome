@@ -26,6 +26,35 @@ use crate::platform::macos::dome::{
 const SCREEN_WIDTH: Length = Length::new(1920.0);
 const SCREEN_HEIGHT: Length = Length::new(1080.0);
 
+/// A work area whose every edge sits on the side of the half-point boundary where
+/// rounding to nearest would grow the rectangle past what AppKit reported, so a test
+/// asserting containment fails under any policy other than inward.
+const FRACTIONAL_WORK_AREA: Dimension = Dimension::new(
+    Length::new(10.4),
+    Length::new(20.4),
+    Length::new(1899.2),
+    Length::new(1039.2),
+);
+
+fn assert_inside_work_area(frame: (i32, i32, i32, i32), reported: Dimension) {
+    let (x, y, width, height) = frame;
+    assert!(
+        x as f32 >= reported.x.value() && y as f32 >= reported.y.value(),
+        "origin ({x}, {y}) escaped the reported ({}, {})",
+        reported.x.value(),
+        reported.y.value()
+    );
+    assert!(
+        (x + width) as f32 <= (reported.x + reported.width).value()
+            && (y + height) as f32 <= (reported.y + reported.height).value(),
+        "far edge ({}, {}) escaped the reported ({}, {})",
+        x + width,
+        y + height,
+        (reported.x + reported.width).value(),
+        (reported.y + reported.height).value()
+    );
+}
+
 fn default_monitor() -> MonitorInfo {
     MonitorInfo {
         display_id: 1,
@@ -138,11 +167,11 @@ impl ExternalWindow for MockAXWindow {
         let (w, h) = self.size.get();
         Ok((Length::new(w as f32), Length::new(h as f32)))
     }
-    fn set_frame(&self, dim: Dimension<Logical>) -> Result<()> {
-        let x = dim.x.value() as i32;
-        let y = dim.y.value() as i32;
-        let w = dim.width.value() as i32;
-        let h = dim.height.value() as i32;
+    fn set_frame(&self, rect: PixelRect<Logical>) -> Result<()> {
+        let x = rect.x();
+        let y = rect.y();
+        let w = rect.width();
+        let h = rect.height();
         let (x, y, w, h) = if let Some(ovr) = self.override_frame.get() {
             ovr
         } else {

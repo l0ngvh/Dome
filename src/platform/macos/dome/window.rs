@@ -241,8 +241,8 @@ pub(super) fn hidden_monitor(monitors: &[MonitorInfo]) -> &MonitorInfo {
     monitors
         .iter()
         .max_by_key(|m| {
-            (m.work_area.x + m.work_area.width).value() as i32
-                + (m.work_area.y + m.work_area.height).value() as i32
+            let work_area = m.work_area_snapped();
+            work_area.right() + work_area.bottom()
         })
         .unwrap()
 }
@@ -311,7 +311,7 @@ impl Dome {
         match &mut window.state {
             WindowState::Positioned(PositionedState::Tiling(p)) => {
                 if p.set_target(target)
-                    && let Err(e) = window.ext.set_frame(target.to_dimension())
+                    && let Err(e) = window.ext.set_frame(target)
                 {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
@@ -323,7 +323,7 @@ impl Dome {
                 window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
                     target, target,
                 )));
-                if let Err(e) = window.ext.set_frame(target.to_dimension()) {
+                if let Err(e) = window.ext.set_frame(target) {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
             }
@@ -334,7 +334,7 @@ impl Dome {
                 window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
                     actual, target,
                 )));
-                if let Err(e) = window.ext.set_frame(target.to_dimension()) {
+                if let Err(e) = window.ext.set_frame(target) {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
             }
@@ -377,7 +377,7 @@ impl Dome {
         match &mut window.state {
             WindowState::Positioned(PositionedState::Float(fp)) => {
                 if fp.set_target(target)
-                    && let Err(e) = window.ext.set_frame(target.to_dimension())
+                    && let Err(e) = window.ext.set_frame(target)
                 {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
@@ -385,7 +385,7 @@ impl Dome {
             WindowState::Positioned(PositionedState::Tiling(_) | PositionedState::Offscreen(_)) => {
                 window.state =
                     WindowState::Positioned(PositionedState::Float(FloatPlacement::new(target)));
-                if let Err(e) = window.ext.set_frame(target.to_dimension()) {
+                if let Err(e) = window.ext.set_frame(target) {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
             }
@@ -413,7 +413,7 @@ impl Dome {
         // inactive. The workspace is visible again, so transition back to
         // BorderlessFullscreen and drive the OS-side restore.
         let monitor = self.monitor_registry.monitor(monitor_id);
-        let monitor_dim = monitor.work_area();
+        let target = monitor.work_area_snapped();
         match &mut window.state {
             WindowState::BorderlessMinimized { .. } => {
                 // BorderlessFullscreen windows previously in other workspaces. Restore it
@@ -424,27 +424,24 @@ impl Dome {
             }
             WindowState::Positioned(PositionedState::Offscreen(offscreen)) => {
                 let actual = offscreen.actual;
-                let target = PixelRect::from_dimension(monitor_dim);
                 // Fullscreen is tiling-shaped: always use Tiling placement
                 window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
                     actual, target,
                 )));
-                if let Err(err) = window.ext.set_frame(monitor_dim.round()) {
+                if let Err(err) = window.ext.set_frame(target) {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
             }
             WindowState::Positioned(PositionedState::Tiling(p)) => {
-                let target = PixelRect::from_dimension(monitor_dim);
                 if p.set_target(target)
-                    && let Err(err) = window.ext.set_frame(monitor_dim.round())
+                    && let Err(err) = window.ext.set_frame(target)
                 {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
             }
             WindowState::Positioned(PositionedState::Float(fp)) => {
-                let target = PixelRect::from_dimension(monitor_dim);
                 if fp.set_target(target)
-                    && let Err(err) = window.ext.set_frame(monitor_dim.round())
+                    && let Err(err) = window.ext.set_frame(target)
                 {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
@@ -551,7 +548,7 @@ impl Dome {
                 if observed_at.first <= p.placed_at + Duration::from_secs(1) {
                     if p.has_drifted(new_placement) {
                         if let Some(target) = p.observe_drift(new_placement)
-                            && let Err(e) = window.ext.set_frame(target.to_dimension())
+                            && let Err(e) = window.ext.set_frame(target)
                         {
                             tracing::trace!("Window {} set_frame failed: {e}", window);
                         }
@@ -567,7 +564,7 @@ impl Dome {
                     // This is likely not caused by Dome calling AX's set_frame but by app
                     // resizing itself or user move actions.
                     if let Some(target) = p.observe_drift(new_placement)
-                        && let Err(e) = window.ext.set_frame(target.to_dimension())
+                        && let Err(e) = window.ext.set_frame(target)
                     {
                         tracing::trace!("Window {} set_frame failed: {e}", window);
                     }

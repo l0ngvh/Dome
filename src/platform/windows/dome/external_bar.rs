@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use crate::config::WindowMatcher;
-use crate::core::{Dimension, MonitorId, Physical, WindowMetadata as _};
+use crate::core::{Dimension, MonitorId, Physical, PixelRect, WindowMetadata as _};
 use crate::platform::reserve_for_bar;
 use crate::platform::windows::external::HwndId;
 
@@ -67,7 +67,11 @@ impl StatusBars {
                 continue;
             };
             if let Some(bar) = self.rects.get(&mid).copied() {
-                m.dimension = reserve_for_bar(m.bounds, m.dimension, bar);
+                // Bar-edge math is f32 and shared with macOS, so the work area leaves
+                // pixel space and comes back. Inward on the way back, so the
+                // reservation is never handed back.
+                let reserved = reserve_for_bar(m.bounds, m.work_area.to_dimension(), bar);
+                m.work_area = PixelRect::from_dimension_inward(reserved);
             }
         }
     }

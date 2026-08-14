@@ -12,7 +12,7 @@ use super::node::{
     WorkspaceId,
 };
 use super::partition_tree::Child;
-use super::strategy::{StrategySet, TilingAction, WorkspaceExport, clip};
+use super::strategy::{StrategySet, TilingAction, WorkspaceExport};
 
 pub(crate) struct VisiblePlacements {
     /// Window that should receive keyboard focus
@@ -29,7 +29,6 @@ pub(crate) struct TilingWindowPlacement {
     pub(crate) visible_border_box: PixelRect,
     pub(crate) content_box: PixelRect,
     /// `content_box` trimmed to the monitor. Zero-area when nothing remains.
-    /// macOS places this. Windows places `content_box` and ignores it.
     #[cfg_attr(
         target_os = "windows",
         expect(
@@ -200,7 +199,7 @@ pub(crate) struct Hub {
 
 impl Hub {
     pub(crate) fn new(
-        primary_screen: Dimension,
+        primary_screen: PixelRect,
         primary_scale: f32,
         layout: GlobalLayoutConfig,
         preferred_layouts: Vec<LayoutWorkspaceConfig>,
@@ -447,12 +446,12 @@ impl Hub {
     pub(crate) fn add_monitor(
         &mut self,
         name: String,
-        dimension: Dimension,
+        work_area: PixelRect,
         scale: f32,
     ) -> MonitorId {
         let monitor_id = self.access.monitors.allocate(Monitor {
             name: name.clone(),
-            dimension,
+            work_area,
             scale,
             active_workspace: WorkspaceId::new(0),
         });
@@ -509,11 +508,11 @@ impl Hub {
     pub(crate) fn update_monitor(
         &mut self,
         monitor_id: MonitorId,
-        dimension: Dimension,
+        work_area: PixelRect,
         scale: f32,
     ) {
         let monitor = self.access.monitors.get_mut(monitor_id);
-        monitor.dimension = dimension;
+        monitor.work_area = work_area;
         monitor.scale = scale;
         // Collect IDs first to avoid borrowing self.access.workspaces while
         // passing &mut self.access to the strategy.
@@ -654,7 +653,7 @@ impl Hub {
             .into_iter()
             .map(|ws_id| {
                 let ws = self.access.workspaces.get(ws_id);
-                let screen = self.access.monitors.get(ws.monitor).dimension;
+                let screen = self.access.monitors.get(ws.monitor).work_area;
 
                 // Fullscreen: only return topmost, skip tiling/float
                 if let Some(&fs_id) = ws.fullscreen_windows.last() {
@@ -686,9 +685,7 @@ impl Hub {
                         panic!("window {id} in float_windows but mode is not Float");
                     };
                     let border_box = PixelRect::from_dimension(dim);
-                    if let Some(visible_border_box) =
-                        clip(border_box.to_dimension(), screen).map(PixelRect::from_dimension)
-                    {
+                    if let Some(visible_border_box) = border_box.clip(screen) {
                         let is_highlighted = focused == Some(id);
                         float_windows.push(FloatWindowPlacement {
                             id,
@@ -887,9 +884,15 @@ impl Hub {
                 .find(|(_, m)| m.name == *name)
                 .map(|(id, _)| *id),
             direction => {
-                let current = self.access.monitors.get(self.access.focused_monitor);
-                let cx = current.dimension.x + current.dimension.width / 2.0;
-                let cy = current.dimension.y + current.dimension.height / 2.0;
+                let current = self
+                    .access
+                    .monitors
+                    .get(self.access.focused_monitor)
+                    .work_area;
+                // Doubled centres, so an odd extent does not lose half a unit to integer
+                // division. Only differences of centres are used, so the factor cancels.
+                let cx2 = 2 * current.x() + current.width();
+                let cy2 = 2 * current.y() + current.height();
 
                 self.access
                     .monitors
@@ -897,23 +900,22 @@ impl Hub {
                     .iter()
                     .filter(|(id, _)| *id != self.access.focused_monitor)
                     .filter_map(|(id, m)| {
-                        let mx = m.dimension.x + m.dimension.width / 2.0;
-                        let my = m.dimension.y + m.dimension.height / 2.0;
-                        let dx = mx - cx;
-                        let dy = my - cy;
+                        let m = m.work_area;
+                        let dx = 2 * m.x() + m.width() - cx2;
+                        let dy = 2 * m.y() + m.height() - cy2;
 
                         let valid = match direction {
-                            MonitorTarget::Left => dx < Length::ZERO,
-                            MonitorTarget::Right => dx > Length::ZERO,
-                            MonitorTarget::Up => dy < Length::ZERO,
-                            MonitorTarget::Down => dy > Length::ZERO,
+                            MonitorTarget::Left => dx < 0,
+                            MonitorTarget::Right => dx > 0,
+                            MonitorTarget::Up => dy < 0,
+                            MonitorTarget::Down => dy > 0,
                             MonitorTarget::Name(_) => false,
                         };
-                        // Use raw f32 for distance² comparison (unit is irrelevant for ordering)
-                        let dist_sq = dx.value() * dx.value() + dy.value() * dy.value();
-                        valid.then_some((*id, dist_sq))
+                        let dx = i64::from(dx);
+                        let dy = i64::from(dy);
+                        valid.then_some((*id, dx * dx + dy * dy))
                     })
-                    .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                    .min_by_key(|(_, dist_sq)| *dist_sq)
                     .map(|(id, _)| id)
             }
         }

@@ -125,7 +125,8 @@ impl TilingStrategy for PartitionTreeStrategy {
         let screen = hub
             .monitors
             .get(hub.workspaces.get(workspace_id).monitor)
-            .dimension;
+            .work_area
+            .to_dimension();
 
         // Capture offset/screen before detach because detach triggers layout,
         // which can change viewport_offset.

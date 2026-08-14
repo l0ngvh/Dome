@@ -42,7 +42,7 @@ impl PartitionTreeStrategy {
         let Some(root) = ws_state.root else { return };
         let viewport_offset = ws_state.viewport_offset;
         let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
-        let screen = monitor.dimension;
+        let screen = monitor.work_area.to_dimension();
         let scale = monitor.scale;
         let (offset_x, offset_y) = viewport_offset;
         let viewport_rect = Dimension::new(offset_x, offset_y, screen.width, screen.height);
@@ -87,7 +87,8 @@ impl PartitionTreeStrategy {
         };
         let ws = hub.workspaces.get(ws_id);
         let (offset_x, offset_y) = ws_state.viewport_offset;
-        let screen = hub.monitors.get(ws.monitor).dimension;
+        let screen = hub.monitors.get(ws.monitor).work_area;
+        let screen_dim = screen.to_dimension();
         let border = hub.border(ws.monitor);
         // Only highlight tiling focus when this is the current workspace AND
         // the workspace's effective focus is on tiling (not float). Fullscreen
@@ -112,11 +113,9 @@ impl PartitionTreeStrategy {
                         self.child_dimension(child),
                         offset_x,
                         offset_y,
-                        screen,
+                        screen_dim,
                     ));
-                    if let Some(visible_border_box) =
-                        clip(border_box.to_dimension(), screen).map(PixelRect::from_dimension)
-                    {
+                    if let Some(visible_border_box) = border_box.clip(screen) {
                         let is_highlighted = focused == Some(Child::Window(id));
                         let content_box = border_box.inset_by(border);
                         windows.push(TilingWindowPlacement {
@@ -124,8 +123,8 @@ impl PartitionTreeStrategy {
                             border_box,
                             visible_border_box,
                             content_box,
-                            visible_content_box: clip(content_box.to_dimension(), screen)
-                                .map(PixelRect::from_dimension)
+                            visible_content_box: content_box
+                                .clip(screen)
                                 .unwrap_or(PixelRect::ZERO),
                             is_highlighted,
                             spawn_indicator: if is_highlighted {
@@ -142,11 +141,9 @@ impl PartitionTreeStrategy {
                         self.child_dimension(child),
                         offset_x,
                         offset_y,
-                        screen,
+                        screen_dim,
                     ));
-                    let Some(visible_border_box) =
-                        clip(border_box.to_dimension(), screen).map(PixelRect::from_dimension)
-                    else {
+                    let Some(visible_border_box) = border_box.clip(screen) else {
                         continue;
                     };
                     let is_highlighted = focused == Some(Child::Container(id));

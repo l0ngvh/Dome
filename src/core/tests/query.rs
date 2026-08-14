@@ -1,5 +1,5 @@
 use crate::action::MonitorTarget;
-use crate::core::node::{Dimension, Length, WindowRestrictions};
+use crate::core::node::{Dimension, Length, PixelRect, WindowRestrictions};
 use crate::core::tests::{
     LayoutConfigBuilder, default_dim, setup, setup_with_layout, titled, titled_matcher,
 };
@@ -88,12 +88,7 @@ fn focused_vs_visible_multi_monitor() {
     hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
     hub.add_monitor(
         "secondary".to_string(),
-        Dimension::new(
-            Length::new(200.0),
-            Length::new(0.0),
-            Length::new(100.0),
-            Length::new(30.0),
-        ),
+        PixelRect::new(200, 0, 100, 30),
         1.0,
     );
     hub.focus_monitor(&MonitorTarget::Name("secondary".into()));
@@ -195,12 +190,7 @@ fn multi_monitor_no_windows() {
     let mut hub = setup();
     hub.add_monitor(
         "secondary".to_string(),
-        Dimension::new(
-            Length::new(200.0),
-            Length::new(0.0),
-            Length::new(100.0),
-            Length::new(30.0),
-        ),
+        PixelRect::new(200, 0, 100, 30),
         1.0,
     );
     let ws = hub.query_workspaces();

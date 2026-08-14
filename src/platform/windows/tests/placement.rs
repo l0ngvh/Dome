@@ -7,7 +7,7 @@ fn single_window_fills_screen() {
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     assert_h_tiled(
         &[env.dim(w1)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
 }
@@ -19,7 +19,7 @@ fn two_windows_split_screen() {
     let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
     assert_h_tiled(
         &[env.dim(w1), env.dim(w2)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
 }
@@ -35,7 +35,7 @@ fn three_windows_split_screen() {
     let w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
     assert_h_tiled(
         &[env.dim(w1), env.dim(w2), env.dim(w3)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
 }
@@ -81,7 +81,7 @@ fn dropping_all_limits_restores_the_even_split() {
     assert_eq!(env.dim(w2).width, Length::new(952.0));
     assert_h_tiled(
         &[env.dim(w1), env.dim(w2)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
 }
@@ -192,7 +192,7 @@ fn positions_are_rounded_not_truncated() {
         .map(|i| env.open(i, "App", "app.exe", SPAWN_DIM))
         .collect();
     let dims: Vec<_> = wins.iter().map(|w| env.dim(*w)).collect();
-    assert_h_tiled(&dims, default_monitor().dimension, env.config.border_size);
+    assert_h_tiled(&dims, default_monitor().work_area, env.config.border_size);
 }
 
 // These tests verify that show_tiling, show_float, and show_fullscreen_window
@@ -200,17 +200,17 @@ fn positions_are_rounded_not_truncated() {
 // longer insets anything: it places core's `content_box` verbatim.
 
 fn scaled_monitor(scale: f32) -> MonitorInfo {
-    // MonitorInfo.dimension is physical pixels. At non-1.0 scales the physical
+    // MonitorInfo.work_area is physical pixels. At non-1.0 scales the physical
     // extent is the logical resolution multiplied by scale.
     MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
-        dimension: Dimension::new(
+        work_area: PixelRect::from_dimension(Dimension::new(
             Length::ZERO,
             Length::ZERO,
             SCREEN_WIDTH * scale,
             SCREEN_HEIGHT * scale,
-        ),
+        )),
         bounds: Dimension::new(
             Length::ZERO,
             Length::ZERO,
@@ -325,12 +325,7 @@ fn show_tiling_places_at_200pct_offset_monitor() {
     let primary = MonitorInfo {
         handle: 1,
         name: "Primary".to_string(),
-        dimension: Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(1920.0),
-            Length::new(1080.0),
-        ),
+        work_area: PixelRect::new(0, 0, 1920, 1080),
         bounds: Dimension::new(
             Length::new(0.0),
             Length::new(0.0),
@@ -344,12 +339,7 @@ fn show_tiling_places_at_200pct_offset_monitor() {
     let secondary = MonitorInfo {
         handle: 2,
         name: "Secondary".to_string(),
-        dimension: Dimension::new(
-            Length::new(1920.0),
-            Length::new(0.0),
-            Length::new(5120.0),
-            Length::new(2880.0),
-        ),
+        work_area: PixelRect::new(1920, 0, 5120, 2880),
         bounds: Dimension::new(
             Length::new(1920.0),
             Length::new(0.0),
@@ -420,7 +410,7 @@ fn show_fullscreen_window_places_at_175pct() {
     let phys_h = SCREEN_HEIGHT * 1.75;
 
     // Simulate the user resizing to fill the screen (triggers fullscreen detection).
-    // The mock dimension must match the physical monitor extent.
+    // The mock work area must match the physical monitor extent.
     env.move_window_to(
         w1,
         Dimension::new(Length::ZERO, Length::ZERO, phys_w, phys_h),
@@ -428,7 +418,7 @@ fn show_fullscreen_window_places_at_175pct() {
     env.dome.apply_layout();
 
     let d = env.dim(w1);
-    // Fullscreen covers the full physical monitor dimension directly.
+    // Fullscreen covers the full physical monitor work area directly.
     assert_eq!(d.x, Length::ZERO);
     assert_eq!(d.y, Length::ZERO);
     assert_eq!(d.width, phys_w.round());
@@ -516,12 +506,7 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
     let primary = MonitorInfo {
         handle: 1,
         name: "Primary".to_string(),
-        dimension: Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(1920.0),
-            Length::new(1080.0),
-        ),
+        work_area: PixelRect::new(0, 0, 1920, 1080),
         bounds: Dimension::new(
             Length::new(0.0),
             Length::new(0.0),
@@ -534,12 +519,7 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
     let secondary = MonitorInfo {
         handle: 2,
         name: "Secondary".to_string(),
-        dimension: Dimension::new(
-            Length::new(1920.0),
-            Length::new(0.0),
-            Length::new(3840.0),
-            Length::new(2160.0),
-        ),
+        work_area: PixelRect::new(1920, 0, 3840, 2160),
         bounds: Dimension::new(
             Length::new(1920.0),
             Length::new(0.0),
@@ -586,12 +566,7 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
     let monitor = MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
-        dimension: Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(1920.0),
-            Length::new(1080.0),
-        ),
+        work_area: PixelRect::new(0, 0, 1920, 1080),
         bounds: Dimension::new(
             Length::new(0.0),
             Length::new(0.0),
@@ -699,12 +674,7 @@ fn float_move_monitor_different_dpi_rescales_border() {
     let primary = MonitorInfo {
         handle: 1,
         name: "Primary".to_string(),
-        dimension: Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(1920.0),
-            Length::new(1080.0),
-        ),
+        work_area: PixelRect::new(0, 0, 1920, 1080),
         bounds: Dimension::new(
             Length::new(0.0),
             Length::new(0.0),
@@ -717,12 +687,7 @@ fn float_move_monitor_different_dpi_rescales_border() {
     let secondary = MonitorInfo {
         handle: 2,
         name: "Secondary".to_string(),
-        dimension: Dimension::new(
-            Length::new(1920.0),
-            Length::new(0.0),
-            Length::new(5120.0),
-            Length::new(2880.0),
-        ),
+        work_area: PixelRect::new(1920, 0, 5120, 2880),
         bounds: Dimension::new(
             Length::new(1920.0),
             Length::new(0.0),
@@ -777,12 +742,12 @@ fn dome_new_assigns_per_monitor_scale() {
     let primary = MonitorInfo {
         handle: 1,
         name: "Primary".to_string(),
-        dimension: Dimension::new(
+        work_area: PixelRect::from_dimension(Dimension::new(
             Length::ZERO,
             Length::ZERO,
             SCREEN_WIDTH * 1.5,
             SCREEN_HEIGHT * 1.5,
-        ),
+        )),
         bounds: Dimension::new(
             Length::ZERO,
             Length::ZERO,
@@ -795,12 +760,12 @@ fn dome_new_assigns_per_monitor_scale() {
     let secondary = MonitorInfo {
         handle: 2,
         name: "Secondary".to_string(),
-        dimension: Dimension::new(
+        work_area: PixelRect::from_dimension(Dimension::new(
             SCREEN_WIDTH * 1.5,
             Length::ZERO,
             Length::new(5120.0),
             Length::new(2880.0),
-        ),
+        )),
         bounds: Dimension::new(
             SCREEN_WIDTH * 1.5,
             Length::ZERO,

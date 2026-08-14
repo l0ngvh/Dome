@@ -118,7 +118,8 @@ impl TilingStrategy for MasterStrategy {
         let screen = hub
             .monitors
             .get(hub.workspaces.get(ws_id).monitor)
-            .dimension;
+            .work_area
+            .to_dimension();
 
         let state = self.workspaces.get_mut(&ws_id).unwrap_or_else(|| {
             panic!("master: detach_window called for {id:?} but workspace {ws_id} has no state")

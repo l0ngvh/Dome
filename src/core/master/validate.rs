@@ -77,7 +77,8 @@ impl ValidateStrategy for MasterStrategy {
             let pane_height = hub
                 .monitors
                 .get(hub.workspaces.get(ws_id).monitor)
-                .dimension
+                .work_area
+                .to_dimension()
                 .height;
 
             for &wid in &state.master {

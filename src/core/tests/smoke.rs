@@ -11,7 +11,7 @@ use crate::action::MonitorTarget;
 use crate::config::{SizeConstraint, SplitMode, Strategy, TreeLayoutNode, WindowMatcher};
 use crate::core::hub::{GlobalLayoutConfig, Hub};
 use crate::core::node::{
-    Dimension, Length, LimitObservation, LimitUpdate, MonitorId, WindowId, WindowRestrictions,
+    Length, LimitObservation, LimitUpdate, MonitorId, PixelRect, WindowId, WindowRestrictions,
 };
 use crate::core::strategy::TilingAction;
 use rand::{Rng, SeedableRng};
@@ -276,7 +276,7 @@ enum RecordedOp {
     AddMonitor {
         producer_id: usize,
         name: String,
-        dim: Dimension,
+        dim: PixelRect,
         scale: f32,
     },
     DeleteWindow {
@@ -593,14 +593,9 @@ fn build_op(
             })
         }
         OpKind::AddMonitor => {
-            let x = monitors.len() as f32 * 150.0;
+            let x = monitors.len() as i32 * 150;
             let name = format!("monitor-{}", monitors.len());
-            let dim = Dimension::new(
-                Length::new(x),
-                Length::new(0.0),
-                Length::new(150.0),
-                Length::new(30.0),
-            );
+            let dim = PixelRect::new(x, 0, 150, 30);
             Some(RecordedOp::AddMonitor {
                 producer_id: next_op_index,
                 name,

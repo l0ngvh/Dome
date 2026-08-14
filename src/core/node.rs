@@ -24,14 +24,14 @@ impl std::fmt::Display for MonitorId {
     }
 }
 
-/// Core is coordinate-system-agnostic: `dimension` holds whatever rect
+/// Core is coordinate-system-agnostic: `work_area` holds whatever rect
 /// the platform supplies in its own native frame (logical on macOS,
 /// physical on Windows). Core never characterises or converts the
 /// unit -- all layout math is unit-agnostic.
 #[derive(Debug, Clone)]
 pub(crate) struct Monitor {
     pub(super) name: String,
-    pub(super) dimension: Dimension,
+    pub(super) work_area: PixelRect,
     /// Multiplier applied to config-denominated lengths before use in
     /// layout math on this monitor. Stored here so `SizeConstraint::resolve`
     /// can convert logical config values without re-reading platform state.
@@ -611,17 +611,6 @@ impl<U> Dimension<U> {
         }
     }
 
-    /// `round(x) + round(width)` can disagree with `round(x + width)`, which opens
-    /// gaps between adjacent boxes and overshoots the monitor on the last one.
-    pub(crate) fn round(self) -> Self {
-        let left = self.x.round();
-        let top = self.y.round();
-        let right = (self.x + self.width).round();
-        let bottom = (self.y + self.height).round();
-
-        Self::new(left, top, right - left, bottom - top)
-    }
-
     /// The exact left inverse of `inset_by` for any box wider and taller than
     /// `2 * border`. Below that `inset_by` clamps its extents and the original is lost.
     pub(crate) fn outset_by(self, border: Length<U>) -> Self {
@@ -697,16 +686,29 @@ impl<U> PixelRect<U> {
         }
     }
 
-    /// Snapping lives in `Dimension::round` so one implementation owns it. The
-    /// casts are exact because every field is whole by then.
+    /// Rounds every edge to nearest. The far edges are derived from `x + width` rather
+    /// than by rounding the extents, because `round(x) + round(width)` can disagree with
+    /// `round(x + width)`, which opens gaps between adjacent boxes and overshoots the
+    /// monitor on the last one.
     pub(crate) fn from_dimension(dim: Dimension<U>) -> Self {
-        let r = dim.round();
-        Self::new(
-            r.x.v as i32,
-            r.y.v as i32,
-            r.width.v as i32,
-            r.height.v as i32,
-        )
+        let left = dim.x.v.round() as i32;
+        let top = dim.y.v.round() as i32;
+        let right = (dim.x + dim.width).v.round() as i32;
+        let bottom = (dim.y + dim.height).v.round() as i32;
+        Self::new(left, top, right - left, bottom - top)
+    }
+
+    /// The largest grid-aligned rectangle contained by `dim`: the origin moves up to
+    /// the next whole unit and the far edge back to the previous one, so the result can
+    /// only shrink. Used for the monitor work area, which is a region a window must stay
+    /// inside. Rounding to nearest would let a window cover a fraction of a pixel a
+    /// status bar reserved.
+    pub(crate) fn from_dimension_inward(dim: Dimension<U>) -> Self {
+        let left = dim.x.v.ceil() as i32;
+        let top = dim.y.v.ceil() as i32;
+        let right = (dim.x + dim.width).v.floor() as i32;
+        let bottom = (dim.y + dim.height).v.floor() as i32;
+        Self::new(left, top, (right - left).max(0), (bottom - top).max(0))
     }
 
     pub(crate) fn to_dimension(self) -> Dimension<U> {
@@ -740,6 +742,20 @@ impl<U> PixelRect<U> {
 
     pub(crate) const fn bottom(self) -> i32 {
         self.y + self.height
+    }
+
+    /// Mirrors `strategy::clip`, including returning `None` on an empty intersection,
+    /// so the two cannot drift apart in meaning. Exact on integers: an intersection of
+    /// two grid-aligned rectangles is grid-aligned, so nothing needs rounding after.
+    pub(crate) fn clip(self, bounds: Self) -> Option<Self> {
+        let x1 = self.x.max(bounds.x);
+        let y1 = self.y.max(bounds.y);
+        let x2 = self.right().min(bounds.right());
+        let y2 = self.bottom().min(bounds.bottom());
+        if x1 >= x2 || y1 >= y2 {
+            return None;
+        }
+        Some(Self::new(x1, y1, x2 - x1, y2 - y1))
     }
 
     /// `<=` rather than `==` so an inverted extent counts as empty, matching what

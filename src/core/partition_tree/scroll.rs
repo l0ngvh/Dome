@@ -18,7 +18,7 @@ impl PartitionTreeStrategy {
             return;
         };
         let monitor_id = hub.workspaces.get(workspace_id).monitor;
-        let screen = hub.monitors.get(monitor_id).dimension;
+        let screen = hub.monitors.get(monitor_id).work_area.to_dimension();
         let (mut offset_x, mut offset_y) = ws_state.viewport_offset;
 
         if let Some(focused) = ws_state.focused_tiling {
@@ -56,7 +56,8 @@ impl PartitionTreeStrategy {
         let screen = hub
             .monitors
             .get(hub.workspaces.get(workspace_id).monitor)
-            .dimension;
+            .work_area
+            .to_dimension();
         let (mut offset_x, mut offset_y) = ws_state.viewport_offset;
 
         let root_dim = match ws_state.root {

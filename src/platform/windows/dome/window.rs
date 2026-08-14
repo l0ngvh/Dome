@@ -5,7 +5,7 @@ use super::Dome;
 use super::display_from_process;
 use crate::config::{WindowMatcher, pattern_matches};
 use crate::core::{
-    Dimension, FloatWindowPlacement, Length, LimitObservation, MonitorId, Physical, PixelRect,
+    FloatWindowPlacement, Length, LimitObservation, MonitorId, Physical, PixelRect,
     TilingWindowPlacement, WindowId, WindowRestrictions,
 };
 use crate::platform::windows::external::{ManageExternalWindow, ShowCmd, ZOrder};
@@ -461,7 +461,7 @@ impl Dome {
     pub(super) fn show_fullscreen_window(
         &mut self,
         id: WindowId,
-        dimension: Dimension,
+        work_area: PixelRect,
         monitor: MonitorId,
     ) {
         let Some(entry) = self.registry.get_mut(id) else {
@@ -480,11 +480,10 @@ impl Dome {
             | WindowState::BorderlessMinimized { .. }
             | WindowState::ExclusiveFullscreen => {}
             WindowState::Positioned(ps) => {
-                let new_target = PixelRect::from_dimension(dimension);
-                if matches!(ps, PositionedState::Tiling(d) if d.target == new_target) {
+                if matches!(ps, PositionedState::Tiling(d) if d.target == work_area) {
                     return;
                 }
-                entry.ext.set_position(ZOrder::Unchanged, new_target);
+                entry.ext.set_position(ZOrder::Unchanged, work_area);
                 self.float_overlays.remove(&id);
                 let prev_actual = match ps {
                     PositionedState::Tiling(d) => d.actual,
@@ -492,7 +491,7 @@ impl Dome {
                     PositionedState::Offscreen { actual, .. } => actual,
                 };
                 entry.state = WindowState::Positioned(PositionedState::Tiling(DriftState::new(
-                    new_target,
+                    work_area,
                     prev_actual,
                     monitor,
                 )));

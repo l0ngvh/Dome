@@ -1,7 +1,7 @@
 use crate::action::MonitorTarget;
 use crate::core::GlobalLayoutConfig;
 use crate::core::node::WindowRestrictions;
-use crate::core::node::{Dimension, Length};
+use crate::core::node::{Dimension, Length, PixelRect};
 use crate::core::tests::{
     LayoutConfigBuilder, default_dim, setup, setup_with_layout, snapshot, titled, titled_matcher,
 };
@@ -980,16 +980,7 @@ fn block_all_does_not_persist_after_delete() {
 #[test]
 fn block_all_on_unfocused_window_does_not_block() {
     let mut hub = setup();
-    hub.add_monitor(
-        "second".into(),
-        Dimension::new(
-            Length::new(150.0),
-            Length::new(0.0),
-            Length::new(150.0),
-            Length::new(30.0),
-        ),
-        1.0,
-    );
+    hub.add_monitor("second".into(), PixelRect::new(150, 0, 150, 30), 1.0);
     // Put a tiling window on the second monitor's workspace.
     hub.focus_monitor(&MonitorTarget::Right);
     let w0 = hub
@@ -1090,16 +1081,7 @@ fn block_all_on_unfocused_window_does_not_block() {
 #[test]
 fn protect_fullscreen_blocks_display_mode_and_monitor_move() {
     let mut hub = setup();
-    hub.add_monitor(
-        "second".into(),
-        Dimension::new(
-            Length::new(150.0),
-            Length::new(0.0),
-            Length::new(150.0),
-            Length::new(30.0),
-        ),
-        1.0,
-    );
+    hub.add_monitor("second".into(), PixelRect::new(150, 0, 150, 30), 1.0);
     let w0 = hub
         .insert_window(titled("w32"), default_dim(), WindowRestrictions::None)
         .unwrap();

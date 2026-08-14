@@ -24,7 +24,7 @@ fn window_destroyed_fills_screen() {
     assert!(!env.is_offscreen(w2));
     assert_h_tiled(
         &[env.dim(w2)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
 }
@@ -40,7 +40,7 @@ fn window_minimized_removes_from_tiling() {
     // w1 should now fill the screen
     assert_h_tiled(
         &[env.dim(w1)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
     // w2 stays tracked as a minimized window (not deleted), reachable
@@ -62,7 +62,7 @@ fn user_minimize_then_restore() {
     // Both windows should be tiled again
     assert_h_tiled(
         &[env.dim(w1), env.dim(w2)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
 }
@@ -103,12 +103,7 @@ fn monitors_changed_updates_layout() {
     let new_monitor = MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
-        dimension: Dimension::new(
-            Length::ZERO,
-            Length::ZERO,
-            Length::new(1280.0),
-            Length::new(720.0),
-        ),
+        work_area: PixelRect::new(0, 0, 1280, 720),
         bounds: Dimension::new(
             Length::ZERO,
             Length::ZERO,
@@ -205,7 +200,7 @@ fn title_changed_manages_unknown_window() {
     assert!(!env.is_offscreen(w1));
     assert_h_tiled(
         &[env.dim(w1)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
 }
@@ -222,7 +217,7 @@ fn delete_currently_displayed_window() {
     assert!(!env.is_offscreen(w2));
     assert_h_tiled(
         &[env.dim(w2)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
 
@@ -472,7 +467,7 @@ fn dpi_change_then_apply_layout_places_at_new_scale() {
 
     let after = env.dim(w);
     // Hub delivers frames in physical pixels. DPI change scales border but
-    // not the physical monitor dimension, so the content rect shrinks by
+    // not the physical monitor work area, so the content rect shrinks by
     // 2 * border * (scale - 1) per axis.
     let border = Length::new(env.config.border_size.logical());
     let expected_x = (before.x * 1.5).round();
@@ -534,7 +529,7 @@ fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
 
     // Secondary window placement must reflect the 2.0x scale change.
     // Hub delivers frames in physical pixels. DPI change scales border but
-    // not the physical monitor dimension, so the content rect shifts by
+    // not the physical monitor work area, so the content rect shifts by
     // border * (new_scale - old_scale) per axis and shrinks by 2 * that.
     let after_b = env.dim(w_b);
     let border = Length::new(env.config.border_size.logical());

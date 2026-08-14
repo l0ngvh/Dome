@@ -385,7 +385,7 @@ pub(in crate::platform::windows) const TAB_BAR_OVERLAY_CLASS: PCWSTR =
 /// `renderer` is declared before `window` so it drops first.
 pub(in crate::platform::windows) struct TilingOverlay {
     renderer: Renderer,
-    monitor: Dimension,
+    monitor: PixelRect,
     // Physical-pixel cache for the last `surface_size_from_physical` result.
     width_phys: u32,
     height_phys: u32,
@@ -410,7 +410,7 @@ impl TilingOverlay {
         queue: Arc<wgpu::Queue>,
         config: Config,
         tab_bar_height: Length<Logical>,
-        monitor: Dimension,
+        monitor: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<Self>> {
         let flavor = config.theme;
@@ -524,7 +524,7 @@ impl TilingOverlay {
 impl TilingOverlayApi for TilingOverlay {
     fn update(
         &mut self,
-        monitor: Dimension,
+        monitor: PixelRect,
         windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
         scale: f32,
@@ -683,7 +683,7 @@ pub(in crate::platform::windows) trait FloatOverlayApi {
 pub(in crate::platform::windows) trait TilingOverlayApi {
     fn update(
         &mut self,
-        monitor: Dimension,
+        monitor: PixelRect,
         windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
         scale: f32,
@@ -885,7 +885,7 @@ impl CreateOverlay for WgpuOverlayFactory {
         &self,
         config: Config,
         tab_bar_height: Length<Logical>,
-        monitor: Dimension,
+        monitor: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
         Ok(TilingOverlay::new(
@@ -922,7 +922,7 @@ impl CreateOverlay for WgpuOverlayFactory {
         &self,
         config: Config,
         container_id: ContainerId,
-        rect: Dimension,
+        rect: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<dyn TabBarOverlayApi>> {
         Ok(TabBarOverlay::new(
@@ -959,33 +959,6 @@ impl PhysicalLengthExt for Length<Physical> {
     }
 }
 
-impl PhysicalRectExt for Dimension<Physical> {
-    fn to_logical(self, scale: f32) -> Dimension<Logical> {
-        debug_assert!(scale > 0.0, "scale must be positive, got {scale}");
-        Dimension::new(
-            Length::new(self.x.value() / scale),
-            Length::new(self.y.value() / scale),
-            Length::new(self.width.value() / scale),
-            Length::new(self.height.value() / scale),
-        )
-    }
-
-    fn to_surface_size(self) -> (i32, i32, u32, u32) {
-        let w = self.width.round().value() as u32;
-        let h = self.height.round().value() as u32;
-        assert!(
-            w > 0 && h > 0,
-            "overlay surface size must be positive; got {w}x{h}"
-        );
-        (
-            self.x.round().value() as i32,
-            self.y.round().value() as i32,
-            w,
-            h,
-        )
-    }
-}
-
 impl PhysicalRectExt for PixelRect<Physical> {
     /// Does not round, for the reason `PhysicalLengthExt::to_logical` gives.
     fn to_logical(self, scale: f32) -> Dimension<Logical> {
@@ -1019,7 +992,7 @@ impl PhysicalRectExt for PixelRect<Physical> {
 pub(in crate::platform::windows) trait TabBarOverlayApi {
     fn update(
         &mut self,
-        rect: Dimension,
+        rect: PixelRect,
         titles: Vec<String>,
         active_index: usize,
         is_highlighted: bool,
@@ -1068,7 +1041,7 @@ impl TabBarOverlay {
         queue: Arc<wgpu::Queue>,
         config: Config,
         container_id: ContainerId,
-        rect: Dimension,
+        rect: PixelRect,
         scale: f32,
         hub_sender: HubSender,
     ) -> anyhow::Result<Box<Self>> {
@@ -1157,7 +1130,7 @@ impl TabBarOverlay {
 impl TabBarOverlayApi for TabBarOverlay {
     fn update(
         &mut self,
-        rect: Dimension,
+        rect: PixelRect,
         titles: Vec<String>,
         active_index: usize,
         is_highlighted: bool,

@@ -85,16 +85,19 @@ pub(crate) fn get_dimension(hwnd: HWND) -> Dimension {
     rect_to_dimension(rect)
 }
 
-/// Converts a Win32 `RECT` (left, top, right, bottom edges) into a `Dimension<Physical>`
-/// with (x, y, width, height). This is the single site for the `RECT -> Dimension` crossing;
-/// callers in `display.rs` and within this module use it instead of ad-hoc arithmetic.
-pub(crate) fn rect_to_dimension(rect: RECT) -> Dimension {
-    Dimension::new(
-        Length::new(rect.left as f32),
-        Length::new(rect.top as f32),
-        Length::new((rect.right - rect.left) as f32),
-        Length::new((rect.bottom - rect.top) as f32),
+/// Converts a Win32 `RECT` (left, top, right, bottom edges) into (x, y, width, height).
+/// The single site for the `RECT` crossing, so callers do not hand-roll the edge arithmetic.
+pub(crate) fn rect_to_pixel_rect(rect: RECT) -> PixelRect {
+    PixelRect::new(
+        rect.left,
+        rect.top,
+        rect.right - rect.left,
+        rect.bottom - rect.top,
     )
+}
+
+pub(crate) fn rect_to_dimension(rect: RECT) -> Dimension {
+    rect_to_pixel_rect(rect).to_dimension()
 }
 
 /// Positions `hwnd` at `OFFSCREEN_POS` with z-order HWND_BOTTOM.

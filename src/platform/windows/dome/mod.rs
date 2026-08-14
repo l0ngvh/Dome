@@ -75,7 +75,7 @@ pub(super) enum HubEvent {
 
 struct MonitorPositionData {
     monitor_id: MonitorId,
-    dimension: Dimension,
+    work_area: PixelRect,
     border_thickness: Length<Physical>,
     tiling_windows: Vec<TilingWindowPlacement>,
     float_windows: Vec<FloatWindowPlacement>,
@@ -87,7 +87,7 @@ pub(super) trait CreateOverlay {
         &self,
         config: Config,
         tab_bar_height: Length<Logical>,
-        monitor: Dimension,
+        monitor: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>>;
     fn create_float_overlay(
@@ -100,7 +100,7 @@ pub(super) trait CreateOverlay {
         &self,
         config: Config,
         container_id: ContainerId,
-        rect: Dimension,
+        rect: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<dyn TabBarOverlayApi>>;
 }
@@ -152,7 +152,7 @@ impl Dome {
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(
-            primary.dimension,
+            primary.work_area,
             primary.scale,
             GlobalLayoutConfig::from(&config),
             workspace_overrides.clone(),
@@ -163,13 +163,13 @@ impl Dome {
         monitors_reg.insert(
             primary.handle,
             primary_monitor_id,
-            primary.dimension,
+            primary.work_area,
             primary.scale,
         );
         if let Ok(overlay) = overlay_factory.create_tiling_overlay(
             config.clone(),
             config.partition_tree.tab_bar_height,
-            primary.dimension,
+            primary.work_area,
             primary.scale,
         ) {
             tiling_overlays.insert(primary_monitor_id, overlay);
@@ -177,18 +177,18 @@ impl Dome {
         tracing::info!(
             name = %primary.name,
             handle = ?primary.handle,
-            dimension = ?primary.dimension,
+            work_area = ?primary.work_area,
             "Primary monitor"
         );
 
         for monitor in &monitors {
             if monitor.handle != primary.handle {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.dimension, monitor.scale);
-                monitors_reg.insert(monitor.handle, id, monitor.dimension, monitor.scale);
+                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, monitor.scale);
+                monitors_reg.insert(monitor.handle, id, monitor.work_area, monitor.scale);
                 if let Ok(overlay) = overlay_factory.create_tiling_overlay(
                     config.clone(),
                     config.partition_tree.tab_bar_height,
-                    monitor.dimension,
+                    monitor.work_area,
                     monitor.scale,
                 ) {
                     tiling_overlays.insert(id, overlay);
@@ -196,7 +196,7 @@ impl Dome {
                 tracing::info!(
                     name = %monitor.name,
                     handle = ?monitor.handle,
-                    dimension = ?monitor.dimension,
+                    work_area = ?monitor.work_area,
                     "Monitor"
                 );
             }
@@ -573,14 +573,14 @@ impl Dome {
         let mut new_displayed: HashMap<MonitorId, HashSet<WindowId>> = HashMap::new();
 
         for mp in result.monitors {
-            let dimension = self.monitors.monitor(mp.monitor_id).dimension();
+            let work_area = self.monitors.monitor(mp.monitor_id).work_area();
 
             let mut window_ids = HashSet::new();
 
             match &mp.layout {
                 MonitorLayout::Fullscreen(id) => {
                     window_ids.insert(*id);
-                    self.show_fullscreen_window(*id, dimension, mp.monitor_id);
+                    self.show_fullscreen_window(*id, work_area, mp.monitor_id);
                 }
                 MonitorLayout::Normal {
                     tiling_windows,
@@ -636,7 +636,7 @@ impl Dome {
 
                     per_monitor.push(MonitorPositionData {
                         monitor_id: mp.monitor_id,
-                        dimension,
+                        work_area,
                         border_thickness: mp.border_thickness,
                         tiling_windows: placed_tiling,
                         float_windows: placed_floats,
@@ -795,7 +795,7 @@ impl Dome {
                 .get_mut(&data.monitor_id)
                 .unwrap()
                 .update(
-                    data.dimension,
+                    data.work_area,
                     &data.tiling_windows,
                     &data.containers,
                     scale,
@@ -803,11 +803,7 @@ impl Dome {
                 );
             let tab_bar_h_logical = self.config.partition_tree.tab_bar_height;
             for (placement, titles) in data.containers.iter().filter(|(p, _)| p.is_tabbed) {
-                let rect = compute_tab_bar_rect(
-                    placement.border_box.to_dimension(),
-                    tab_bar_h_logical,
-                    scale,
-                );
+                let rect = compute_tab_bar_rect(placement.border_box, tab_bar_h_logical, scale);
                 let tab_bar = match self.tab_bars.entry(placement.id) {
                     std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
                     std::collections::hash_map::Entry::Vacant(e) => {
@@ -891,7 +887,7 @@ impl Dome {
             if let Ok(overlay) = self.overlay_factory.create_tiling_overlay(
                 self.config.clone(),
                 self.config.partition_tree.tab_bar_height,
-                m.dimension(),
+                m.work_area(),
                 m.scale(),
             ) {
                 self.tiling_overlays.insert(id, overlay);
@@ -995,16 +991,20 @@ pub(super) fn display_from_process(process: &str) -> String {
     process.strip_suffix(".exe").unwrap_or(process).to_string()
 }
 
-// Tab bar rect from a tabbed container's physical-pixel `border_box`. The bar
-// hugs the container's top edge with the configured logical height
-// rounded into the platform's `Unit` (physical pixels on Windows).
+// The bar hugs the container's top edge, with the configured logical height rounded
+// into the platform's `Unit`.
 fn compute_tab_bar_rect(
-    border_box: Dimension,
+    border_box: PixelRect,
     tab_bar_h_logical: Length<Logical>,
     scale: f32,
-) -> Dimension {
+) -> PixelRect {
     let h_phys = tab_bar_h_logical.to_unit(scale).round();
-    Dimension::new(border_box.x, border_box.y, border_box.width, h_phys)
+    PixelRect::new(
+        border_box.x(),
+        border_box.y(),
+        border_box.width(),
+        h_phys.value() as i32,
+    )
 }
 
 #[cfg(test)]

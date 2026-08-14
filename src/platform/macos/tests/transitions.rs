@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn a_fractional_work_area_keeps_the_fullscreen_window_inside_it() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let mut monitor = default_monitor();
+    monitor.work_area = FRACTIONAL_WORK_AREA;
+    dome.monitors_changed(vec![monitor]);
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    // Reaches `place_fullscreen_window` with the window still in `Tiling`.
+    send(&mut dome, "toggle fullscreen");
+    macos.settle(&mut dome, 10);
+    assert_inside_work_area(macos.window_frame(cg1), FRACTIONAL_WORK_AREA);
+
+    // Round trip through another workspace, which returns via the `Offscreen` arm.
+    send(&mut dome, "focus workspace 1");
+    macos.settle(&mut dome, 10);
+    send(&mut dome, "focus workspace 0");
+    macos.settle(&mut dome, 10);
+    assert_inside_work_area(macos.window_frame(cg1), FRACTIONAL_WORK_AREA);
+}
+
+#[test]
 fn fullscreen_window_restored_from_offscreen() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
