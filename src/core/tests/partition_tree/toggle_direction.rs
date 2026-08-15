@@ -1,7 +1,7 @@
 use crate::core::GlobalLayoutConfig;
-use crate::core::node::{Dimension, Length, WindowRestrictions};
+use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_dim, setup, setup_with_layout, snapshot, titled, titled_matcher,
+    LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
@@ -16,8 +16,8 @@ fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
 fn toggle_direction_on_focused_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
     hub.toggle_direction();
 
@@ -66,8 +66,8 @@ fn toggle_direction_on_focused_container() {
 fn toggle_direction_on_window() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
     hub.toggle_direction();
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -115,10 +115,10 @@ fn toggle_direction_on_window() {
 fn toggle_direction_on_window_nested() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
     hub.toggle_direction();
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -168,17 +168,17 @@ fn toggle_direction_on_window_nested() {
 fn toggle_direction_inside_tabbed_only_affects_tabbed_subtree() {
     let mut hub = setup();
 
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W4"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W5"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W6"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W7"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W5"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W6"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W7"), default_rect(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(7))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -278,17 +278,17 @@ fn toggle_direction_inside_tabbed_only_affects_tabbed_subtree() {
 fn toggle_direction_skips_nested_tabbed_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
     let w1 = hub
-        .insert_window(titled("W1"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("W1"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W4"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W5"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W5"), default_rect(), WindowRestrictions::None);
     hub.set_focus(w1);
 
     assert_snapshot!(snapshot(&hub), @"
@@ -386,29 +386,29 @@ fn toggle_direction_skips_nested_tabbed_container() {
 fn toggle_direction_inside_tabbed_skips_nested_tabbed() {
     let mut hub = setup();
 
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
     let w1 = hub
-        .insert_window(titled("W1"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("W1"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
     hub.set_focus(w1);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W4"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W5"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W4"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W5"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.toggle_spawn_mode();
     let w6 = hub
-        .insert_window(titled("W6"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("W6"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("W7"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W7"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W8"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W9"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W8"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W9"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W10"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W11"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W10"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W11"), default_rect(), WindowRestrictions::None);
     hub.set_focus(w6);
 
     assert_snapshot!(snapshot(&hub), @"
@@ -519,7 +519,7 @@ fn toggle_direction_noop() {
     hub.toggle_direction();
     assert_eq!(before, snapshot(&hub));
 
-    hub.insert_window(titled("w7"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w7"), default_rect(), WindowRestrictions::None);
     let before = snapshot(&hub);
     hub.toggle_direction();
     assert_eq!(before, snapshot(&hub));
@@ -527,12 +527,7 @@ fn toggle_direction_noop() {
     let mut hub = setup_with_layout(layout_floating(&["w8"]));
     hub.insert_window(
         titled("w8"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     )
     .unwrap();

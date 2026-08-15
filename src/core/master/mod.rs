@@ -13,7 +13,7 @@ use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
 use crate::core::master::preferred_layout::{Slot, SlotId};
 use crate::core::node::{
-    Child, Dimension, Direction, Length, WindowId, WindowMetadata, WorkspaceId,
+    Child, Dimension, Direction, Length, PixelRect, WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::strategy::{
     TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, distribute_space,
@@ -109,7 +109,7 @@ impl TilingStrategy for MasterStrategy {
         self.compute_placement(hub, ws_id);
     }
 
-    fn detach_window(&mut self, hub: &HubAccess, id: WindowId) -> Dimension {
+    fn detach_window(&mut self, hub: &HubAccess, id: WindowId) -> PixelRect {
         let ws_id = hub
             .windows
             .get(id)
@@ -134,12 +134,12 @@ impl TilingStrategy for MasterStrategy {
             self.slots.get_mut(sid).windows.retain(|w| w != &id);
         }
         let dim = removed.dimension;
-        let result = Dimension::new(
+        let result = PixelRect::from_dimension(Dimension::new(
             dim.x + screen.x,
             dim.y - y_offset + screen.y,
             dim.width,
             dim.height,
-        );
+        ));
 
         self.reconcile_master_count(hub, ws_id);
         self.compute_placement(hub, ws_id);

@@ -1,11 +1,11 @@
 use crate::core::node::WindowRestrictions;
-use crate::core::tests::{default_dim, setup, snapshot, titled};
+use crate::core::tests::{default_rect, setup, snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
 fn initial_window_cover_full_screen() {
     let mut hub = setup();
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -51,7 +51,7 @@ fn split_window_evenly() {
     for i in 0..4 {
         hub.insert_window(
             titled(format!("w{i}").as_str()),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         );
     }
@@ -101,13 +101,13 @@ fn split_window_evenly() {
 #[test]
 fn new_container_preserves_wrapped_window_position() {
     let mut hub = setup();
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
     // Focus w1 (middle)
     hub.focus_left();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
     // New container wrapping w1 should be in the middle position
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
@@ -156,12 +156,12 @@ fn new_container_preserves_wrapped_window_position() {
 #[test]
 fn insert_window_after_focused_window() {
     let mut hub = setup();
-    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w7"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w7"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w8"), default_rect(), WindowRestrictions::None);
     // Focus w1 (middle)
     hub.focus_left();
-    hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w9"), default_rect(), WindowRestrictions::None);
     // w3 should be inserted right after w1, not at the end
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
@@ -210,19 +210,19 @@ fn insert_window_after_focused_window() {
 fn insert_window_after_focused_container_with_same_new_window_direction() {
     let mut hub = setup();
     // Create: [w0] [w1, w2] [w3]
-    hub.insert_window(titled("w10"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w10"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w11"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w12"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w12"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w13"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w13"), default_rect(), WindowRestrictions::None);
     // Focus the middle container and toggle back spawn direction
     hub.focus_left();
     hub.focus_parent();
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w14"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w14"), default_rect(), WindowRestrictions::None);
     // w4 should be inserted right after the focused container, not at the end
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(4))
@@ -272,12 +272,12 @@ fn insert_window_after_focused_container_with_same_new_window_direction() {
 #[test]
 fn insert_to_new_container_when_focused_container_window_insert_direction_differ_and_no_parent() {
     let mut hub = setup();
-    hub.insert_window(titled("w15"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w16"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w17"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w15"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w16"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w17"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w18"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w18"), default_rect(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -326,16 +326,16 @@ fn insert_to_new_container_when_focused_container_window_insert_direction_differ
 fn insert_to_parent_when_focused_container_window_insert_direction_differ_but_has_parent() {
     let mut hub = setup();
     // Creating [w0, [w1, w2], w3]
-    hub.insert_window(titled("w19"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w20"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w21"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w19"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w20"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w21"), default_rect(), WindowRestrictions::None);
     hub.focus_left();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w22"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w22"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
     hub.toggle_spawn_mode();
     // Should be inserted in the root container
-    hub.insert_window(titled("w23"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w23"), default_rect(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -387,10 +387,10 @@ fn insert_to_parent_when_focused_container_window_insert_direction_differ_but_ha
 fn insert_window_after_focusing_parent() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w24"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w25"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w24"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w25"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
-    hub.insert_window(titled("w26"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w26"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))

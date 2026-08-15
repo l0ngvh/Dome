@@ -1,7 +1,7 @@
 use crate::config::{Strategy, WindowMatcher};
-use crate::core::node::{Dimension, Length};
+use crate::core::node::PixelRect;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect,
     setup_logger_with_level, snapshot, titled, titled_matcher, titled_process,
 };
 use crate::core::{Hub, MonitorLayout, Pixels, WindowId, WindowRestrictions};
@@ -16,8 +16,8 @@ fn swap_secondary_and_master() {
                 .build(),
         )
         .build();
-    hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None); // W0 = master
-    hub.insert_window(titled("w12"), default_dim(), WindowRestrictions::None); // W1 = stack (focused)
+    hub.insert_window(titled("w11"), default_rect(), WindowRestrictions::None); // W0 = master
+    hub.insert_window(titled("w12"), default_rect(), WindowRestrictions::None); // W1 = stack (focused)
 
     // Move W1 left: swaps with last master (W0). W1 becomes master, W0 becomes stack.
     hub.move_left();
@@ -70,9 +70,9 @@ fn move_direction_up_down() {
                 .build(),
         )
         .build();
-    hub.insert_window(titled("w13"), default_dim(), WindowRestrictions::None); // W0 = master
-    hub.insert_window(titled("w14"), default_dim(), WindowRestrictions::None); // W1 = stack
-    hub.insert_window(titled("w15"), default_dim(), WindowRestrictions::None); // W2 = stack (focused)
+    hub.insert_window(titled("w13"), default_rect(), WindowRestrictions::None); // W0 = master
+    hub.insert_window(titled("w14"), default_rect(), WindowRestrictions::None); // W1 = stack
+    hub.insert_window(titled("w15"), default_rect(), WindowRestrictions::None); // W2 = stack (focused)
 
     // Move W2 up within stack: swap with W1.
     hub.move_up();
@@ -133,19 +133,19 @@ fn move_direction_up_down_wraps_within_three_window_pane() {
         ])
         .build();
     let _w0 = hub
-        .insert_window(titled("w0"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let _w1 = hub
-        .insert_window(titled("w1"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w1"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w2 = hub
-        .insert_window(titled("w2"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w2"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w3 = hub
-        .insert_window(titled("w3"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w3"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w4 = hub
-        .insert_window(titled("w4"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w4"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let ws = hub.current_workspace();
 
@@ -176,7 +176,7 @@ fn focus_and_move_noop() {
                 .build(),
         )
         .build();
-    hub.insert_window(titled("w16"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w16"), default_rect(), WindowRestrictions::None);
 
     let before = snapshot(&hub);
 
@@ -201,17 +201,12 @@ fn focus_and_move_noop() {
                 .build(),
         )
         .build();
-    hub.insert_window(titled("w18"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w19"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w18"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w19"), default_rect(), WindowRestrictions::None);
     let float_id = hub
         .insert_window(
             titled("w17"),
-            Dimension::new(
-                Length::new(50.0),
-                Length::new(5.0),
-                Length::new(40.0),
-                Length::new(15.0),
-            ),
+            PixelRect::new(50, 5, 40, 15),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -239,8 +234,8 @@ fn move_window_to_workspace() {
                     .build(),
             )
             .build();
-        hub.insert_window(titled("w28"), default_dim(), WindowRestrictions::None); // W0 = master
-        hub.insert_window(titled("w29"), default_dim(), WindowRestrictions::None); // W1 = stack (focused)
+        hub.insert_window(titled("w28"), default_rect(), WindowRestrictions::None); // W0 = master
+        hub.insert_window(titled("w29"), default_rect(), WindowRestrictions::None); // W1 = stack (focused)
         hub.focus_left();
         hub.move_focused_to_workspace("1");
         assert_snapshot!(snapshot(&hub), @"
@@ -330,9 +325,9 @@ fn move_window_to_workspace() {
                     .build(),
             )
             .build();
-        hub.insert_window(titled("w30"), default_dim(), WindowRestrictions::None); // W0 = master
-        hub.insert_window(titled("w31"), default_dim(), WindowRestrictions::None); // W1 = stack
-        hub.insert_window(titled("w32"), default_dim(), WindowRestrictions::None); // W2 = stack (focused)
+        hub.insert_window(titled("w30"), default_rect(), WindowRestrictions::None); // W0 = master
+        hub.insert_window(titled("w31"), default_rect(), WindowRestrictions::None); // W1 = stack
+        hub.insert_window(titled("w32"), default_rect(), WindowRestrictions::None); // W2 = stack (focused)
         hub.move_focused_to_workspace("1");
         assert_snapshot!(snapshot(&hub), @"
         Hub(focused=WindowId(1))
@@ -423,7 +418,7 @@ fn move_only_window_to_workspace() {
                 .build(),
         )
         .build();
-    hub.insert_window(titled("w33"), default_dim(), WindowRestrictions::None); // W0
+    hub.insert_window(titled("w33"), default_rect(), WindowRestrictions::None); // W0
 
     hub.move_focused_to_workspace("1");
 
@@ -501,13 +496,13 @@ fn promote_secondary_to_master_when_there_is_room() {
         ])
         .build();
     let _w0 = hub
-        .insert_window(titled("A"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("A"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let _w1 = hub
-        .insert_window(titled("B"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("B"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let _w2 = hub
-        .insert_window(titled("C"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("C"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.move_left();
 
@@ -589,28 +584,28 @@ fn move_matched_master_to_secondary_rematches() {
     let _w0 = hub
         .insert_window(
             titled_process("Filler", "other.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let w1 = hub
         .insert_window(
             titled_process("Editor", "editor.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w2 = hub
         .insert_window(
             titled_process("Browser", "browser.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w3 = hub
         .insert_window(
             titled_process("Code", "code.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -739,28 +734,28 @@ fn move_matched_secondary_to_master_rematches() {
     let _w0 = hub
         .insert_window(
             titled_process("Filler", "other.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let w1 = hub
         .insert_window(
             titled_process("Editor", "editor.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w2 = hub
         .insert_window(
             titled_process("Browser", "browser.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w3 = hub
         .insert_window(
             titled_process("Code", "code.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();

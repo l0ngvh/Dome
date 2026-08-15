@@ -1,6 +1,6 @@
 use crate::core::node::WindowRestrictions;
 use crate::core::tests::{
-    LayoutConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder, default_dim, snapshot, titled,
+    LayoutConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder, default_rect, snapshot, titled,
 };
 use insta::assert_snapshot;
 
@@ -17,9 +17,9 @@ fn auto_tile_sets_horizontal_spawn_mode_when_width_greater_than_height() {
                 .build(),
         )
         .build();
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -79,22 +79,22 @@ fn auto_tile_sets_vertical_spawn_mode_when_height_greater_than_width() {
     // direct children, as the auto tile logic can get confused when width is approximately equal
     // to height, due to floating precision lost
     let w0 = hub
-        .insert_window(titled("w3"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w3"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w7"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w7"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w8"), default_rect(), WindowRestrictions::None);
     hub.toggle_direction();
     // Each window is 25x30, height > width, so spawn mode should be vertical
     hub.set_focus(w0);
-    hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w9"), default_rect(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(6))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -155,11 +155,11 @@ fn auto_tile_preserves_tab_spawn_mode() {
                 .build(),
         )
         .build();
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -216,13 +216,13 @@ fn auto_tile_adjusts_after_toggle_direction() {
         )
         .build();
     let w0 = hub
-        .insert_window(titled("w10"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w10"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w12"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w11"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w12"), default_rect(), WindowRestrictions::None);
     hub.toggle_direction();
     hub.set_focus(w0);
-    hub.insert_window(titled("w13"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w13"), default_rect(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -280,11 +280,11 @@ fn auto_tile_with_tab_spawn_mode() {
                 .build(),
         )
         .build();
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -338,14 +338,14 @@ fn auto_tile_preserves_tab_spawn_mode_on_nested_container_on_delete() {
                 .build(),
         )
         .build();
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     let w2 = hub
-        .insert_window(titled("W2"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("W2"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.focus_left();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.focus_parent();
     hub.toggle_spawn_mode();
@@ -391,7 +391,7 @@ fn auto_tile_preserves_tab_spawn_mode_on_nested_container_on_delete() {
     |                                                                         |*                                                                         *
     +-------------------------------------------------------------------------+***************************************************************************
     ");
-    hub.insert_window(titled("w14"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w14"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(4))

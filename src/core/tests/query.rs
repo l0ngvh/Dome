@@ -1,7 +1,7 @@
 use crate::action::MonitorTarget;
-use crate::core::node::{Dimension, Length, PixelRect, WindowRestrictions};
+use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_dim, setup, setup_with_layout, titled, titled_matcher,
+    LayoutConfigBuilder, default_rect, setup, setup_with_layout, titled, titled_matcher,
 };
 use crate::core::{GlobalLayoutConfig, WorkspaceInfo};
 
@@ -26,9 +26,9 @@ fn empty_hub() {
 #[test]
 fn single_workspace_with_windows() {
     let mut hub = setup();
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 1);
     assert_eq!(ws[0].window_count, 3);
@@ -39,10 +39,10 @@ fn single_workspace_with_windows() {
 #[test]
 fn multiple_workspaces() {
     let mut hub = setup();
-    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
     hub.focus_workspace("web");
-    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);
 
@@ -60,20 +60,15 @@ fn multiple_workspaces() {
 #[test]
 fn workspace_with_floats_and_fullscreen() {
     let mut hub = setup_with_layout(layout_floating(&["w7"]));
-    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
     hub.insert_window(
         titled("w7"),
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(200.0),
-            Length::new(100.0),
-        ),
+        PixelRect::new(0, 0, 200, 100),
         WindowRestrictions::None,
     )
     .unwrap();
     let third = hub
-        .insert_window(titled("w8"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w8"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_fullscreen(third, WindowRestrictions::None);
     let ws = hub.query_workspaces();
@@ -85,14 +80,14 @@ fn workspace_with_floats_and_fullscreen() {
 #[test]
 fn focused_vs_visible_multi_monitor() {
     let mut hub = setup();
-    hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w9"), default_rect(), WindowRestrictions::None);
     hub.add_monitor(
         "secondary".to_string(),
         PixelRect::new(200, 0, 100, 30),
         1.0,
     );
     hub.focus_monitor(&MonitorTarget::Name("secondary".into()));
-    hub.insert_window(titled("w10"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w10"), default_rect(), WindowRestrictions::None);
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);
 
@@ -110,7 +105,7 @@ fn focused_vs_visible_multi_monitor() {
 #[test]
 fn empty_non_active_workspace_persists() {
     let mut hub = setup();
-    hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w11"), default_rect(), WindowRestrictions::None);
     hub.focus_workspace("empty");
     hub.focus_workspace("0");
     let ws = hub.query_workspaces();
@@ -143,23 +138,13 @@ fn workspace_with_only_floats() {
     let mut hub = setup_with_layout(layout_floating(&["w12", "w13"]));
     hub.insert_window(
         titled("w12"),
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(200.0),
-            Length::new(100.0),
-        ),
+        PixelRect::new(0, 0, 200, 100),
         WindowRestrictions::None,
     )
     .unwrap();
     hub.insert_window(
         titled("w13"),
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(200.0),
-            Length::new(100.0),
-        ),
+        PixelRect::new(0, 0, 200, 100),
         WindowRestrictions::None,
     )
     .unwrap();
@@ -172,10 +157,10 @@ fn workspace_with_only_floats() {
 fn workspace_with_only_fullscreen() {
     let mut hub = setup();
     let first = hub
-        .insert_window(titled("w14"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w14"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let second = hub
-        .insert_window(titled("w15"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w15"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_fullscreen(first, WindowRestrictions::None);
     hub.set_fullscreen(second, WindowRestrictions::None);

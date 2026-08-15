@@ -2,7 +2,7 @@ use insta::assert_snapshot;
 
 use crate::config::{Strategy, WindowMatcher};
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim, process_meta,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, process_meta,
     snapshot, titled, titled_process,
 };
 use crate::core::{Direction, TilingAction, WindowRestrictions};
@@ -29,14 +29,14 @@ fn secondary_matched_goes_to_stack() {
     let _w0 = hub
         .insert_window(
             titled_process("Term", "terminal.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w1 = hub
         .insert_window(
             titled_process("Filler", "other.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -105,14 +105,14 @@ fn master_matched_goes_to_master_pane() {
     let _w0 = hub
         .insert_window(
             titled_process("Editor", "editor.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w1 = hub
         .insert_window(
             titled_process("Browser", "browser.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -177,14 +177,14 @@ fn master_full_pushes_unmatched_to_secondary() {
     let _w0 = hub
         .insert_window(
             titled_process("Filler", "other.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w1 = hub
         .insert_window(
             titled_process("Editor", "editor.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -265,21 +265,21 @@ fn master_full_continue_matching_in_secondary() {
     let _w0 = hub
         .insert_window(
             titled_process("Editor", "editor.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w1 = hub
         .insert_window(
             titled_process("Browser", "browser.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w2 = hub
         .insert_window(
             titled_process("Code", "code.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -345,12 +345,12 @@ fn unmatched_fills_master_room() {
         .build();
     hub.insert_window(
         titled_process("Editor", "editor.exe"),
-        default_dim(),
+        default_rect(),
         WindowRestrictions::None,
     );
     hub.insert_window(
         titled_process("Other", "other.exe"),
-        default_dim(),
+        default_rect(),
         WindowRestrictions::None,
     );
     assert_snapshot!(snapshot(&hub), @r"
@@ -425,21 +425,21 @@ fn mixed_matched_and_unmatched_order() {
     let _w0 = hub
         .insert_window(
             titled_process("A", "A.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w1 = hub
         .insert_window(
             titled_process("B", "B.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w2 = hub
         .insert_window(
             titled_process("C", "C.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -498,8 +498,8 @@ fn unmatched_goes_to_stack_when_master_full() {
                 .build(),
         ])
         .build();
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -562,14 +562,14 @@ fn insert_master_full_evicts_unmatched() {
     let _filler = hub
         .insert_window(
             titled_process("Filler", "other.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _editor = hub
         .insert_window(
             titled_process("Editor", "editor.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -656,35 +656,35 @@ fn matched_order_on_both_lanes() {
     let _w0 = hub
         .insert_window(
             titled_process("C", "C.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w1 = hub
         .insert_window(
             titled_process("E", "E.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w2 = hub
         .insert_window(
             titled_process("A", "A.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w3 = hub
         .insert_window(
             titled_process("B", "B.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w4 = hub
         .insert_window(
             titled_process("D", "D.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -759,28 +759,28 @@ fn decrease_master_count_drop_matched_master() {
     let _w0 = hub
         .insert_window(
             titled_process("A", "A.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w1 = hub
         .insert_window(
             titled_process("B", "B.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w2 = hub
         .insert_window(
             titled_process("D", "D.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w3 = hub
         .insert_window(
             titled_process("C", "C.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -851,21 +851,21 @@ fn reloading_preferred_layout_puts_matched_windows_to_place() {
     let _w0 = hub
         .insert_window(
             titled_process("B", "B.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w1 = hub
         .insert_window(
             titled_process("C", "C.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w2 = hub
         .insert_window(
             titled_process("A", "A.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -960,14 +960,14 @@ fn reordering_matched_windows_doesnt_guarrantee_next_match() {
     let _w0 = hub
         .insert_window(
             titled_process("A", "A.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w1 = hub
         .insert_window(
             titled_process("C", "C.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -978,7 +978,7 @@ fn reordering_matched_windows_doesnt_guarrantee_next_match() {
     let _w2 = hub
         .insert_window(
             titled_process("B", "B.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -1046,14 +1046,14 @@ fn swapping_secondary_window_doesnt_guarrantee_next_match() {
     let _w0 = hub
         .insert_window(
             titled_process("B", "B.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w1 = hub
         .insert_window(
             titled_process("C", "C.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -1064,7 +1064,7 @@ fn swapping_secondary_window_doesnt_guarrantee_next_match() {
     let _w2 = hub
         .insert_window(
             titled_process("A", "A.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -1125,9 +1125,9 @@ fn increase_master_count_without_matcher_change() {
                 .build(),
         ])
         .build();
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
 
     // Hot-reload preferred layout with count=2, same (empty) matchers.
     hub.sync_preferred_layout(vec![
@@ -1220,56 +1220,56 @@ fn insert_multiple_matched_windows_to_the_same_slot() {
     let _w0 = hub
         .insert_window(
             titled_process("Terminal A", "terminal.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w1 = hub
         .insert_window(
             titled_process("Editor A", "editor.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w2 = hub
         .insert_window(
             titled_process("Browser A", "browser.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w3 = hub
         .insert_window(
             titled_process("Editor B", "editor.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w4 = hub
         .insert_window(
             titled_process("Mail A", "mail.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w5 = hub
         .insert_window(
             titled_process("Browser B", "browser.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w6 = hub
         .insert_window(
             titled_process("Terminal B", "terminal.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w7 = hub
         .insert_window(
             titled_process("Main B", "mail.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -1369,28 +1369,28 @@ fn insert_master_full_no_evictable_matches_against_secondary() {
     let _w0 = hub
         .insert_window(
             titled_process("Editor A", "editor.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w1 = hub
         .insert_window(
             titled_process("Terminal", "terminal.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w2 = hub
         .insert_window(
             titled_process("Mail", "mail.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     let _w3 = hub
         .insert_window(
             titled_process("Editor B", "editor.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();

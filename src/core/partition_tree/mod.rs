@@ -20,7 +20,9 @@ use crate::config::SizeConstraints;
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
-use crate::core::node::{Dimension, Length, Logical, WindowId, WindowMetadata, WorkspaceId};
+use crate::core::node::{
+    Dimension, Length, Logical, PixelRect, WindowId, WindowMetadata, WorkspaceId,
+};
 use crate::core::strategy::{TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport};
 
 /// i3-style manual tiling strategy. Manages a container tree where windows are
@@ -114,7 +116,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         tracing::debug!(%window_id, ?slot_id, "First preferred window, established as root");
     }
 
-    fn detach_window(&mut self, hub: &HubAccess, window_id: WindowId) -> Dimension {
+    fn detach_window(&mut self, hub: &HubAccess, window_id: WindowId) -> PixelRect {
         let child_dim = self.tiling_windows.get(&window_id).unwrap().dimension;
         let workspace_id = hub
             .windows
@@ -136,12 +138,12 @@ impl TilingStrategy for PartitionTreeStrategy {
         // Convert layout-space coordinates to screen-absolute. Layout positions are
         // relative to workspace origin (0,0) plus viewport offset; screen-absolute
         // includes the monitor's origin.
-        Dimension::new(
+        PixelRect::from_dimension(Dimension::new(
             child_dim.x - offset_x + screen.x,
             child_dim.y - offset_y + screen.y,
             child_dim.width,
             child_dim.height,
-        )
+        ))
     }
 
     fn handle_action(&mut self, hub: &mut HubAccess, action: TilingAction) {

@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim, setup_hub,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, setup_hub,
     setup_logger_with_level, titled, validate_hub,
 };
 use crate::action::MonitorTarget;
@@ -276,7 +276,7 @@ enum RecordedOp {
     AddMonitor {
         producer_id: usize,
         name: String,
-        dim: PixelRect,
+        rect: PixelRect,
         scale: f32,
     },
     DeleteWindow {
@@ -595,11 +595,11 @@ fn build_op(
         OpKind::AddMonitor => {
             let x = monitors.len() as i32 * 150;
             let name = format!("monitor-{}", monitors.len());
-            let dim = PixelRect::new(x, 0, 150, 30);
+            let rect = PixelRect::new(x, 0, 150, 30);
             Some(RecordedOp::AddMonitor {
                 producer_id: next_op_index,
                 name,
-                dim,
+                rect,
                 scale: 1.0,
             })
         }
@@ -769,7 +769,7 @@ fn apply_op(
             let id = hub
                 .insert_window(
                     titled(window_title),
-                    default_dim(),
+                    default_rect(),
                     WindowRestrictions::None,
                 )
                 .expect("test ignore list is empty");
@@ -782,7 +782,7 @@ fn apply_op(
             restrictions,
         } => {
             let id = hub
-                .insert_window(titled("w3"), default_dim(), *restrictions)
+                .insert_window(titled("w3"), default_rect(), *restrictions)
                 .expect("test ignore list is empty");
             windows.push(id);
             window_origin.push(*producer_id);
@@ -791,10 +791,10 @@ fn apply_op(
         RecordedOp::AddMonitor {
             producer_id,
             name,
-            dim,
+            rect,
             scale,
         } => {
-            let id = hub.add_monitor(name.clone(), *dim, *scale);
+            let id = hub.add_monitor(name.clone(), *rect, *scale);
             monitors.push(id);
             monitor_origin.push(*producer_id);
         }
@@ -1142,7 +1142,7 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 let id = hub
                     .insert_window(
                         titled(window_title),
-                        default_dim(),
+                        default_rect(),
                         WindowRestrictions::None,
                     )
                     .expect("test ignore list is empty");
@@ -1153,17 +1153,17 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 restrictions,
             } => {
                 let id = hub
-                    .insert_window(titled("w3"), default_dim(), *restrictions)
+                    .insert_window(titled("w3"), default_rect(), *restrictions)
                     .expect("test ignore list is empty");
                 live_window[*producer_id] = Some(id);
             }
             RecordedOp::AddMonitor {
                 producer_id,
                 name,
-                dim,
+                rect,
                 scale,
             } => {
-                let id = hub.add_monitor(name.clone(), *dim, *scale);
+                let id = hub.add_monitor(name.clone(), *rect, *scale);
                 live_monitor[*producer_id] = Some(id);
             }
             RecordedOp::DeleteWindow { window } => {

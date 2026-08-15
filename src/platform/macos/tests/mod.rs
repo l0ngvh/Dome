@@ -537,7 +537,7 @@ fn new_window(macos: &MacOS, cg_id: CGWindowID) -> PendingAdd {
                 bundle_id: None,
             },
         },
-        dim: PixelRect::new(pos.0, pos.1, size.0, size.1),
+        rect: PixelRect::new(pos.0, pos.1, size.0, size.1),
     }
 }
 

@@ -9,7 +9,7 @@ use super::super::accessibility::ExternalWindow;
 
 struct WindowState {
     window: Arc<dyn ExternalWindow>,
-    original_dim: PixelRect,
+    original_rect: PixelRect,
 }
 
 pub(super) struct Recovery {
@@ -35,12 +35,12 @@ impl Recovery {
         h: Pixels,
         monitor: PixelRect,
     ) {
-        let original_dim = default_position(monitor, w, h);
+        let original_rect = default_position(monitor, w, h);
         self.state.insert(
             window.cg_id(),
             WindowState {
                 window,
-                original_dim,
+                original_rect,
             },
         );
     }
@@ -51,7 +51,7 @@ impl Recovery {
 
     pub(super) fn restore_all(&self) {
         for window_state in self.state.values() {
-            let _ = window_state.window.set_frame(window_state.original_dim);
+            let _ = window_state.window.set_frame(window_state.original_rect);
         }
     }
 }

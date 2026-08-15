@@ -4,17 +4,17 @@ use crate::config::SizeConstraint;
 
 use crate::core::node::{Length, LimitObservation, LimitUpdate, Logical, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, PartitionTreeConfigBuilder, default_dim, setup, snapshot, titled,
+    LayoutConfigBuilder, PartitionTreeConfigBuilder, default_rect, setup, snapshot, titled,
 };
 
 #[test]
 fn set_min_size_respects_minimum_height() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w0"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
 
     hub.set_window_constraint(
         w0,
@@ -69,10 +69,10 @@ fn set_min_size_respects_minimum_height() {
 fn set_min_size_distributes_remaining_space_equally() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w2"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w2"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
 
     hub.set_window_constraint(
         w0,
@@ -127,11 +127,11 @@ fn set_min_size_distributes_remaining_space_equally() {
 #[test]
 fn set_min_size_propagates_to_parent_container() {
     let mut hub = setup();
-    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
     let w2 = hub
-        .insert_window(titled("w7"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w7"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     hub.set_window_constraint(
@@ -189,10 +189,10 @@ fn set_min_size_propagates_to_parent_container() {
 fn children_combined_size_exceeds_screen_size() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w8"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w8"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w9"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w9"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     hub.set_window_constraint(
@@ -254,15 +254,15 @@ fn children_combined_size_exceeds_screen_size() {
 #[test]
 fn children_combined_size_exceeds_container_size() {
     let mut hub = setup();
-    hub.insert_window(titled("w10"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w10"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w11"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
     let w2 = hub
-        .insert_window(titled("w12"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w12"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.toggle_spawn_mode();
     let w3 = hub
-        .insert_window(titled("w13"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w13"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     hub.set_window_constraint(
@@ -328,11 +328,11 @@ fn children_combined_size_exceeds_container_size() {
 fn children_combined_size_exceeds_screen_height() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w14"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w14"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.toggle_spawn_mode();
     let w1 = hub
-        .insert_window(titled("w15"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w15"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     hub.set_window_constraint(
@@ -394,13 +394,13 @@ fn children_combined_size_exceeds_screen_height() {
 #[test]
 fn set_min_size_tabbed_child_container() {
     let mut hub = setup();
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
     let w3 = hub
-        .insert_window(titled("W3"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("W3"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     hub.set_window_constraint(
@@ -459,17 +459,17 @@ fn set_min_size_tabbed_child_container() {
 #[test]
 fn delete_window_with_min_size_shrinks_parent_container() {
     let mut hub = setup();
-    hub.insert_window(titled("w16"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w16"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
     let w1 = hub
-        .insert_window(titled("w17"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w17"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.toggle_spawn_mode();
     let w2 = hub
-        .insert_window(titled("w18"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w18"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w3 = hub
-        .insert_window(titled("w19"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w19"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     hub.set_window_constraint(
@@ -587,9 +587,9 @@ fn delete_window_with_min_size_shrinks_parent_container() {
 fn delete_window_with_min_size_allows_siblings_to_expand() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w20"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w20"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w21"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w21"), default_rect(), WindowRestrictions::None);
 
     hub.set_window_constraint(
         w0,
@@ -685,9 +685,9 @@ fn delete_window_with_min_size_allows_siblings_to_expand() {
 fn max_height_centers_window_vertically_in_horizontal_split() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w22"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w22"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w23"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w23"), default_rect(), WindowRestrictions::None);
 
     hub.set_window_constraint(
         w0,
@@ -742,10 +742,10 @@ fn max_height_centers_window_vertically_in_horizontal_split() {
 fn max_width_centers_window_horizontally_in_vertical_split() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w24"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w24"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w25"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w25"), default_rect(), WindowRestrictions::None);
 
     hub.set_window_constraint(
         w0,
@@ -800,9 +800,9 @@ fn max_width_centers_window_horizontally_in_vertical_split() {
 fn max_width_limits_window_in_horizontal_split() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w26"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w26"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w27"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w27"), default_rect(), WindowRestrictions::None);
 
     hub.set_window_constraint(
         w0,
@@ -857,10 +857,10 @@ fn max_width_limits_window_in_horizontal_split() {
 fn both_windows_at_max_centered_collectively() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w28"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w28"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w29"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w29"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     hub.set_window_constraint(
@@ -922,11 +922,11 @@ fn both_windows_at_max_centered_collectively() {
 #[test]
 fn tabbed_window_with_max_size_is_centered() {
     let mut hub = setup();
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
     let w1 = hub
-        .insert_window(titled("W1"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("W1"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     hub.set_window_constraint(
@@ -974,14 +974,14 @@ fn tabbed_window_with_max_size_is_centered() {
 fn nested_window_center_due_to_max_constraints() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w30"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w30"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w31"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w31"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.toggle_spawn_mode();
     let w2 = hub
-        .insert_window(titled("w32"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w32"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     hub.set_window_constraint(
@@ -1051,8 +1051,8 @@ fn nested_window_center_due_to_max_constraints() {
 #[test]
 fn global_max_applies_to_all_windows() {
     let mut hub = setup();
-    hub.insert_window(titled("w33"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w34"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w33"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w34"), default_rect(), WindowRestrictions::None);
 
     let l = LayoutConfigBuilder::new()
         .with_partition_tree_config(
@@ -1109,9 +1109,9 @@ fn global_max_applies_to_all_windows() {
 fn per_window_max_overrides_global() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w35"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w35"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w36"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w36"), default_rect(), WindowRestrictions::None);
 
     let l = LayoutConfigBuilder::new()
         .with_partition_tree_config(
@@ -1175,7 +1175,7 @@ fn per_window_max_overrides_global() {
 fn single_window_with_max_size_centered() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w37"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w37"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     hub.set_window_constraint(
@@ -1224,7 +1224,7 @@ fn single_window_with_max_size_centered() {
 fn single_window_with_max_larger_than_screen_fills_screen() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w38"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w38"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     hub.set_window_constraint(
@@ -1279,9 +1279,9 @@ fn single_window_with_max_larger_than_screen_fills_screen() {
 fn clearing_constraint_allows_window_to_resize() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w39"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w39"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w40"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w40"), default_rect(), WindowRestrictions::None);
 
     hub.set_window_constraint(
         w0,
@@ -1384,9 +1384,9 @@ fn clearing_constraint_allows_window_to_resize() {
 fn new_max_clamps_existing_min() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w41"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w41"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w42"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w42"), default_rect(), WindowRestrictions::None);
 
     hub.set_window_constraint(
         w0,
@@ -1442,10 +1442,10 @@ fn new_max_clamps_existing_min() {
 fn setting_max_keeps_a_min_set_earlier() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w60"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w60"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w61"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w61"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     // macOS observes either a min or a max per axis, never both, so the two arrive in
@@ -1553,9 +1553,9 @@ fn setting_max_keeps_a_min_set_earlier() {
 fn raising_min_above_existing_max_raises_max() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w43"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w43"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w44"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w44"), default_rect(), WindowRestrictions::None);
 
     // Set max_h=10. In a horizontal split with screen height 30,
     // w0 height is capped at 10, centered vertically.
@@ -1661,9 +1661,9 @@ fn raising_min_above_existing_max_raises_max() {
 fn clearing_max_removes_the_limit() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w45"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w45"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w46"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w46"), default_rect(), WindowRestrictions::None);
 
     // Cap w0 height at 10. w0 takes 75x10 centered.
     hub.set_window_constraint(
@@ -1785,9 +1785,9 @@ fn clearing_max_removes_the_limit() {
 fn setting_min_below_existing_max_keeps_max() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w47"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w47"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w48"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w48"), default_rect(), WindowRestrictions::None);
 
     // Cap w0 height at 20. w0 takes 75x20 centered.
     hub.set_window_constraint(
@@ -1854,7 +1854,7 @@ fn setting_min_below_existing_max_keeps_max() {
 fn window_max_smaller_than_global_min_width() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w49"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w49"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     let l = LayoutConfigBuilder::new()
@@ -1914,7 +1914,7 @@ fn window_max_smaller_than_global_min_width() {
 fn window_max_height_smaller_than_global_min_height() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w50"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w50"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     let l = LayoutConfigBuilder::new()
@@ -1965,9 +1965,9 @@ fn window_max_height_smaller_than_global_min_height() {
 fn window_max_width_smaller_than_global_min_width() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w51"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w51"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w52"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w52"), default_rect(), WindowRestrictions::None);
 
     let l = LayoutConfigBuilder::new()
         .with_min_width(SizeConstraint::Pixels(Length::new(100.0)))
@@ -2028,9 +2028,9 @@ fn window_max_width_smaller_than_global_min_width() {
 fn zero_valued_max_leaves_the_window_unconstrained() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w62"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w62"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w63"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w63"), default_rect(), WindowRestrictions::None);
     let unconstrained = snapshot(&hub);
 
     hub.set_window_constraint(
@@ -2053,9 +2053,9 @@ fn zero_valued_max_leaves_the_window_unconstrained() {
 fn constraint_survives_border_size_change() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w53"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w53"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w54"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w54"), default_rect(), WindowRestrictions::None);
 
     hub.set_window_constraint(
         w0,

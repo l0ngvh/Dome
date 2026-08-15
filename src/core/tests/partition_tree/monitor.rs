@@ -1,13 +1,13 @@
 use crate::action::MonitorTarget;
 use crate::core::node::{PixelRect, WindowRestrictions};
-use crate::core::tests::{default_dim, setup, snapshot, titled};
+use crate::core::tests::{default_rect, setup, snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
 fn move_container_to_monitor() {
     let mut hub = setup();
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     hub.add_monitor(
         "monitor-1".to_string(),
         PixelRect::new(150, 0, 100, 30),
@@ -30,8 +30,8 @@ fn move_container_to_monitor() {
 #[test]
 fn move_container_to_monitor_no_target() {
     let mut hub = setup();
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
     hub.add_monitor(
         "monitor-1".to_string(),
         PixelRect::new(150, 0, 100, 30),
@@ -86,11 +86,11 @@ fn move_container_to_monitor_no_target() {
 #[test]
 fn move_container_to_monitor_with_floats_on_workspace() {
     let mut hub = setup();
-    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
     hub.toggle_float();
     hub.focus_left();
-    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
     hub.add_monitor(
         "monitor-1".to_string(),

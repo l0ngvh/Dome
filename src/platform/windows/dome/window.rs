@@ -681,8 +681,7 @@ impl Dome {
                 fp.monitor = resolved;
                 fp.actual = new_placement;
                 fp.target = new_placement;
-                self.hub
-                    .update_float_dimension(id, new_placement.to_dimension(), resolved);
+                self.hub.update_float_rect(id, new_placement, resolved);
             }
 
             (

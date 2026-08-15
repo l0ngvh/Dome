@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 
 use crate::core::{
-    Dimension, Length, LimitObservation, LimitUpdate, MonitorId, PixelRect, Pixels, WindowId,
+    Length, LimitObservation, LimitUpdate, MonitorId, PixelRect, Pixels, WindowId,
     WindowRestrictions,
 };
 use crate::platform::macos::MonitorInfo;
@@ -268,27 +268,14 @@ impl Dome {
     pub(super) fn add_native_fullscreen_window(&mut self, new: NewWindow) -> Option<WindowId> {
         let window_id = self.hub.insert_window(
             Box::new(new.metadata.clone()),
-            Dimension::new(
-                Length::new(0.0),
-                Length::new(0.0),
-                Length::new(1.0),
-                Length::new(1.0),
-            ),
+            PixelRect::new(0, 0, 1, 1),
             WindowRestrictions::ProtectFullscreen,
         )?;
-        self.finalize_added_window(new, window_id, WindowState::NativeFullscreen);
+        self.registry
+            .insert(new, window_id, WindowState::NativeFullscreen);
+        self.pending_created.push(window_id);
         tracing::info!(%window_id, "New native fullscreen window");
         Some(window_id)
-    }
-
-    pub(super) fn finalize_added_window(
-        &mut self,
-        new: NewWindow,
-        window_id: WindowId,
-        state: WindowState,
-    ) {
-        self.registry.insert(new, window_id, state);
-        self.pending_created.push(window_id);
     }
 
     #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
@@ -597,13 +584,13 @@ impl Dome {
                 // Write target directly -- placed_at is NOT bumped because
                 // this is an observation, not an outbound set_frame.
                 fp.target = new_placement;
-                let dim = new_placement.to_dimension();
                 let monitor_id = self
                     .monitor_registry
-                    .find_closest_monitor(dim)
+                    .find_closest_monitor(new_placement.to_dimension())
                     .map(|m| m.id())
                     .unwrap_or_else(|| self.monitor_registry.primary_monitor_id());
-                self.hub.update_float_dimension(window_id, dim, monitor_id);
+                self.hub
+                    .update_float_rect(window_id, new_placement, monitor_id);
             }
             WindowState::BorderlessMinimized { retries } => {
                 tracing::trace!("Previously minimized borderless fullscreen window reappeared");
@@ -757,7 +744,7 @@ impl Dome {
         window.is_minimized = true;
     }
 
-    pub(super) fn is_borderless_fullscreen_at(&self, dim: PixelRect) -> bool {
-        self.monitor_registry.is_borderless_fullscreen_at(dim)
+    pub(super) fn is_borderless_fullscreen_at(&self, rect: PixelRect) -> bool {
+        self.monitor_registry.is_borderless_fullscreen_at(rect)
     }
 }

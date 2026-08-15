@@ -107,7 +107,7 @@ pub(super) enum DisplayMode {
     #[default]
     Tiling,
     Float {
-        dim: Dimension,
+        border_box: PixelRect,
         occupy: Option<FloatFullscreenMatcherId>,
     },
     Fullscreen {
@@ -226,12 +226,15 @@ impl Window {
 
     pub(super) fn float(
         workspace: WorkspaceId,
-        dim: Dimension,
+        border_box: PixelRect,
         metadata: Box<dyn WindowMetadata>,
     ) -> Self {
         Self {
             workspace: Some(workspace),
-            mode: DisplayMode::Float { dim, occupy: None },
+            mode: DisplayMode::Float {
+                border_box,
+                occupy: None,
+            },
             restrictions: WindowRestrictions::None,
             is_minimized: false,
             metadata,
@@ -288,8 +291,7 @@ pub(crate) struct Logical;
 
 /// Unit marker for rectangles expressed in **physical pixels** (raw device coords).
 /// Used on Windows (PMv2 context: `GetWindowRect`, `SetWindowPos`, `GetMonitorInfoW`,
-/// DWM frame bounds). See `src/platform/windows/handle.rs::get_dimension` for the
-/// cross-DPI virtualization rationale.
+/// DWM frame bounds).
 #[cfg_attr(
     not(target_os = "windows"),
     expect(
@@ -742,17 +744,6 @@ impl<U> Dimension<U> {
             height,
         }
     }
-
-    /// The exact left inverse of `inset_by` for any box wider and taller than
-    /// `2 * border`. Below that `inset_by` clamps its extents and the original is lost.
-    pub(crate) fn outset_by(self, border: Length<U>) -> Self {
-        Self::new(
-            self.x - border,
-            self.y - border,
-            self.width + border * 2.0,
-            self.height + border * 2.0,
-        )
-    }
 }
 
 /// Manual `Default` avoids a `U: Default` bound that `#[derive(Default)]` would
@@ -920,6 +911,17 @@ impl<U> PixelRect<U> {
             self.y + border,
             (self.width - border * 2).max(Pixels::ZERO),
             (self.height - border * 2).max(Pixels::ZERO),
+        )
+    }
+
+    /// The exact left inverse of `inset_by` for any box wider and taller than
+    /// `2 * border`. Below that `inset_by` clamps its extents and the original is lost.
+    pub(crate) fn outset_by(self, border: Pixels<U>) -> Self {
+        Self::from_pixels(
+            self.x - border,
+            self.y - border,
+            self.width + border * 2,
+            self.height + border * 2,
         )
     }
 }

@@ -7,9 +7,9 @@ use crate::config::{
 use super::allocator::{Allocator, NodeId};
 use super::matcher::{FloatFullscreenMatcherId, MatcherHit};
 use super::node::{
-    ContainerId, Dimension, DisplayMode, Length, LimitObservation, LimitUpdate, Logical, Monitor,
-    MonitorId, PixelRect, Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions,
-    Workspace, WorkspaceId,
+    ContainerId, DisplayMode, Length, LimitObservation, LimitUpdate, Logical, Monitor, MonitorId,
+    PixelRect, Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions, Workspace,
+    WorkspaceId,
 };
 use super::partition_tree::Child;
 use super::strategy::{StrategySet, TilingAction, WorkspaceExport};
@@ -565,7 +565,7 @@ impl Hub {
     pub(crate) fn insert_window(
         &mut self,
         metadata: Box<dyn WindowMetadata>,
-        dimension: Dimension,
+        rect: PixelRect,
         restrictions: WindowRestrictions,
     ) -> Option<WindowId> {
         if let Some(r) = self
@@ -615,10 +615,10 @@ impl Hub {
                 let window_id = self
                     .access
                     .windows
-                    .allocate(Window::float(target_ws, dimension, metadata));
-                tracing::debug!(%window_id, ?dimension, "Inserting float window");
+                    .allocate(Window::float(target_ws, rect, metadata));
+                tracing::debug!(%window_id, ?rect, "Inserting float window");
                 // `occupy_id` links the window back to the matcher that routed it.
-                self.attach_float_to_workspace(target_ws, window_id, dimension, occupy_id);
+                self.attach_float_to_workspace(target_ws, window_id, rect, occupy_id);
                 self.set_focus(window_id);
                 window_id
             }
@@ -682,10 +682,9 @@ impl Hub {
                 let mut float_windows = Vec::new();
                 for &id in &ws.float_windows {
                     let window = self.access.windows.get(id);
-                    let DisplayMode::Float { dim, .. } = window.mode else {
+                    let DisplayMode::Float { border_box, .. } = window.mode else {
                         panic!("window {id} in float_windows but mode is not Float");
                     };
-                    let border_box = PixelRect::from_dimension(dim);
                     if let Some(visible_border_box) = border_box.clip(screen) {
                         let is_highlighted = focused == Some(id);
                         float_windows.push(FloatWindowPlacement {

@@ -547,8 +547,12 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
 
     // Report an unknown monitor handle (999). The observation should be
     // dropped entirely -- no position change, no dimension change.
-    env.dome
-        .handle_window_moved(win, dim(3000, 500, 600, 400), 999, Instant::now());
+    env.dome.handle_window_moved(
+        win,
+        PixelRect::new(3000, 500, 600, 400),
+        999,
+        Instant::now(),
+    );
     env.dome.apply_layout();
     env.settle(10);
 
@@ -1002,7 +1006,8 @@ fn bar_move_updates_work_area() {
     env.settle(10);
     assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
 
-    env.dome.bar_moved(bar_id, 1, dim(0, 0, 1920, 60));
+    env.dome
+        .bar_moved(bar_id, 1, PixelRect::new(0, 0, 1920, 60));
     env.dome.apply_layout();
     env.settle(10);
 

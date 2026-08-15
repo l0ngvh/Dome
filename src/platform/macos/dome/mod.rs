@@ -125,7 +125,7 @@ impl WindowMetadata for MacOSMetadata {
 pub(in crate::platform::macos) enum PendingAdd {
     Positioned {
         new: NewWindow,
-        dim: PixelRect,
+        rect: PixelRect,
     },
     /// Native fullscreen windows lives on their own space and thus has no dimension
     NativeFullscreen {
@@ -288,19 +288,18 @@ impl Dome {
                 PendingAdd::NativeFullscreen { new } => {
                     self.add_native_fullscreen_window(new);
                 }
-                PendingAdd::Positioned { new, dim } => {
+                PendingAdd::Positioned { new, rect } => {
                     let ax_for_recovery = new.ax.clone();
-                    let borderless_fs = self.is_borderless_fullscreen_at(dim);
+                    let borderless_fs = self.is_borderless_fullscreen_at(rect);
                     let restrictions = if borderless_fs {
                         WindowRestrictions::ProtectFullscreen
                     } else {
                         WindowRestrictions::None
                     };
-                    let Some(id) = self.hub.insert_window(
-                        Box::new(new.metadata.clone()),
-                        dim.to_dimension(),
-                        restrictions,
-                    ) else {
+                    let Some(id) =
+                        self.hub
+                            .insert_window(Box::new(new.metadata.clone()), rect, restrictions)
+                    else {
                         let cg_id = new.ax.cg_id();
                         let pid = new.ax.pid();
                         crate::trace_once!(
@@ -314,14 +313,15 @@ impl Dome {
                         WindowState::BorderlessFullscreen
                     } else {
                         WindowState::Positioned(window::PositionedState::Offscreen(
-                            window::OffscreenPlacement::new(dim),
+                            window::OffscreenPlacement::new(rect),
                         ))
                     };
-                    self.finalize_added_window(new, id, state);
+                    self.registry.insert(new, id, state);
+                    self.pending_created.push(id);
                     self.recovery.track(
                         ax_for_recovery,
-                        dim.width(),
-                        dim.height(),
+                        rect.width(),
+                        rect.height(),
                         self.monitor_registry.primary_monitor().work_area_snapped(),
                     );
                 }

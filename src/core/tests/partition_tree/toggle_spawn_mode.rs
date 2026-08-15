@@ -1,7 +1,7 @@
 use crate::core::GlobalLayoutConfig;
-use crate::core::node::{Dimension, Length, WindowRestrictions};
+use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_dim, setup, setup_with_layout, snapshot, titled, titled_matcher,
+    LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
@@ -16,10 +16,10 @@ fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
 fn toggle_spawn_mode_creates_new_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
@@ -67,9 +67,9 @@ fn toggle_spawn_mode_creates_new_container() {
 fn toggle_spawn_mode_in_single_window_workspace_creates_vertical_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -116,12 +116,12 @@ fn toggle_spawn_mode_in_single_window_workspace_creates_vertical_container() {
 fn toggle_spawn_mode_in_vertical_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w7"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w7"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w8"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
@@ -172,12 +172,12 @@ fn toggle_spawn_mode_in_vertical_container() {
 fn toggle_spawn_mode_to_tab_inserts_to_parent_tabbed_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -223,15 +223,15 @@ fn toggle_spawn_mode_to_tab_inserts_to_parent_tabbed_container() {
 fn toggle_spawn_mode_to_tab_inserts_to_ancestor_tabbed_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W4"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
@@ -277,11 +277,11 @@ fn toggle_spawn_mode_to_tab_inserts_to_ancestor_tabbed_container() {
 fn toggle_spawn_mode_to_tab_creates_tabbed_container_if_no_ancestor() {
     let mut hub = setup();
 
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -329,11 +329,11 @@ fn toggle_spawn_mode_to_tab_creates_tabbed_container_if_no_ancestor() {
 fn toggle_spawn_mode_horizontal_when_focused_is_tabbed_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.focus_parent();
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -381,12 +381,12 @@ fn toggle_spawn_mode_horizontal_when_focused_is_tabbed_container() {
 fn toggle_spawn_mode_vertical_when_focused_is_tabbed_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.focus_parent();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -434,13 +434,13 @@ fn toggle_spawn_mode_vertical_when_focused_is_tabbed_container() {
 fn toggle_spawn_mode_tab_when_focused_is_tabbed_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.focus_parent();
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -486,14 +486,14 @@ fn toggle_spawn_mode_tab_when_focused_is_tabbed_container() {
 fn toggle_spawn_mode_tab_when_focused_is_split_container_creates_parent() {
     let mut hub = setup();
 
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
@@ -541,10 +541,10 @@ fn toggle_spawn_mode_tab_when_focused_is_split_container_creates_parent() {
 fn spawn_non_tab_in_tabbed_parent_creates_child_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -592,13 +592,13 @@ fn spawn_non_tab_in_tabbed_parent_creates_child_container() {
 fn spawn_non_tab_in_tabbed_parent_with_focused_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
-    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
@@ -653,12 +653,7 @@ fn toggle_spawn_mode_noop() {
     let mut hub = setup_with_layout(layout_floating(&["w9"]));
     hub.insert_window(
         titled("w9"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     )
     .unwrap();

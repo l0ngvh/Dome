@@ -22,7 +22,7 @@ use crate::config::{
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
-use crate::core::node::{Dimension, Direction, Length, Logical, WindowId};
+use crate::core::node::{Direction, Length, Logical, WindowId};
 use crate::core::strategy::TilingAction;
 use crate::core::{
     ContainerPlacement, FloatWindowPlacement, PixelRect, TilingWindowPlacement, WindowMetadata,
@@ -1016,14 +1016,9 @@ impl WindowMetadata for TestMetadata {
     }
 }
 
-/// Dimension for test inserts where geometry is not under assertion. Tiling ignores it.
-pub(crate) fn default_dim() -> Dimension {
-    Dimension::new(
-        Length::new(0.0),
-        Length::new(0.0),
-        Length::new(100.0),
-        Length::new(100.0),
-    )
+/// Rect for test inserts where geometry is not under assertion. Tiling ignores it.
+pub(crate) fn default_rect() -> PixelRect {
+    PixelRect::new(0, 0, 100, 100)
 }
 
 /// Convenience: create a boxed `TestMetadata` with the given title.

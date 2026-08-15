@@ -85,12 +85,12 @@ impl Hub {
                     .attach_window(&mut self.access, window_id, target_workspace);
                 self.set_workspace_focus(window_id);
             }
-            DisplayMode::Float { dim, .. } => {
+            DisplayMode::Float { border_box, .. } => {
                 // unminimize restores to current_workspace(), and minimize
                 // clears the origin, so the restore target may differ from the
                 // origin workspace. Drop occupy unconditionally to avoid
                 // leaking the origin's matcher into a different export section.
-                self.attach_float_to_workspace(target_workspace, window_id, dim, None);
+                self.attach_float_to_workspace(target_workspace, window_id, border_box, None);
             }
             DisplayMode::Fullscreen { .. } => {
                 self.attach_fullscreen_to_workspace(target_workspace, window_id, None);

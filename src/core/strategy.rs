@@ -7,8 +7,8 @@ use crate::core::GlobalLayoutConfig;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::master::MasterStrategy;
 use crate::core::node::{
-    Child, Constraints, ContainerId, Dimension, Direction, Length, Unit, WindowId, WindowMetadata,
-    WorkspaceId,
+    Child, Constraints, ContainerId, Dimension, Direction, Length, PixelRect, Unit, WindowId,
+    WindowMetadata, WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
 
@@ -101,7 +101,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Remove a window from its workspace's tiling tree. Returns the window's
     /// dimension in screen-absolute coordinates (translated before detach
     /// because detach triggers layout, which can change viewport_offset).
-    fn detach_window(&mut self, hub: &HubAccess, window_id: WindowId) -> Dimension;
+    fn detach_window(&mut self, hub: &HubAccess, window_id: WindowId) -> PixelRect;
 
     /// Dispatch a tiling-specific action. Reads the current workspace from
     /// `hub.focused_monitor` internally. Both mutates state and triggers

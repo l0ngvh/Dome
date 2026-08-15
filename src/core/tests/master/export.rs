@@ -2,7 +2,7 @@ use crate::config::{Strategy, WindowMatcher};
 use crate::core::WindowRestrictions;
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim, titled,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, titled,
     titled_process,
 };
 
@@ -39,7 +39,7 @@ fn export_master_single_window() {
         .build();
     hub.focus_workspace("1");
     let ws_id = hub.current_workspace();
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
 
     let result = hub.export_workspace(ws_id);
     assert_eq!(
@@ -76,7 +76,7 @@ fn export_master_matched_preserves_slot_matcher() {
         .build();
     hub.focus_workspace("1");
     let ws_id = hub.current_workspace();
-    hub.insert_window(titled("AAA"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("AAA"), default_rect(), WindowRestrictions::None);
 
     let result = hub.export_workspace(ws_id);
     assert_eq!(
@@ -112,8 +112,8 @@ fn export_master_mixed_matched_and_unmatched() {
     hub.focus_workspace("1");
     let ws_id = hub.current_workspace();
 
-    hub.insert_window(titled("AAA"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("foreign"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("AAA"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("foreign"), default_rect(), WindowRestrictions::None);
 
     let result = hub.export_workspace(ws_id);
     assert_eq!(
@@ -153,12 +153,12 @@ fn export_two_windows_one_slot_emits_single_matcher() {
     let ws_id = hub.current_workspace();
     hub.insert_window(
         titled_process("Browser A", "browser.exe"),
-        default_dim(),
+        default_rect(),
         WindowRestrictions::None,
     );
     hub.insert_window(
         titled_process("Browser B", "browser.exe"),
-        default_dim(),
+        default_rect(),
         WindowRestrictions::None,
     );
 

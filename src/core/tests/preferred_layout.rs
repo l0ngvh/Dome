@@ -1,6 +1,6 @@
 use super::LayoutWorkspaceConfigBuilder;
 use crate::config::{Strategy, WindowMatcher};
-use crate::core::node::{Dimension, DisplayMode, Length, WindowRestrictions};
+use crate::core::node::{DisplayMode, PixelRect, WindowRestrictions};
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{LayoutConfigBuilder, TestHubBuilder, process_meta, snapshot, titled};
 use insta::assert_snapshot;
@@ -24,12 +24,7 @@ fn sync_preferred_layout_creates_new_workspace() {
     hub.focus_workspace("dev");
     hub.insert_window(
         process_meta("float.exe"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
     assert_snapshot!(snapshot(&hub), @r"
@@ -86,12 +81,7 @@ fn float_matcher_routes_to_float() {
         .build();
     hub.insert_window(
         process_meta("float.exe"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
     hub.focus_workspace("3");
@@ -149,12 +139,7 @@ fn fullscreen_matcher_routes_to_fullscreen() {
         .build();
     hub.insert_window(
         process_meta("fullscreen.exe"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
     hub.focus_workspace("3");
@@ -217,12 +202,7 @@ fn fullscreen_beats_float_when_both_match() {
         .build();
     hub.insert_window(
         titled("matchme"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
     hub.focus_workspace("3");
@@ -285,12 +265,7 @@ fn no_match_tiles_on_current_workspace() {
         .build();
     hub.insert_window(
         process_meta("unknown.exe"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
     assert_snapshot!(snapshot(&hub), @r"
@@ -355,12 +330,7 @@ fn matchers_on_partition_tree_variant() {
         .build();
     hub.insert_window(
         process_meta("float.exe"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
     hub.focus_workspace("ws2");
@@ -412,12 +382,7 @@ fn global_float_matcher_floats_on_current_workspace() {
         .build();
     hub.insert_window(
         process_meta("calc.exe"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
     // Window stays on workspace "0" (current), not routed anywhere.
@@ -469,12 +434,7 @@ fn global_fullscreen_matcher_fullscreens_on_current_workspace() {
         .build();
     hub.insert_window(
         process_meta("slides.exe"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
     assert_snapshot!(snapshot(&hub), @r"
@@ -541,12 +501,7 @@ fn per_workspace_override_beats_global() {
     // Per-workspace wins — routes to workspace "3" as float.
     hub.insert_window(
         process_meta("calc.exe"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
     hub.focus_workspace("3");
@@ -599,12 +554,7 @@ fn no_match_uses_global_matcher() {
     // "unknown.exe" matches nothing — tiles on current workspace.
     hub.insert_window(
         process_meta("unknown.exe"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
     assert_snapshot!(snapshot(&hub), @r"
@@ -666,12 +616,7 @@ fn tiling_matcher_routes_to_workspace() {
         .build();
     hub.insert_window(
         process_meta("editor.exe"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     )
     .unwrap();
@@ -740,12 +685,7 @@ fn float_beats_tiling() {
         .build();
     hub.insert_window(
         process_meta("popup.exe"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     )
     .unwrap();
@@ -811,12 +751,7 @@ fn config_order_first_match_wins() {
         .build();
     hub.insert_window(
         process_meta("editor.exe"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     )
     .unwrap();
@@ -880,23 +815,13 @@ fn no_tiling_match_falls_back_to_current() {
         .build();
     hub.insert_window(
         process_meta("unknown.exe"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     )
     .unwrap();
     hub.insert_window(
         titled("Unknown1"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     )
     .unwrap();
@@ -960,12 +885,7 @@ fn sync_preferred_layout_reemits_matched_float_when_matcher_survives() {
 
     hub.insert_window(
         process_meta("float-live-window"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
 
@@ -1005,12 +925,7 @@ fn sync_preferred_layout_synthesises_float_when_matcher_removed() {
 
     hub.insert_window(
         process_meta("float-live-window"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
 
@@ -1041,12 +956,7 @@ fn sync_preferred_layout_adopts_manual_float_when_matcher_added() {
     let window_id = hub
         .insert_window(
             process_meta("float-live-window"),
-            Dimension::new(
-                Length::new(10.0),
-                Length::new(5.0),
-                Length::new(30.0),
-                Length::new(20.0),
-            ),
+            PixelRect::new(10, 5, 30, 20),
             WindowRestrictions::None,
         )
         .expect("window inserted");
@@ -1106,12 +1016,7 @@ fn tiling_insert_routes_against_post_export_state() {
 
     hub.insert_window(
         process_meta("other.exe"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     )
     .expect("foreign tiling window inserted");
@@ -1128,12 +1033,7 @@ fn tiling_insert_routes_against_post_export_state() {
     let new_window = hub
         .insert_window(
             process_meta("other.exe"),
-            Dimension::new(
-                Length::new(10.0),
-                Length::new(5.0),
-                Length::new(30.0),
-                Length::new(20.0),
-            ),
+            PixelRect::new(10, 5, 30, 20),
             WindowRestrictions::None,
         )
         .expect("routed window inserted");

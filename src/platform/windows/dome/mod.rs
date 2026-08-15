@@ -21,7 +21,7 @@ use crate::action::{
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
-    ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, Length,
+    ContainerId, ContainerPlacement, Direction, FloatWindowPlacement, Hub, Length,
     LimitObservation, Logical, MonitorId, MonitorLayout, Physical, PixelRect, Pixels, TilingAction,
     TilingWindowPlacement, WindowId, WindowRestrictions, WorkspaceInfo,
 };
@@ -357,15 +357,13 @@ impl Dome {
             metadata,
             constraints,
         }: NewWindow,
-        rect: Dimension<Physical>,
+        rect: PixelRect<Physical>,
         monitor: isize,
     ) {
         if self.registry.contains_hwnd(ext.id()) {
             return;
         }
-        let borderless_fs = self
-            .monitors
-            .is_borderless_fullscreen_at(PixelRect::from_dimension(rect), monitor);
+        let borderless_fs = self.monitors.is_borderless_fullscreen_at(rect, monitor);
         let restrictions = if borderless_fs {
             WindowRestrictions::ProtectFullscreen
         } else {
@@ -384,7 +382,7 @@ impl Dome {
         } else {
             WindowState::Positioned(PositionedState::Offscreen {
                 retries: 0,
-                actual: PixelRect::from_dimension(rect),
+                actual: rect,
             })
         };
         let id_key = ext.id();
@@ -846,19 +844,14 @@ impl Dome {
     pub(super) fn handle_window_moved(
         &mut self,
         id_key: HwndId,
-        new_placement: Dimension<Physical>,
+        new_placement: PixelRect<Physical>,
         monitor_handle: isize,
         observed_at: Instant,
     ) {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
         };
-        self.window_moved(
-            id,
-            PixelRect::from_dimension(new_placement),
-            monitor_handle,
-            observed_at,
-        );
+        self.window_moved(id, new_placement, monitor_handle, observed_at);
         self.apply_layout();
     }
 
@@ -912,7 +905,7 @@ impl Dome {
         &mut self,
         hwnd_id: HwndId,
         monitor: isize,
-        rect: Dimension<Physical>,
+        rect: PixelRect<Physical>,
     ) {
         if let Some(mid) = self.monitors.id_for_handle(monitor) {
             self.status_bars.capture(hwnd_id, mid, rect);
@@ -944,7 +937,7 @@ impl Dome {
         &mut self,
         hwnd_id: HwndId,
         monitor_handle: isize,
-        rect: Dimension<Physical>,
+        rect: PixelRect<Physical>,
     ) {
         if let Some(mid) = self.monitors.id_for_handle(monitor_handle) {
             self.status_bars.move_to(hwnd_id, mid, rect);

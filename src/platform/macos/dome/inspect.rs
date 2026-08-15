@@ -178,7 +178,7 @@ pub(in crate::platform::macos) fn compute_reconciliation(
         };
         to_add.push(PendingAdd::Positioned {
             new,
-            dim: PixelRect::from_dimension(Dimension::new(x, y, w, h)),
+            rect: PixelRect::from_dimension(Dimension::new(x, y, w, h)),
         });
     }
 

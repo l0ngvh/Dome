@@ -1,7 +1,7 @@
 use crate::core::GlobalLayoutConfig;
-use crate::core::node::{Dimension, Length, WindowRestrictions};
+use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_dim, setup, setup_with_layout, snapshot, titled, titled_matcher,
+    LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
@@ -17,10 +17,10 @@ fn focus_parent_twice_nested_containers() {
     let mut hub = setup();
 
     // Create nested containers
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
 
     hub.focus_parent();
     hub.focus_parent();
@@ -72,8 +72,8 @@ fn focus_parent_twice_nested_containers() {
 fn focus_parent_twice_single_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
 
     hub.focus_parent();
     hub.focus_parent();
@@ -122,8 +122,8 @@ fn focus_parent_twice_single_container() {
 #[test]
 fn focus_parent_then_toggle_fullscreen() {
     let mut hub = setup();
-    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
     // toggle_fullscreen is a no-op when a container is highlighted
     hub.toggle_fullscreen();
@@ -179,12 +179,7 @@ fn focus_parent_noop() {
     let mut hub = setup_with_layout(layout_floating(&["w7"]));
     hub.insert_window(
         titled("w7"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     )
     .unwrap();

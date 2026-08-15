@@ -1,8 +1,8 @@
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::NodeId;
-use crate::core::node::{Dimension, Length, MonitorId, WindowId, WindowRestrictions};
+use crate::core::node::{MonitorId, PixelRect, WindowId, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_dim, setup, setup_with_layout, snapshot, titled, titled_matcher,
+    LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
@@ -18,12 +18,7 @@ fn insert_float_window() {
     let mut hub = setup_with_layout(layout_floating(&["w0"]));
     hub.insert_window(
         titled("w0"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     )
     .unwrap();
@@ -64,15 +59,10 @@ fn insert_float_window() {
 #[test]
 fn float_window_with_tiling() {
     let mut hub = setup_with_layout(layout_floating(&["w2"]));
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     hub.insert_window(
         titled("w2"),
-        Dimension::new(
-            Length::new(50.0),
-            Length::new(5.0),
-            Length::new(40.0),
-            Length::new(15.0),
-        ),
+        PixelRect::new(50, 5, 40, 15),
         WindowRestrictions::None,
     )
     .unwrap();
@@ -119,15 +109,10 @@ fn float_window_with_tiling() {
 #[test]
 fn move_float_to_workspace() {
     let mut hub = setup_with_layout(layout_floating(&["w4"]));
-    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
     hub.insert_window(
         titled("w4"),
-        Dimension::new(
-            Length::new(50.0),
-            Length::new(5.0),
-            Length::new(40.0),
-            Length::new(15.0),
-        ),
+        PixelRect::new(50, 5, 40, 15),
         WindowRestrictions::None,
     )
     .unwrap();
@@ -174,16 +159,11 @@ fn move_float_to_workspace() {
 #[test]
 fn focus_falls_back_to_tiling_after_float_delete() {
     let mut hub = setup_with_layout(layout_floating(&["w6"]));
-    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
     let f0 = hub
         .insert_window(
             titled("w6"),
-            Dimension::new(
-                Length::new(50.0),
-                Length::new(5.0),
-                Length::new(40.0),
-                Length::new(15.0),
-            ),
+            PixelRect::new(50, 5, 40, 15),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -234,24 +214,14 @@ fn focus_falls_back_to_last_float() {
     let mut hub = setup_with_layout(layout_floating(&["w7", "w8"]));
     hub.insert_window(
         titled("w7"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(10.0),
-        ),
+        PixelRect::new(10, 5, 30, 10),
         WindowRestrictions::None,
     )
     .unwrap();
     let f1 = hub
         .insert_window(
             titled("w8"),
-            Dimension::new(
-                Length::new(50.0),
-                Length::new(5.0),
-                Length::new(30.0),
-                Length::new(10.0),
-            ),
+            PixelRect::new(50, 5, 30, 10),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -285,7 +255,7 @@ fn focus_falls_back_to_last_float() {
 #[test]
 fn toggle_tiling_to_float() {
     let mut hub = setup();
-    hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w9"), default_rect(), WindowRestrictions::None);
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -331,12 +301,7 @@ fn toggle_float_to_tiling() {
     let mut hub = setup_with_layout(layout_floating(&["w10"]));
     hub.insert_window(
         titled("w10"),
-        Dimension::new(
-            Length::new(50.0),
-            Length::new(5.0),
-            Length::new(40.0),
-            Length::new(15.0),
-        ),
+        PixelRect::new(50, 5, 40, 15),
         WindowRestrictions::None,
     )
     .unwrap();
@@ -383,8 +348,8 @@ fn toggle_float_to_tiling() {
 #[test]
 fn toggle_tiling_to_float_scenarios() {
     let mut hub = setup();
-    hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w12"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w11"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w12"), default_rect(), WindowRestrictions::None);
 
     // Toggle W1 to float (covers toggle with existing tiling + position preservation at x=75)
     hub.toggle_float();
@@ -475,23 +440,18 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     // Regression test: workspace should not be deleted if it still has floats
     let mut hub = setup_with_layout(layout_floating(&["w14"]));
 
-    hub.insert_window(titled("w13"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w13"), default_rect(), WindowRestrictions::None);
 
     hub.focus_workspace("1");
     let f1 = hub
         .insert_window(
             titled("w14"),
-            Dimension::new(
-                Length::new(10.0),
-                Length::new(5.0),
-                Length::new(30.0),
-                Length::new(20.0),
-            ),
+            PixelRect::new(10, 5, 30, 20),
             WindowRestrictions::None,
         )
         .unwrap();
     let w2 = hub
-        .insert_window(titled("w15"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w15"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
     assert_snapshot!(snapshot(&hub), @"
@@ -584,22 +544,16 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
 
 #[test]
 fn delete_unfocused_float_window() {
-    use crate::core::node::{Dimension, Length};
     let mut hub = setup_with_layout(layout_floating(&["w16"]));
 
     let f0 = hub
         .insert_window(
             titled("w16"),
-            Dimension::new(
-                Length::new(10.0),
-                Length::new(5.0),
-                Length::new(30.0),
-                Length::new(20.0),
-            ),
+            PixelRect::new(10, 5, 30, 20),
             WindowRestrictions::None,
         )
         .unwrap();
-    hub.insert_window(titled("w17"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w17"), default_rect(), WindowRestrictions::None);
 
     hub.delete_window(f0);
 
@@ -650,12 +604,7 @@ fn delete_float_keeps_workspace_alive() {
         let f0 = hub
             .insert_window(
                 titled("w18"),
-                Dimension::new(
-                    Length::new(10.0),
-                    Length::new(5.0),
-                    Length::new(30.0),
-                    Length::new(20.0),
-                ),
+                PixelRect::new(10, 5, 30, 20),
                 WindowRestrictions::None,
             )
             .unwrap();
@@ -672,16 +621,11 @@ fn delete_float_keeps_workspace_alive() {
     {
         let mut hub = setup_with_layout(layout_floating(&["w20"]));
         hub.focus_workspace("1");
-        hub.insert_window(titled("w19"), default_dim(), WindowRestrictions::None);
+        hub.insert_window(titled("w19"), default_rect(), WindowRestrictions::None);
         let f0 = hub
             .insert_window(
                 titled("w20"),
-                Dimension::new(
-                    Length::new(10.0),
-                    Length::new(5.0),
-                    Length::new(30.0),
-                    Length::new(20.0),
-                ),
+                PixelRect::new(10, 5, 30, 20),
                 WindowRestrictions::None,
             )
             .unwrap();
@@ -702,23 +646,13 @@ fn delete_float_keeps_workspace_alive() {
         let f0 = hub
             .insert_window(
                 titled("w21"),
-                Dimension::new(
-                    Length::new(10.0),
-                    Length::new(5.0),
-                    Length::new(30.0),
-                    Length::new(20.0),
-                ),
+                PixelRect::new(10, 5, 30, 20),
                 WindowRestrictions::None,
             )
             .unwrap();
         hub.insert_window(
             titled("w22"),
-            Dimension::new(
-                Length::new(50.0),
-                Length::new(5.0),
-                Length::new(30.0),
-                Length::new(20.0),
-            ),
+            PixelRect::new(50, 5, 30, 20),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -738,12 +672,7 @@ fn delete_float_keeps_workspace_alive() {
         let f0 = hub
             .insert_window(
                 titled("w23"),
-                Dimension::new(
-                    Length::new(10.0),
-                    Length::new(5.0),
-                    Length::new(30.0),
-                    Length::new(20.0),
-                ),
+                PixelRect::new(10, 5, 30, 20),
                 WindowRestrictions::None,
             )
             .unwrap();
@@ -762,16 +691,11 @@ fn delete_float_keeps_workspace_alive() {
 fn insert_float_offscreen_does_not_scroll_viewport() {
     let mut hub = setup_with_layout(layout_floating(&["w25"]));
     let _w0 = hub
-        .insert_window(titled("w24"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w24"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.insert_window(
         titled("w25"),
-        Dimension::new(
-            Length::new(200.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(200, 5, 30, 20),
         WindowRestrictions::None,
     )
     .unwrap();
@@ -817,27 +741,17 @@ fn insert_float_offscreen_does_not_scroll_viewport() {
 }
 
 #[test]
-fn update_float_dimension_writes_new_dim() {
+fn update_float_rect_writes_new_dim() {
     let mut hub = setup_with_layout(layout_floating(&["w26"]));
     hub.insert_window(
         titled("w26"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     )
     .unwrap();
-    hub.update_float_dimension(
+    hub.update_float_rect(
         WindowId::new(0),
-        Dimension::new(
-            Length::new(50.0),
-            Length::new(20.0),
-            Length::new(60.0),
-            Length::new(40.0),
-        ),
+        PixelRect::new(50, 20, 60, 40),
         MonitorId::new(0),
     );
     assert_snapshot!(snapshot(&hub), @"
@@ -880,53 +794,29 @@ fn update_float_dimension_writes_new_dim() {
 }
 
 #[test]
-fn update_float_dimension_preserves_z_order() {
+fn update_float_rect_preserves_z_order() {
     let mut hub = setup_with_layout(layout_floating(&["w27", "w28", "w29"]));
     let a = hub
         .insert_window(
             titled("w27"),
-            Dimension::new(
-                Length::new(10.0),
-                Length::new(5.0),
-                Length::new(30.0),
-                Length::new(20.0),
-            ),
+            PixelRect::new(10, 5, 30, 20),
             WindowRestrictions::None,
         )
         .unwrap();
     hub.insert_window(
         titled("w28"),
-        Dimension::new(
-            Length::new(50.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(50, 5, 30, 20),
         WindowRestrictions::None,
     )
     .unwrap();
     hub.insert_window(
         titled("w29"),
-        Dimension::new(
-            Length::new(90.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(90, 5, 30, 20),
         WindowRestrictions::None,
     )
     .unwrap();
     // Move a (index 0) without changing z-order or focus (c stays topmost/focused)
-    hub.update_float_dimension(
-        a,
-        Dimension::new(
-            Length::new(15.0),
-            Length::new(10.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
-        MonitorId::new(0),
-    );
+    hub.update_float_rect(a, PixelRect::new(15, 10, 30, 20), MonitorId::new(0));
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -970,47 +860,28 @@ fn update_float_dimension_preserves_z_order() {
 
 #[test]
 #[should_panic(expected = "is not Float")]
-fn update_float_dimension_on_tiling_panics() {
+fn update_float_rect_on_tiling_panics() {
     let mut hub = setup();
     let w = hub
-        .insert_window(titled("w30"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w30"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.update_float_dimension(
-        w,
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
-        MonitorId::new(0),
-    );
+    hub.update_float_rect(w, PixelRect::new(10, 5, 30, 20), MonitorId::new(0));
 }
 
 #[test]
 #[should_panic]
-fn update_float_dimension_on_unknown_panics() {
+fn update_float_rect_on_unknown_panics() {
     let mut hub = setup_with_layout(layout_floating(&["w31"]));
     hub.insert_window(
         titled("w31"),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     )
     .unwrap();
     // WindowId(999) was never inserted -- panics in allocator.get()
-    hub.update_float_dimension(
+    hub.update_float_rect(
         WindowId::new(999),
-        Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ),
+        PixelRect::new(10, 5, 30, 20),
         MonitorId::new(0),
     );
 }

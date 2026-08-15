@@ -328,7 +328,8 @@ impl TestEnv {
             app_name: ext.app_name.clone(),
         };
         if Dome::is_known_bar(&metadata) {
-            self.dome.capture_bar(hwnd_id, 1, ext.get_dim());
+            self.dome
+                .capture_bar(hwnd_id, 1, PixelRect::from_dimension(ext.get_dim()));
             return hwnd_id;
         }
         if !ext.manageable {
@@ -340,7 +341,7 @@ impl TestEnv {
             constraints: ext.constraints,
         };
         let dim = ext.get_dim();
-        self.dome.add_window(new, dim, 1);
+        self.dome.add_window(new, PixelRect::from_dimension(dim), 1);
         hwnd_id
     }
 
@@ -390,8 +391,12 @@ impl TestEnv {
                 continue;
             }
             let monitor = self.monitor_for_pos(dim.x, dim.y);
-            self.dome
-                .handle_window_moved(hwnd_id, dim, monitor, Instant::now());
+            self.dome.handle_window_moved(
+                hwnd_id,
+                PixelRect::from_dimension(dim),
+                monitor,
+                Instant::now(),
+            );
         }
         self.dome.apply_layout();
         true
@@ -824,13 +829,13 @@ impl ManageExternalWindow for MockExternalHwnd {
         1
     }
 
-    fn set_position(&self, z: ZOrder, dim: PixelRect) {
+    fn set_position(&self, z: ZOrder, rect: PixelRect) {
         self.minimized.store(false, Ordering::Relaxed);
         let dim = self
             .override_position
             .lock()
             .unwrap()
-            .map_or(dim.to_dimension(), |pos| {
+            .map_or(rect.to_dimension(), |pos| {
                 Dimension::new(
                     Length::new(pos.0 as f32),
                     Length::new(pos.1 as f32),

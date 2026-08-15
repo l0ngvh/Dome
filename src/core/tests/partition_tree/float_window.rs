@@ -1,9 +1,9 @@
 use crate::core::ContainerId;
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::NodeId;
-use crate::core::node::{Dimension, Length, LimitObservation, LimitUpdate, WindowRestrictions};
+use crate::core::node::{Length, LimitObservation, LimitUpdate, PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_dim, setup, setup_with_layout, snapshot, titled, titled_matcher,
+    LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
@@ -17,9 +17,9 @@ fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
 #[test]
 fn focus_falls_back_to_last_focused_window_after_float_delete() {
     let mut hub = setup_with_layout(layout_floating(&["w3"]));
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
 
     // Focus W1 (middle window)
     hub.focus_left();
@@ -27,12 +27,7 @@ fn focus_falls_back_to_last_focused_window_after_float_delete() {
     let f0 = hub
         .insert_window(
             titled("w3"),
-            Dimension::new(
-                Length::new(50.0),
-                Length::new(5.0),
-                Length::new(40.0),
-                Length::new(15.0),
-            ),
+            PixelRect::new(50, 5, 40, 15),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -85,19 +80,14 @@ fn focus_falls_back_to_last_focused_window_after_float_delete() {
 #[test]
 fn toggle_float_to_tiling_with_nested_containers() {
     let mut hub = setup_with_layout(layout_floating(&["w7"]));
-    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
     hub.insert_window(
         titled("w7"),
-        Dimension::new(
-            Length::new(50.0),
-            Length::new(5.0),
-            Length::new(40.0),
-            Length::new(15.0),
-        ),
+        PixelRect::new(50, 5, 40, 15),
         WindowRestrictions::None,
     )
     .unwrap();
@@ -150,8 +140,8 @@ fn toggle_float_to_tiling_with_nested_containers() {
 fn toggle_float_with_container_focused() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w8"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w9"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
     // After focus_parent, focused_tiling_window() returns None (container highlighted).
     // toggle_float is a no-op: both windows stay tiling, container stays highlighted.
@@ -202,7 +192,7 @@ fn toggle_float_with_container_focused() {
 fn toggle_float_with_scrolled_viewport() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w10"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w10"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w0,
@@ -212,7 +202,7 @@ fn toggle_float_with_scrolled_viewport() {
         },
     );
     let w1 = hub
-        .insert_window(titled("w11"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w11"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w1,
@@ -222,7 +212,7 @@ fn toggle_float_with_scrolled_viewport() {
         },
     );
     let w2 = hub
-        .insert_window(titled("w12"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w12"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w2,
@@ -283,7 +273,7 @@ fn toggle_float_with_scrolled_viewport() {
 fn toggle_float_to_tiling_with_scrolled_viewport() {
     let mut hub = setup();
     let w0 = hub
-        .insert_window(titled("w13"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w13"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w0,
@@ -293,7 +283,7 @@ fn toggle_float_to_tiling_with_scrolled_viewport() {
         },
     );
     let w1 = hub
-        .insert_window(titled("w14"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w14"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w1,
@@ -358,17 +348,12 @@ fn toggle_float_to_tiling_with_scrolled_viewport() {
 #[test]
 fn focus_direction_keeps_float_focus() {
     let mut hub = setup_with_layout(layout_floating(&["w2"]));
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     let float_id = hub
         .insert_window(
             titled("w2"),
-            Dimension::new(
-                Length::new(50.0),
-                Length::new(5.0),
-                Length::new(40.0),
-                Length::new(15.0),
-            ),
+            PixelRect::new(50, 5, 40, 15),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -390,17 +375,12 @@ fn focus_direction_keeps_float_focus() {
 #[test]
 fn focus_parent_keeps_float_focus() {
     let mut hub = setup_with_layout(layout_floating(&["w2"]));
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     let float_id = hub
         .insert_window(
             titled("w2"),
-            Dimension::new(
-                Length::new(50.0),
-                Length::new(5.0),
-                Length::new(40.0),
-                Length::new(15.0),
-            ),
+            PixelRect::new(50, 5, 40, 15),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -416,17 +396,12 @@ fn focus_parent_keeps_float_focus() {
 #[test]
 fn move_direction_keeps_float_focus() {
     let mut hub = setup_with_layout(layout_floating(&["w2"]));
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     let float_id = hub
         .insert_window(
             titled("w2"),
-            Dimension::new(
-                Length::new(50.0),
-                Length::new(5.0),
-                Length::new(40.0),
-                Length::new(15.0),
-            ),
+            PixelRect::new(50, 5, 40, 15),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -483,18 +458,13 @@ fn move_direction_keeps_float_focus() {
 #[test]
 fn tab_switch_keeps_float_focus() {
     let mut hub = setup_with_layout(layout_floating(&["w2"]));
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
     let float_id = hub
         .insert_window(
             titled("w2"),
-            Dimension::new(
-                Length::new(50.0),
-                Length::new(5.0),
-                Length::new(40.0),
-                Length::new(15.0),
-            ),
+            PixelRect::new(50, 5, 40, 15),
             WindowRestrictions::None,
         )
         .unwrap();

@@ -38,51 +38,23 @@ use crate::platform::windows::external::{
 // Unlike macOS, we are allowed to move windows completely offscreen on Windows
 pub(crate) const OFFSCREEN_POS: Pixels = Pixels::new(-32000);
 
-/// Returns the window's physical-pixel frame.
-///
-/// # Cross-process DPI behaviour
-///
 /// Because Dome is Per-Monitor v2 DPI-aware (see `resources/windows/dome.manifest`),
-/// GetWindowRect returns physical pixels regardless of the target HWND's own
-/// DPI awareness. Windows virtualizes the return based on the CALLER's
-/// awareness, not the target's. This is documented in the Microsoft Learn
-/// "PhysicalToLogicalPointForPerMonitorDPI" page:
+/// GetWindowRect returns physical pixels regardless of the target HWND's own DPI
+/// awareness. Windows virtualizes the return based on the CALLER's awareness, not the
+/// target's, and this holds for windows owned by other processes, which is the case
+/// Dome depends on.
+/// https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-physicaltologicalpointforpermonitordpi
+/// https://stackoverflow.com/a/37829235
 ///
-/// > Consider two applications, one has a PROCESS_DPI_AWARENESS value of
-/// > PROCESS_DPI_UNAWARE and the other has a value of PROCESS_PER_MONITOR_AWARE.
-/// > The PROCESS_PER_MONITOR_AWARE app creates a window on a single monitor
-/// > where the scale factor is 200% (192 DPI). If both apps call GetWindowRect
-/// > on this window, they will receive different values. The PROCESS_DPI_UNAWARE
-/// > app will receive a rect based on 96 DPI coordinates, while the
-/// > PROCESS_PER_MONITOR_AWARE app will receive coordinates matching the actual
-/// > DPI of the monitor.
-///
-/// Corroborating sources:
-/// - MS Learn, GetWindowRect: "GetWindowRect is virtualized for DPI."
-///   https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowrect
-/// - MS Learn, PhysicalToLogicalPointForPerMonitorDPI: "The system returns
-///   all points to an application in its own coordinate space." Also: "since
-///   a PROCESS_PER_MONITOR_AWARE uses the actual DPI of the monitor, logical
-///   and physical coordinates are identical."
-///   https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-physicaltologicalpointforpermonitordpi
-/// - Stack Overflow (Cody Gray, 2016): "if you call GetWindowRect or GetClientRect
-///   from a high-DPI aware application, you will get the actual values in
-///   screen coordinates. This will be true not only for windows belonging to
-///   your application's process, but also for windows belonging to other
-///   processes, regardless of that other process's DPI awareness setting."
-///   https://stackoverflow.com/a/37829235
-///
-/// Upshot: typing this as `Dimension<Physical>` is honest unconditionally
-/// for PMv2 callers. Separate from this, WM_GETMINMAXINFO is NOT virtualized
-/// in the same way -- see `target_scale_to_physical`.
-pub(crate) fn get_dimension(hwnd: HWND) -> Dimension {
+/// WM_GETMINMAXINFO is NOT virtualized the same way. See `target_scale_to_physical`.
+pub(crate) fn get_pixel_rect(hwnd: HWND) -> PixelRect {
     let mut rect = RECT::default();
     if let Err(e) = unsafe { GetWindowRect(hwnd, &mut rect) } {
         tracing::trace!(?hwnd, "GetWindowRect failed: {e}");
-        // Callers tolerate a zero Dimension (e.g. check_unmanageable rejects zero-dim windows).
-        return rect_to_dimension(rect);
+        // Callers tolerate a zero rect (e.g. check_unmanageable rejects zero-extent windows).
+        return rect_to_pixel_rect(rect);
     }
-    rect_to_dimension(rect)
+    rect_to_pixel_rect(rect)
 }
 
 /// Converts a Win32 `RECT` (left, top, right, bottom edges) into (x, y, width, height).
@@ -323,14 +295,14 @@ impl ManageExternalWindow for ExternalHwnd {
     /// `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`) and moves any thread-owned
     /// child windows by the same delta.
     ///
-    fn set_position(&self, z: ZOrder, dim: PixelRect) {
+    fn set_position(&self, z: ZOrder, rect: PixelRect) {
         let hwnd = self.0;
-        let old = get_dimension(hwnd);
+        let old = get_pixel_rect(hwnd);
         let (bl, bt, br, bb) = get_invisible_border(hwnd);
-        let x = dim.x().value() - bl;
-        let y = dim.y().value() - bt;
-        let cx = dim.width().value() + bl + br;
-        let cy = dim.height().value() + bt + bb;
+        let x = rect.x().value() - bl;
+        let y = rect.y().value() - bt;
+        let cx = rect.width().value() + bl + br;
+        let cy = rect.height().value() + bt + bb;
 
         let insert_after: Option<HWND> = z.into();
         let mut flags = SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS;
@@ -344,18 +316,18 @@ impl ManageExternalWindow for ExternalHwnd {
 
         // Propagate the position delta to owned child windows so they stay anchored
         // relative to the parent. Short-circuits on windows with no owned children.
-        let dx = x - old.x.value() as i32;
-        let dy = y - old.y.value() as i32;
+        let dx = x - old.x().value();
+        let dy = y - old.y().value();
         if dx != 0 || dy != 0 {
             for_each_owned(hwnd, |child| {
-                let mut rect = RECT::default();
-                if unsafe { GetWindowRect(child, &mut rect).is_ok() }
+                let mut child_rect = RECT::default();
+                if unsafe { GetWindowRect(child, &mut child_rect).is_ok() }
                     && let Err(e) = unsafe {
                         SetWindowPos(
                             child,
                             None,
-                            rect.left + dx,
-                            rect.top + dy,
+                            child_rect.left + dx,
+                            child_rect.top + dy,
                             0,
                             0,
                             SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
@@ -516,15 +488,15 @@ impl InspectExternalWindow for ExternalHwnd {
                     ..Default::default()
                 };
                 if unsafe { GetMonitorInfoW(hmonitor, &mut info) }.as_bool() {
-                    let dim = get_dimension(hwnd);
-                    let left = Length::new(info.rcWork.left as f32);
-                    let top = Length::new(info.rcWork.top as f32);
-                    let right = Length::new(info.rcWork.right as f32);
-                    let bottom = Length::new(info.rcWork.bottom as f32);
-                    dim.x <= left
-                        && dim.y <= top
-                        && dim.x + dim.width >= right
-                        && dim.y + dim.height >= bottom
+                    let rect = get_pixel_rect(hwnd);
+                    let left = Pixels::new(info.rcWork.left);
+                    let top = Pixels::new(info.rcWork.top);
+                    let right = Pixels::new(info.rcWork.right);
+                    let bottom = Pixels::new(info.rcWork.bottom);
+                    rect.x() <= left
+                        && rect.y() <= top
+                        && rect.x() + rect.width() >= right
+                        && rect.y() + rect.height() >= bottom
                 } else {
                     false
                 }
@@ -558,8 +530,8 @@ impl InspectExternalWindow for ExternalHwnd {
             );
             return true;
         }
-        let dim = get_dimension(hwnd);
-        if dim.width == Length::ZERO || dim.height == Length::ZERO {
+        let rect = get_pixel_rect(hwnd);
+        if rect.width() == Pixels::ZERO || rect.height() == Pixels::ZERO {
             crate::trace_once!(
                 key: (title.clone(), pid),
                 ?title, ?pid, "not manageable: zero dimension"
@@ -682,7 +654,7 @@ impl InspectExternalWindow for ExternalHwnd {
 
     /// Returns the DWM extended frame bounds in physical pixels. Falls back to
     /// `GetWindowRect` if the DWM attribute is unavailable.
-    fn get_visible_rect(&self) -> Dimension {
+    fn get_visible_rect(&self) -> PixelRect {
         let hwnd = self.0;
         let mut frame_rect = RECT::default();
         let result = unsafe {
@@ -694,9 +666,9 @@ impl InspectExternalWindow for ExternalHwnd {
             )
         };
         if result.is_ok() {
-            rect_to_dimension(frame_rect)
+            rect_to_pixel_rect(frame_rect)
         } else {
-            get_dimension(hwnd)
+            get_pixel_rect(hwnd)
         }
     }
 

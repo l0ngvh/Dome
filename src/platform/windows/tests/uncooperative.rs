@@ -91,7 +91,7 @@ fn stale_tiling_observation_ignored() {
     env.moves.lock().unwrap().clear();
 
     env.dome
-        .handle_window_moved(w1, dim(100, 100, 400, 300), 1, before);
+        .handle_window_moved(w1, PixelRect::new(100, 100, 400, 300), 1, before);
 
     assert!(
         env.moves.lock().unwrap().is_empty(),
@@ -119,7 +119,7 @@ fn stale_tiling_observation_in_fullscreen_arm_ignored() {
     env.moves.lock().unwrap().clear();
 
     env.dome
-        .handle_window_moved(w1, fullscreen_dim(), 1, before);
+        .handle_window_moved(w1, PixelRect::from_dimension(fullscreen_dim()), 1, before);
 
     assert_eq!(
         env.dim(w1),
@@ -145,7 +145,7 @@ fn stale_float_observation_does_not_write_target() {
 
     env.moves.lock().unwrap().clear();
 
-    let drag_target = dim(300, 200, 500, 400);
+    let drag_target = PixelRect::new(300, 200, 500, 400);
     env.dome.handle_window_moved(w1, drag_target, 1, before);
 
     assert!(

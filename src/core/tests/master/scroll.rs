@@ -2,7 +2,7 @@ use crate::config::{MasterConfig, SizeConstraint, Strategy};
 use crate::core::WindowRestrictions;
 use crate::core::node::{Length, LimitObservation, LimitUpdate};
 use crate::core::strategy::TilingAction;
-use crate::core::tests::{LayoutConfigBuilder, TestHubBuilder, default_dim, snapshot, titled};
+use crate::core::tests::{LayoutConfigBuilder, TestHubBuilder, default_rect, snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
@@ -19,16 +19,16 @@ fn min_height_master_pane_overflows_and_scrolls_to_focus() {
         )
         .build();
     let w0 = hub
-        .insert_window(titled("w0"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w1"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w1"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w2 = hub
-        .insert_window(titled("w2"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w2"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w3 = hub
-        .insert_window(titled("w3"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w3"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w0,
@@ -113,22 +113,22 @@ fn min_height_stack_pane_overflows_independently_of_master() {
         )
         .build();
     let _w0 = hub
-        .insert_window(titled("w4"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w4"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let _w1 = hub
-        .insert_window(titled("w5"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w5"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w2 = hub
-        .insert_window(titled("w6"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w6"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w3 = hub
-        .insert_window(titled("w7"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w7"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w4 = hub
-        .insert_window(titled("w8"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w8"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w5 = hub
-        .insert_window(titled("w9"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w9"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w2,
@@ -215,28 +215,28 @@ fn both_panes_scroll_independently() {
         )
         .build();
     let w0 = hub
-        .insert_window(titled("w10"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w10"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w11"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w11"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w2 = hub
-        .insert_window(titled("w12"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w12"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w3 = hub
-        .insert_window(titled("w13"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w13"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w4 = hub
-        .insert_window(titled("w14"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w14"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w5 = hub
-        .insert_window(titled("w15"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w15"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w6 = hub
-        .insert_window(titled("w16"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w16"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w7 = hub
-        .insert_window(titled("w17"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w17"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w0,
@@ -348,10 +348,10 @@ fn min_width_both_panes_meet_min_layout_overflows_screen() {
         )
         .build();
     let w0 = hub
-        .insert_window(titled("w18"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w18"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w19"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w19"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w0,
@@ -417,10 +417,10 @@ fn min_width_master_alone_exceeds_screen_layout_overflows() {
         )
         .build();
     let w0 = hub
-        .insert_window(titled("w20"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w20"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w21"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w21"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w0,
@@ -485,10 +485,10 @@ fn min_width_master_expands_when_only_master_constrained() {
         )
         .build();
     let w0 = hub
-        .insert_window(titled("w22"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w22"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let _w1 = hub
-        .insert_window(titled("w23"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w23"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w0,
@@ -547,10 +547,10 @@ fn max_height_centers_window_in_pane_slot() {
         )
         .build();
     let _w0 = hub
-        .insert_window(titled("w24"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w24"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w25"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w25"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w1,
@@ -609,10 +609,10 @@ fn max_width_centers_window_in_stack_pane() {
         )
         .build();
     let _w0 = hub
-        .insert_window(titled("w26"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w26"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w27"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w27"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w1,
@@ -671,10 +671,10 @@ fn max_width_centers_window_in_master_pane() {
         )
         .build();
     let w0 = hub
-        .insert_window(titled("w28"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w28"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let _w1 = hub
-        .insert_window(titled("w29"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w29"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w0,
@@ -734,7 +734,7 @@ fn global_min_above_window_max_caps_min_to_max() {
         )
         .build();
     let w0 = hub
-        .insert_window(titled("w30"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w30"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w0,
@@ -794,19 +794,19 @@ fn master_count_increment_clamps_stack_scroll() {
         )
         .build();
     let _w0 = hub
-        .insert_window(titled("w30"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w30"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w31"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w31"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w2 = hub
-        .insert_window(titled("w32"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w32"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w3 = hub
-        .insert_window(titled("w33"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w33"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w4 = hub
-        .insert_window(titled("w34"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w34"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w1,
@@ -895,19 +895,19 @@ fn master_count_decrement_clamps_master_scroll() {
         )
         .build();
     let w0 = hub
-        .insert_window(titled("w35"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w35"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w36"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w36"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w2 = hub
-        .insert_window(titled("w37"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w37"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w3 = hub
-        .insert_window(titled("w38"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w38"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let _w4 = hub
-        .insert_window(titled("w39"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w39"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w0,
@@ -998,16 +998,16 @@ fn detach_clamps_scroll() {
         )
         .build();
     let w0 = hub
-        .insert_window(titled("w40"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w40"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w41"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w41"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w2 = hub
-        .insert_window(titled("w42"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w42"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w3 = hub
-        .insert_window(titled("w43"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w43"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w0,
@@ -1090,19 +1090,19 @@ fn attach_does_not_disturb_other_pane_scroll() {
         )
         .build();
     let _w0 = hub
-        .insert_window(titled("w44"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w44"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w45"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w45"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w2 = hub
-        .insert_window(titled("w46"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w46"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w3 = hub
-        .insert_window(titled("w47"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w47"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w4 = hub
-        .insert_window(titled("w48"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w48"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w1,
@@ -1135,7 +1135,7 @@ fn attach_does_not_disturb_other_pane_scroll() {
     // w4 is already focused (last stack window). Stack scrolled to show it.
     // Attach a new window (lands in stack since master_count=1 is full)
     let w5 = hub
-        .insert_window(titled("w49"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w49"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w5,
@@ -1195,19 +1195,19 @@ fn apply_config_relayouts_and_clamps_scroll() {
         )
         .build();
     let _w0 = hub
-        .insert_window(titled("w50"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w50"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w1 = hub
-        .insert_window(titled("w51"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w51"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w2 = hub
-        .insert_window(titled("w52"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w52"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w3 = hub
-        .insert_window(titled("w53"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w53"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let w4 = hub
-        .insert_window(titled("w54"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w54"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(
         w1,

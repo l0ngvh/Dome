@@ -285,10 +285,10 @@ impl MonitorRegistry {
         best.map(|(m, _)| m)
     }
 
-    pub(super) fn is_borderless_fullscreen_at(&self, dim: PixelRect) -> bool {
+    pub(super) fn is_borderless_fullscreen_at(&self, rect: PixelRect) -> bool {
         let point = Dimension::new(
-            Length::from_pixels(dim.x()),
-            Length::from_pixels(dim.y()),
+            Length::from_pixels(rect.x()),
+            Length::from_pixels(rect.y()),
             Length::new(1.0),
             Length::new(1.0),
         );
@@ -296,10 +296,10 @@ impl MonitorRegistry {
         monitor.is_some_and(|m| {
             let mon = m.info.work_area_snapped();
             let tolerance = Pixels::new(2);
-            (dim.x() - mon.x()).abs() <= tolerance
-                && (dim.y() - mon.y()).abs() <= tolerance
-                && (dim.width() - mon.width()).abs() <= tolerance
-                && (dim.height() - mon.height()).abs() <= tolerance
+            (rect.x() - mon.x()).abs() <= tolerance
+                && (rect.y() - mon.y()).abs() <= tolerance
+                && (rect.width() - mon.width()).abs() <= tolerance
+                && (rect.height() - mon.height()).abs() <= tolerance
         })
     }
 
