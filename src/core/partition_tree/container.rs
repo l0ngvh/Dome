@@ -1,6 +1,4 @@
-use super::preferred_layout::PreferredContainerSlotId;
-use crate::core::allocator::Node;
-use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
+use crate::core::node::ContainerId;
 use crate::core::partition_tree::{Child, Parent, PartitionTreeStrategy, SpawnMode};
 
 impl PartitionTreeStrategy {
@@ -8,8 +6,8 @@ impl PartitionTreeStrategy {
     /// child to grandparent.
     pub(super) fn delete_container(&mut self, container_id: ContainerId) {
         debug_assert_eq!(self.containers.get(container_id).children.len(), 1);
-        let grandparent = self.containers.get(container_id).parent;
-        let ws = self.containers.get(container_id).workspace;
+        let grandparent = self.tiling_containers.get(&container_id).unwrap().parent;
+        let ws = self.tiling_containers.get(&container_id).unwrap().workspace;
         let last_child = self
             .containers
             .get_mut(container_id)
@@ -34,6 +32,7 @@ impl PartitionTreeStrategy {
 
         self.clean_up_occupied_container(container_id);
         self.containers.delete(container_id);
+        self.tiling_containers.remove(&container_id);
         self.maintain_direction_invariance(grandparent);
     }
 
@@ -50,7 +49,11 @@ impl PartitionTreeStrategy {
         } else {
             parent.children.push(child);
         }
-        let container_spawn_mode = self.containers.get(container_id).spawn_mode();
+        let container_spawn_mode = self
+            .tiling_containers
+            .get(&container_id)
+            .unwrap()
+            .spawn_mode();
         if let Child::Window(wid) = child {
             self.tiling_windows.get_mut(&wid).unwrap().spawn_mode =
                 SpawnMode::without_history(container_spawn_mode);
@@ -64,215 +67,78 @@ impl PartitionTreeStrategy {
     /// child is leaving the workspace or being relocated inside it.
     pub(super) fn detach_child_from_container(&mut self, container_id: ContainerId, child: Child) {
         tracing::debug!(%child, %container_id, "Detaching child from container");
-        self.containers.get_mut(container_id).remove_child(child);
+        self.remove_child(container_id, child);
         if self.containers.get(container_id).children.len() == 1 {
             self.delete_container(container_id);
         }
     }
-}
 
-/// Internal node of the partition tree. Holds an ordered list of `Child`
-/// nodes (windows or sub-containers) and either a split direction or the
-/// tabbed flag.
-///
-/// Invariants:
-/// 1. `children.len() >= 2`. Containers with one or zero children are
-///    collapsed by `tree.rs` on detach.
-/// 2. A non-tabbed container's `direction` differs from its non-tabbed
-///    parent's direction. A tabbed container is exempt: `direction()`
-///    returns `None` for it, so the alternation rule does not apply
-///    across a tabbed boundary. `validate_container_direction`
-///    (`validate.rs`) enforces this.
-#[derive(Debug, Clone)]
-pub(crate) struct Container {
-    pub(super) parent: Parent,
-    pub(super) workspace: WorkspaceId,
-    pub(super) children: Vec<Child>,
-    pub(super) dimension: Dimension,
-    /// Split axis. Read through `direction()`, which returns `None` when
-    /// `is_tabbed` is set. A value is stored while tabbed to keep the field
-    /// initialised, but it is unused until the container converts back to split.
-    direction: Direction,
-    /// Spawn mode for new children inserted under this container. Mutate via
-    /// `set_spawn_mode_reset` (drops history) or `set_spawn_mode_keep_history`
-    /// (preserves history). Direct field write would lose the `H <-> V <-> Tab`
-    /// rotation state.
-    spawn_mode: SpawnMode,
-    pub(super) is_tabbed: bool,
-    pub(super) active_tab_index: usize,
-    pub(super) min_width: Length,
-    pub(super) min_height: Length,
-    /// Preferred container slot this live container materializes, if any.
-    pub(super) occupy: Option<PreferredContainerSlotId>,
-}
-
-impl Node for Container {
-    type Id = ContainerId;
-}
-
-impl Container {
-    /// Build a split container. `direction` seeds `spawn_mode` to match.
-    pub(super) fn new(
-        parent: Parent,
-        workspace: WorkspaceId,
-        children: Vec<Child>,
-        split_mode: crate::config::SplitMode,
-    ) -> Self {
-        match split_mode {
-            crate::config::SplitMode::Horizontal => Self {
-                children,
-                parent,
-                workspace,
-                dimension: Dimension::default(),
-                direction: Direction::Horizontal,
-                spawn_mode: SpawnMode::horizontal(),
-                is_tabbed: false,
-                active_tab_index: 0,
-                min_width: Length::ZERO,
-                min_height: Length::ZERO,
-                occupy: None,
-            },
-            crate::config::SplitMode::Vertical => Self {
-                children,
-                parent,
-                workspace,
-                dimension: Dimension::default(),
-                direction: Direction::Vertical,
-                spawn_mode: SpawnMode::vertical(),
-                is_tabbed: false,
-                active_tab_index: 0,
-                min_width: Length::ZERO,
-                min_height: Length::ZERO,
-                occupy: None,
-            },
-            crate::config::SplitMode::Tabbed => Self {
-                children,
-                parent,
-                workspace,
-                dimension: Dimension::default(),
-                direction: Direction::Horizontal,
-                spawn_mode: SpawnMode::tabbed(),
-                is_tabbed: true,
-                active_tab_index: 0,
-                min_width: Length::ZERO,
-                min_height: Length::ZERO,
-                occupy: None,
-            },
-        }
-    }
-
-    pub(crate) fn is_tabbed(&self) -> bool {
-        self.is_tabbed
-    }
-
-    pub(crate) fn active_tab_index(&self) -> usize {
-        self.active_tab_index
-    }
-
-    pub(crate) fn active_tab(&self) -> Option<Child> {
-        if self.is_tabbed {
-            Some(self.children[self.active_tab_index])
+    pub(super) fn active_tab(&self, container_id: ContainerId) -> Option<Child> {
+        let data = self.tiling_containers.get(&container_id).unwrap();
+        if data.is_tabbed {
+            Some(self.containers.get(container_id).children[data.active_tab_index])
         } else {
             None
         }
     }
 
-    pub(crate) fn set_active_tab_to_child(&mut self, child: Child) {
-        if !self.is_tabbed {
-            panic!("Calling set_active_tab_to_child on split container");
-        }
-        self.active_tab_index = self.children.iter().position(|c| *c == child).unwrap();
+    pub(super) fn set_active_tab_to_child(&mut self, container_id: ContainerId, child: Child) {
+        assert!(
+            self.tiling_containers.get(&container_id).unwrap().is_tabbed,
+            "Calling set_active_tab_to_child on split container"
+        );
+        let index = self.containers.get(container_id).position_of(child);
+        self.tiling_containers
+            .get_mut(&container_id)
+            .unwrap()
+            .active_tab_index = index;
     }
 
-    pub(super) fn switch_tab(&mut self, forward: bool) -> Option<Child> {
-        if !self.is_tabbed {
+    pub(super) fn switch_tab(&mut self, container_id: ContainerId, forward: bool) -> Option<Child> {
+        if !self.tiling_containers.get(&container_id).unwrap().is_tabbed {
             return None;
         }
-        let len = self.children.len();
-        let current = self.active_tab_index;
+        let len = self.containers.get(container_id).children.len();
+        let current = self
+            .tiling_containers
+            .get(&container_id)
+            .unwrap()
+            .active_tab_index;
         let new_tab = if forward {
             (current + 1) % len
         } else {
             (current + len - 1) % len
         };
-        self.active_tab_index = new_tab;
-        Some(self.children[new_tab])
+        self.tiling_containers
+            .get_mut(&container_id)
+            .unwrap()
+            .active_tab_index = new_tab;
+        Some(self.containers.get(container_id).children[new_tab])
     }
 
-    pub(super) fn set_active_tab_by_index(&mut self, index: usize) -> Option<Child> {
-        if !self.is_tabbed || index >= self.children.len() {
+    pub(super) fn set_active_tab_by_index(
+        &mut self,
+        container_id: ContainerId,
+        index: usize,
+    ) -> Option<Child> {
+        if !self.tiling_containers.get(&container_id).unwrap().is_tabbed
+            || index >= self.containers.get(container_id).children.len()
+        {
             return None;
         }
-        self.active_tab_index = index;
-        Some(self.children[index])
+        self.tiling_containers
+            .get_mut(&container_id)
+            .unwrap()
+            .active_tab_index = index;
+        Some(self.containers.get(container_id).children[index])
     }
 
-    pub(crate) fn children(&self) -> &[Child] {
-        &self.children
-    }
-
-    pub(crate) fn min_size(&self) -> (Length, Length) {
-        (self.min_width, self.min_height)
-    }
-
-    pub(super) fn direction(&self) -> Option<Direction> {
-        if self.is_tabbed {
-            None
-        } else {
-            Some(self.direction)
+    pub(super) fn remove_child(&mut self, container_id: ContainerId, child: Child) {
+        let pos = self.containers.get(container_id).position_of(child);
+        self.containers.get_mut(container_id).children.remove(pos);
+        let data = self.tiling_containers.get_mut(&container_id).unwrap();
+        if data.is_tabbed && pos <= data.active_tab_index {
+            data.active_tab_index = data.active_tab_index.saturating_sub(1);
         }
-    }
-
-    pub(super) fn can_accommodate(&self, spawn_mode: SpawnMode) -> bool {
-        spawn_mode
-            .as_direction()
-            .is_some_and(|d| self.has_direction(d))
-            || (spawn_mode.is_tab() && self.is_tabbed())
-    }
-
-    pub(super) fn has_direction(&self, direction: Direction) -> bool {
-        if self.is_tabbed {
-            false
-        } else {
-            self.direction == direction
-        }
-    }
-
-    pub(crate) fn spawn_mode(&self) -> SpawnMode {
-        self.spawn_mode
-    }
-
-    pub(super) fn set_spawn_mode_reset(&mut self, spawn_mode: SpawnMode) {
-        self.spawn_mode = SpawnMode::without_history(spawn_mode)
-    }
-
-    pub(crate) fn set_spawn_mode_keep_history(&mut self, spawn_mode: SpawnMode) {
-        self.spawn_mode = self.spawn_mode.switch_to(spawn_mode)
-    }
-
-    pub(super) fn position_of(&self, child: Child) -> usize {
-        self.children.iter().position(|c| *c == child).unwrap()
-    }
-
-    pub(super) fn remove_child(&mut self, child: Child) {
-        let pos = self.children.iter().position(|c| *c == child).unwrap();
-        self.children.remove(pos);
-        if self.is_tabbed && pos <= self.active_tab_index {
-            self.active_tab_index = self.active_tab_index.saturating_sub(1);
-        }
-    }
-
-    pub(super) fn replace_child_if_present(&mut self, old: Child, new: Child) {
-        if let Some(pos) = self.children.iter().position(|c| *c == old) {
-            self.children[pos] = new;
-        }
-    }
-
-    pub(super) fn toggle_direction(&mut self) -> Direction {
-        self.direction = match self.direction {
-            Direction::Horizontal => Direction::Vertical,
-            Direction::Vertical => Direction::Horizontal,
-        };
-        self.direction
     }
 }

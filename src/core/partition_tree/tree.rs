@@ -1,7 +1,7 @@
 use crate::config::SplitMode;
 use crate::core::hub::HubAccess;
 use crate::core::node::{ContainerId, Dimension, WindowId, WorkspaceId};
-use crate::core::partition_tree::{Child, Container, Parent, SpawnMode};
+use crate::core::partition_tree::{Child, Container, Parent, SpawnMode, TilingContainerData};
 
 use super::PartitionTreeStrategy;
 
@@ -30,22 +30,31 @@ impl PartitionTreeStrategy {
         if spawn_mode.is_tab()
             && let Some(tabbed_self_or_ancestor) = self.find_tabbed_self_or_ancestor(insert_anchor)
         {
-            let container = self.containers.get(tabbed_self_or_ancestor);
+            let active_tab_index = self
+                .tiling_containers
+                .get(&tabbed_self_or_ancestor)
+                .unwrap()
+                .active_tab_index();
             self.attach_child_to_container(
                 child,
                 tabbed_self_or_ancestor,
-                Some(container.active_tab_index() + 1),
+                Some(active_tab_index + 1),
             );
         } else if let Child::Container(cid) = insert_anchor
-            && self.containers.get(cid).can_accommodate(spawn_mode)
+            && self
+                .tiling_containers
+                .get(&cid)
+                .unwrap()
+                .can_accommodate(spawn_mode)
         {
             self.attach_child_to_container(child, cid, None);
         } else {
             match self.parent(insert_anchor) {
                 Parent::Container(container_id) => {
                     if self
-                        .containers
-                        .get(container_id)
+                        .tiling_containers
+                        .get(&container_id)
+                        .unwrap()
                         .can_accommodate(spawn_mode)
                     {
                         let anchor_index =
@@ -140,9 +149,8 @@ impl PartitionTreeStrategy {
     pub(super) fn set_focus_pointer(&mut self, child: Child) -> WorkspaceId {
         let path: Vec<_> = self.ancestors_of(child).collect();
         for (walk_pos, parent_id) in &path {
-            let container = self.containers.get_mut(*parent_id);
-            if container.is_tabbed {
-                container.set_active_tab_to_child(*walk_pos);
+            if self.tiling_containers.get(parent_id).unwrap().is_tabbed {
+                self.set_active_tab_to_child(*parent_id, *walk_pos);
             }
         }
         // Workspace-level focus state lives above the container tree.
@@ -220,21 +228,21 @@ impl PartitionTreeStrategy {
     pub(super) fn parent(&self, child: Child) -> Parent {
         match child {
             Child::Window(id) => self.tiling_windows.get(&id).unwrap().parent,
-            Child::Container(id) => self.containers.get(id).parent,
+            Child::Container(id) => self.tiling_containers.get(&id).unwrap().parent,
         }
     }
 
     pub(super) fn set_parent(&mut self, child: Child, parent: Parent) {
         match child {
             Child::Window(id) => self.tiling_windows.get_mut(&id).unwrap().parent = parent,
-            Child::Container(id) => self.containers.get_mut(id).parent = parent,
+            Child::Container(id) => self.tiling_containers.get_mut(&id).unwrap().parent = parent,
         }
     }
 
     pub(super) fn child_dimension(&self, child: Child) -> Dimension {
         match child {
             Child::Window(id) => self.tiling_windows.get(&id).unwrap().dimension,
-            Child::Container(id) => self.containers.get(id).dimension,
+            Child::Container(id) => self.tiling_containers.get(&id).unwrap().dimension,
         }
     }
 
@@ -245,14 +253,14 @@ impl PartitionTreeStrategy {
                 .get(id)
                 .workspace()
                 .expect("tiling window must have a workspace"),
-            Child::Container(id) => self.containers.get(id).workspace,
+            Child::Container(id) => self.tiling_containers.get(&id).unwrap().workspace,
         }
     }
 
     pub(super) fn child_spawn_mode(&self, child: Child) -> SpawnMode {
         match child {
             Child::Window(id) => self.tiling_windows.get(&id).unwrap().spawn_mode,
-            Child::Container(id) => self.containers.get(id).spawn_mode(),
+            Child::Container(id) => self.tiling_containers.get(&id).unwrap().spawn_mode(),
         }
     }
 
@@ -262,7 +270,7 @@ impl PartitionTreeStrategy {
         let Child::Container(cid) = subtree else {
             return subtree;
         };
-        let ws = self.containers.get(cid).workspace;
+        let ws = self.tiling_containers.get(&cid).unwrap().workspace;
         let wid = self
             .last_focused_window_in(ws, cid)
             .expect("focus history covers every window of an in-tree subtree");
@@ -295,7 +303,7 @@ impl PartitionTreeStrategy {
                         .add_to_history(wid);
                 }
                 Child::Container(cid) => {
-                    self.containers.get_mut(cid).workspace = workspace_id;
+                    self.tiling_containers.get_mut(&cid).unwrap().workspace = workspace_id;
                 }
             }
         }
@@ -303,13 +311,13 @@ impl PartitionTreeStrategy {
 
     pub(super) fn find_tabbed_self_or_ancestor(&self, child: Child) -> Option<ContainerId> {
         if let Child::Container(id) = child
-            && self.containers.get(id).is_tabbed
+            && self.tiling_containers.get(&id).unwrap().is_tabbed
         {
             return Some(id);
         }
         self.ancestors_of(child)
             .map(|(_, pid)| pid)
-            .find(|&pid| self.containers.get(pid).is_tabbed)
+            .find(|&pid| self.tiling_containers.get(&pid).unwrap().is_tabbed)
     }
 
     /// Ensures all child containers have different direction than their parent.
@@ -324,14 +332,21 @@ impl PartitionTreeStrategy {
         };
         let order: Vec<_> = self.containers_preorder(container_id).collect();
         for id in order {
-            let Some(direction) = self.containers.get(id).direction() else {
+            let Some(direction) = self.tiling_containers.get(&id).unwrap().direction() else {
                 continue;
             };
             for &child in &self.containers.get(id).children.clone() {
                 if let Child::Container(child_id) = child
-                    && self.containers.get(child_id).has_direction(direction)
+                    && self
+                        .tiling_containers
+                        .get(&child_id)
+                        .unwrap()
+                        .has_direction(direction)
                 {
-                    self.containers.get_mut(child_id).toggle_direction();
+                    self.tiling_containers
+                        .get_mut(&child_id)
+                        .unwrap()
+                        .toggle_direction();
                 }
             }
         }
@@ -348,12 +363,13 @@ impl PartitionTreeStrategy {
         let spawn_mode = SpawnMode::from(split_mode);
         let parent = self.parent(anchor);
         let workspace_id = self.child_workspace(hub, anchor);
-        let container_id = self.containers.allocate(Container::new(
-            parent,
-            workspace_id,
-            children.clone(),
-            split_mode,
-        ));
+        let container_id = self.containers.allocate(Container {
+            children: children.clone(),
+        });
+        self.tiling_containers.insert(
+            container_id,
+            TilingContainerData::new(parent, workspace_id, split_mode),
+        );
         tracing::debug!("Forming container {container_id} to replace {anchor}");
         for &c in &children {
             match c {
@@ -362,8 +378,9 @@ impl PartitionTreeStrategy {
                         SpawnMode::without_history(spawn_mode);
                 }
                 Child::Container(cid) => {
-                    self.containers
-                        .get_mut(cid)
+                    self.tiling_containers
+                        .get_mut(&cid)
+                        .unwrap()
                         .set_spawn_mode_reset(spawn_mode);
                 }
             }

@@ -57,10 +57,10 @@ impl PartitionTreeStrategy {
         let order: Vec<_> = self.containers_preorder(root_id).collect();
 
         for cid in order {
-            let container = self.containers.get(cid);
-            let dim = container.dimension;
-            let children = container.children.clone();
-            let direction = container.direction();
+            let data = self.tiling_containers.get(&cid).unwrap();
+            let dim = data.dimension;
+            let direction = data.direction();
+            let children = self.containers.get(cid).children.clone();
             for (child, child_dim) in children.iter().zip(self.layout_children(
                 hub,
                 &children,
@@ -139,6 +139,7 @@ impl PartitionTreeStrategy {
                 }
                 Child::Container(id) => {
                     let container = self.containers.get(id);
+                    let data = self.tiling_containers.get(&id).unwrap();
                     let dim = self.child_dimension(child);
                     let border_box = translate(dim, offset_x, offset_y, screen.x(), screen.y());
                     let Some(visible_border_box) = border_box.clip(screen) else {
@@ -148,7 +149,7 @@ impl PartitionTreeStrategy {
                     // a unit from the round(y + h) the content box uses. The content top comes
                     // from the container's own dimension, not the active tab's, since a
                     // max-constrained tab is centred within the content.
-                    let band_height = if container.is_tabbed() {
+                    let band_height = if data.is_tabbed() {
                         let content_top =
                             Pixels::round(dim.y + self.tab_bar_length(scale) - offset_y)
                                 + screen.y();
@@ -173,8 +174,8 @@ impl PartitionTreeStrategy {
                         } else {
                             None
                         },
-                        is_tabbed: container.is_tabbed(),
-                        active_tab_index: container.active_tab_index(),
+                        is_tabbed: data.is_tabbed(),
+                        active_tab_index: data.active_tab_index(),
                         titles: container
                             .children()
                             .iter()
@@ -184,7 +185,7 @@ impl PartitionTreeStrategy {
                             })
                             .collect(),
                     });
-                    if let Some(active) = container.active_tab() {
+                    if let Some(active) = self.active_tab(id) {
                         stack.push(active);
                     } else {
                         for &c in container.children() {
@@ -330,9 +331,9 @@ impl PartitionTreeStrategy {
         container_id: ContainerId,
         scale: f32,
     ) {
-        let container = self.containers.get(container_id);
-        let children = container.children.clone();
-        let direction = container.direction();
+        let data = self.tiling_containers.get(&container_id).unwrap();
+        let direction = data.direction();
+        let children = self.containers.get(container_id).children.clone();
 
         let child_constraints: Vec<Constraints> = children
             .iter()
@@ -369,7 +370,7 @@ impl PartitionTreeStrategy {
             }
         };
 
-        let container = self.containers.get_mut(container_id);
+        let container = self.tiling_containers.get_mut(&container_id).unwrap();
         container.min_width = min_w;
         container.min_height = min_h;
 
@@ -399,7 +400,7 @@ impl PartitionTreeStrategy {
                 }
             }
             Child::Container(cid) => {
-                let c = self.containers.get_mut(cid);
+                let c = self.tiling_containers.get_mut(&cid).unwrap();
                 c.dimension = dim;
                 if automatic_tiling && !c.spawn_mode().is_tab() {
                     c.set_spawn_mode_reset(spawn_mode);
@@ -412,7 +413,7 @@ impl PartitionTreeStrategy {
         match child {
             Child::Window(id) => window_constraints(hub, &self.size_constraints, id),
             Child::Container(id) => {
-                let (min_w, min_h) = self.containers.get(id).min_size();
+                let (min_w, min_h) = self.tiling_containers.get(&id).unwrap().min_size();
                 Constraints {
                     min_width: min_w,
                     min_height: min_h,

@@ -917,6 +917,36 @@ impl std::fmt::Display for Child {
     }
 }
 
+/// An ordered group of children in a workspace layout. Each child is either a
+/// window or a nested group.
+///
+/// Invariant: `children.len() >= 2`. A group left with one child is dissolved
+/// and that child is promoted to the group's own parent.
+#[derive(Debug, Clone)]
+pub(crate) struct Container {
+    pub(super) children: Vec<Child>,
+}
+
+impl Node for Container {
+    type Id = ContainerId;
+}
+
+impl Container {
+    pub(super) fn children(&self) -> &[Child] {
+        &self.children
+    }
+
+    pub(super) fn position_of(&self, child: Child) -> usize {
+        self.children.iter().position(|c| *c == child).unwrap()
+    }
+
+    pub(super) fn replace_child_if_present(&mut self, old: Child, new: Child) {
+        if let Some(pos) = self.children.iter().position(|c| *c == old) {
+            self.children[pos] = new;
+        }
+    }
+}
+
 impl NodeId for WindowId {
     fn new(id: usize) -> Self {
         Self(id)

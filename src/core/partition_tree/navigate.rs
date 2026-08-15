@@ -28,8 +28,13 @@ impl PartitionTreeStrategy {
             return;
         };
 
+        let direct_parent_direction = self
+            .tiling_containers
+            .get(&direct_parent_id)
+            .unwrap()
+            .direction();
         let direct_parent = self.containers.get(direct_parent_id);
-        if direct_parent.direction().is_some_and(|d| d == direction) {
+        if direct_parent_direction.is_some_and(|d| d == direction) {
             let pos = direct_parent.position_of(child);
             let target_pos = if forward {
                 pos + 1
@@ -52,15 +57,19 @@ impl PartitionTreeStrategy {
         let mut found_ancestor = None;
         for (current_anchor, container_id) in self.ancestors_of(Child::Container(direct_parent_id))
         {
-            let container = self.containers.get(container_id);
-            if container.direction().is_none_or(|d| d != direction) {
+            if self
+                .tiling_containers
+                .get(&container_id)
+                .unwrap()
+                .direction()
+                .is_none_or(|d| d != direction)
+            {
                 continue;
             }
-            let pos = container
-                .children
-                .iter()
-                .position(|c| *c == current_anchor)
-                .unwrap();
+            let pos = self
+                .containers
+                .get(container_id)
+                .position_of(current_anchor);
             let insert_pos = if forward { pos + 1 } else { pos };
             found_ancestor = Some((container_id, insert_pos));
             break;
@@ -102,10 +111,16 @@ impl PartitionTreeStrategy {
 
         let mut sibling_found = None;
         for (current, parent_id) in self.ancestors_of(focused) {
-            let container = self.containers.get(parent_id);
-            if container.direction().is_none_or(|d| d != direction) {
+            if self
+                .tiling_containers
+                .get(&parent_id)
+                .unwrap()
+                .direction()
+                .is_none_or(|d| d != direction)
+            {
                 continue;
             }
+            let container = self.containers.get(parent_id);
             let pos = container.position_of(current);
             let has_sibling = if forward {
                 pos + 1 < container.children.len()
@@ -140,12 +155,15 @@ impl PartitionTreeStrategy {
             }
         };
         for (_, parent_id) in self.ancestors_of(Child::Container(root_id)) {
-            if self.containers.get(parent_id).is_tabbed {
+            if self.tiling_containers.get(&parent_id).unwrap().is_tabbed {
                 break;
             }
             root_id = parent_id;
         }
-        self.containers.get_mut(root_id).toggle_direction();
+        self.tiling_containers
+            .get_mut(&root_id)
+            .unwrap()
+            .toggle_direction();
         self.maintain_direction_invariance(Parent::Container(root_id));
         self.compute_placement(hub, workspace_id);
     }
@@ -155,13 +173,18 @@ impl PartitionTreeStrategy {
         hub: &mut HubAccess,
         container_id: ContainerId,
     ) {
-        let container = self.containers.get_mut(container_id);
+        let container = self.tiling_containers.get_mut(&container_id).unwrap();
         let ws = container.workspace;
         let direction = container.direction();
         let parent = container.parent;
         container.is_tabbed = !container.is_tabbed;
         tracing::debug!(%container_id, from = ?direction, "Toggled container layout");
-        if self.containers.get(container_id).is_tabbed() {
+        if self
+            .tiling_containers
+            .get(&container_id)
+            .unwrap()
+            .is_tabbed()
+        {
             // Resolved through focus_target_in because highlight mode on this very
             // container is not on its own ancestor path. None leaves the tab alone.
             let focused = self.workspaces.get(&ws).unwrap().focused_tiling;
@@ -172,9 +195,7 @@ impl PartitionTreeStrategy {
                     .map(|(child, _)| child)
             });
             if let Some(active_tab) = active_tab {
-                self.containers
-                    .get_mut(container_id)
-                    .set_active_tab_to_child(active_tab);
+                self.set_active_tab_to_child(container_id, active_tab);
             }
         } else {
             // Toggled from tabbed to split
@@ -191,7 +212,7 @@ impl PartitionTreeStrategy {
         };
 
         let current_mode = match focused {
-            Child::Container(id) => self.containers.get(id).spawn_mode(),
+            Child::Container(id) => self.tiling_containers.get(&id).unwrap().spawn_mode(),
             Child::Window(id) => {
                 let w = hub.windows.get(id);
                 if w.is_float() || w.is_fullscreen() {
@@ -204,8 +225,9 @@ impl PartitionTreeStrategy {
 
         match focused {
             Child::Container(id) => self
-                .containers
-                .get_mut(id)
+                .tiling_containers
+                .get_mut(&id)
+                .unwrap()
                 .set_spawn_mode_keep_history(new_mode),
             Child::Window(id) => {
                 let td = self.tiling_windows.get_mut(&id).unwrap();
@@ -243,11 +265,7 @@ impl PartitionTreeStrategy {
         let Some(container_id) = self.find_tabbed_self_or_ancestor(focused) else {
             return;
         };
-        let new_child = self
-            .containers
-            .get_mut(container_id)
-            .switch_tab(forward)
-            .unwrap();
+        let new_child = self.switch_tab(container_id, forward).unwrap();
         let focus_target = self.focus_target_in(new_child);
         tracing::debug!(forward, %container_id, ?focus_target, "Focusing tab");
         self.set_focus(hub, focus_target);
@@ -259,11 +277,7 @@ impl PartitionTreeStrategy {
         container_id: ContainerId,
         index: usize,
     ) {
-        let Some(new_child) = self
-            .containers
-            .get_mut(container_id)
-            .set_active_tab_by_index(index)
-        else {
+        let Some(new_child) = self.set_active_tab_by_index(container_id, index) else {
             return;
         };
         let focus_target = self.focus_target_in(new_child);

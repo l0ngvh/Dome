@@ -331,11 +331,14 @@ impl PartitionTreeStrategy {
     }
 
     pub(super) fn clean_up_occupied_container(&mut self, container_id: ContainerId) {
-        if let Some(slot_id) = self.containers.get(container_id).occupy {
-            let ws_id = self.containers.get(container_id).workspace;
+        if let Some(slot_id) = self.tiling_containers.get(&container_id).unwrap().occupy {
+            let ws_id = self.tiling_containers.get(&container_id).unwrap().workspace;
             let new_occupied_root = self.top_occupied_in(slot_id);
             self.clear_container_slot(slot_id);
-            self.containers.get_mut(container_id).occupy = None;
+            self.tiling_containers
+                .get_mut(&container_id)
+                .unwrap()
+                .occupy = None;
             if let Some(ws_state) = self.workspaces.get_mut(&ws_id)
                 && ws_state.occupied_preferred_root == Some(PreferredSlot::Container(slot_id))
             {
@@ -488,8 +491,9 @@ impl PartitionTreeStrategy {
                 .occupy
                 .map(PreferredSlot::Window),
             Child::Container(cid) => self
-                .containers
-                .get(cid)
+                .tiling_containers
+                .get(&cid)
+                .unwrap()
                 .occupy
                 .map(PreferredSlot::Container),
         }
@@ -504,7 +508,10 @@ impl PartitionTreeStrategy {
 
     fn occupy_container_slot(&mut self, slot: PreferredContainerSlotId, container_id: ContainerId) {
         self.container_slots.get_mut(slot).occupied = Some(container_id);
-        self.containers.get_mut(container_id).occupy = Some(slot);
+        self.tiling_containers
+            .get_mut(&container_id)
+            .unwrap()
+            .occupy = Some(slot);
     }
 
     fn occupied_container(&self, slot: PreferredContainerSlotId) -> Option<ContainerId> {
@@ -643,8 +650,8 @@ impl PartitionTreeStrategy {
                     let children = self.containers.get(cid).children.clone();
 
                     let split = {
-                        let container = self.containers.get(cid);
-                        Some(match container.direction() {
+                        let data = self.tiling_containers.get(&cid).unwrap();
+                        Some(match data.direction() {
                             Some(Direction::Horizontal) => SplitMode::Horizontal,
                             Some(Direction::Vertical) => SplitMode::Vertical,
                             None => SplitMode::Tabbed,
@@ -664,7 +671,7 @@ impl PartitionTreeStrategy {
                     } else if pref_root.is_none() {
                         pref_root = Some(PreferredSlot::Container(cs));
                     }
-                    self.containers.get_mut(cid).occupy = Some(cs);
+                    self.tiling_containers.get_mut(&cid).unwrap().occupy = Some(cs);
                     for &c in children.iter().rev() {
                         stack.push((Some(cs), c));
                     }

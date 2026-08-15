@@ -10,7 +10,7 @@ mod validate;
 
 use self::preferred_layout::{PreferredContainerSlot, PreferredSlot, PreferredWindowSlot};
 pub(crate) use crate::core::node::Child;
-pub(crate) use container::Container;
+pub(crate) use crate::core::node::Container;
 pub(crate) use types::*;
 
 use std::collections::HashMap;
@@ -20,7 +20,9 @@ use crate::config::SizeConstraints;
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
-use crate::core::node::{Logical, PixelRect, Pixels, WindowId, WindowMetadata, WorkspaceId};
+use crate::core::node::{
+    ContainerId, Logical, PixelRect, Pixels, WindowId, WindowMetadata, WorkspaceId,
+};
 use crate::core::strategy::{
     TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, translate,
 };
@@ -31,6 +33,7 @@ use crate::core::strategy::{
 #[derive(Debug)]
 pub(crate) struct PartitionTreeStrategy {
     containers: Allocator<Container>,
+    tiling_containers: HashMap<ContainerId, TilingContainerData>,
     tiling_windows: HashMap<WindowId, TilingWindowData>,
     workspaces: HashMap<WorkspaceId, WorkspaceTilingState>,
     window_slots: Allocator<PreferredWindowSlot>,
@@ -280,6 +283,7 @@ impl PartitionTreeStrategy {
     ) -> Self {
         Self {
             containers: Allocator::new(),
+            tiling_containers: HashMap::new(),
             tiling_windows: HashMap::new(),
             workspaces: HashMap::new(),
             window_slots: Allocator::new(),
