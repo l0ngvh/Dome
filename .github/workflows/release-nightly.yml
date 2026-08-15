@@ -13,18 +13,42 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      date: ${{ steps.version.outputs.date }}
+      short_sha: ${{ steps.version.outputs.short_sha }}
+      full_sha: ${{ steps.version.outputs.full_sha }}
     steps:
       - uses: actions/checkout@v4
+
+      # Computed here rather than in publish so a run that straddles midnight UTC
+      # cannot tag itself with a different date than it gated on.
+      - name: compute-version
+        id: version
+        run: |
+          set -euo pipefail
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          DATE=$(date -u +%Y.%m.%d)
+          echo "short_sha=$SHORT_SHA"          >> "$GITHUB_OUTPUT"
+          echo "full_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "date=$DATE"                    >> "$GITHUB_OUTPUT"
+          echo "version=$DATE.$SHORT_SHA"      >> "$GITHUB_OUTPUT"
+          echo "tag=nightly-$DATE.$SHORT_SHA"  >> "$GITHUB_OUTPUT"
+
       - name: check-head
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
           HEAD_SHA=$(git rev-parse HEAD)
           LAST_SHA=$(gh release view nightly --json body -q .body 2>/dev/null \
             | grep -oE 'sha=[a-f0-9]{40}$' | head -1 | cut -d= -f2 || true)
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::$TAG is already published. A rebuild of the same commit on the same day would publish different bytes under a version that is already taken."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           elif [ -z "$LAST_SHA" ] || [ "$HEAD_SHA" != "$LAST_SHA" ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
@@ -181,6 +205,14 @@ jobs:
     needs: [gate, build, build-raycast-extension, build-flow-launcher-plugin]
     if: needs.gate.outputs.should_run == 'true'
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VERSION: ${{ needs.gate.outputs.version }}
+      TAG: ${{ needs.gate.outputs.tag }}
+      DATE: ${{ needs.gate.outputs.date }}
+      SHORT_SHA: ${{ needs.gate.outputs.short_sha }}
+      FULL_SHA: ${{ needs.gate.outputs.full_sha }}
+      KEEP_NIGHTLIES: "14"
     steps:
       - uses: actions/checkout@v4
 
@@ -188,61 +220,86 @@ jobs:
         with:
           path: dist
 
+      # Package managers pin a sha256, so the URL they fetch has to be immutable.
+      # One copy carries the version in its name for the versioned release, the
+      # other keeps the stable name on the rolling release for manual downloads
+      # and the integration READMEs.
+      - name: stage-artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p versioned rolling
+          stage() {
+            cp "dist/$1/$2" "rolling/$2"
+            cp "dist/$1/$2" "versioned/${2/dome-nightly-/dome-nightly-$VERSION-}"
+          }
+          stage dome-nightly-aarch64-apple-darwin   dome-nightly-aarch64-apple-darwin.dmg
+          stage dome-nightly-x86_64-pc-windows-msvc dome-nightly-x86_64-pc-windows-msvc.zip
+          stage dome-nightly-raycast-extension      dome-nightly-raycast-extension.zip
+          stage dome-nightly-flow-launcher-plugin   dome-nightly-flow-launcher-plugin.zip
+
       - name: compute-sha
         id: sha
         run: |
           set -euo pipefail
-          echo "sha_aarch64_dmg=$(sha256sum dist/dome-nightly-aarch64-apple-darwin/dome-nightly-aarch64-apple-darwin.dmg | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "sha_zip=$(sha256sum dist/dome-nightly-x86_64-pc-windows-msvc/dome-nightly-x86_64-pc-windows-msvc.zip | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "sha_aarch64_dmg=$(sha256sum "versioned/dome-nightly-$VERSION-aarch64-apple-darwin.dmg" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "sha_zip=$(sha256sum "versioned/dome-nightly-$VERSION-x86_64-pc-windows-msvc.zip" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: compute-version
-        id: version
+      # Ordered before the rolling refresh so a failure there still leaves the
+      # taps resolving against a complete versioned release.
+      - name: create-versioned-release
         run: |
           set -euo pipefail
-          SHORT_SHA=$(git rev-parse --short=7 HEAD)
-          FULL_SHA=$(git rev-parse HEAD)
-          DATE=$(date -u +%Y.%m.%d)
-          echo "short_sha=$SHORT_SHA"     >> "$GITHUB_OUTPUT"
-          echo "full_sha=$FULL_SHA"       >> "$GITHUB_OUTPUT"
-          echo "date=$DATE"               >> "$GITHUB_OUTPUT"
-          echo "version=$DATE.$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          gh release create "$TAG" \
+            --title "Dome Nightly $DATE ($SHORT_SHA)" \
+            --notes "Nightly build at $DATE UTC. sha=$FULL_SHA" \
+            --prerelease \
+            --target "$FULL_SHA" \
+            versioned/*
 
-      - name: create-release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: refresh-rolling-release
         run: |
           set -euo pipefail
           gh release delete nightly --cleanup-tag --yes || true
           gh release create nightly \
-            --title "Dome Nightly ${{ steps.version.outputs.date }} (${{ steps.version.outputs.short_sha }})" \
-            --notes "Nightly build at ${{ steps.version.outputs.date }} UTC. sha=${{ steps.version.outputs.full_sha }}" \
+            --title "Dome Nightly $DATE ($SHORT_SHA)" \
+            --notes "Latest nightly: $TAG. These assets always track the newest build, so their checksums change in place. Package managers must pin the versioned assets on $TAG instead. sha=$FULL_SHA" \
             --prerelease \
-            --target "${{ steps.version.outputs.full_sha }}" \
-            dist/dome-nightly-aarch64-apple-darwin/dome-nightly-aarch64-apple-darwin.dmg \
-            dist/dome-nightly-x86_64-pc-windows-msvc/dome-nightly-x86_64-pc-windows-msvc.zip \
-            dist/dome-nightly-raycast-extension/dome-nightly-raycast-extension.zip \
-            dist/dome-nightly-flow-launcher-plugin/dome-nightly-flow-launcher-plugin.zip
+            --target "$FULL_SHA" \
+            rolling/*
+
+      # A tap can lag the newest release by up to HOMEBREW_AUTO_UPDATE_SECS, so
+      # retention has to outlive that window by a wide margin. Count-based rather
+      # than age-based because the gate skips days with no new commits.
+      - name: prune-old-nightlies
+        run: |
+          set -euo pipefail
+          gh release list --limit 200 --json tagName,createdAt \
+            --jq '[.[] | select(.tagName | startswith("nightly-"))] | sort_by(.createdAt) | reverse | .[].tagName' \
+            > nightly-tags.txt
+          tail -n "+$((KEEP_NIGHTLIES + 1))" nightly-tags.txt | while read -r stale; do
+            [ -n "$stale" ] || continue
+            echo "Deleting $stale"
+            gh release delete "$stale" --cleanup-tag --yes
+          done
 
       - name: dispatch-homebrew
-        continue-on-error: true
         uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
         with:
           token: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
           repository: l0ngvh/homebrew-dome
           event-type: new-nightly-release
           client-payload: >-
-            {"version": "${{ steps.version.outputs.version }}",
+            {"version": "${{ needs.gate.outputs.version }}",
              "sha_aarch64_dmg": "${{ steps.sha.outputs.sha_aarch64_dmg }}",
              "sha_zip": "${{ steps.sha.outputs.sha_zip }}"}
 
       - name: dispatch-scoop
-        continue-on-error: true
         uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
         with:
           token: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
           repository: l0ngvh/scoop-dome
           event-type: new-nightly-release
           client-payload: >-
-            {"version": "${{ steps.version.outputs.version }}",
+            {"version": "${{ needs.gate.outputs.version }}",
              "sha_aarch64_dmg": "${{ steps.sha.outputs.sha_aarch64_dmg }}",
              "sha_zip": "${{ steps.sha.outputs.sha_zip }}"}
