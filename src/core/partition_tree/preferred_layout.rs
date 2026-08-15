@@ -340,6 +340,23 @@ impl PartitionTreeStrategy {
         }
     }
 
+    pub(super) fn free_preferred_subtree(&mut self, root: PreferredSlot) {
+        let mut stack = vec![root];
+        for _ in crate::core::bounded_loop() {
+            let Some(slot) = stack.pop() else { break };
+            match slot {
+                PreferredSlot::Window(id) => self.window_slots.delete(id),
+                PreferredSlot::Container(id) => {
+                    let children = self.container_slots.get(id).children.clone();
+                    self.container_slots.delete(id);
+                    for &c in children.iter().rev() {
+                        stack.push(c);
+                    }
+                }
+            }
+        }
+    }
+
     pub(super) fn clean_up_occupied_container(&mut self, container_id: ContainerId) {
         if let Some(slot_id) = self.tiling_containers.get(&container_id).unwrap().occupy {
             let ws_id = self.tiling_containers.get(&container_id).unwrap().workspace;
@@ -424,8 +441,11 @@ impl PartitionTreeStrategy {
 
         // Phase: mutable — detach root (clears bookmarks + occupation,
         // triggers one layout on the now-empty workspace).
+        // The free is ordered after the detach, which still reads the tiling state of the
+        // subtree it is unlinking.
         if let Some(root) = old_root {
             self.detach_child(hub, root);
+            self.free_container_subtree(hub, root);
         }
 
         // Set the new preferred layout.
@@ -691,20 +711,7 @@ impl PartitionTreeStrategy {
         }
 
         if let Some(old) = old_root {
-            let mut stack = vec![old];
-            for _ in crate::core::bounded_loop() {
-                let Some(slot) = stack.pop() else { break };
-                match slot {
-                    PreferredSlot::Window(id) => self.window_slots.delete(id),
-                    PreferredSlot::Container(id) => {
-                        let children = self.container_slots.get(id).children.clone();
-                        self.container_slots.delete(id);
-                        for &c in children.iter().rev() {
-                            stack.push(c);
-                        }
-                    }
-                }
-            }
+            self.free_preferred_subtree(old);
         }
 
         let pref_root = pref_root?;

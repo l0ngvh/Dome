@@ -654,3 +654,19 @@ fn switch_into_preferred_tree_layout_focuses_every_migrated_window_in_turn() {
     assert!(recovered.contains(&w31));
     assert!(recovered.contains(&w32));
 }
+
+#[test]
+fn switching_a_workspace_to_master_frees_its_containers() {
+    let mut hub = setup_hub();
+    hub.insert_window(titled("w33"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w34"), default_dim(), WindowRestrictions::None);
+
+    // Without a container the switch below would have nothing to free and would pass
+    // whether or not it frees anything.
+    assert_eq!(hub.access.containers.all_active().len(), 1);
+
+    hub.sync_configuration(layout(Strategy::Master, 0.5, 1, &[], &[]));
+
+    // `snapshot` runs the arena reachability assertion, which is what checks the free.
+    assert_snapshot!(snapshot(&hub), @"");
+}

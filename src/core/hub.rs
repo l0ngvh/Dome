@@ -207,6 +207,17 @@ impl HubAccess {
         }
         order
     }
+
+    pub(super) fn take_windows(&mut self, root: Child) -> Vec<WindowId> {
+        let mut windows = Vec::new();
+        for child in self.children_dfs(root) {
+            match child {
+                Child::Window(wid) => windows.push(wid),
+                Child::Container(cid) => self.free_container(cid),
+            }
+        }
+        windows
+    }
 }
 
 impl HubAccess {

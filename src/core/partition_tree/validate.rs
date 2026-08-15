@@ -10,6 +10,7 @@ use super::PartitionTreeStrategy;
 
 impl ValidateStrategy for PartitionTreeStrategy {
     fn validate(&self, hub: &HubAccess) {
+        let mut reachable: HashSet<ContainerId> = HashSet::new();
         for (workspace_id, workspace) in hub.workspaces.all_active() {
             self.validate_workspace_focus(hub, workspace_id, &workspace);
 
@@ -29,6 +30,7 @@ impl ValidateStrategy for PartitionTreeStrategy {
                         self.validate_window(hub, wid, expected_parent, workspace_id)
                     }
                     Child::Container(cid) => {
+                        reachable.insert(cid);
                         self.validate_container(
                             hub,
                             cid,
@@ -40,6 +42,7 @@ impl ValidateStrategy for PartitionTreeStrategy {
                 }
             }
         }
+        self.validate_container_arena(hub, &reachable);
     }
 }
 
@@ -149,6 +152,36 @@ impl PartitionTreeStrategy {
         assert_eq!(
             history_seen, tree_windows,
             "Workspace {workspace_id}: focus_history does not match the tiling windows in the tree"
+        );
+    }
+
+    /// The arena is shared, so a container the tree no longer references is a leak that
+    /// only an arena-wide sweep can see. `StrategySet` holds one `PartitionTreeStrategy`
+    /// across every tree workspace, so `reachable` covers every root and this is exact.
+    fn validate_container_arena(&self, hub: &HubAccess, reachable: &HashSet<ContainerId>) {
+        let allocated: HashSet<ContainerId> = hub
+            .containers
+            .all_active()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(
+            sorted_difference(&allocated, reachable),
+            Vec::new(),
+            "Containers allocated but reachable from no workspace root, so they leaked"
+        );
+        assert_eq!(
+            sorted_difference(reachable, &allocated),
+            Vec::new(),
+            "Containers reachable from a workspace root but not allocated"
+        );
+
+        let with_state: HashSet<ContainerId> = self.tiling_containers.keys().copied().collect();
+        assert_eq!(
+            sorted_difference(&with_state, reachable),
+            Vec::new(),
+            "Containers holding tiling state but reachable from no workspace root, so their \
+             state leaked"
         );
     }
 
@@ -403,4 +436,13 @@ impl PartitionTreeStrategy {
             );
         }
     }
+}
+
+fn sorted_difference(
+    from: &HashSet<ContainerId>,
+    minus: &HashSet<ContainerId>,
+) -> Vec<ContainerId> {
+    let mut extra: Vec<ContainerId> = from.difference(minus).copied().collect();
+    extra.sort_unstable();
+    extra
 }

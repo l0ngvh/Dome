@@ -237,23 +237,21 @@ impl TilingStrategy for PartitionTreeStrategy {
         ws_id: WorkspaceId,
     ) -> (Vec<WindowId>, Option<WindowId>) {
         let focused = self.focused_tiling_window(ws_id);
-        let mut tiling: Vec<WindowId> = self
-            .workspaces
-            .get(&ws_id)
-            .and_then(|ws| ws.root)
-            .map(|root| {
-                hub.children_dfs(root)
-                    .into_iter()
-                    .filter_map(|c| match c {
-                        Child::Window(id) => Some(id),
-                        Child::Container(_) => None,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let Some(state) = self.workspaces.remove(&ws_id) else {
+            return (Vec::new(), focused);
+        };
+        let mut tiling = match state.root {
+            Some(root) => self.free_container_subtree(hub, root),
+            None => Vec::new(),
+        };
+        if let Some(preferred_root) = state.preferred_root {
+            self.free_preferred_subtree(preferred_root);
+        }
+        for wid in &tiling {
+            self.tiling_windows.remove(wid);
+        }
         // To return the windows in inserted order
         tiling.reverse();
-        self.workspaces.remove(&ws_id);
         (tiling, focused)
     }
 

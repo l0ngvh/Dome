@@ -86,7 +86,7 @@ impl WorkspaceExport {
 /// generic window management (monitors, workspaces, float, fullscreen, focus
 /// priority) does not.
 pub(crate) trait TilingStrategy: std::fmt::Debug {
-    /// Pre-allocate per-workspace state, no-op when the state already exists.
+    /// Pre-allocate per-workspace state.
     fn prepare_workspace(
         &mut self,
         ws_id: WorkspaceId,

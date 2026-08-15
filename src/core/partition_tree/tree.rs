@@ -143,6 +143,21 @@ impl PartitionTreeStrategy {
         held_focus
     }
 
+    /// Discard `subtree`. Returns its windows, which the caller re-homes.
+    pub(super) fn free_container_subtree(
+        &mut self,
+        hub: &mut HubAccess,
+        subtree: Child,
+    ) -> Vec<WindowId> {
+        // Ordered before `take_windows`, which frees the entities the walk traverses.
+        for node in hub.children_dfs(subtree) {
+            if let Child::Container(cid) = node {
+                self.tiling_containers.remove(&cid);
+            }
+        }
+        hub.take_windows(subtree)
+    }
+
     /// Internal set_focus that works with `Child` (window or container).
     pub(super) fn set_focus(&mut self, hub: &mut HubAccess, child: Child) {
         let ws = self.set_focus_pointer(hub, child);
