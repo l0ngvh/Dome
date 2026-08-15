@@ -70,6 +70,7 @@ impl MasterStrategy {
                 .collect();
 
             let focused = self.focused_tiling_window(ws_id);
+            let previous_history = state.focus_history.clone();
 
             let state = self.workspaces.get_mut(&ws_id).unwrap();
             for &id in &state.master_matchers {
@@ -98,6 +99,8 @@ impl MasterStrategy {
                 .collect();
             state.master.clear();
             state.secondary.clear();
+            // Every attach runs scroll_into_view, which resolves the focused
+            // window against the panes, so a full history over empty panes panics.
             state.clear_focus_history();
             state.master_count = new_count_opt;
             state.master_ratio = new_ratio_opt;
@@ -105,6 +108,9 @@ impl MasterStrategy {
             for &wid in &tiling_windows {
                 self.attach_window(hub, wid, ws_id);
             }
+            // Re-attaching enrolls in pane order, losing recency. Same set, so
+            // the pre-reload order still holds.
+            self.workspaces.get_mut(&ws_id).unwrap().focus_history = previous_history;
             if let Some(f) = focused {
                 self.set_focus(hub, f);
             }

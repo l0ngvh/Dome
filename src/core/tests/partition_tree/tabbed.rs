@@ -1114,7 +1114,7 @@ fn toggle_tabbed_off_dont_rotate_child_when_its_already_correct() {
 }
 
 #[test]
-fn replace_focus_should_not_change_active_tab_when_not_replacing_focused() {
+fn delete_unfocused_child_keeps_active_tab() {
     let mut hub = setup();
 
     hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);

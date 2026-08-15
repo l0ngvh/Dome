@@ -105,7 +105,6 @@ impl TilingStrategy for MasterStrategy {
     fn attach_window(&mut self, hub: &mut HubAccess, id: WindowId, ws_id: WorkspaceId) {
         hub.windows.get_mut(id).set_workspace(Some(ws_id));
         self.place(hub, ws_id, id);
-        hub.workspaces.get_mut(ws_id).is_float_focused = false;
         self.compute_placement(hub, ws_id);
     }
 
@@ -159,7 +158,6 @@ impl TilingStrategy for MasterStrategy {
             return;
         }
         state.record_focus(window_id);
-        hub.workspaces.get_mut(ws_id).is_float_focused = false;
         self.scroll_into_view(hub, ws_id);
     }
 
@@ -438,7 +436,7 @@ impl MasterStrategy {
         let occupy = self.sort_window_into_pane(ws_id, id, metadata);
 
         let state = self.workspaces.get_mut(&ws_id).unwrap();
-        state.record_focus(id);
+        state.add_to_history(id);
 
         self.window_states.insert(
             id,
@@ -543,6 +541,14 @@ impl WorkspaceState {
     fn record_focus(&mut self, window_id: WindowId) {
         self.drop_from_history(window_id);
         self.focus_history.insert(0, window_id);
+    }
+
+    /// Appends as least recently focused, keeping `focus_history` set-equal to the
+    /// panes without claiming focus. Idempotent, so a rebuild preserves order.
+    fn add_to_history(&mut self, window_id: WindowId) {
+        if !self.focus_history.contains(&window_id) {
+            self.focus_history.push(window_id);
+        }
     }
 
     fn drop_from_history(&mut self, window_id: WindowId) {

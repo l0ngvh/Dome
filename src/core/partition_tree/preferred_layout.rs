@@ -175,7 +175,6 @@ impl PartitionTreeStrategy {
         }
         self.occupy_window_slot(slot_id, window_id);
         self.compute_placement(hub, ws_id);
-        self.set_focus(hub, new_child);
     }
 
     /// When lowest common ancestor of the being inserted window and the current preferred root is
@@ -245,7 +244,6 @@ impl PartitionTreeStrategy {
             .occupied_preferred_root = Some(PreferredSlot::Container(lca));
 
         self.compute_placement(hub, ws_id);
-        self.set_focus(hub, Child::Window(window_id));
     }
 
     pub(super) fn attach_window_into_occupied_ancestor(
@@ -282,7 +280,7 @@ impl PartitionTreeStrategy {
                     self.container_slot_split(lca),
                 );
                 self.occupy_container_slot(lca, new_container_id);
-                self.mark_slot_occupied_and_focus(hub, window_id, ws_id, slot_id);
+                self.mark_slot_occupied(hub, window_id, ws_id, slot_id);
                 return;
             }
 
@@ -296,7 +294,7 @@ impl PartitionTreeStrategy {
         tracing::debug!(%window_id, ?slot_id, %container_id, insert_pos, "Inserting window into occupied ancestor container");
         self.attach_child_to_container(Child::Window(window_id), container_id, Some(insert_pos));
 
-        self.mark_slot_occupied_and_focus(hub, window_id, ws_id, slot_id);
+        self.mark_slot_occupied(hub, window_id, ws_id, slot_id);
     }
 
     pub(super) fn detach_preferred_slot(&mut self, workspace_id: WorkspaceId, child: Child) {
@@ -407,7 +405,8 @@ impl PartitionTreeStrategy {
             (windows, state.root)
         };
 
-        let focused = self.focused_tiling_window(ws_id);
+        // Re-attaching seeds the history in tree order, losing recency.
+        let previous_history = self.workspaces.get(&ws_id).unwrap().focus_history.clone();
 
         // Phase: mutable — detach root (clears bookmarks + occupation,
         // triggers one layout on the now-empty workspace).
@@ -432,9 +431,20 @@ impl PartitionTreeStrategy {
         for &wid in &tiling_windows {
             self.attach_window(hub, wid, ws_id);
         }
+        self.workspaces.get_mut(&ws_id).unwrap().focus_history = previous_history;
 
-        if let Some(f) = focused {
-            self.set_focus(hub, Child::Window(f));
+        // Detaching the root left the workspace unfocused. The history front is the
+        // window the user was on, including when the focus was a highlighted
+        // container standing on it, whose id does not survive the rebuild.
+        let restored = self
+            .workspaces
+            .get(&ws_id)
+            .unwrap()
+            .focus_history
+            .first()
+            .copied();
+        if let Some(target) = restored {
+            self.set_focus(hub, Child::Window(target));
         }
     }
 
@@ -572,7 +582,7 @@ impl PartitionTreeStrategy {
         false
     }
 
-    fn mark_slot_occupied_and_focus(
+    fn mark_slot_occupied(
         &mut self,
         hub: &mut HubAccess,
         window_id: WindowId,
@@ -581,7 +591,6 @@ impl PartitionTreeStrategy {
     ) {
         self.occupy_window_slot(slot_id, window_id);
         self.compute_placement(hub, ws_id);
-        self.set_focus(hub, Child::Window(window_id));
     }
 
     fn build_from_live_tree(

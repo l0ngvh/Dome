@@ -1,6 +1,6 @@
 use crate::config::SplitMode;
 use crate::core::hub::HubAccess;
-use crate::core::node::{ContainerId, Dimension, WorkspaceId};
+use crate::core::node::{ContainerId, Dimension, WindowId, WorkspaceId};
 use crate::core::partition_tree::{Child, Container, Parent, SpawnMode};
 
 use super::PartitionTreeStrategy;
@@ -21,7 +21,6 @@ impl PartitionTreeStrategy {
         let Some(insert_anchor) = insert_anchor else {
             self.workspaces.get_mut(&ws_id).unwrap().root = Some(child);
             self.set_parent(child, Parent::Workspace(ws_id));
-            self.set_focus(hub, child);
             self.compute_placement(hub, ws_id);
             return;
         };
@@ -73,48 +72,78 @@ impl PartitionTreeStrategy {
         }
 
         self.compute_placement(hub, ws_id);
-        self.set_focus(hub, child);
     }
 
     /// Detach a `Child` (window or container) from its workspace.
     pub(super) fn detach_child(&mut self, hub: &HubAccess, child: Child) {
         let workspace_id = self.child_workspace(hub, child);
 
-        let parent = self.parent(child);
-        match parent {
-            Parent::Container(parent_id) => {
-                self.detach_child_from_container(parent_id, child);
-                self.compute_placement(hub, workspace_id);
-            }
-            Parent::Workspace(workspace_id) => {
-                self.workspaces.get_mut(&workspace_id).unwrap().root = None;
-                self.workspaces
-                    .get_mut(&workspace_id)
-                    .unwrap()
-                    .focused_tiling = None;
+        match self.parent(child) {
+            Parent::Container(parent_id) => self.detach_child_from_container(parent_id, child),
+            Parent::Workspace(_) => self.workspaces.get_mut(&workspace_id).unwrap().root = None,
+        }
 
-                self.compute_placement(hub, workspace_id);
+        if self.forget_subtree(workspace_id, child) {
+            let successor = self
+                .workspaces
+                .get(&workspace_id)
+                .unwrap()
+                .focus_history
+                .first()
+                .copied();
+            match successor {
+                Some(wid) => {
+                    self.set_focus_pointer(Child::Window(wid));
+                }
+                None => {
+                    self.workspaces
+                        .get_mut(&workspace_id)
+                        .unwrap()
+                        .focused_tiling = None
+                }
             }
         }
+
+        // Ordered after recovery so the trailing scroll_into_view clamps against the
+        // surviving focus rather than the one that just left.
+        self.compute_placement(hub, workspace_id);
 
         self.detach_preferred_slot(workspace_id, child);
     }
 
+    /// Drop every window of `subtree` from `ws`'s focus history. Returns whether the
+    /// workspace focus pointed into `subtree`, so the caller knows it owes a
+    /// successor. Reads the subtree's own internals, which a structural detach
+    /// leaves intact.
+    fn forget_subtree(&mut self, ws: WorkspaceId, subtree: Child) -> bool {
+        let nodes: Vec<_> = self.children_dfs(subtree).collect();
+        let state = self.workspaces.get_mut(&ws).unwrap();
+        let mut held_focus = false;
+        for node in nodes {
+            held_focus |= state.focused_tiling == Some(node);
+            if let Child::Window(wid) = node {
+                state.drop_from_history(wid);
+            }
+        }
+        held_focus
+    }
+
     /// Internal set_focus that works with `Child` (window or container).
-    ///
-    /// Establish invariant 3 of `Container` for `child`: writes `child` to
-    /// `container.focused` on every ancestor up to the workspace, and updates
-    /// `active_tab` on each tabbed ancestor with the walk position (not
-    /// `child`). At the workspace level, sets `focused_tiling = Some(child)`
-    /// and clears `is_float_focused`.
     pub(super) fn set_focus(&mut self, hub: &mut HubAccess, child: Child) {
+        let ws = self.set_focus_pointer(child);
+        self.scroll_into_view(hub, ws);
+    }
+
+    /// The state half of `set_focus`, without the hub. Returns the workspace so
+    /// callers do not re-derive it through `hub`, which can disagree with the tree
+    /// mid-surgery.
+    pub(super) fn set_focus_pointer(&mut self, child: Child) -> WorkspaceId {
         let path: Vec<_> = self.ancestors_of(child).collect();
         for (walk_pos, parent_id) in &path {
             let container = self.containers.get_mut(*parent_id);
             if container.is_tabbed {
                 container.set_active_tab_to_child(*walk_pos);
             }
-            container.focused = child;
         }
         // Workspace-level focus state lives above the container tree.
         // ancestors_of terminates at the workspace boundary, so handle it here.
@@ -125,9 +154,12 @@ impl PartitionTreeStrategy {
         let Parent::Workspace(ws) = self.parent(ws_child) else {
             panic!("set_focus: top of ancestor path has no workspace parent");
         };
-        self.workspaces.get_mut(&ws).unwrap().focused_tiling = Some(child);
-        hub.workspaces.get_mut(ws).is_float_focused = false;
-        self.scroll_into_view(hub, ws);
+        let state = self.workspaces.get_mut(&ws).unwrap();
+        state.focused_tiling = Some(child);
+        if let Child::Window(wid) = child {
+            state.record_focus(wid);
+        }
+        ws
     }
 
     pub(super) fn ancestors_of(
@@ -224,12 +256,26 @@ impl PartitionTreeStrategy {
         }
     }
 
-    /// One step down the focus chain. Does not recurse.
-    pub(super) fn descend_to_focused(&self, child: Child) -> Child {
-        match child {
-            Child::Window(_) => child,
-            Child::Container(id) => self.containers.get(id).focused,
-        }
+    /// Focus target when entering `subtree`. Panics if the history does not cover a
+    /// container subtree.
+    pub(super) fn focus_target_in(&self, subtree: Child) -> Child {
+        let Child::Container(cid) = subtree else {
+            return subtree;
+        };
+        let ws = self.containers.get(cid).workspace;
+        let wid = self
+            .last_focused_window_in(ws, cid)
+            .expect("focus history covers every window of an in-tree subtree");
+        Child::Window(wid)
+    }
+
+    /// Skips history entries that live elsewhere in the workspace.
+    fn last_focused_window_in(&self, ws: WorkspaceId, subtree: ContainerId) -> Option<WindowId> {
+        let history = &self.workspaces.get(&ws)?.focus_history;
+        history.iter().copied().find(|&wid| {
+            self.ancestors_of(Child::Window(wid))
+                .any(|(_, pid)| pid == subtree)
+        })
     }
 
     pub(super) fn assign_subtree_to_workspace(
@@ -243,6 +289,10 @@ impl PartitionTreeStrategy {
             match node {
                 Child::Window(wid) => {
                     hub.windows.get_mut(wid).set_workspace(Some(workspace_id));
+                    self.workspaces
+                        .get_mut(&workspace_id)
+                        .unwrap()
+                        .add_to_history(wid);
                 }
                 Child::Container(cid) => {
                     self.containers.get_mut(cid).workspace = workspace_id;
@@ -302,7 +352,6 @@ impl PartitionTreeStrategy {
             parent,
             workspace_id,
             children.clone(),
-            anchor,
             split_mode,
         ));
         tracing::debug!("Forming container {container_id} to replace {anchor}");

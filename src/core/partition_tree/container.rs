@@ -9,6 +9,7 @@ impl PartitionTreeStrategy {
     pub(super) fn delete_container(&mut self, container_id: ContainerId) {
         debug_assert_eq!(self.containers.get(container_id).children.len(), 1);
         let grandparent = self.containers.get(container_id).parent;
+        let ws = self.containers.get(container_id).workspace;
         let last_child = self
             .containers
             .get_mut(container_id)
@@ -26,7 +27,10 @@ impl PartitionTreeStrategy {
             Parent::Workspace(ws) => self.workspaces.get_mut(&ws).unwrap().root = Some(last_child),
         }
 
-        self.replace_child_focus(Child::Container(container_id), last_child);
+        if self.workspaces.get(&ws).unwrap().focused_tiling == Some(Child::Container(container_id))
+        {
+            self.set_focus_pointer(last_child);
+        }
 
         self.clean_up_occupied_container(container_id);
         self.containers.delete(container_id);
@@ -55,84 +59,14 @@ impl PartitionTreeStrategy {
         self.maintain_direction_invariance(Parent::Container(container_id));
     }
 
-    /// Detach child from container and replace focus to sibling.
-    /// Deletes container if only one child remains.
+    /// Detach child from container. Deletes the container if only one child
+    /// remains. Focus recovery belongs to `detach_child`, which knows whether the
+    /// child is leaving the workspace or being relocated inside it.
     pub(super) fn detach_child_from_container(&mut self, container_id: ContainerId, child: Child) {
         tracing::debug!(%child, %container_id, "Detaching child from container");
-        let children = &self.containers.get(container_id).children;
-        let pos = children.iter().position(|c| *c == child).unwrap();
-        let sibling = if pos > 0 {
-            children[pos - 1]
-        } else {
-            children[pos + 1]
-        };
-        let new_focus = self.descend_to_focused(sibling);
-        self.replace_child_focus(child, new_focus);
-
         self.containers.get_mut(container_id).remove_child(child);
         if self.containers.get(container_id).children.len() == 1 {
             self.delete_container(container_id);
-        }
-    }
-
-    /// Maintain invariant 3 of `Container` after replacing `old_child` with
-    /// `new_child` in the tree. Two-walk algorithm:
-    ///
-    /// Walk 1 (scope): from `old_child`, find the highest ancestor still
-    /// focusing `old_child`. Stops at the first ancestor that does not focus
-    /// `old_child`. If the walk reaches the workspace, scope is the entire
-    /// path (and `focused_tiling` is also checked in walk 2).
-    ///
-    /// Walk 2 (replace): from `new_child`, rewrite `focused = new_child` and
-    /// update active tabs on every ancestor that still has `focused ==
-    /// old_child`. Stops at the scope boundary from walk 1. If scope reached
-    /// the workspace, also replaces `focused_tiling` if it pointed to
-    /// `old_child`.
-    fn replace_child_focus(&mut self, old_child: Child, new_child: Child) {
-        // Walk 1 (scope): find how far up old_child's focus extends.
-        // focus_chain_top = None means scope reaches the workspace.
-        let mut focus_chain_top = None;
-        let mut reached_workspace = true;
-        for (_, parent_id) in self.ancestors_of(old_child) {
-            if self.containers.get(parent_id).focused == old_child {
-                focus_chain_top = Some(parent_id);
-            } else {
-                reached_workspace = false;
-                break;
-            }
-        }
-        if reached_workspace {
-            focus_chain_top = None;
-        }
-
-        // Walk 2 (replace): walk up from new_child, replacing focus references.
-        let path: Vec<_> = self.ancestors_of(new_child).collect();
-        let mut hit_boundary = false;
-        for (walk_pos, parent_id) in &path {
-            let container = self.containers.get_mut(*parent_id);
-            if container.focused == old_child {
-                if container.is_tabbed {
-                    container.set_active_tab_to_child(*walk_pos);
-                }
-                container.focused = new_child;
-            }
-            if focus_chain_top.is_some_and(|c| c == *parent_id) {
-                hit_boundary = true;
-                break;
-            }
-        }
-        // If scope reached workspace and walk 2 didn't hit a boundary, update workspace focus.
-        if !hit_boundary {
-            let ws_child = match path.last() {
-                Some((_, last_pid)) => Child::Container(*last_pid),
-                None => new_child,
-            };
-            if let Parent::Workspace(ws) = self.parent(ws_child)
-                && self.workspaces.get(&ws).unwrap().focused_tiling == Some(old_child)
-            {
-                self.workspaces.get_mut(&ws).unwrap().focused_tiling = Some(new_child);
-                tracing::debug!(?old_child, ?new_child, "Workspace focus replaced");
-            }
         }
     }
 }
@@ -149,21 +83,11 @@ impl PartitionTreeStrategy {
 ///    returns `None` for it, so the alternation rule does not apply
 ///    across a tabbed boundary. `validate_container_direction`
 ///    (`validate.rs`) enforces this.
-/// 3. Focus-chain invariant: every container on the path from workspace
-///    root to the focused leaf has `focused` set to the same `Child`
-///    value (the focused leaf, or a `Child::Container` after
-///    `focus_parent`). See `WorkspaceTilingState::focused_tiling`
-///    (`mod.rs`) for the workspace-level pointer that anchors this
-///    chain.
 #[derive(Debug, Clone)]
 pub(crate) struct Container {
     pub(super) parent: Parent,
     pub(super) workspace: WorkspaceId,
     pub(super) children: Vec<Child>,
-    /// The focused descendant per invariant 3 above. Not necessarily a
-    /// direct child: in a chain `root -> A -> B -> W`, all of
-    /// `root.focused`, `A.focused`, `B.focused` equal `Child::Window(W)`.
-    pub(super) focused: Child,
     pub(super) dimension: Dimension,
     /// Split axis. Read through `direction()`, which returns `None` when
     /// `is_tabbed` is set. A value is stored while tabbed to keep the field
@@ -187,20 +111,16 @@ impl Node for Container {
 }
 
 impl Container {
-    /// Build a split container. `focused` must be one of `children` (or a
-    /// descendant under one of them) so invariant 3 holds at construction.
-    /// `direction` seeds `spawn_mode` to match.
+    /// Build a split container. `direction` seeds `spawn_mode` to match.
     pub(super) fn new(
         parent: Parent,
         workspace: WorkspaceId,
         children: Vec<Child>,
-        focused: Child,
         split_mode: crate::config::SplitMode,
     ) -> Self {
         match split_mode {
             crate::config::SplitMode::Horizontal => Self {
                 children,
-                focused,
                 parent,
                 workspace,
                 dimension: Dimension::default(),
@@ -214,7 +134,6 @@ impl Container {
             },
             crate::config::SplitMode::Vertical => Self {
                 children,
-                focused,
                 parent,
                 workspace,
                 dimension: Dimension::default(),
@@ -228,7 +147,6 @@ impl Container {
             },
             crate::config::SplitMode::Tabbed => Self {
                 children,
-                focused,
                 parent,
                 workspace,
                 dimension: Dimension::default(),

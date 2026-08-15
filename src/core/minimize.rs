@@ -83,6 +83,7 @@ impl Hub {
                 self.strategies
                     .for_workspace_mut(target_workspace)
                     .attach_window(&mut self.access, window_id, target_workspace);
+                self.set_workspace_focus(window_id);
             }
             DisplayMode::Float { dim, .. } => {
                 // unminimize restores to current_workspace(), and minimize

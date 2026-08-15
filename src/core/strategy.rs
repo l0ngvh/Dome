@@ -91,7 +91,8 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
         preferred_layout: Option<&LayoutWorkspaceConfig>,
     );
 
-    /// Insert a window into the tiling tree for the given workspace.
+    /// Insert a window into the tiling tree for the given workspace. Does not
+    /// focus it: the hub decides focus.
     fn attach_window(&mut self, hub: &mut HubAccess, window_id: WindowId, ws_id: WorkspaceId);
 
     /// Remove a window from its workspace's tiling tree. Returns the window's
@@ -107,8 +108,8 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Compute layout for all tiling windows in the workspace.
     fn compute_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId);
 
-    /// Set tiling focus to the given window, updating container focus chains
-    /// and workspace focus state.
+    /// Move tiling focus to the given window. Never touches
+    /// `Workspace::is_float_focused`, so a focused float keeps keyboard focus.
     fn set_focus(&mut self, hub: &mut HubAccess, window_id: WindowId);
 
     /// Collect tiling placements for rendering.

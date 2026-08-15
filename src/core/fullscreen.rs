@@ -53,6 +53,7 @@ impl Hub {
         self.strategies
             .for_workspace_mut(ws)
             .attach_window(&mut self.access, window_id, ws);
+        self.set_workspace_focus(window_id);
 
         tracing::info!("Fullscreen unset");
     }
