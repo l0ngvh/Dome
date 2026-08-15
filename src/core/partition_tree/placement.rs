@@ -42,12 +42,14 @@ impl PartitionTreeStrategy {
         let Some(root) = ws_state.root else { return };
         let viewport_offset = ws_state.viewport_offset;
         let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
-        let screen = monitor.work_area.to_dimension();
+        let work_area = monitor.work_area;
+        let screen_width = Length::from_pixels(work_area.width());
+        let screen_height = Length::from_pixels(work_area.height());
         let scale = monitor.scale;
         let (offset_x, offset_y) = viewport_offset;
-        let viewport_rect = Dimension::new(offset_x, offset_y, screen.width, screen.height);
+        let viewport_rect = Dimension::new(offset_x, offset_y, screen_width, screen_height);
 
-        self.set_root_dimension(hub, root, screen);
+        self.set_root_dimension(hub, root, screen_width, screen_height);
 
         let Child::Container(root_id) = root else {
             return;
@@ -88,10 +90,8 @@ impl PartitionTreeStrategy {
         let ws = hub.workspaces.get(ws_id);
         let (offset_x, offset_y) = ws_state.viewport_offset;
         let screen = hub.monitors.get(ws.monitor).work_area;
-        let screen_dim = screen.to_dimension();
         let border = hub.border(ws.monitor);
-        // Only highlight tiling focus when this is the current workspace AND
-        // the workspace's effective focus is on tiling (not float). Fullscreen
+        // Only highlight tiling focus when this is the current workspace. Fullscreen
         // workspaces never reach here (hub returns early with MonitorLayout::Fullscreen).
         let focused = if focused && !ws.is_float_focused {
             ws_state.focused_tiling
@@ -109,12 +109,13 @@ impl PartitionTreeStrategy {
             let Some(child) = stack.pop() else { break };
             match child {
                 Child::Window(id) => {
-                    let border_box = PixelRect::from_dimension(translate(
+                    let border_box = translate(
                         self.child_dimension(child),
                         offset_x,
                         offset_y,
-                        screen_dim,
-                    ));
+                        screen.x(),
+                        screen.y(),
+                    );
                     if let Some(visible_border_box) = border_box.clip(screen) {
                         let is_highlighted = focused == Some(Child::Window(id));
                         let content_box = border_box.inset_by(border);
@@ -137,12 +138,13 @@ impl PartitionTreeStrategy {
                 }
                 Child::Container(id) => {
                     let container = self.containers.get(id);
-                    let border_box = PixelRect::from_dimension(translate(
+                    let border_box = translate(
                         self.child_dimension(child),
                         offset_x,
                         offset_y,
-                        screen_dim,
-                    ));
+                        screen.x(),
+                        screen.y(),
+                    );
                     let Some(visible_border_box) = border_box.clip(screen) else {
                         continue;
                     };
@@ -287,18 +289,24 @@ impl PartitionTreeStrategy {
             .collect()
     }
 
-    /// Place the root child within the screen. Base dimension is
-    /// `screen.max(min)` on each axis: the root grows past the screen when a
+    /// Place the root child within the screen. Base dimension is the screen extent maxed
+    /// against the minimum on each axis: the root grows past the screen when a
     /// descendant's minimum exceeds the screen, and the viewport scrolls to it
     /// instead of clipping. Then applies the root's max constraint with the
     /// current viewport for centering.
-    fn set_root_dimension(&mut self, hub: &HubAccess, root: Child, screen: Dimension) {
+    fn set_root_dimension(
+        &mut self,
+        hub: &HubAccess,
+        root: Child,
+        screen_width: Length,
+        screen_height: Length,
+    ) {
         let c = self.get_effective_constraints(hub, root);
         let base_dim: Dimension = Dimension::new(
             Length::ZERO,
             Length::ZERO,
-            screen.width.max(c.min_width),
-            screen.height.max(c.min_height),
+            screen_width.max(c.min_width),
+            screen_height.max(c.min_height),
         );
         let dim = place_in_visible(base_dim, (c.max_width, c.max_height), base_dim);
 

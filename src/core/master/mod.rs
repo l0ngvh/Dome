@@ -16,7 +16,7 @@ use crate::core::node::{
     Child, Dimension, Direction, Length, PixelRect, WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::strategy::{
-    TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, distribute_space,
+    TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, distribute_space, translate,
     window_constraints,
 };
 
@@ -115,11 +115,10 @@ impl TilingStrategy for MasterStrategy {
             .get(id)
             .workspace()
             .expect("detaching tiling window has a workspace");
-        let screen = hub
+        let work_area = hub
             .monitors
             .get(hub.workspaces.get(ws_id).monitor)
-            .work_area
-            .to_dimension();
+            .work_area;
 
         let state = self.workspaces.get_mut(&ws_id).unwrap_or_else(|| {
             panic!("master: detach_window called for {id:?} but workspace {ws_id} has no state")
@@ -134,12 +133,7 @@ impl TilingStrategy for MasterStrategy {
             self.slots.get_mut(sid).windows.retain(|w| w != &id);
         }
         let dim = removed.dimension;
-        let result = PixelRect::from_dimension(Dimension::new(
-            dim.x + screen.x,
-            dim.y - y_offset + screen.y,
-            dim.width,
-            dim.height,
-        ));
+        let result = translate(dim, Length::ZERO, y_offset, work_area.x(), work_area.y());
 
         self.reconcile_master_count(hub, ws_id);
         self.compute_placement(hub, ws_id);

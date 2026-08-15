@@ -17,22 +17,22 @@ impl MasterStrategy {
             return;
         }
 
-        let screen = hub
+        let work_area = hub
             .monitors
             .get(hub.workspaces.get(ws_id).monitor)
-            .work_area
-            .to_dimension();
-        let h = screen.height;
+            .work_area;
+        let screen_width = Length::from_pixels(work_area.width());
+        let h = Length::from_pixels(work_area.height());
 
         let master_ids: Vec<WindowId> = state.master.clone();
         let stack_ids: Vec<WindowId> = state.secondary.clone();
 
         match (master_n, stack_n) {
             (_, 0) => {
-                self.do_pane_layout(hub, &master_ids, screen.width, Length::ZERO, h);
+                self.do_pane_layout(hub, &master_ids, screen_width, Length::ZERO, h);
             }
             (0, _) => {
-                self.do_pane_layout(hub, &stack_ids, screen.width, Length::ZERO, h);
+                self.do_pane_layout(hub, &stack_ids, screen_width, Length::ZERO, h);
             }
             (_, _) => {
                 let master_min_w = master_ids
@@ -45,19 +45,19 @@ impl MasterStrategy {
                     .fold(Length::ZERO, Length::max);
 
                 let desired_master_w = Length::new(
-                    (screen.width.value() * state.master_ratio.unwrap_or(self.master_ratio))
+                    (screen_width.value() * state.master_ratio.unwrap_or(self.master_ratio))
                         .floor(),
                 );
                 let total_min = master_min_w + stack_min_w;
 
-                let (master_w, stack_w) = if total_min >= screen.width {
+                let (master_w, stack_w) = if total_min >= screen_width {
                     (master_min_w, stack_min_w)
                 } else if desired_master_w < master_min_w {
-                    (master_min_w, screen.width - master_min_w)
-                } else if screen.width - desired_master_w < stack_min_w {
-                    (screen.width - stack_min_w, stack_min_w)
+                    (master_min_w, screen_width - master_min_w)
+                } else if screen_width - desired_master_w < stack_min_w {
+                    (screen_width - stack_min_w, stack_min_w)
                 } else {
-                    (desired_master_w, screen.width - desired_master_w)
+                    (desired_master_w, screen_width - desired_master_w)
                 };
 
                 self.do_pane_layout(hub, &master_ids, master_w, Length::ZERO, h);
@@ -84,7 +84,6 @@ impl MasterStrategy {
 
         let ws = hub.workspaces.get(ws_id);
         let screen = hub.monitors.get(ws.monitor).work_area;
-        let screen_dim = screen.to_dimension();
         let border = hub.border(ws.monitor);
 
         let mut windows = Vec::with_capacity(state.master.len() + state.secondary.len());
@@ -98,8 +97,7 @@ impl MasterStrategy {
         let mut push_pane = |vec: &[WindowId], y_offset: Length| {
             for &wid in vec.iter() {
                 let dim = self.window_states[&wid].dimension;
-                let border_box =
-                    PixelRect::from_dimension(translate(dim, Length::ZERO, y_offset, screen_dim));
+                let border_box = translate(dim, Length::ZERO, y_offset, screen.x(), screen.y());
                 if let Some(visible_border_box) = border_box.clip(screen) {
                     let is_highlighted = focused_id == Some(wid);
                     let content_box = border_box.inset_by(border);
@@ -174,12 +172,12 @@ impl MasterStrategy {
 
     fn clamp_scroll(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
         let state = self.workspaces.get(&ws_id).unwrap();
-        let pane_height = hub
-            .monitors
-            .get(hub.workspaces.get(ws_id).monitor)
-            .work_area
-            .to_dimension()
-            .height;
+        let pane_height = Length::from_pixels(
+            hub.monitors
+                .get(hub.workspaces.get(ws_id).monitor)
+                .work_area
+                .height(),
+        );
 
         let master_ids: Vec<WindowId> = state.master.clone();
         let master_max = if !master_ids.is_empty() {

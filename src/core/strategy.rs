@@ -7,12 +7,11 @@ use crate::core::GlobalLayoutConfig;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::master::MasterStrategy;
 use crate::core::node::{
-    Child, Constraints, ContainerId, Dimension, Direction, Length, PixelRect, Unit, WindowId,
-    WindowMetadata, WorkspaceId,
+    Child, Constraints, ContainerId, Dimension, Direction, Length, PixelRect, Pixels, Unit,
+    WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
 
-/// Actions that are specific to the tiling strategy.
 #[derive(Debug)]
 pub(crate) enum TilingAction {
     FocusDirection {
@@ -196,16 +195,18 @@ pub(crate) fn window_constraints(
     let monitor_id = hub.workspaces.get(ws_id).monitor;
     let monitor = hub.monitors.get(monitor_id);
     let scale = monitor.scale;
-    let screen = monitor.work_area.to_dimension();
+    let work_area = monitor.work_area;
+    let screen_width = Length::from_pixels(work_area.width());
+    let screen_height = Length::from_pixels(work_area.height());
 
-    let global_min_w = size_constraints.minimum_width.resolve(screen.width, scale);
+    let global_min_w = size_constraints.minimum_width.resolve(screen_width, scale);
     let global_min_h = size_constraints
         .minimum_height
-        .resolve(screen.height, scale);
-    let global_max_w = size_constraints.maximum_width.resolve(screen.width, scale);
+        .resolve(screen_height, scale);
+    let global_max_w = size_constraints.maximum_width.resolve(screen_width, scale);
     let global_max_h = size_constraints
         .maximum_height
-        .resolve(screen.height, scale);
+        .resolve(screen_height, scale);
 
     let outset = Length::from_pixels(hub.border(monitor_id) * 2);
     let limits = hub.windows.get(wid).limits();
@@ -250,20 +251,28 @@ pub(crate) fn window_constraints(
     }
 }
 
-/// Convert layout-space coordinates to screen-absolute. Layout positions are
-/// relative to workspace origin (0,0); this applies viewport offset and
-/// monitor origin.
+/// Converts layout-space coordinates to screen-absolute. Layout positions are relative to
+/// the workspace origin plus the viewport offset, so the monitor origin is what makes them
+/// absolute. The origin is added after rounding rather than before, which is exact because
+/// it is integral.
 pub(crate) fn translate<U>(
     dim: Dimension<U>,
     offset_x: Length<U>,
     offset_y: Length<U>,
-    screen: Dimension<U>,
-) -> Dimension<U> {
-    Dimension::new(
-        dim.x - offset_x + screen.x,
-        dim.y - offset_y + screen.y,
+    screen_x: Pixels<U>,
+    screen_y: Pixels<U>,
+) -> PixelRect<U> {
+    let local = PixelRect::from_dimension(Dimension::new(
+        dim.x - offset_x,
+        dim.y - offset_y,
         dim.width,
         dim.height,
+    ));
+    PixelRect::from_pixels(
+        local.x() + screen_x,
+        local.y() + screen_y,
+        local.width(),
+        local.height(),
     )
 }
 

@@ -11,12 +11,12 @@ impl MasterStrategy {
         let Some((pane, idx)) = state.focused_position() else {
             return;
         };
-        let pane_height = hub
-            .monitors
-            .get(hub.workspaces.get(ws_id).monitor)
-            .work_area
-            .to_dimension()
-            .height;
+        let pane_height = Length::from_pixels(
+            hub.monitors
+                .get(hub.workspaces.get(ws_id).monitor)
+                .work_area
+                .height(),
+        );
 
         let offset = match pane {
             Pane::Master => state.master_y_offset,

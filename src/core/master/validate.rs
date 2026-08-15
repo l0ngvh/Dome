@@ -74,12 +74,12 @@ impl ValidateStrategy for MasterStrategy {
                 continue;
             }
 
-            let pane_height = hub
-                .monitors
-                .get(hub.workspaces.get(ws_id).monitor)
-                .work_area
-                .to_dimension()
-                .height;
+            let pane_height = Length::from_pixels(
+                hub.monitors
+                    .get(hub.workspaces.get(ws_id).monitor)
+                    .work_area
+                    .height(),
+            );
 
             for &wid in &state.master {
                 let dim = self.window_states[&wid].dimension;

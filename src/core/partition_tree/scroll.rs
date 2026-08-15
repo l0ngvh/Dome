@@ -18,7 +18,9 @@ impl PartitionTreeStrategy {
             return;
         };
         let monitor_id = hub.workspaces.get(workspace_id).monitor;
-        let screen = hub.monitors.get(monitor_id).work_area.to_dimension();
+        let work_area = hub.monitors.get(monitor_id).work_area;
+        let screen_width = Length::from_pixels(work_area.width());
+        let screen_height = Length::from_pixels(work_area.height());
         let (mut offset_x, mut offset_y) = ws_state.viewport_offset;
 
         if let Some(focused) = ws_state.focused_tiling {
@@ -27,9 +29,9 @@ impl PartitionTreeStrategy {
             let reserved_top = self.enclosing_tabbed_strip_total(focused, scale);
 
             offset_x =
-                nudge_offset_into_view(offset_x, focused_dim.x, focused_dim.width, screen.width);
+                nudge_offset_into_view(offset_x, focused_dim.x, focused_dim.width, screen_width);
             offset_y =
-                nudge_offset_into_view(offset_y, focused_dim.y, focused_dim.height, screen.height);
+                nudge_offset_into_view(offset_y, focused_dim.y, focused_dim.height, screen_height);
             // Keep enclosing tab strips visible at the top of the viewport.
             // After this clamp, focused.y - offset_y >= reserved_top, so each
             // enclosing strip sits on or below the top of the screen.
@@ -46,18 +48,18 @@ impl PartitionTreeStrategy {
         }
     }
 
-    /// Clamp the workspace's viewport offset against the root's dimension.
     /// With no root, resets to `(ZERO, ZERO)` so a later attach starts from a
     /// known origin instead of inheriting a stale offset from a previous tree.
     fn clamp_viewport_offset(&mut self, hub: &HubAccess, workspace_id: WorkspaceId) {
         let Some(ws_state) = self.workspaces.get(&workspace_id) else {
             return;
         };
-        let screen = hub
+        let work_area = hub
             .monitors
             .get(hub.workspaces.get(workspace_id).monitor)
-            .work_area
-            .to_dimension();
+            .work_area;
+        let screen_width = Length::from_pixels(work_area.width());
+        let screen_height = Length::from_pixels(work_area.height());
         let (mut offset_x, mut offset_y) = ws_state.viewport_offset;
 
         let root_dim = match ws_state.root {
@@ -71,8 +73,8 @@ impl PartitionTreeStrategy {
             }
         };
 
-        offset_x = clamp_offset(offset_x, root_dim.width, screen.width);
-        offset_y = clamp_offset(offset_y, root_dim.height, screen.height);
+        offset_x = clamp_offset(offset_x, root_dim.width, screen_width);
+        offset_y = clamp_offset(offset_y, root_dim.height, screen_height);
         self.workspaces
             .get_mut(&workspace_id)
             .unwrap()
