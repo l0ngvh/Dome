@@ -114,9 +114,8 @@ fn focus_left_right() {
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
-    // w2 is focused (last added). Focus left should move to w1.
+    // w2 is focused, being the last added.
     env.run_actions("focus left");
-    // Focus right should move back to w2.
     env.run_actions("focus right");
 
     // Both windows should remain tiled (focus doesn't change layout)
@@ -133,8 +132,6 @@ fn resize_detects_fullscreen() {
     let d = env.dim(w1);
     assert_eq!(d.x, border, "should start tiled with border inset");
 
-    // Simulate the user resizing the window to fill the screen
-    // window positioned at full monitor dimensions
     env.move_window_to(
         w1,
         Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
@@ -153,12 +150,10 @@ fn dont_correct_float_move() {
     env.run_actions("toggle float");
     env.settle(10);
 
-    // Clear move log to establish baseline
     env.moves.lock().unwrap().clear();
 
     env.move_window_to(w1, dim(200, 150, 600, 400));
 
-    // Float arm should NOT call set_position
     env.flush_moves();
 
     assert!(
@@ -195,13 +190,8 @@ fn positions_are_rounded_not_truncated() {
     assert_h_tiled(&dims, default_monitor().work_area, env.config.border_size);
 }
 
-// These tests verify that show_tiling, show_float, and show_fullscreen_window
-// pass physical-native frames from Hub directly to SetWindowPos. The shell no
-// longer insets anything: it places core's `content_box` verbatim.
-
 fn scaled_monitor(scale: f32) -> MonitorInfo {
-    // MonitorInfo.work_area is physical pixels. At non-1.0 scales the physical
-    // extent is the logical resolution multiplied by scale.
+    // At non-1.0 scales the physical extent is the logical resolution multiplied by scale.
     MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
@@ -357,20 +347,16 @@ fn show_tiling_places_at_200pct_offset_monitor() {
         vec![primary, secondary],
     );
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    // Move to the secondary monitor
     env.run_actions("move monitor right");
     env.settle(10);
     let border = Length::new(env.config.border_size.logical());
     let scaled_border = border * 2.0;
     let d = env.dim(w1);
     // Hub places directly in physical coords on the secondary monitor.
-    assert_eq!(d.x, (Length::new(1920.0) + scaled_border).round());
-    assert_eq!(d.y, (scaled_border).round());
-    assert_eq!(d.width, (Length::new(5120.0) - 2.0 * scaled_border).round());
-    assert_eq!(
-        d.height,
-        (Length::new(2880.0) - 2.0 * scaled_border).round()
-    );
+    assert_eq!(d.x, (Length::new(1920.0) + scaled_border));
+    assert_eq!(d.y, scaled_border);
+    assert_eq!(d.width, (Length::new(5120.0) - 2.0 * scaled_border));
+    assert_eq!(d.height, (Length::new(2880.0) - 2.0 * scaled_border));
 }
 
 #[test]
@@ -385,7 +371,6 @@ fn show_float_places_at_125pct() {
     env.settle(10);
 
     env.move_window_to(w1, dim(200, 150, 600, 400));
-    // Drive the next placement cycle
     env.dome.apply_layout();
     env.settle(10);
 
@@ -417,17 +402,23 @@ fn show_fullscreen_window_places_at_175pct() {
         w1,
         Dimension::new(Length::ZERO, Length::ZERO, phys_w, phys_h),
     );
+    env.moves.lock().unwrap().clear();
     env.dome.apply_layout();
 
+    // Without this the assertions below would read back the rect the resize wrote and pass
+    // even if apply_layout emitted nothing.
+    assert!(
+        env.moves.lock().unwrap().iter().any(|(id, ..)| *id == w1),
+        "apply_layout must emit a placement for the fullscreen window"
+    );
+
     let d = env.dim(w1);
-    // Fullscreen covers the full physical monitor work area directly.
     assert_eq!(d.x, Length::ZERO);
     assert_eq!(d.y, Length::ZERO);
-    assert_eq!(d.width, phys_w.round());
-    assert_eq!(d.height, phys_h.round());
+    assert_eq!(d.width, phys_w);
+    assert_eq!(d.height, phys_h);
 }
 
-/// Proves that the physical round-trip converges at non-100% scales.
 /// Under agnostic-core, no conversion occurs, so this is a pure identity check.
 #[test]
 fn float_round_trip_converges_at_125pct() {
@@ -454,20 +445,18 @@ fn float_round_trip_converges_at_125pct() {
 
     let d2 = env.dim(w1);
 
-    // Position must be stable across iterations
     assert_eq!(d1.x, d2.x, "x diverged");
     assert_eq!(d1.y, d2.y, "y diverged");
     assert_eq!(d1.width, d2.width, "width diverged");
     assert_eq!(d1.height, d2.height, "height diverged");
 
-    // Identity: values round-trip back to original physical coords
     assert_eq!(d2.x, Length::new(300.0));
     assert_eq!(d2.y, Length::new(200.0));
     assert_eq!(d2.width, Length::new(500.0));
     assert_eq!(d2.height, Length::new(400.0));
 }
 
-/// 4.0 logical * 1.3 is 5.2 physical, so both crossings must round the border.
+/// The default border size at scale 1.3 is fractional, so both crossings must round the border.
 #[test]
 fn float_settle_does_not_drift_at_fractional_scaled_border() {
     let mut env = TestEnv::new_with_monitors(
@@ -542,11 +531,8 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
 
     let original_dim = env.dim(win);
 
-    // Clear moves to establish baseline
     env.moves.lock().unwrap().clear();
 
-    // Report an unknown monitor handle (999). The observation should be
-    // dropped entirely -- no position change, no dimension change.
     env.dome.handle_window_moved(
         win,
         PixelRect::new(3000, 500, 600, 400),
@@ -600,25 +586,23 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
     env.settle(10);
 
     let d_before = env.dim(w2);
-    // At scale 1.0, tab bar is 30px: y == border + 30, height == 1080 - 2*border - 30
     let border = Length::new(env.config.border_size.logical());
     let tab_h_1x = Length::new(30.0);
-    assert_eq!(d_before.y, (border + tab_h_1x).round());
+    assert_eq!(d_before.y, (border + tab_h_1x));
 
-    // Simulate DPI change to 192 (scale 2.0)
+    // 192 DPI is scale 2.0.
     let handle = 1_isize;
     env.dome.monitor_dpi_changed(handle, 192);
     env.dome.apply_layout();
     env.settle(10);
 
     let d_after = env.dim(w2);
-    // At scale 2.0, tab bar is 30*2=60px, border is still logical but scaled by 2.0
     let scaled_border = border * 2.0;
     let tab_h_2x = Length::new(30.0 * 2.0);
-    assert_eq!(d_after.y, (scaled_border + tab_h_2x).round());
+    assert_eq!(d_after.y, (scaled_border + tab_h_2x));
     assert_eq!(
         d_after.height,
-        (Length::new(1080.0) - 2.0 * scaled_border - tab_h_2x).round()
+        (Length::new(1080.0) - 2.0 * scaled_border - tab_h_2x)
     );
 }
 
@@ -633,7 +617,6 @@ fn float_move_monitor_same_dpi_preserves_content_rect() {
     env.run_actions("toggle float");
     env.settle(10);
 
-    // Anchor the float at a known position on the primary monitor
     env.move_window_to(w1, dim(200, 150, 600, 400));
     env.settle(10);
 
@@ -712,7 +695,6 @@ fn float_move_monitor_different_dpi_rescales_border() {
     env.run_actions("toggle float");
     env.settle(10);
 
-    // Anchor the float at a known content rect on monitor 1
     env.move_window_to(w1, dim(100, 100, 400, 300));
     env.dome.apply_layout();
     env.settle(10);
@@ -788,33 +770,16 @@ fn dome_new_assigns_per_monitor_scale() {
     );
     let border = Length::new(env.config.border_size.logical());
 
-    // Verify primary monitor uses 1.5x scale via window placement.
     let w_a = env.open(1, "AppA", "a.exe", SPAWN_DIM);
-    let scaled_border = border * 1.5;
-    let phys_w = SCREEN_WIDTH * 1.5;
-    let phys_h = SCREEN_HEIGHT * 1.5;
     let d_a = env.dim(w_a);
-    assert_eq!(d_a.x, scaled_border.round());
-    assert_eq!(d_a.y, scaled_border.round());
-    assert_eq!(d_a.width, (phys_w - 2.0 * scaled_border).round());
-    assert_eq!(d_a.height, (phys_h - 2.0 * scaled_border).round());
+    assert_eq!(d_a.x, border * 1.5);
 
-    // Verify secondary monitor uses 2.0x scale via window placement.
+    // Its origin carries the primary's scaled width, so this pins both monitors' scales at once.
     let w_b = env.open(2, "AppB", "b.exe", SPAWN_DIM);
     env.run_actions("move monitor right");
     env.settle(10);
-    let scaled_border_b = border * 2.0;
     let d_b = env.dim(w_b);
-    assert_eq!(d_b.x, (SCREEN_WIDTH * 1.5 + scaled_border_b).round());
-    assert_eq!(d_b.y, scaled_border_b.round());
-    assert_eq!(
-        d_b.width,
-        (Length::new(5120.0) - 2.0 * scaled_border_b).round()
-    );
-    assert_eq!(
-        d_b.height,
-        (Length::new(2880.0) - 2.0 * scaled_border_b).round()
-    );
+    assert_eq!(d_b.x, SCREEN_WIDTH * 1.5 + border * 2.0);
 }
 
 #[test]
@@ -926,7 +891,6 @@ fn float_overlay_geometry_is_stable_across_repeated_apply_layout() {
     );
     env.flush_moves();
 
-    // Snapshot the float overlay state after the first update (from window_drifted)
     let after_drift = env
         .float_overlays()
         .iter()
@@ -934,7 +898,6 @@ fn float_overlay_geometry_is_stable_across_repeated_apply_layout() {
         .map(|f| f.state)
         .unwrap_or(FloatOverlayState::Hidden);
 
-    // A second apply_layout re-emits the same placement, so the overlay repaints identically
     env.dome.apply_layout();
     env.settle(10);
 

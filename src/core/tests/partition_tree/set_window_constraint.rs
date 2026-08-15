@@ -2,7 +2,9 @@ use insta::assert_snapshot;
 
 use crate::config::SizeConstraint;
 
-use crate::core::node::{Length, LimitObservation, LimitUpdate, Logical, WindowRestrictions};
+use crate::core::node::{
+    Length, LimitObservation, LimitUpdate, Logical, Pixels, WindowRestrictions,
+};
 use crate::core::tests::{
     LayoutConfigBuilder, PartitionTreeConfigBuilder, default_rect, setup, snapshot, titled,
 };
@@ -494,7 +496,6 @@ fn delete_window_with_min_size_shrinks_parent_container() {
         },
     );
 
-    // Container min_width = 300 (w1 + w2 + w3), exceeds screen width 150
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -539,7 +540,6 @@ fn delete_window_with_min_size_shrinks_parent_container() {
 
     hub.delete_window(w1);
 
-    // After deleting w1, container min_width drops to 200 (w2 + w3)
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -641,7 +641,6 @@ fn delete_window_with_min_size_allows_siblings_to_expand() {
 
     hub.delete_window(w0);
 
-    // After deleting w0, w1 expands to full screen width
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -1060,7 +1059,7 @@ fn global_max_applies_to_all_windows() {
                 .with_automatic_tiling(true)
                 .build(),
         )
-        .with_max_width(SizeConstraint::Pixels(Length::new(60.0)))
+        .with_max_width(SizeConstraint::Pixels(Pixels::new(60)))
         .build();
     hub.sync_configuration(l);
 
@@ -1119,7 +1118,7 @@ fn per_window_max_overrides_global() {
                 .with_automatic_tiling(true)
                 .build(),
         )
-        .with_max_width(SizeConstraint::Pixels(Length::new(60.0)))
+        .with_max_width(SizeConstraint::Pixels(Pixels::new(60)))
         .build();
     hub.sync_configuration(l);
     hub.set_window_constraint(
@@ -1557,8 +1556,6 @@ fn raising_min_above_existing_max_raises_max() {
         .unwrap();
     hub.insert_window(titled("w44"), default_rect(), WindowRestrictions::None);
 
-    // Set max_h=10. In a horizontal split with screen height 30,
-    // w0 height is capped at 10, centered vertically.
     hub.set_window_constraint(
         w0,
         LimitObservation {
@@ -1606,9 +1603,6 @@ fn raising_min_above_existing_max_raises_max() {
                                                                                ***************************************************************************
     ");
 
-    // Raise min_h=15 above max_h=10. If max stays at 10, the layout
-    // is contradictory and the implementation must raise max to 15.
-    // Observable: w0 height is now 15, not 10 and not 30.
     hub.set_window_constraint(
         w0,
         LimitObservation {
@@ -1665,7 +1659,6 @@ fn clearing_max_removes_the_limit() {
         .unwrap();
     hub.insert_window(titled("w46"), default_rect(), WindowRestrictions::None);
 
-    // Cap w0 height at 10. w0 takes 75x10 centered.
     hub.set_window_constraint(
         w0,
         LimitObservation {
@@ -1713,7 +1706,6 @@ fn clearing_max_removes_the_limit() {
                                                                                ***************************************************************************
     ");
 
-    // Clear max_h. w0 expands to 75x30.
     hub.set_window_constraint(
         w0,
         LimitObservation {
@@ -1789,7 +1781,6 @@ fn setting_min_below_existing_max_keeps_max() {
         .unwrap();
     hub.insert_window(titled("w48"), default_rect(), WindowRestrictions::None);
 
-    // Cap w0 height at 20. w0 takes 75x20 centered.
     hub.set_window_constraint(
         w0,
         LimitObservation {
@@ -1838,8 +1829,6 @@ fn setting_min_below_existing_max_keeps_max() {
                                                                                ***************************************************************************
     ");
 
-    // Set min_h=10 below max_h=20. If max were incorrectly lowered
-    // to 10, w0 would render at height 10. It should stay at 20.
     hub.set_window_constraint(
         w0,
         LimitObservation {
@@ -1858,11 +1847,10 @@ fn window_max_smaller_than_global_min_width() {
         .unwrap();
 
     let l = LayoutConfigBuilder::new()
-        .with_min_width(SizeConstraint::Pixels(Length::new(300.0)))
+        .with_min_width(SizeConstraint::Pixels(Pixels::new(300)))
         .build();
     hub.sync_configuration(l);
 
-    // Window max (50) < global min (300) - should not panic, window max takes precedence
     hub.set_window_constraint(
         w0,
         LimitObservation {
@@ -1918,11 +1906,10 @@ fn window_max_height_smaller_than_global_min_height() {
         .unwrap();
 
     let l = LayoutConfigBuilder::new()
-        .with_min_height(SizeConstraint::Pixels(Length::new(300.0)))
+        .with_min_height(SizeConstraint::Pixels(Pixels::new(300)))
         .build();
     hub.sync_configuration(l);
 
-    // Window max (10) < global min (300) - should not panic
     hub.set_window_constraint(
         w0,
         LimitObservation {
@@ -1970,11 +1957,10 @@ fn window_max_width_smaller_than_global_min_width() {
     hub.insert_window(titled("w52"), default_rect(), WindowRestrictions::None);
 
     let l = LayoutConfigBuilder::new()
-        .with_min_width(SizeConstraint::Pixels(Length::new(100.0)))
+        .with_min_width(SizeConstraint::Pixels(Pixels::new(100)))
         .build();
     hub.sync_configuration(l);
 
-    // Window max (50) < global min (100) - should not panic
     hub.set_window_constraint(
         w0,
         LimitObservation {

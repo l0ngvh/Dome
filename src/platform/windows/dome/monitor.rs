@@ -22,7 +22,7 @@ pub(in crate::platform::windows) struct MonitorInfo {
     /// f32 edge math is shared with macOS.
     pub bounds: Dimension,
     pub is_primary: bool,
-    /// DPI scale factor for this monitor (e.g. 1.5 for 150%). Always > 0.
+    /// Always > 0.
     pub scale: f32,
 }
 
@@ -48,8 +48,7 @@ impl QueryDisplay for Win32Display {
     }
 }
 
-/// Per-monitor state: physical work area, DPI scale, and the set of windows
-/// currently laid out on this monitor (rebuilt each `apply_layout` pass).
+/// Per-monitor state. `displayed` is rebuilt each `apply_layout` pass.
 pub(super) struct Monitor {
     id: MonitorId,
     handle: isize,
@@ -165,10 +164,6 @@ impl MonitorRegistry {
             .unwrap_or(false)
     }
 
-    /// Reconciles the registry against a fresh monitor list from the OS.
-    /// Adds new monitors, removes stale ones, and updates work areas/scales
-    /// for monitors that changed. Returns the set of added and removed IDs
-    /// so the caller can drive overlay creation/destruction.
     pub(super) fn reconcile(&mut self, hub: &mut Hub, monitors: &[MonitorInfo]) -> MonitorChange {
         let mut added = Vec::new();
         let mut removed = Vec::new();
@@ -219,12 +214,12 @@ impl MonitorRegistry {
                 && let Some(ms) = self.monitors.get(&id)
                 && (ms.work_area != monitor.work_area || ms.scale != monitor.scale)
             {
-                let old_dim = Some(ms.work_area);
+                let old_work_area = Some(ms.work_area);
                 let old_scale = Some(ms.scale);
                 tracing::info!(
                     name = %monitor.name,
-                    ?old_dim,
-                    new_dim = ?monitor.work_area,
+                    ?old_work_area,
+                    new_work_area = ?monitor.work_area,
                     ?old_scale,
                     new_scale = ?monitor.scale,
                     "Monitor work area changed"
@@ -259,11 +254,9 @@ impl MonitorRegistry {
     }
 }
 
-/// Windows baseline DPI (100% scaling). All scale factors are relative to this.
+/// Windows baseline DPI (100% scaling).
 const BASE_DPI: f32 = 96.0;
 
-/// Returns the scale factor for a monitor, e.g. 1.5 for 144 DPI (150%).
-/// Falls back to 1.0 with a warning on API failure.
 fn scale_for_monitor(hmonitor: HMONITOR) -> f32 {
     let mut dpi_x: u32 = 0;
     let mut dpi_y: u32 = 0;

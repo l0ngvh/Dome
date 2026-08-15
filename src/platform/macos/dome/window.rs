@@ -32,11 +32,7 @@ pub(super) enum PositionedState {
     /// Window is moved offscreen by Dome. `actual` is the last observed position, may differ from
     /// the current hidden coordinates if monitors changed since the window was hidden.
     Offscreen(OffscreenPlacement),
-    /// Window is in a tiling layout slot with drift correction.
     Tiling(Placement),
-    /// Window is floating. Carries only the reconciled target rect and a
-    /// stale-observation timestamp -- no retry/drift fields because floats
-    /// accept the OS-reported position as ground truth.
     Float(FloatPlacement),
 }
 
@@ -51,15 +47,12 @@ impl OffscreenPlacement {
         Self { actual, retries: 0 }
     }
 
-    /// Check if the window drifted from the hidden position. Updates `actual`
-    /// unconditionally. Returns true if the window is NOT at the hidden
-    /// position (i.e. it fought back). Increments retries on drift.
+    /// Updates `actual` unconditionally. Returns true if the window is NOT at
+    /// the hidden position (i.e. it fought back).
     fn record_drift(&mut self, new_actual: PixelRect, monitors: &[MonitorInfo]) -> bool {
         self.actual = new_actual;
         let (hidden_x, hidden_y) = hidden_position(monitors);
-        if new_actual.x() == Pixels::truncate(hidden_x)
-            || new_actual.y() == Pixels::truncate(hidden_y)
-        {
+        if new_actual.x() == hidden_x || new_actual.y() == hidden_y {
             return false;
         }
         self.retries = self.retries.saturating_add(1);
@@ -91,13 +84,9 @@ pub(super) struct Placement {
 #[derive(Clone, Copy)]
 pub(super) struct FloatPlacement {
     /// Last rect reconciled with the OS -- the rect we most recently passed to
-    /// `set_frame` or adopted from a drag observation. Used for outbound
-    /// idempotence in `show_tiling` / `show_float` and to skip no-op
-    /// observations in `window_moved`.
+    /// `set_frame` or adopted from a drag observation.
     pub(super) target: PixelRect,
-    /// When `target` was last bumped by an outbound `set_frame`. The
-    /// initial-placement stale filter in `window_moved` ignores AX bursts
-    /// whose `observed_at.last` predates this timestamp. User-drag
+    /// When `target` was last bumped by an outbound `set_frame`. User-drag
     /// observations do NOT bump this: they write `target` without issuing
     /// `set_frame`, so the filter anchor stays on the last outbound call.
     placed_at: Instant,
@@ -111,8 +100,7 @@ impl FloatPlacement {
         }
     }
 
-    /// Record a new target. Returns true if set_frame is needed.
-    /// Bumps `placed_at` only when the target actually changes.
+    /// Returns true if set_frame is needed.
     fn set_target(&mut self, target: PixelRect) -> bool {
         if self.target == target {
             return false;
@@ -133,7 +121,7 @@ impl Placement {
         }
     }
 
-    /// Record a new target. Returns true if set_frame is needed.
+    /// Returns true if set_frame is needed.
     fn set_target(&mut self, target: PixelRect) -> bool {
         let target_changed = self.target != target;
         self.target = target;
@@ -146,11 +134,10 @@ impl Placement {
 
     // FIXME: Change this to if new placement encompass the old placement
     //
-    /// Edge-alignment predicate. Returns true if `new_actual` has at least
-    /// one vertical *and* one horizontal edge misaligned with the target
-    /// (i.e. this is drift, not just an edge-anchored size delta). Pure —
-    /// no mutation; caller must follow up with `observe_drift` to consume a
-    /// retry.
+    /// Returns true if `new_actual` has at least one vertical *and* one
+    /// horizontal edge misaligned with the target (i.e. this is drift, not
+    /// just an edge-anchored size delta). The caller must follow up with
+    /// `observe_drift` to consume a retry.
     fn has_drifted(&self, new_actual: PixelRect) -> bool {
         let target = self.target;
         let left = new_actual.x() == target.x();
@@ -160,11 +147,8 @@ impl Placement {
         !((left || right) && (top || bottom))
     }
 
-    /// Record a drift observation. Bumps `retries`, updates `actual`, and
-    /// returns the target to re-issue via `set_frame` while retries remain;
-    /// returns `None` once the budget is exhausted (logging the give-up
-    /// message once). Shared by the edge-based and late-event drift paths
-    /// so a single helper owns the retry accounting and logging.
+    /// Returns the target to re-issue via `set_frame` while retries remain, and
+    /// `None` once the budget is exhausted.
     fn observe_drift(&mut self, new_actual: PixelRect) -> Option<PixelRect> {
         self.retries = self.retries.saturating_add(1);
         self.actual = new_actual;
@@ -179,7 +163,6 @@ impl Placement {
         }
     }
 
-    /// Whether drift retries are not yet exhausted.
     fn should_retry(&self) -> bool {
         self.retries <= MAX_ENFORCEMENT_RETRIES
     }
@@ -189,7 +172,6 @@ impl Placement {
         self.retries == MAX_ENFORCEMENT_RETRIES + 1
     }
 
-    /// Compare actual vs target, return the limits learned if size mismatched.
     fn detect_constraint(&self) -> Option<LimitObservation> {
         let (actual, target) = (self.actual, self.target);
         let min_w = (actual.width() > target.width()).then_some(actual.width());
@@ -232,13 +214,12 @@ pub(super) fn move_offscreen(
     let (hidden_x, hidden_y) = hidden_position(monitors);
     // When spaces change or monitors are connected/disconnected, hidden windows
     // may be moved to visible state, so we need to re-hide them
-    if actual.x() == Pixels::truncate(hidden_x) || actual.y() == Pixels::truncate(hidden_y) {
+    if actual.x() == hidden_x || actual.y() == hidden_y {
         return Ok(());
     }
-    ax.hide_at(hidden_x, hidden_y)
+    ax.hide_at(Length::from_pixels(hidden_x), Length::from_pixels(hidden_y))
 }
 
-/// Returns the monitor used for hiding windows offscreen.
 /// We pick the monitor whose bottom-right corner is furthest from origin,
 /// ensuring hidden windows are placed at a valid screen position that is
 /// not visible on any other screen.
@@ -246,20 +227,20 @@ pub(super) fn hidden_monitor(monitors: &[MonitorInfo]) -> &MonitorInfo {
     monitors
         .iter()
         .max_by_key(|m| {
-            let work_area = m.work_area_snapped();
+            let work_area = m.work_area;
             work_area.right() + work_area.bottom()
         })
         .unwrap()
 }
 
-fn hidden_position(monitors: &[MonitorInfo]) -> (Length, Length) {
+fn hidden_position(monitors: &[MonitorInfo]) -> (Pixels, Pixels) {
     // MacOS doesn't allow completely set windows offscreen, so we need to leave at
     // least one pixel left
     // https://nikitabobko.github.io/AeroSpace/guide#emulation-of-virtual-workspaces
-    let d = &hidden_monitor(monitors).work_area;
+    let work_area = hidden_monitor(monitors).work_area;
     (
-        d.x + d.width - Length::new(1.0),
-        d.y + d.height - Length::new(1.0),
+        work_area.right() - Pixels::new(1),
+        work_area.bottom() - Pixels::new(1),
     )
 }
 
@@ -291,9 +272,7 @@ impl Dome {
         if window.is_moving {
             return;
         }
-        // User-minimized window being restored via focus_window_by_cg. Clear the
-        // flag and drive the OS-side restore. Fall through to the preserved
-        // state match for geometry placement.
+        // User-minimized window being restored via focus_window_by_cg.
         if window.is_minimized {
             window.is_minimized = false;
             if let Err(e) = window.ext.unminimize() {
@@ -308,9 +287,7 @@ impl Dome {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
             }
-            // Caller (the `tiling_windows` loop in apply_monitor_placements)
-            // asserts the kind. If the preserved platform state is Float, the
-            // window just toggled tiling-ward in core; rebuild as Tiling.
+            // The window just toggled tiling-ward in core, so rebuild as Tiling.
             WindowState::Positioned(PositionedState::Float(_)) => {
                 window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
                     target, target,
@@ -357,9 +334,7 @@ impl Dome {
         if window.is_moving {
             return;
         }
-        // User-minimized window being restored via focus_window_by_cg. Clear the
-        // flag and drive the OS-side restore. Fall through to the preserved
-        // state match for geometry placement.
+        // User-minimized window being restored via focus_window_by_cg.
         if window.is_minimized {
             window.is_minimized = false;
             if let Err(e) = window.ext.unminimize() {
@@ -401,14 +376,10 @@ impl Dome {
             return;
         };
         tracing::Span::current().record("window", window.to_string());
-        // Borderless-fullscreen window hidden by Dome because its workspace was
-        // inactive. The workspace is visible again, so transition back to
-        // BorderlessFullscreen and drive the OS-side restore.
         let monitor = self.monitor_registry.monitor(monitor_id);
-        let target = monitor.work_area_snapped();
+        let target = monitor.work_area();
         match &mut window.state {
             WindowState::BorderlessMinimized { .. } => {
-                // BorderlessFullscreen windows previously in other workspaces. Restore it
                 if let Err(err) = window.ext.unminimize() {
                     tracing::trace!("Failed to unminimize window: {err:#}");
                 }
@@ -512,11 +483,9 @@ impl Dome {
                 }
             }
             WindowState::Positioned(PositionedState::Tiling(p)) => {
-                // Stale check: if even the latest notification predates the
-                // last placement, the burst carries only pre-placement state
-                // and must be ignored. A burst that straddles placed_at
-                // (observed_at.first < placed_at <= observed_at.last) is kept, since
-                // at least one notification fired post-placement.
+                // A burst that straddles placed_at (observed_at.first < placed_at
+                // <= observed_at.last) is kept, since at least one notification fired
+                // post-placement.
                 if observed_at.last < p.placed_at {
                     tracing::trace!(placed_at = ?p.placed_at, "stale observation, ignoring");
                     return;
@@ -563,7 +532,6 @@ impl Dome {
                 }
             }
             WindowState::Positioned(PositionedState::Float(fp)) => {
-                // Stale check against the last outbound set_frame timestamp.
                 if observed_at.last < fp.placed_at {
                     tracing::trace!(placed_at = ?fp.placed_at, "stale observation, ignoring");
                     return;
@@ -580,9 +548,6 @@ impl Dome {
                     return;
                 }
 
-                // Float accepts the OS-reported position as ground truth.
-                // Write target directly -- placed_at is NOT bumped because
-                // this is an observation, not an outbound set_frame.
                 fp.target = new_placement;
                 let monitor_id = self
                     .monitor_registry
@@ -618,10 +583,9 @@ impl Dome {
                 }
             }
             WindowState::BorderlessFullscreen => {
-                // No longer borderless fullscreen. Move to offscreen since
-                // the window may belong to a hidden workspace and will be
-                // placed back into view by flush_layout if it belongs to the
-                // active one.
+                // Move to offscreen since the window may belong to a hidden
+                // workspace and will be placed back into view by flush_layout
+                // if it belongs to the active one.
                 if !is_borderless_fullscreen {
                     window.state = WindowState::Positioned(PositionedState::Offscreen(
                         OffscreenPlacement::new(new_placement),
@@ -678,7 +642,6 @@ impl Dome {
                     result
                 }
                 PositionedState::Float(fp) => {
-                    // Post-sync: fp.target is the last observed rect
                     let offscreen = OffscreenPlacement::new(fp.target);
                     let result = move_offscreen(&monitors, &offscreen.actual, &*window.ext);
                     window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
@@ -713,7 +676,6 @@ impl Dome {
                 window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
             }
             PositionedState::Float(fp) => {
-                // Post-sync: fp.target is the last observed rect
                 let offscreen = OffscreenPlacement::new(fp.target);
                 if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ext) {
                     tracing::debug!(%window_id, "Failed to move window offscreen: {e}");

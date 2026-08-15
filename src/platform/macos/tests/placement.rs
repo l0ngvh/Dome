@@ -24,7 +24,7 @@ fn a_fractional_work_area_keeps_the_window_inside_it() {
     });
 
     let mut monitor = default_monitor();
-    monitor.work_area = FRACTIONAL_WORK_AREA;
+    monitor.work_area = PixelRect::from_dimension_inward(FRACTIONAL_WORK_AREA);
     dome.monitors_changed(vec![monitor]);
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
@@ -37,7 +37,7 @@ fn a_fractional_work_area_keeps_the_window_inside_it() {
 #[test]
 fn degenerate_content_box_parks_window() {
     let mut macos = MacOS::new();
-    // 600 per edge against a 1080-tall work area leaves no content height at all.
+    // Each edge exceeds half of SCREEN_HEIGHT, so no content height remains.
     let mut dome = macos.setup_dome_with_config(Config {
         border_size: Length::new(600.0),
         ..Config::default()
@@ -157,18 +157,15 @@ fn float_window_moved_by_user() {
     );
     macos.settle(&mut dome, 10);
 
-    // Toggle cg2 (focused) to float
     send(&mut dome, "toggle float");
     macos.settle(&mut dome, 10);
 
-    // User drags the float to a new position
     macos.simulate_external_move(&mut dome, cg2, 200, 150, 600, 400);
     macos.settle(&mut dome, 10);
 
     // Float should stay at the user-chosen position, not be corrected
     assert_eq!(macos.window_frame(cg2), (200, 150, 600, 400));
 
-    // Core should reflect the outer frame (reverse-inset of the observed content rect)
     let border = Config::default().border_size.logical();
     let snap = macos
         .last_float_snapshot(cg2)
@@ -183,7 +180,6 @@ fn float_window_moved_by_user() {
         )
     );
 
-    // Idempotence: a follow-up settle should issue no new set_frame calls for cg2
     let moves_before = macos.moves.borrow().len();
     macos.settle(&mut dome, 10);
     let moves_after = macos.moves.borrow();
@@ -214,12 +210,9 @@ fn float_window_reshaped_on_border_size_change() {
     );
     macos.settle(&mut dome, 10);
 
-    // Toggle focused cg2 to float and settle.
     send(&mut dome, "toggle float");
     macos.settle(&mut dome, 10);
 
-    // Snapshot core's stored outer dim before the border change. Hub-dim does
-    // not change across config_changed; only the inset applied on flush_layout.
     let snap_before = macos
         .last_float_snapshot(cg2)
         .expect("float snapshot must exist once cg2 is floated and visible");
@@ -228,18 +221,15 @@ fn float_window_reshaped_on_border_size_change() {
     // by the config change.
     macos.moves.borrow_mut().clear();
 
-    // Bump border_size from the default (4.0) to 12.0, giving an 8 px delta
-    // well beyond rounding noise.
+    // A border several points above the default, so the delta cannot be
+    // mistaken for rounding noise.
     let new_config = Config {
         border_size: Length::new(12.0),
         ..Default::default()
     };
     dome.config_changed(new_config);
 
-    // config_changed calls flush_layout, which passes the new content_dim to
-    // FloatPlacement::set_target. The new content differs from fp.target
-    // (computed with the old border), so set_target returns true and set_frame
-    // runs. Check before settle because settle drains the move log.
+    // Check before settle because settle drains the move log.
     let reshape_moves: Vec<_> = macos
         .moves
         .borrow()
@@ -254,7 +244,6 @@ fn float_window_reshaped_on_border_size_change() {
 
     macos.settle(&mut dome, 10);
 
-    // After settle: OS window converged to the stored border box inset by 12.0.
     // Outer-frame values are exact integers by construction (default float
     // placement rounds to whole pixels).
     let expected_x = snap_before.outer_frame.x.value() as i32 + 12;
@@ -266,8 +255,6 @@ fn float_window_reshaped_on_border_size_change() {
         (expected_x, expected_y, expected_w, expected_h)
     );
 
-    // Core's stored outer dim must be unchanged: sync_config does not touch
-    // float dims (see src/core/hub.rs sync_config).
     let snap_after = macos
         .last_float_snapshot(cg2)
         .expect("float snapshot must exist after re-flush");
@@ -275,7 +262,6 @@ fn float_window_reshaped_on_border_size_change() {
         snap_after.outer_frame, snap_before.outer_frame,
         "border-size change must not alter the hub-stored outer dim"
     );
-    // The RenderFrame's content_dim must reflect the new 12px border inset.
     assert_eq!(
         snap_after.content_dim,
         Dimension::new(
@@ -304,15 +290,11 @@ fn float_place_with_same_target_is_noop() {
     );
     macos.settle(&mut dome, 10);
 
-    // Toggle cg2 (focused) to float
     send(&mut dome, "toggle float");
     macos.settle(&mut dome, 10);
 
-    // Clear move log
     macos.moves.borrow_mut().clear();
 
-    // Issue another layout flush with no dimension change.
-    // FloatPlacement::set_target should return false, so no set_frame.
     dome.flush_layout();
     macos.settle(&mut dome, 10);
 
@@ -337,12 +319,7 @@ fn multi_monitor_per_display() {
     let second_monitor = MonitorInfo {
         display_id: 2,
         name: "External".to_string(),
-        work_area: Dimension::new(
-            Length::new(1920.0),
-            Length::ZERO,
-            Length::new(2560.0),
-            Length::new(1440.0),
-        ),
+        work_area: PixelRect::new(1920, 0, 2560, 1440),
         bounds: Dimension::new(
             Length::new(1920.0),
             Length::ZERO,
@@ -390,4 +367,41 @@ fn set_reserved_bar_shrinks_and_restores_work_area() {
     dome.set_reserved_bar(None);
     macos.settle(&mut dome, 10);
     assert_eq!(macos.window_frame(win), (4, 4, 1912, 1072));
+}
+
+/// The only production path that can be handed a fractional work area from a test.
+/// `get_all_monitors` builds its rect from `NSScreen`, so the snap it performs is
+/// unreachable here.
+#[test]
+fn a_fractional_reserved_bar_keeps_the_window_inside_the_reserved_area() {
+    const BAR_HEIGHT: f64 = 30.4;
+
+    let mut macos = MacOS::new();
+    // Zero border so the sole tile fills the work area exactly, leaving no inset to
+    // absorb a sub-point rounding error.
+    let mut dome = macos.setup_dome_with_config(Config {
+        border_size: Length::ZERO,
+        ..Config::default()
+    });
+
+    let win = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    dome.set_reserved_bar(Some(BarGeometry::new(
+        Some(BAR_HEIGHT),
+        Some("top".into()),
+        None,
+        None,
+    )));
+    macos.settle(&mut dome, 10);
+
+    let bar_height = Length::new(BAR_HEIGHT as f32);
+    let reserved = Dimension::new(
+        Length::ZERO,
+        bar_height,
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT - bar_height,
+    );
+    assert_inside_work_area(macos.window_frame(win), reserved);
 }

@@ -1,6 +1,6 @@
 use crate::config::{MasterConfig, SizeConstraint, Strategy};
 use crate::core::WindowRestrictions;
-use crate::core::node::{Length, LimitObservation, LimitUpdate};
+use crate::core::node::{Length, LimitObservation, LimitUpdate, Pixels};
 use crate::core::strategy::TilingAction;
 use crate::core::tests::{LayoutConfigBuilder, TestHubBuilder, default_rect, snapshot, titled};
 use insta::assert_snapshot;
@@ -58,7 +58,6 @@ fn min_height_master_pane_overflows_and_scrolls_to_focus() {
             ..Default::default()
         },
     );
-    // w3 is already focused after insert. Scroll brought it into view.
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -158,7 +157,6 @@ fn min_height_stack_pane_overflows_independently_of_master() {
             ..Default::default()
         },
     );
-    // Focus last stack window (w5 is already focused after insert)
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(5))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -729,7 +727,7 @@ fn global_min_above_window_max_caps_min_to_max() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_min_width(SizeConstraint::Pixels(Length::new(100.0)))
+                .with_min_width(SizeConstraint::Pixels(Pixels::new(100)))
                 .build(),
         )
         .build();
@@ -836,8 +834,6 @@ fn master_count_increment_clamps_stack_scroll() {
             ..Default::default()
         },
     );
-    // w4 is the last stack window, already focused after insert. Stack scrolled
-    // MoreMaster: first stack window becomes second master window
     hub.handle_tiling_action(TilingAction::MoreMaster);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
@@ -940,7 +936,6 @@ fn master_count_decrement_clamps_master_scroll() {
     // focus_left lands on w3, the last-inserted master window, scrolling master to the bottom
     // so the offset is out of range once master shrinks.
     hub.focus_left();
-    // FewerMaster: last master becomes first stack window
     hub.handle_tiling_action(TilingAction::FewerMaster);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
@@ -1037,8 +1032,6 @@ fn detach_clamps_scroll() {
             ..Default::default()
         },
     );
-    // w3 is already focused (last master) and scroll brought it into view
-    // Detach last master window
     hub.delete_window(w3);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -1132,8 +1125,6 @@ fn attach_does_not_disturb_other_pane_scroll() {
             ..Default::default()
         },
     );
-    // w4 is already focused (last stack window). Stack scrolled to show it.
-    // Attach a new window (lands in stack since master_count=1 is full)
     let w5 = hub
         .insert_window(titled("w49"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -1237,8 +1228,6 @@ fn apply_config_relayouts_and_clamps_scroll() {
             ..Default::default()
         },
     );
-    // w4 is already focused (last stack window). Stack scrolled to show it.
-    // Apply same config (relayout, clamp is idempotent)
     let l = LayoutConfigBuilder::new()
         .with_strategy(Strategy::Master)
         .with_master_config(MasterConfig {

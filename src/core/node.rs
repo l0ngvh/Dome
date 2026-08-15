@@ -58,8 +58,8 @@ pub(crate) struct Workspace {
     /// set to false in that case
     pub(super) is_float_focused: bool,
     /// Float ids in this workspace, ordered by z-index (last is topmost).
-    /// Each id's screen-absolute dim lives on the window itself, in
-    /// `DisplayMode::Float { dim }`. Focusing a float moves it to the end.
+    /// Each id's screen-absolute rect lives on the window itself, in
+    /// `DisplayMode::Float`. Focusing a float moves it to the end.
     pub(super) float_windows: Vec<WindowId>,
     /// All fullscreen windows in this workspace, order by z-index with the last is the top most
     /// window. Only the top most fullscreen window is displayed.
@@ -131,29 +131,20 @@ pub(crate) enum WindowRestrictions {
     None,
     /// Blocks all user-initiated operations globally (Windows exclusive fullscreen).
     BlockAll,
-    /// Blocks toggle_fullscreen, toggle_float, move_to_monitor on this window.
-    /// Allows move_to_workspace — fullscreen windows can move across workspaces.
-    /// Protects platform-initiated fullscreen — only the platform can undo it.
+    /// Protects platform-initiated fullscreen. Only the platform can undo it.
     ProtectFullscreen,
 }
 
-/// Per-platform metadata for a window (title, app name, etc.). Each platform
-/// provides its own concrete type implementing this trait.
 pub(crate) trait WindowMetadata:
     std::fmt::Display + std::fmt::Debug + Send + Sync + 'static
 {
-    /// Human-readable app name used by the minimized window listing.
     fn app_name(&self) -> Option<String>;
-    /// Current window title, if any.
     fn title(&self) -> Option<&str>;
-    /// Update the window title.
     fn set_title(&mut self, title: String);
-    /// Clone into a boxed trait object.
     fn clone_box(&self) -> Box<dyn WindowMetadata>;
 
     fn matches_window_matcher(&self, matcher: &WindowMatcher) -> bool;
 
-    /// Synthesise a `WindowMatcher` from this window's metadata.
     /// Every populated platform field is included for maximum specificity.
     fn to_window_matcher(&self) -> WindowMatcher;
 
@@ -166,7 +157,6 @@ pub(crate) trait WindowMetadata:
     }
 }
 
-/// Represents a single application window
 #[derive(Debug)]
 pub(crate) struct Window {
     pub(super) workspace: Option<WorkspaceId>,
@@ -195,8 +185,7 @@ impl Clone for Window {
 }
 
 impl Window {
-    /// Returns the workspace this window is attached to. None iff the
-    /// window is minimized (is_minimized <=> workspace().is_none()).
+    /// None iff the window is minimized (is_minimized <=> workspace().is_none()).
     pub(crate) fn workspace(&self) -> Option<WorkspaceId> {
         self.workspace
     }
@@ -301,15 +290,11 @@ pub(crate) struct Logical;
 )]
 pub(crate) struct Physical;
 
-/// Per-target alias pinning core's `Dimension` to one concrete unit. `Hub` and every
-/// core DTO keep the bare `Dimension` spelling and resolve to `Dimension<Unit>`.
 #[cfg(target_os = "windows")]
 pub(crate) type Unit = Physical;
 #[cfg(not(target_os = "windows"))]
 pub(crate) type Unit = Logical;
 
-/// Trait encoding the logical-to-target conversion for each unit marker.
-/// `Logical::from_logical` is identity; `Physical::from_logical` multiplies by scale.
 /// Dispatch is on the target unit (not the input) so adding a new target (e.g. Linux)
 /// is just `impl UnitKind for NewMarker` plus a cfg arm on `Unit`.
 pub(crate) trait UnitKind {
@@ -386,17 +371,6 @@ impl<U> Length<U> {
         Self::new(self.v.abs())
     }
 
-    #[cfg_attr(
-        not(target_os = "windows"),
-        expect(
-            dead_code,
-            reason = "only the Windows tab bar height derivation rounds a Length"
-        )
-    )]
-    pub(crate) fn round(self) -> Self {
-        Self::new(self.v.round())
-    }
-
     pub(crate) fn clamp(self, lo: Self, hi: Self) -> Self {
         Self::new(self.v.clamp(lo.v, hi.v))
     }
@@ -431,9 +405,6 @@ impl<U> std::fmt::Display for Length<U> {
 }
 
 impl Length<Logical> {
-    /// Convert a logical config length into the binary's `Unit`. Identity on
-    /// macOS; multiplies by `scale` on Windows. This is the only method that
-    /// crosses the logical-to-unit boundary; core arithmetic reads go through it.
     pub(crate) fn to_unit(self, scale: f32) -> Length<Unit> {
         Length::new(<Unit as UnitKind>::from_logical(self.v, scale))
     }
@@ -548,9 +519,7 @@ impl<U> SubAssign for Length<U> {
 }
 
 impl<'de> serde::Deserialize<'de> for Length<Logical> {
-    /// Deserializes a finite, non-negative `f32` from TOML/serde into `Length<Logical>`.
     /// Lives next to the type definition to keep serialisation coherent with the type.
-    /// Only `serde::Deserialize`/`Deserializer`/`Error::custom` are used -- no OS deps.
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v = f32::deserialize(d)?;
         if !v.is_finite() || v < 0.0 {
@@ -604,7 +573,7 @@ impl<U> Ord for Pixels<U> {
 }
 
 // Intentionally no From<i32> and no From<Pixels> for Length. An Into would put the two
-// named crossings, Pixels::truncate and Length::from_pixels, back out of sight.
+// named crossings, Pixels::round and Length::from_pixels, back out of sight.
 impl<U> Pixels<U> {
     pub(crate) const ZERO: Self = Self::new(0);
 
@@ -613,11 +582,6 @@ impl<U> Pixels<U> {
             v,
             _unit: PhantomData,
         }
-    }
-
-    /// Narrows toward zero.
-    pub(crate) fn truncate(length: Length<U>) -> Self {
-        Self::new(length.v as i32)
     }
 
     pub(crate) fn round(length: Length<U>) -> Self {
@@ -694,7 +658,6 @@ pub(crate) struct Dimension<U = Unit> {
 }
 
 // Manual Debug avoids a `U: Debug` bound that #[derive(Debug)] would infer.
-// The phantom field contributes nothing to the output.
 impl<U> std::fmt::Debug for Dimension<U> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Dimension")
@@ -706,8 +669,6 @@ impl<U> std::fmt::Debug for Dimension<U> {
     }
 }
 
-// Manual PartialEq avoids a `U: PartialEq` bound that #[derive(PartialEq)]
-// would infer. Only the Length fields matter; the phantom tag is zero-sized.
 impl<U> PartialEq for Dimension<U> {
     fn eq(&self, other: &Self) -> bool {
         self.x == other.x
@@ -717,9 +678,6 @@ impl<U> PartialEq for Dimension<U> {
     }
 }
 
-// Manual Copy/Clone impls avoid a `U: Copy`/`U: Clone` bound that
-// #[derive(Copy, Clone)] would infer. PhantomData<fn() -> U> is
-// unconditionally Copy+Clone.
 impl<U> Copy for Dimension<U> {}
 impl<U> Clone for Dimension<U> {
     fn clone(&self) -> Self {
@@ -728,9 +686,8 @@ impl<U> Clone for Dimension<U> {
 }
 
 impl<U> Dimension<U> {
-    /// Four positional `Length<U>` args. Does not catch positional swaps
-    /// (e.g. x vs width) since all share the same type; a builder would
-    /// be needed for that, which is out of scope.
+    /// Does not catch positional swaps (e.g. x vs width) since all four args share
+    /// the same type. A builder would be needed for that, which is out of scope.
     pub(crate) const fn new(
         x: Length<U>,
         y: Length<U>,
@@ -746,8 +703,7 @@ impl<U> Dimension<U> {
     }
 }
 
-/// Manual `Default` avoids a `U: Default` bound that `#[derive(Default)]` would
-/// infer. Zero rectangle is meaningful as an initial placeholder.
+/// Zero rectangle is meaningful as an initial placeholder.
 impl<U> Default for Dimension<U> {
     fn default() -> Self {
         Self::new(Length::ZERO, Length::ZERO, Length::ZERO, Length::ZERO)

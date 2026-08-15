@@ -11,7 +11,8 @@ use crate::action::MonitorTarget;
 use crate::config::{SizeConstraint, SplitMode, Strategy, TreeLayoutNode, WindowMatcher};
 use crate::core::hub::{GlobalLayoutConfig, Hub};
 use crate::core::node::{
-    Length, LimitObservation, LimitUpdate, MonitorId, PixelRect, WindowId, WindowRestrictions,
+    Length, LimitObservation, LimitUpdate, MonitorId, PixelRect, Pixels, WindowId,
+    WindowRestrictions,
 };
 use crate::core::strategy::TilingAction;
 use rand::{Rng, SeedableRng};
@@ -48,9 +49,8 @@ impl SmokeStrategy {
         }
     }
 
-    /// Build a hub from this strategy. Returns the hub, the list of preferred
-    /// titles (empty for non-preferred-tree strategies), and the tree ops used
-    /// (empty for non-preferred-tree strategies; needed by the reducer).
+    /// The returned preferred titles and tree ops are empty for
+    /// non-preferred-tree strategies. The reducer needs the tree ops.
     fn build_hub(
         self,
         rng: &mut ChaCha8Rng,
@@ -79,8 +79,7 @@ impl SmokeStrategy {
         }
     }
 
-    /// Return a plain `fn() -> Hub` for this strategy. Only valid for
-    /// non-preferred-tree strategies (used by the reducer's `ddmin` loop).
+    /// Only valid for non-preferred-tree strategies.
     fn make_simple_hub(self) -> fn() -> Hub {
         match self {
             SmokeStrategy::PartitionTree => setup_hub,
@@ -725,8 +724,8 @@ fn build_op(
                     layout.master.master_count = rng.random_range(1..=4);
                 }
                 _ => {
-                    let v = rng.random_range(10.0f32..200.0);
-                    layout.size_constraints.minimum_width = SizeConstraint::Pixels(Length::new(v));
+                    let v = rng.random_range(10..200);
+                    layout.size_constraints.minimum_width = SizeConstraint::Pixels(Pixels::new(v));
                 }
             }
             Some(RecordedOp::ConfigReload { layout })
@@ -994,8 +993,6 @@ fn capture_panic<F: FnOnce()>(f: F) -> Option<FailureSignature> {
             .unwrap_or_default();
         let line = info.location().map(|loc| loc.line()).unwrap_or(0);
 
-        // Payload is typically &str or String. unwrap_or_default is acceptable
-        // here: an empty string is a meaningful "no payload" representation.
         let raw_payload = info
             .payload()
             .downcast_ref::<&str>()
@@ -1390,7 +1387,6 @@ fn generate_tree_ops(
             break;
         }
 
-        // Pick an anchor from among all existing tree nodes.
         let leaf_count = next_leaf_id;
         let total_nodes = leaf_count + container_ids.len();
         let pick = rng.random_range(0..total_nodes);

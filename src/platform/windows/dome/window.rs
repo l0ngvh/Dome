@@ -199,7 +199,7 @@ pub(super) enum WindowState {
     Positioned(PositionedState),
     /// Window covers the entire monitor, initiated by the user (e.g. a game
     /// or media player). Detected by comparing window dimensions to monitor
-    /// dimensions in `check_fullscreen_state`.
+    /// dimensions.
     BorderlessFullscreen,
     /// Borderless-fullscreen window currently OS-minimized by Dome because
     /// its workspace is inactive. Hub-side fullscreen is preserved;

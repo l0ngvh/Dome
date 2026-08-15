@@ -54,10 +54,9 @@ pub(in crate::platform::macos) enum HubEvent {
     MonitorsChanged(Vec<MonitorInfo>),
     MirrorClicked(CGWindowID),
     TabClicked(ContainerId, usize),
-    /// macOS Space changed. Used to detect native fullscreen enter/exit since
-    /// native fullscreen moves windows to a separate Space.
+    /// Used to detect native fullscreen enter/exit, since native fullscreen
+    /// moves windows to a separate Space.
     SpaceChanged,
-    /// A single PID was observed (from app-launch path).
     PidObserved {
         pid: i32,
     },
@@ -111,9 +110,8 @@ pub(in crate::platform::macos) enum HubMessage {
 /// The main thread consumes this to create, update, and destroy overlay windows,
 /// since macOS requires all UI operations to happen on the main thread.
 pub(in crate::platform::macos) struct RenderFrame {
-    /// One entry per visible monitor. Contains tiling windows and containers to render on
-    /// that monitor's shared overlay. Monitors with no tiling content still get an entry
-    /// so the main thread can hide their overlay.
+    /// One entry per visible monitor. Monitors with no tiling content still get
+    /// an entry so the main thread can hide their overlay.
     pub(in crate::platform::macos) tiling: Vec<MonitorTilingData>,
     /// Float windows visible on the current workspace. Created on first appearance,
     /// updated on subsequent frames. Float windows are rare, so the UI thread simply
@@ -142,11 +140,10 @@ pub(in crate::platform::macos) struct MonitorTilingData {
 #[derive(Clone)]
 pub(in crate::platform::macos) struct ContainerShow {
     pub(in crate::platform::macos) placement: ContainerPlacement,
-    /// Top `tab_bar_height` strip of `placement.border_box` in logical points.
+    /// Top band of `placement.border_box`.
     pub(in crate::platform::macos) tab_bar_dim: Dimension<Logical>,
     /// Pre-flipped Cocoa frame for `tab_bar_dim`. Always populated, even when
-    /// `!placement.is_tabbed`. The UI loop filters before creating the overlay
-    /// window.
+    /// `!placement.is_tabbed`.
     pub(in crate::platform::macos) tab_bar_cocoa_frame: NSRect,
 }
 

@@ -38,10 +38,8 @@ fn is_moving_suppresses_placement() {
     dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
     macos.settle(&mut dome, 10);
 
-    // cg1 is full-screen tiled
     let full_frame = macos.window_frame(cg1);
 
-    // User starts dragging cg1 to a different position
     start_drag(&mut dome, 100);
     macos.window(cg1).position.set((500, 300));
     macos.window(cg1).size.set((400, 400));
@@ -53,8 +51,6 @@ fn is_moving_suppresses_placement() {
     macos.settle(&mut dome, 10);
     assert_eq!(macos.window_frame(cg1), (500, 300, 400, 400));
 
-    // User stops dragging — in production, this triggers check_positions
-    // which reads the window's current position and calls windows_moved
     end_drag(&mut dome, &macos, 100, cg1, 500, 300, 400, 400);
     macos.settle(&mut dome, 10);
     let new_frame = macos.window_frame(cg1);
@@ -71,22 +67,15 @@ fn monitor_change_rehides_offscreen_windows() {
     dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
     macos.settle(&mut dome, 10);
 
-    // Hide window
     send(&mut dome, "focus workspace 1");
     macos.settle(&mut dome, 10);
     let offscreen_before = macos.window_frame(cg1);
     assert!(macos.is_offscreen(cg1));
 
-    // Second monitor appears — offscreen position changes
     let second_monitor = MonitorInfo {
         display_id: 2,
         name: "External".to_string(),
-        work_area: Dimension::new(
-            Length::new(1920.0),
-            Length::new(0.0),
-            Length::new(2560.0),
-            Length::new(1440.0),
-        ),
+        work_area: PixelRect::new(1920, 0, 2560, 1440),
         bounds: Dimension::new(
             Length::new(1920.0),
             Length::new(0.0),
@@ -100,7 +89,6 @@ fn monitor_change_rehides_offscreen_windows() {
     dome.monitors_changed(vec![default_monitor(), second_monitor]);
     macos.settle(&mut dome, 10);
 
-    // Window should be re-hidden at the new offscreen position (based on second monitor)
     assert!(macos.is_offscreen(cg1));
     let offscreen_after = macos.window_frame(cg1);
     assert_ne!(
@@ -126,16 +114,13 @@ fn remove_borderless_fullscreen_window_restores_siblings() {
     );
     macos.settle(&mut dome, 10);
 
-    // Zoom cg1 → borderless fullscreen, cg2 hidden
     macos.simulate_external_move(&mut dome, cg1, 0, 0, 1920, 1080);
     macos.settle(&mut dome, 10);
     assert!(macos.is_offscreen(cg2));
 
-    // Close the fullscreen window
     dome.reconcile_windows(&[], &[cg1], &[], vec![], &[], &[]);
     macos.settle(&mut dome, 10);
 
-    // Sibling should be restored to full tiling
     assert!(!macos.is_offscreen(cg2));
     assert_eq!(macos.window_frame(cg2), (4, 4, 1912, 1072));
 }
@@ -258,12 +243,7 @@ fn render_frame_focused_monitor_changes_on_focus_monitor() {
     let second_monitor = MonitorInfo {
         display_id: 2,
         name: "External".to_string(),
-        work_area: Dimension::new(
-            Length::new(1920.0),
-            Length::ZERO,
-            Length::new(2560.0),
-            Length::new(1440.0),
-        ),
+        work_area: PixelRect::new(1920, 0, 2560, 1440),
         bounds: Dimension::new(
             Length::new(1920.0),
             Length::ZERO,
@@ -326,7 +306,6 @@ fn multi_action_sequence_applies_each_hub_action() {
         }
     }
 
-    // After "focus ws 1, focus ws 0", workspace 0 is focused and windows are visible
     assert!(!macos.is_offscreen(cg1));
     assert!(!macos.is_offscreen(cg2));
 }
@@ -348,7 +327,6 @@ fn reconcile_keeps_window_when_is_valid_true() {
     let wid_before = dome.tracked_window(cg1).unwrap().window_id;
 
     // Fast path: is_valid stays true, no removal requested.
-    // compute_reconciliation would produce empty to_remove for this window.
     dome.reconcile_windows(&[], &[], &[], vec![], &[], &[]);
 
     let entry = dome
@@ -367,7 +345,7 @@ fn reconcile_keeps_window_when_app_windows_errs() {
     macos.settle(&mut dome, 10);
 
     // When app.windows(marker) returns Err, compute_reconciliation returns
-    // all-empty (no removes, no adds, no refresh). Simulate at Dome level.
+    // all-empty (no removes, no adds, no refresh).
     // set_valid(false) documents the scenario trigger even though this test
     // bypasses compute_reconciliation and feeds reconcile_windows directly.
     macos.window(cg1).set_valid(false);
@@ -425,7 +403,6 @@ fn reconcile_keeps_when_cg_id_absent_but_pid_has_fullscreen() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
 
-    // Two windows on same PID. One enters native fullscreen.
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(100, "Safari", "Tabs");
     dome.reconcile_windows(
@@ -440,8 +417,7 @@ fn reconcile_keeps_when_cg_id_absent_but_pid_has_fullscreen() {
     macos.enter_native_fullscreen(&mut dome, cg2);
 
     // Space-switch scenario: is_valid false on cg1, app.windows() empty.
-    // Fullscreen guard keeps the entry. At Dome level, this means
-    // compute_reconciliation does NOT put cg1 in to_remove.
+    // Fullscreen guard keeps the entry.
     macos.window(cg1).set_valid(false);
     dome.reconcile_windows(&[], &[], &[], vec![], &[], &[]);
 
@@ -462,7 +438,7 @@ fn reconcile_removes_when_cg_id_absent_and_no_fullscreen() {
     macos.settle(&mut dome, 10);
 
     // Window is genuinely gone: is_valid false, not in app.windows(), no
-    // fullscreen on this PID. compute_reconciliation puts cg1 in to_remove.
+    // fullscreen on this PID.
     macos.window(cg1).set_valid(false);
     dome.reconcile_windows(&[], &[cg1], &[], vec![], &[], &[]);
 
@@ -477,7 +453,6 @@ fn reconcile_fullscreen_guard_is_per_pid() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
 
-    // cg1 on PID 100, cg2 on PID 200.
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(200, "Terminal", "zsh");
     dome.reconcile_windows(
@@ -490,11 +465,8 @@ fn reconcile_fullscreen_guard_is_per_pid() {
     );
     macos.settle(&mut dome, 10);
 
-    // PID 200 enters native fullscreen.
     macos.enter_native_fullscreen(&mut dome, cg2);
 
-    // PID 100 has no fullscreen. A removal on PID 100 proceeds even though
-    // PID 200 has a fullscreen window. The guard is per-PID, not global.
     macos.window(cg1).set_valid(false);
     dome.reconcile_windows(&[], &[cg1], &[], vec![], &[], &[]);
 

@@ -15,10 +15,8 @@ use super::partition_tree::Child;
 use super::strategy::{StrategySet, TilingAction, WorkspaceExport};
 
 pub(crate) struct VisiblePlacements {
-    /// Window that should receive keyboard focus
     pub(crate) focused_window: Option<WindowId>,
     pub(crate) focused_monitor: MonitorId,
-    /// Placement of windows per monitor
     pub(crate) monitors: Vec<MonitorPlacements>,
 }
 
@@ -37,8 +35,7 @@ pub(crate) struct TilingWindowPlacement {
         )
     )]
     pub(crate) visible_content_box: PixelRect,
-    /// Whether to highlight the window, for example when the window is focused. Doesn't require
-    /// that the window has keyboard focus.
+    /// Highlighting does not require keyboard focus.
     pub(crate) is_highlighted: bool,
     pub(crate) spawn_indicator: Option<SpawnIndicator>,
 }
@@ -57,6 +54,9 @@ pub(crate) struct ContainerPlacement {
     pub(crate) id: ContainerId,
     pub(crate) border_box: PixelRect,
     pub(crate) visible_border_box: PixelRect,
+    /// Top band of `border_box` reserved for the tab strip, zero-height when the container
+    /// is not tabbed.
+    pub(crate) tab_bar_band: PixelRect,
     pub(crate) is_highlighted: bool,
     pub(crate) spawn_indicator: Option<SpawnIndicator>,
     pub(crate) is_tabbed: bool,
@@ -66,8 +66,6 @@ pub(crate) struct ContainerPlacement {
 
 pub(crate) struct MonitorPlacements {
     pub(crate) monitor_id: MonitorId,
-    /// Resolved once per monitor. Emitted so the overlay paints the exact gap the
-    /// inset left rather than re-deriving it from config.
     pub(crate) border_thickness: Pixels<Unit>,
     pub(crate) layout: MonitorLayout,
 }
@@ -82,8 +80,8 @@ pub(crate) enum MonitorLayout {
 }
 
 /// Which border edges to highlight with the spawn indicator color.
-/// Each bool means "highlight this edge." `left` is always false today
-/// but included so we don't need a struct change if a future spawn mode uses it.
+/// `left` is always false today but included so we don't need a struct change
+/// if a future spawn mode uses it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SpawnIndicator {
     pub(crate) top: bool,
@@ -112,7 +110,6 @@ pub(super) enum RestrictedAction {
 }
 
 /// Convenience bundle of the global layout fields from Config.
-/// Hub and strategies use this instead of threading 9 separate fields.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GlobalLayoutConfig {
     pub(crate) strategy: Strategy,
@@ -238,8 +235,6 @@ impl Hub {
             .active_workspace
     }
 
-    /// Return the window that should get keyboard focus.
-    ///
     /// The top most fullscreen window will get the focus, if any, as fullscreen windows take over
     /// the whole workspaces they are in.
     /// If none is present, focus between float and tiling windows will be decided by is_float_focused
@@ -275,8 +270,7 @@ impl Hub {
         }
     }
 
-    /// Single entry point for tiling actions. Checks restrictions and delegates
-    /// to the strategy.
+    /// Single entry point for tiling actions.
     #[tracing::instrument(skip(self))]
     pub(crate) fn handle_tiling_action(&mut self, action: TilingAction) {
         if self.is_restricted(RestrictedAction::TilingNavigation) {
@@ -465,7 +459,6 @@ impl Hub {
         let ws_id = self
             .access
             .workspaces
-            // Placeholder id. will be changed after inserting primary monitor
             .allocate(Workspace::new(workspace_name.clone(), monitor_id));
         self.access.monitors.get_mut(monitor_id).active_workspace = ws_id;
         let preferred_layout = self
@@ -541,7 +534,6 @@ impl Hub {
         }
         let preferred_layouts = self.access.preferred_layouts.clone();
 
-        // Change the strategy of workspages without preferred layout
         self.strategies
             .resync(&mut self.access, &preferred_layouts, layout.strategy);
 
@@ -617,7 +609,6 @@ impl Hub {
                     .windows
                     .allocate(Window::float(target_ws, rect, metadata));
                 tracing::debug!(%window_id, ?rect, "Inserting float window");
-                // `occupy_id` links the window back to the matcher that routed it.
                 self.attach_float_to_workspace(target_ws, window_id, rect, occupy_id);
                 self.set_focus(window_id);
                 window_id
@@ -656,7 +647,6 @@ impl Hub {
                 let ws = self.access.workspaces.get(ws_id);
                 let screen = self.access.monitors.get(ws.monitor).work_area;
 
-                // Fullscreen: only return topmost, skip tiling/float
                 if let Some(&fs_id) = ws.fullscreen_windows.last() {
                     return MonitorPlacements {
                         monitor_id: ws.monitor,

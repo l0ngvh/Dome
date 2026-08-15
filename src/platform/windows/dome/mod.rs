@@ -348,7 +348,6 @@ impl Dome {
         }
     }
 
-    /// Adding a manageable window.
     #[tracing::instrument(skip_all, fields(pid = ext.pid(), hwnd = %ext.id(), metadata = %metadata))]
     pub(super) fn add_window(
         &mut self,
@@ -541,9 +540,8 @@ impl Dome {
             entry.ext.show_cmd(ShowCmd::Restore);
             entry.is_minimized = false;
             // entry.state holds the prior Positioned(Tiling/Float/Offscreen) or
-            // BorderlessFullscreen variant. The next apply_layout dispatches
-            // through show_fullscreen_window / show_tiling / show_float against
-            // that preserved state.
+            // BorderlessFullscreen variant. That state is deliberately preserved
+            // so the next apply_layout dispatches against it.
         }
     }
 
@@ -589,9 +587,8 @@ impl Dome {
                     let mut placed_floats = Vec::new();
                     let mut container_data = Vec::new();
 
-                    // Windows places tiles unclipped, so a tile extending past the work
-                    // area stays where core put it. That is a current choice, not an
-                    // invariant -- macOS trims instead (macos/dome/layout.rs).
+                    // Windows places tiles unclipped, so a tile extending past the work area stays where core put it.
+                    // That is a current choice, not an invariant. macOS trims instead.
                     for wp in tiling_windows {
                         window_ids.insert(wp.id);
                         if self.registry.get(wp.id).is_none() {
@@ -646,7 +643,6 @@ impl Dome {
             new_displayed.insert(mp.monitor_id, window_ids);
         }
 
-        // Global diff
         let old_window_ids: HashSet<WindowId> = self
             .monitors
             .monitors()
@@ -663,8 +659,6 @@ impl Dome {
             .copied()
             .collect();
 
-        // Update displayed state on each monitor.
-        // Clear all first, then set the ones that have placements this pass.
         self.monitors.clear_all_displayed();
         for (mid, dm) in new_displayed {
             self.monitors.set_displayed_windows(mid, dm);
@@ -672,7 +666,7 @@ impl Dome {
 
         for &id in &to_hide {
             // Keep taskbar tab for user-minimized windows so the user can
-            // click it to restore. Dome-hidden windows get their tab removed.
+            // click it to restore.
             if let Some(entry) = self.registry.get(id)
                 && !entry.is_minimized
             {
@@ -687,10 +681,8 @@ impl Dome {
             }
         }
 
-        // Position
         self.position_windows(&per_monitor, focused);
 
-        // Clean up float overlays for windows that are no longer float
         let current_float_ids: HashSet<WindowId> = per_monitor
             .iter()
             .flat_map(|m| m.float_windows.iter().map(|wp| wp.id))
@@ -698,14 +690,12 @@ impl Dome {
         self.float_overlays
             .retain(|id, _| current_float_ids.contains(id));
 
-        // Taskbar
         for &id in &tabs_to_add {
             if let Some(entry) = self.registry.get(id) {
                 self.taskbar.add_tab(entry.ext.id());
             }
         }
 
-        // Focus
         let current_monitor = focused_monitor;
         let monitor_changed = self
             .last_focused_monitor
@@ -799,9 +789,8 @@ impl Dome {
                     scale,
                     data.border_thickness,
                 );
-            let tab_bar_h_logical = self.config.partition_tree.tab_bar_height;
             for (placement, titles) in data.containers.iter().filter(|(p, _)| p.is_tabbed) {
-                let rect = compute_tab_bar_rect(placement.border_box, tab_bar_h_logical, scale);
+                let rect = placement.tab_bar_band;
                 let tab_bar = match self.tab_bars.entry(placement.id) {
                     std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
                     std::collections::hash_map::Entry::Vacant(e) => {
@@ -979,25 +968,9 @@ impl Dome {
 }
 
 // Fallback display string derived from the executable name. Prefer
-// FileDescription from version info when available (see get_app_display_name).
+// FileDescription from version info when available.
 pub(super) fn display_from_process(process: &str) -> String {
     process.strip_suffix(".exe").unwrap_or(process).to_string()
-}
-
-// The bar hugs the container's top edge, with the configured logical height rounded
-// into the platform's `Unit`.
-fn compute_tab_bar_rect(
-    border_box: PixelRect,
-    tab_bar_h_logical: Length<Logical>,
-    scale: f32,
-) -> PixelRect {
-    let h_phys = tab_bar_h_logical.to_unit(scale).round();
-    PixelRect::from_pixels(
-        border_box.x(),
-        border_box.y(),
-        border_box.width(),
-        Pixels::truncate(h_phys),
-    )
 }
 
 #[cfg(test)]

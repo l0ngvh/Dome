@@ -140,7 +140,6 @@ fn remove_non_focused_monitor() {
     let primary = hub.focused_monitor();
     let m1 = hub.add_monitor("external".to_string(), PixelRect::new(150, 0, 100, 30), 1.0);
 
-    // Stay on primary, remove external
     hub.remove_monitor(m1, primary);
 
     assert_snapshot!(snapshot_text(&hub), @"
@@ -190,14 +189,12 @@ fn focus_monitor_by_direction() {
     let mut hub = setup();
     hub.insert_window(titled("w7"), default_rect(), WindowRestrictions::None);
 
-    // Monitor to the right
     hub.add_monitor(
         "right-monitor".to_string(),
         PixelRect::new(150, 0, 100, 30),
         1.0,
     );
 
-    // Monitor below
     hub.add_monitor(
         "bottom-monitor".to_string(),
         PixelRect::new(0, 30, 150, 30),
@@ -244,7 +241,6 @@ fn focus_monitor_by_direction() {
       Monitor(id=MonitorId(2), screen=(x=0.00 y=30.00 w=150.00 h=30.00))
     ");
 
-    // Focus by name twice: second call is no-op
     hub.focus_monitor(&MonitorTarget::Name("right-monitor".to_string()));
     let after_name = snapshot_text(&hub);
     hub.focus_monitor(&MonitorTarget::Name("right-monitor".to_string()));
@@ -345,7 +341,6 @@ fn move_float_to_monitor() {
 fn monitor_noop_cases() {
     use crate::action::MonitorTarget;
 
-    // Single monitor: focus_monitor is no-op
     {
         let mut hub = setup();
         hub.insert_window(titled("w13"), default_rect(), WindowRestrictions::None);
@@ -354,7 +349,6 @@ fn monitor_noop_cases() {
         assert_eq!(snapshot_text(&hub), before);
     }
 
-    // Single monitor with tiling: move_focused_to_monitor is no-op
     {
         let mut hub = setup();
         hub.insert_window(titled("w14"), default_rect(), WindowRestrictions::None);
@@ -363,7 +357,7 @@ fn monitor_noop_cases() {
         assert_eq!(snapshot_text(&hub), before);
     }
 
-    // Two monitors, move to same monitor: no-op
+    // The hub starts focused on the monitor named "primary".
     {
         let mut hub = setup();
         hub.insert_window(titled("w15"), default_rect(), WindowRestrictions::None);
@@ -373,7 +367,6 @@ fn monitor_noop_cases() {
         assert_eq!(snapshot_text(&hub), before);
     }
 
-    // Two monitors, no windows: move_focused_to_monitor is no-op
     {
         let mut hub = setup();
         hub.add_monitor(
@@ -425,6 +418,8 @@ fn monitor_scale_multiplies_tab_bar_height() {
 #[cfg(target_os = "windows")]
 #[test]
 fn monitor_scale_multiplies_size_constraints() {
+    use crate::core::node::Pixels;
+
     let mut hub = TestHubBuilder::new()
         .with_scale(2.0)
         .with_layout(
@@ -435,8 +430,7 @@ fn monitor_scale_multiplies_size_constraints() {
                         .with_automatic_tiling(false)
                         .build(),
                 )
-                // At scale of 2.0, min width should be 80
-                .with_min_width(SizeConstraint::Pixels(Length::new(40.0)))
+                .with_min_width(SizeConstraint::Pixels(Pixels::new(40)))
                 .build(),
         )
         .build();
@@ -457,12 +451,7 @@ fn monitor_scale_multiplies_size_constraints() {
     ");
 
     let monitor_id = hub.focused_monitor();
-    hub.update_monitor(
-        monitor_id,
-        PixelRect::new(0, 0, 500, 1000),
-        // At scale of 3.0, min width should be 120
-        3.0,
-    );
+    hub.update_monitor(monitor_id, PixelRect::new(0, 0, 500, 1000), 3.0);
 
     assert_snapshot!(snapshot_text(&hub), @r"
     Hub(focused=WindowId(5))

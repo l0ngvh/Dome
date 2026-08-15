@@ -9,7 +9,7 @@ use std::str::FromStr;
 use crate::action::{
     Action, Actions, FocusTarget, MonitorTarget, MoveTarget, TabDirection, ToggleTarget,
 };
-use crate::core::{Length, Logical, Unit};
+use crate::core::{Length, Logical, Pixels, Unit};
 use crate::font::{FontConfig, MAX_FONT_SIZE, MIN_FONT_SIZE, default_text_size};
 use crate::theme::{Flavor, Theme};
 
@@ -199,7 +199,6 @@ fn default_keymaps() -> ModalKeymaps {
         },
         Actions::new(vec![Action::Close]),
     );
-    // Monitor focus: Meta+Alt+hjkl
     for (key, target) in [
         ("h", MonitorTarget::Left),
         ("j", MonitorTarget::Down),
@@ -434,7 +433,6 @@ impl RawConfig {
     }
 }
 
-/// Deserialization target for a bundled ignore file.
 #[derive(Deserialize)]
 struct BundledIgnore {
     #[serde(default)]
@@ -627,28 +625,24 @@ fn walk_bindings_table(table: toml::Table, prefix: &str) -> HashMap<Keymap, Acti
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum SizeConstraint {
-    Pixels(Length<Logical>),
+    Pixels(Pixels<Logical>),
     Percent(f32),
 }
 
 impl Default for SizeConstraint {
     fn default() -> Self {
-        SizeConstraint::Pixels(Length::new(0.0))
+        SizeConstraint::Pixels(Pixels::ZERO)
     }
 }
 
 impl SizeConstraint {
-    /// Resolves to a frame-unit length.
-    ///
-    /// `Pixels` is a config-denominated absolute length (logical), so it goes
-    /// through `to_unit(scale)` to reach the frame unit. `Percent` is a ratio
-    /// of `screen_size` (already in frame units), so `scale` does not apply --
-    /// the result is wrapped directly as `Length<Unit>`.
+    /// `Pixels` is a config-denominated absolute logical length, so it goes
+    /// through `to_unit(scale)` to reach the frame unit. `Percent` is a ratio of
+    /// `screen_size`, which the caller passes in frame units already, so `scale`
+    /// does not apply.
     pub(crate) fn resolve(&self, screen_size: Length<Unit>, scale: f32) -> Length<Unit> {
         match self {
-            SizeConstraint::Pixels(px) => px.to_unit(scale),
-            // screen_size is already in Unit space (monitor frame dimension),
-            // so the result is directly Length<Unit> — no logical-to-unit conversion needed.
+            SizeConstraint::Pixels(px) => Length::from_pixels(*px).to_unit(scale),
             SizeConstraint::Percent(pct) => screen_size * (pct / 100.0),
         }
     }
@@ -677,7 +671,11 @@ impl<'de> Deserialize<'de> for SizeConstraint {
                 if val < 0.0 {
                     return Err(E::custom("pixel value must be non-negative"));
                 }
-                Ok(SizeConstraint::Pixels(Length::new(val)))
+                // Also rejects NaN and infinity, whose `fract` is NaN.
+                if val.fract() != 0.0 {
+                    return Err(E::custom("pixel value must be a whole number"));
+                }
+                Ok(SizeConstraint::Pixels(Pixels::round(Length::new(val))))
             }
 
             fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
@@ -705,7 +703,6 @@ impl<'de> Deserialize<'de> for SizeConstraint {
     }
 }
 
-/// Bundled min/max window size constraints from config.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(default)]
 pub(crate) struct SizeConstraints {
@@ -733,10 +730,7 @@ pub(crate) enum Strategy {
     Master,
 }
 
-/// Per-strategy config for the partition-tree strategy.
-///
-/// All fields are read fresh from `hub.config.layout.partition_tree` by the
-/// strategy on every layout pass (see `src/core/partition_tree/layout.rs`).
+/// All fields are read fresh by the strategy on every layout pass.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub(crate) struct PartitionTreeConfig {
     #[serde(default = "default_tab_bar_height")]
@@ -745,8 +739,6 @@ pub(crate) struct PartitionTreeConfig {
     pub(crate) automatic_tiling: bool,
 }
 
-/// Per-strategy config for the master-stack strategy.
-///
 /// Global `master_ratio` and `master_count` seed new workspaces on their first
 /// `attach_window`. They do NOT flow into existing workspaces on hot-reload.
 /// Runtime tuning via `master grow/shrink/more/fewer` persists across reloads.
@@ -779,7 +771,6 @@ impl WalkRule for WindowMatcher {
         &["app", "bundle_id", "title", "process", "class", "aumid"];
 }
 
-/// Split mode for a `TreeLayoutNode::Container`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum SplitMode {
@@ -789,7 +780,6 @@ pub(crate) enum SplitMode {
 }
 
 /// A node in the preferred tree layout for partition-tree workspaces.
-/// Either a single window matcher (leaf) or a container with nested children.
 ///
 /// TOML shapes:
 ///   Leaf:            `{ process = "editor.exe" }`
@@ -799,14 +789,13 @@ pub(crate) enum SplitMode {
 pub(crate) enum TreeLayoutNode {
     Leaf(WindowMatcher),
     Container {
-        /// `None` means the split mode is unspecified — the runtime
-        /// will pick based on context when materializing the tree.
+        /// `None` leaves the split mode to the runtime, which picks one based
+        /// on context when it materializes the tree.
         split: Option<SplitMode>,
         children: Vec<TreeLayoutNode>,
     },
 }
 
-/// Helper struct for deserializing the container variant of `TreeLayoutNode`.
 #[derive(Deserialize)]
 struct TreeContainer {
     #[serde(default)]
@@ -1163,24 +1152,29 @@ impl Config {
     }
 
     fn validate_layout(&self) -> anyhow::Result<()> {
-        // Validation compares config values in logical space directly. No scale
-        // factor exists at validation time, so `.logical()` is the correct escape
-        // hatch here (not `to_unit`).
         if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) = (
             self.size_constraints.minimum_width,
             self.size_constraints.maximum_width,
-        ) && max.logical() > 0.0
+        ) && max > Pixels::ZERO
             && min > max
         {
-            anyhow::bail!("minimum_width ({min}) cannot be greater than maximum_width ({max})");
+            anyhow::bail!(
+                "minimum_width ({}) cannot be greater than maximum_width ({})",
+                min.value(),
+                max.value()
+            );
         }
         if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) = (
             self.size_constraints.minimum_height,
             self.size_constraints.maximum_height,
-        ) && max.logical() > 0.0
+        ) && max > Pixels::ZERO
             && min > max
         {
-            anyhow::bail!("minimum_height ({min}) cannot be greater than maximum_height ({max})");
+            anyhow::bail!(
+                "minimum_height ({}) cannot be greater than maximum_height ({})",
+                min.value(),
+                max.value()
+            );
         }
         Ok(())
     }
@@ -1280,11 +1274,11 @@ mod tests {
         let config: Config = toml::from_str("").unwrap();
         assert_eq!(
             config.size_constraints.maximum_width,
-            SizeConstraint::Pixels(Length::new(0.0))
+            SizeConstraint::Pixels(Pixels::new(0))
         );
         assert_eq!(
             config.size_constraints.maximum_height,
-            SizeConstraint::Pixels(Length::new(0.0))
+            SizeConstraint::Pixels(Pixels::new(0))
         );
     }
 
@@ -1293,7 +1287,7 @@ mod tests {
         let config: Config = toml::from_str("minimum_width = 200.0").unwrap();
         assert_eq!(
             config.size_constraints.minimum_width,
-            SizeConstraint::Pixels(Length::new(200.0))
+            SizeConstraint::Pixels(Pixels::new(200))
         );
     }
 
@@ -1302,7 +1296,7 @@ mod tests {
         let config: Config = toml::from_str("minimum_width = 200").unwrap();
         assert_eq!(
             config.size_constraints.minimum_width,
-            SizeConstraint::Pixels(Length::new(200.0))
+            SizeConstraint::Pixels(Pixels::new(200))
         );
     }
 
@@ -1327,6 +1321,21 @@ mod tests {
     }
 
     #[test]
+    fn size_constraint_rejects_fractional_pixels() {
+        assert!(toml::from_str::<Config>("minimum_width = 100.5").is_err());
+    }
+
+    #[test]
+    fn size_constraint_rejects_non_finite_pixels() {
+        for literal in ["nan", "inf", "-inf"] {
+            assert!(
+                toml::from_str::<Config>(&format!("minimum_width = {literal}")).is_err(),
+                "{literal} should be rejected"
+            );
+        }
+    }
+
+    #[test]
     fn size_constraint_rejects_string_without_percent() {
         assert!(toml::from_str::<Config>(r#"minimum_width = "200""#).is_err());
     }
@@ -1334,28 +1343,27 @@ mod tests {
     #[test]
     fn size_constraint_resolve() {
         assert_eq!(
-            SizeConstraint::Pixels(Length::new(200.0))
+            SizeConstraint::Pixels(Pixels::new(200))
                 .resolve(Length::new(1000.0), 1.0)
                 .value(),
             200.0
         );
-        // On macOS (Unit = Logical), to_unit is identity so scale doesn't affect Pixels.
-        // On Windows (Unit = Physical), Pixels(200) * scale 1.5 = 300.
+        // On macOS (Unit = Logical), to_unit is identity so scale does not affect
+        // Pixels. On Windows (Unit = Physical), scale multiplies through.
         #[cfg(target_os = "windows")]
         assert_eq!(
-            SizeConstraint::Pixels(Length::new(200.0))
+            SizeConstraint::Pixels(Pixels::new(200))
                 .resolve(Length::new(1000.0), 1.5)
                 .value(),
             300.0
         );
         #[cfg(not(target_os = "windows"))]
         assert_eq!(
-            SizeConstraint::Pixels(Length::new(200.0))
+            SizeConstraint::Pixels(Pixels::new(200))
                 .resolve(Length::new(1000.0), 1.5)
                 .value(),
             200.0
         );
-        // scale must not affect Percent (screen_size is already in Unit space)
         assert_eq!(
             SizeConstraint::Percent(10.0)
                 .resolve(Length::new(1000.0), 1.0)
@@ -1455,6 +1463,22 @@ mod tests {
         let _cleanup = CleanupFile(path.clone());
         let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(config.border_size.logical(), 5.0);
+    }
+
+    #[test]
+    fn fractional_minimum_width_falls_back_to_default() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_min_width_frac_{nanos}.toml"));
+        std::fs::write(&path, "minimum_width = 100.5\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
+        assert_eq!(
+            config.size_constraints.minimum_width,
+            SizeConstraint::default_min()
+        );
     }
 
     #[test]
@@ -1569,8 +1593,6 @@ mod tests {
 
     #[test]
     fn keymap_accepts_cmd_and_win_aliases() {
-        // `cmd` (macOS) and `win` (Windows) are aliases for `meta` so users can
-        // write keymaps in the vocabulary of their OS.
         let cmd: Keymap = "cmd+t".parse().unwrap();
         assert_eq!(cmd.modifiers, Modifiers::META);
         let win: Keymap = "win+t".parse().unwrap();
@@ -1676,11 +1698,9 @@ mod tests {
         LayoutConfig::load(&path).expect("example layout failed to load");
     }
 
-    /// RAII guard that removes a temp file on drop, even if the test panics.
     struct CleanupFile(std::path::PathBuf);
     impl Drop for CleanupFile {
         fn drop(&mut self) {
-            // Best-effort cleanup of test temp file; nothing to do if it fails.
             std::fs::remove_file(&self.0).ok();
         }
     }
@@ -1937,8 +1957,8 @@ mod tests {
         assert!(!config.keymaps.default.contains_key(&a));
     }
 
-    // The exact-count assertion is the cheap, high-signal guard. A dropped or
-    // duplicated [[ignore]] entry in the bundled data file fails the test.
+    // The exact count catches a dropped or duplicated [[ignore]] entry in the
+    // bundled data file.
     #[test]
     #[cfg(target_os = "macos")]
     fn macos_ignore_defaults() {
@@ -1966,8 +1986,8 @@ mod tests {
         );
     }
 
-    // The exact-count assertion is the cheap, high-signal guard. A dropped or
-    // duplicated [[ignore]] entry in the bundled data file fails the test.
+    // The exact count catches a dropped or duplicated [[ignore]] entry in the
+    // bundled data file.
     #[test]
     #[cfg(target_os = "windows")]
     fn windows_ignore_defaults() {
@@ -2078,7 +2098,7 @@ mod tests {
         let layout = Config::load(path.to_str().unwrap()).unwrap();
         assert_eq!(
             layout.size_constraints.minimum_width,
-            SizeConstraint::Pixels(Length::new(200.0))
+            SizeConstraint::Pixels(Pixels::new(200))
         );
         assert_eq!(
             layout.size_constraints.maximum_width,
@@ -2086,11 +2106,11 @@ mod tests {
         );
         assert_eq!(
             layout.size_constraints.minimum_height,
-            SizeConstraint::Pixels(Length::new(100.0))
+            SizeConstraint::Pixels(Pixels::new(100))
         );
         assert_eq!(
             layout.size_constraints.maximum_height,
-            SizeConstraint::Pixels(Length::new(0.0))
+            SizeConstraint::Pixels(Pixels::new(0))
         );
     }
 
@@ -2300,7 +2320,6 @@ mod tests {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!("dome_ws_non_table_{nanos}.toml"));
-        // TOML inline arrays can hold non-table elements. Write raw to test recovery.
         std::fs::write(&path, "workspace = [\"not_a_table\"]\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
         let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);

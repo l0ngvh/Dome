@@ -217,7 +217,7 @@ impl Dome {
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(
-            primary.work_area_snapped(),
+            primary.work_area,
             1.0,
             GlobalLayoutConfig::from(&config),
             workspace_overrides.clone(),
@@ -226,7 +226,7 @@ impl Dome {
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         for monitor in monitors {
             if monitor.display_id != primary.display_id {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area_snapped(), 1.0);
+                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, 1.0);
                 monitor_registry.insert(monitor, id);
             }
         }
@@ -322,7 +322,7 @@ impl Dome {
                         ax_for_recovery,
                         rect.width(),
                         rect.height(),
-                        self.monitor_registry.primary_monitor().work_area_snapped(),
+                        self.monitor_registry.primary_monitor().work_area(),
                     );
                 }
             }
@@ -369,8 +369,6 @@ impl Dome {
         for (display_id, rect) in &rects {
             self.status_bars.record(*display_id, *rect);
         }
-        // update_monitors borrows &mut self, so self.monitors cannot be
-        // borrowed across the call. Cheap main-thread clone.
         let cached = self.monitors.clone();
         self.update_monitors(&cached);
         self.flush_layout();
@@ -491,8 +489,7 @@ impl Dome {
     }
 
     /// Handles the frontmost window entering native fullscreen after a space
-    /// change. If `cg_id` is tracked, transitions it to `NativeFullscreen`
-    /// state. If untracked, inserts it as a new fullscreen window.
+    /// change.
     #[tracing::instrument(skip(self, new), fields(cg_id = %cg_id))]
     pub(in crate::platform::macos) fn enter_native_fullscreen(
         &mut self,
@@ -509,9 +506,8 @@ impl Dome {
     }
 
     /// Handles the frontmost window exiting native fullscreen after a space
-    /// change. Only acts if `cg_id` is tracked and currently in
-    /// `NativeFullscreen` state, routing through `window_moved` so the window
-    /// re-enters tiling via the same path as reconcile-detected exits.
+    /// change. Routes through `window_moved` so the window re-enters tiling via
+    /// the same path as reconcile-detected exits.
     #[tracing::instrument(skip(self, pos, size), fields(cg_id = %cg_id))]
     pub(in crate::platform::macos) fn exit_native_fullscreen(
         &mut self,
@@ -568,8 +564,6 @@ impl Dome {
         self.observed_pids.insert(pid);
     }
 
-    /// Replaces `observed_pids` wholesale with the given set. Called after
-    /// `refresh_all_observers` completes on the main thread.
     pub(in crate::platform::macos) fn set_observed_pids(&mut self, pids: HashSet<i32>) {
         self.observed_pids = pids;
     }
@@ -578,8 +572,6 @@ impl Dome {
         self.remove_app_windows(pid);
     }
 
-    /// Sends a message to the main thread to tear down all observers and
-    /// re-register from scratch.
     pub(in crate::platform::macos) fn refresh_observers(&self) {
         self.sender.send(HubMessage::RefreshObservers);
     }
@@ -621,7 +613,6 @@ impl Dome {
         serde_json::to_string(&entries).expect("MinimizedWindow is infallibly serializable")
     }
 
-    /// Clear the minimize flag on a window and drive the OS-side restore.
     #[tracing::instrument(skip(self), fields(window_id = %window_id))]
     pub(in crate::platform::macos) fn unminimize_window(&mut self, window_id: WindowId) {
         self.hub.unminimize_window(window_id);

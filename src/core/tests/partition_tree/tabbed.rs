@@ -1,9 +1,13 @@
 use crate::core::ContainerId;
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::NodeId;
-use crate::core::node::{Length, LimitObservation, LimitUpdate, PixelRect, WindowRestrictions};
+use crate::core::hub::MonitorLayout;
+use crate::core::node::{
+    Length, LimitObservation, LimitUpdate, Logical, PixelRect, WindowRestrictions,
+};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
+    LayoutConfigBuilder, PartitionTreeConfigBuilder, default_rect, setup, setup_with_layout,
+    snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
@@ -841,7 +845,6 @@ fn set_focus_updates_active_tab() {
     hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
 
-    // Focus W0 should update active_tab to 0
     hub.set_focus(w0);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -893,7 +896,6 @@ fn delete_active_tab_updates_active_tab() {
         .unwrap();
     hub.toggle_container_layout();
 
-    // W2 is active (index 2), delete it
     hub.delete_window(w2);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -1050,20 +1052,16 @@ fn toggle_tabbed_off_fixes_direction_conflict_with_parent_and_children() {
 fn toggle_tabbed_off_dont_rotate_child_when_its_already_correct() {
     let mut hub = setup();
 
-    // Create horizontal container with 3 windows
     hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
 
-    // Make it tabbed
     hub.toggle_container_layout();
 
-    // Create a vertical nested container in the middle tab
     hub.focus_prev_tab();
     hub.toggle_spawn_mode();
     hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
 
-    // Focus parent and toggle back to split (horizontal)
     hub.focus_parent();
     hub.focus_parent();
     hub.toggle_container_layout();
@@ -1229,8 +1227,6 @@ fn toggle_container_layout_in_nested_tabbed_maintain_direction_invariant() {
     // should it do
     hub.set_focus(w2);
     hub.toggle_direction();
-    // Now we have 3 containers where original orientation were horizontal, 2 of which got turned
-    // into tabbed
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -1347,7 +1343,6 @@ fn toggle_tabbed_when_focused_is_inside_child_container() {
     hub.set_focus(w3);
     hub.focus_parent();
 
-    // After this focus will be on w7
     hub.delete_window(w3);
 
     hub.toggle_container_layout();
@@ -1471,7 +1466,6 @@ fn focus_tab_noop() {
     hub.focus_prev_tab();
     assert_eq!(before, snapshot(&hub));
 
-    // Two tiling windows with no tabbed ancestor
     let mut hub = setup();
     hub.insert_window(titled("w7"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w8"), default_rect(), WindowRestrictions::None);
@@ -1561,4 +1555,53 @@ fn tab_bar_visible_when_min_height_exceeds_screen() {
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     ");
+}
+
+/// The monitor height and tab bar height are odd and fractional on purpose. They put the
+/// container origin on a half unit, where `round(y) + round(h)` diverges by a unit from the
+/// `round(y + h)` the content box uses.
+#[test]
+fn tabbed_band_bottom_lands_on_the_content_top() {
+    let mut hub = setup_with_layout(
+        LayoutConfigBuilder::new()
+            .with_partition_tree_config(
+                PartitionTreeConfigBuilder::new()
+                    .with_tab_bar_height(Length::<Logical>::new(24.5))
+                    .build(),
+            )
+            .build(),
+    );
+    let monitor_id = hub.focused_monitor();
+    hub.update_monitor(monitor_id, PixelRect::new(0, 0, 1000, 201), 1.0);
+
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    hub.toggle_spawn_mode();
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
+    hub.toggle_spawn_mode();
+    hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
+    hub.toggle_container_layout();
+
+    let placements = hub.get_visible_placements();
+    let active_tab = placements.focused_window.expect("focus on the active tab");
+    let MonitorLayout::Normal {
+        tiling_windows,
+        containers,
+        ..
+    } = &placements.monitors[0].layout
+    else {
+        panic!("expected a normally tiled monitor");
+    };
+    let tabbed = containers
+        .iter()
+        .find(|c| c.is_tabbed)
+        .expect("a tabbed container");
+    let content_top = tiling_windows
+        .iter()
+        .find(|w| w.id == active_tab)
+        .expect("the active tab is placed")
+        .border_box
+        .y();
+
+    assert_eq!(tabbed.tab_bar_band.bottom(), content_top);
 }

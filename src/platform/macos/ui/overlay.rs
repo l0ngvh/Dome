@@ -28,9 +28,7 @@ use crate::core::{
     ContainerId, Dimension, FloatWindowPlacement, Length, Logical, TilingWindowPlacement,
 };
 use crate::font::FontConfig;
-use crate::overlay::{
-    self, BorderMetrics, LogicalTiledContainer, LogicalTiledWindow, OverlayMetrics,
-};
+use crate::overlay::{self, BorderMetrics, LogicalTiledContainer, LogicalTiledWindow};
 use crate::theme::Flavor;
 
 define_class!(
@@ -567,6 +565,7 @@ impl TilingOverlayView {
                 id: cs.placement.id,
                 frame: cs.placement.border_box.to_dimension(),
                 visible_frame: cs.placement.visible_border_box.to_dimension(),
+                tab_bar_height: Length::from_pixels(cs.placement.tab_bar_band.height()),
                 is_highlighted: cs.placement.is_highlighted,
                 spawn_indicator: cs.placement.spawn_indicator,
                 is_tabbed: cs.placement.is_tabbed,
@@ -574,15 +573,8 @@ impl TilingOverlayView {
             })
             .collect();
         let border = BorderMetrics::from_thickness(ivars.border_thickness.get());
-        let metrics = OverlayMetrics {
-            border,
-            tab_bar_height: ivars.tab_bar_height.get(),
-        };
         let theme = config.theme();
 
-        // Tab-bar painting and click collection live in per-container
-        // TabBarOverlay windows. The per-monitor overlay paints only window
-        // borders and container highlights.
         ivars
             .renderer
             .borrow_mut()
@@ -593,7 +585,7 @@ impl TilingOverlayView {
                     &windows_logical,
                     &containers_logical,
                     &theme,
-                    metrics,
+                    border,
                 )
             });
     }
@@ -603,7 +595,7 @@ impl TilingOverlayView {
 /// the container is tabbed and on the active workspace, reconciled per-frame
 /// in the UI thread's frame callback. Owns its own borderless window and
 /// receives mouse events directly so a tab click never has to traverse the
-/// per-monitor `TilingOverlay` (which is now click-through).
+/// per-monitor `TilingOverlay` (which is click-through).
 pub(super) struct TabBarOverlay {
     window: Retained<NSWindow>,
     view: Retained<TabBarOverlayView>,
@@ -646,8 +638,6 @@ impl TabBarOverlay {
                 | NSWindowCollectionBehavior::IgnoresCycle,
         );
         unsafe { window.setReleasedWhenClosed(false) };
-        // Inverse of the tiling overlay's setting: this window exists to
-        // receive tab clicks.
         window.setIgnoresMouseEvents(false);
 
         let view = TabBarOverlayView::new(
@@ -848,10 +838,6 @@ impl TabBarOverlayView {
         let container_id = ivars.container_id;
 
         let border = BorderMetrics::from_thickness(ivars.border_thickness.get());
-        let metrics = OverlayMetrics {
-            border,
-            tab_bar_height: bar.height,
-        };
         let theme = config.theme();
 
         // The tab-bar window's canvas is exactly the bar, so paint at the
@@ -871,7 +857,7 @@ impl TabBarOverlayView {
                     &titles,
                     active_tab_index,
                     is_highlighted,
-                    metrics,
+                    border,
                     &theme,
                 )
             });

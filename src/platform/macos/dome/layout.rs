@@ -1,23 +1,10 @@
 use std::collections::HashSet;
 
-use crate::core::{Dimension, Length, Logical, MonitorLayout, MonitorPlacements, WindowId};
+use crate::core::{Length, MonitorLayout, MonitorPlacements, WindowId};
 use crate::platform::macos::objc2_wrapper::dimension_to_ns_rect_cocoa;
 
 use super::Dome;
 use super::events::{ContainerShow, FloatShow, HubMessage, MonitorTilingData, RenderFrame};
-
-/// Top `tab_bar_height` strip of a tabbed container's frame, in logical points.
-fn tab_bar_dimension(
-    container_frame: Dimension<Logical>,
-    tab_bar_height: Length<Logical>,
-) -> Dimension<Logical> {
-    Dimension::new(
-        container_frame.x,
-        container_frame.y,
-        container_frame.width,
-        tab_bar_height,
-    )
-}
 
 impl Dome {
     /// All fullscreen -> normal and normal -> fullscreen must be resolved before this step
@@ -126,7 +113,7 @@ impl Dome {
             MonitorLayout::Fullscreen(window_id) => {
                 self.place_fullscreen_window(*window_id, mp.monitor_id);
                 let monitor = self.monitor_registry.monitor(mp.monitor_id);
-                let dim = monitor.work_area();
+                let dim = monitor.work_area().to_dimension();
                 (
                     MonitorTilingData {
                         monitor_id: mp.monitor_id,
@@ -149,7 +136,7 @@ impl Dome {
                 containers,
             } => {
                 let monitor = self.monitor_registry.monitor(mp.monitor_id);
-                let monitor_dim = monitor.work_area();
+                let monitor_dim = monitor.work_area().to_dimension();
                 let scale = monitor.egui_scale();
 
                 let mut placed_tiling = Vec::new();
@@ -204,10 +191,7 @@ impl Dome {
 
                 let mut container_data = Vec::with_capacity(containers.len());
                 for cp in containers {
-                    let tab_bar_dim = tab_bar_dimension(
-                        cp.border_box.to_dimension(),
-                        self.config.partition_tree.tab_bar_height,
-                    );
+                    let tab_bar_dim = cp.tab_bar_band.to_dimension();
                     let tab_bar_cocoa_frame = dimension_to_ns_rect_cocoa(
                         Length::new(self.primary_full_height),
                         tab_bar_dim,

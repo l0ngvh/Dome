@@ -3,7 +3,7 @@ use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST};
 
 use crate::core::{LimitObservation, Physical, PixelRect};
 
-/// Opaque window identity. Replaces `ManagedHwnd` throughout the codebase.
+/// Opaque window identity.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct HwndId(isize);
 

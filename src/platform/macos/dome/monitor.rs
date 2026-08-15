@@ -14,8 +14,10 @@ use super::Dome;
 pub(in crate::platform::macos) struct MonitorInfo {
     pub(in crate::platform::macos) display_id: CGDirectDisplayID,
     pub(in crate::platform::macos) name: String,
-    /// Visible area: `bounds` minus the menu bar and dock insets.
-    pub(in crate::platform::macos) work_area: Dimension,
+    /// Visible area: `bounds` minus the menu bar and dock insets. Rounded
+    /// inward at construction, so a window can never be placed onto a fraction
+    /// of a pixel the menu bar, the dock or a status bar reserved.
+    pub(in crate::platform::macos) work_area: PixelRect,
     /// Full physical bounds reported by `CGDisplayBounds`, used for monitor
     /// lookup against raw window coordinates (e.g. borderless fullscreen).
     pub(in crate::platform::macos) bounds: Dimension,
@@ -25,15 +27,6 @@ pub(in crate::platform::macos) struct MonitorInfo {
     /// This is NOT core Monitor.scale (which is always 1.0 on macOS because
     /// AppKit already reports points, so no DPI conversion is needed).
     pub(in crate::platform::macos) scale: f64,
-}
-
-impl MonitorInfo {
-    /// The work area core places windows into. Rounds inward, so a window can
-    /// never be placed onto a fraction of a pixel the menu bar, the dock or a
-    /// status bar reserved.
-    pub(in crate::platform::macos) fn work_area_snapped(&self) -> PixelRect {
-        PixelRect::from_dimension_inward(self.work_area)
-    }
 }
 
 impl std::fmt::Display for MonitorInfo {
@@ -65,12 +58,12 @@ pub(in crate::platform::macos) fn get_all_monitors(mtm: MainThreadMarker) -> Vec
             MonitorInfo {
                 display_id,
                 name,
-                work_area: Dimension::new(
+                work_area: PixelRect::from_dimension_inward(Dimension::new(
                     Length::new(bounds.origin.x as f32),
                     Length::new((bounds.origin.y + top_inset) as f32),
                     Length::new(bounds.size.width as f32),
                     Length::new((bounds.size.height - top_inset - bottom_inset) as f32),
-                ),
+                )),
                 bounds: Dimension::new(
                     Length::new(bounds.origin.x as f32),
                     Length::new(bounds.origin.y as f32),
@@ -109,16 +102,10 @@ impl Monitor {
         self.id
     }
 
-    pub(in crate::platform::macos) fn work_area(&self) -> Dimension {
+    pub(in crate::platform::macos) fn work_area(&self) -> PixelRect {
         self.info.work_area
     }
 
-    pub(in crate::platform::macos) fn work_area_snapped(&self) -> PixelRect {
-        self.info.work_area_snapped()
-    }
-
-    /// NSScreen.backingScaleFactor for egui render density. Not the Hub-side
-    /// scale (which is always 1.0 on macOS because AppKit reports in points).
     pub(in crate::platform::macos) fn egui_scale(&self) -> f64 {
         self.info.scale
     }
@@ -234,9 +221,6 @@ impl MonitorRegistry {
         }
     }
 
-    /// Whether any monitor currently tracks this window as visible on screen.
-    /// Used to decide if a window exiting native fullscreen should stay visible
-    /// or be minimized (unfocused workspace means not displayed).
     pub(super) fn is_displayed(&self, window_id: WindowId) -> bool {
         self.map
             .values()
@@ -266,11 +250,10 @@ impl MonitorRegistry {
         self.map.values().map(|e| e.info.clone()).collect()
     }
 
-    /// Return the `Monitor` whose full display bounds overlap `dim` the most
-    /// (by intersection area). Pure-Rust intersection over the cached
-    /// `MonitorInfo.bounds` -- no CoreGraphics call, so this is safe to
-    /// hit from test contexts where CGS is not initialized.
-    /// Returns `None` when no monitor intersects the dimension.
+    /// Returns the `Monitor` whose full display bounds overlap `dim` the most by
+    /// intersection area. The intersection is pure Rust over the cached
+    /// `MonitorInfo.bounds` rather than a CoreGraphics call, so it is safe to hit
+    /// from test contexts where CGS is not initialized.
     pub(super) fn find_closest_monitor(&self, dim: Dimension) -> Option<&Monitor> {
         let mut best: Option<(&Monitor, f32)> = None;
         for monitor in self.map.values() {
@@ -294,7 +277,7 @@ impl MonitorRegistry {
         );
         let monitor = self.find_closest_monitor(point);
         monitor.is_some_and(|m| {
-            let mon = m.info.work_area_snapped();
+            let mon = m.info.work_area;
             let tolerance = Pixels::new(2);
             (rect.x() - mon.x()).abs() <= tolerance
                 && (rect.y() - mon.y()).abs() <= tolerance
@@ -306,11 +289,11 @@ impl MonitorRegistry {
     pub(super) fn update_monitor(
         &mut self,
         monitor: &MonitorInfo,
-    ) -> Option<(MonitorId, Dimension)> {
+    ) -> Option<(MonitorId, PixelRect)> {
         let entry = self.map.get_mut(&monitor.display_id)?;
-        let old_dim = entry.info.work_area;
+        let old_work_area = entry.info.work_area;
         entry.info = monitor.clone();
-        Some((entry.id, old_dim))
+        Some((entry.id, old_work_area))
     }
 }
 
@@ -333,11 +316,7 @@ impl MonitorRegistry {
         if let Some(new_primary) = monitors.iter().find(|s| s.is_primary) {
             if !self.contains(new_primary.display_id) {
                 self.replace_primary(new_primary);
-                hub.update_monitor(
-                    self.primary_monitor_id(),
-                    new_primary.work_area_snapped(),
-                    1.0,
-                );
+                hub.update_monitor(self.primary_monitor_id(), new_primary.work_area, 1.0);
             } else {
                 self.set_primary_display_id(new_primary.display_id);
             }
@@ -346,30 +325,28 @@ impl MonitorRegistry {
         // Add new monitors first to prevent exhausting all monitors
         for monitor in monitors {
             if !self.contains(monitor.display_id) {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area_snapped(), 1.0);
+                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, 1.0);
                 self.insert(monitor, id);
                 tracing::info!(%monitor, "Monitor added");
             }
         }
 
-        // Remove monitors that no longer exist
         for monitor_id in self.remove_stale(&current_keys) {
             hub.remove_monitor(monitor_id, self.primary_monitor_id());
             tracing::info!(%monitor_id, fallback = %self.primary_monitor_id(), "Monitor removed");
         }
 
-        // Update monitor info (dimension, scale, etc.)
         for monitor in monitors {
-            if let Some((monitor_id, old_dim)) = self.update_monitor(monitor) {
-                if old_dim != monitor.work_area {
+            if let Some((monitor_id, old_work_area)) = self.update_monitor(monitor) {
+                if old_work_area != monitor.work_area {
                     tracing::info!(
                         name = %monitor.name,
-                        ?old_dim,
-                        new_dim = ?monitor.work_area,
-                        "Monitor dimension changed"
+                        ?old_work_area,
+                        new_work_area = ?monitor.work_area,
+                        "Monitor work area changed"
                     );
                 }
-                hub.update_monitor(monitor_id, monitor.work_area_snapped(), 1.0);
+                hub.update_monitor(monitor_id, monitor.work_area, 1.0);
             }
         }
     }
@@ -386,8 +363,14 @@ impl Dome {
             let shrunk: Vec<MonitorInfo> = monitors
                 .iter()
                 .map(|m| {
+                    // Bar-edge math is f32 and shared with Windows, so the work area
+                    // leaves pixel space and comes back.
                     let work_area = match self.status_bars.rect_for(m.display_id) {
-                        Some(bar) => reserve_for_bar(m.bounds, m.work_area, bar),
+                        Some(bar) => PixelRect::from_dimension_inward(reserve_for_bar(
+                            m.bounds,
+                            m.work_area.to_dimension(),
+                            bar,
+                        )),
                         None => m.work_area,
                     };
                     MonitorInfo {

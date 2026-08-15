@@ -27,8 +27,9 @@ const SCREEN_WIDTH: Length = Length::new(1920.0);
 const SCREEN_HEIGHT: Length = Length::new(1080.0);
 
 /// A work area whose every edge sits on the side of the half-point boundary where
-/// rounding to nearest would grow the rectangle past what AppKit reported, so a test
-/// asserting containment fails under any policy other than inward.
+/// rounding to nearest would grow the rectangle past what AppKit reported, so
+/// containment fails under any policy other than inward. Its consumers name that
+/// policy themselves, since `MonitorInfo` now holds an already-snapped rect.
 const FRACTIONAL_WORK_AREA: Dimension = Dimension::new(
     Length::new(10.4),
     Length::new(20.4),
@@ -59,7 +60,12 @@ fn default_monitor() -> MonitorInfo {
     MonitorInfo {
         display_id: 1,
         name: "Test".to_string(),
-        work_area: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
+        work_area: PixelRect::from_dimension_inward(Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT,
+        )),
         bounds: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
         full_height: SCREEN_HEIGHT.value(),
         is_primary: true,
@@ -69,8 +75,6 @@ fn default_monitor() -> MonitorInfo {
 
 type MoveLog = Rc<RefCell<Vec<(CGWindowID, i32, i32, i32, i32)>>>;
 
-/// Mock AXWindow with shared state so clones given to Dome reflect
-/// the same position/size when Dome calls set_frame.
 type OverrideFrame = Rc<Cell<Option<(i32, i32, i32, i32)>>>;
 
 #[derive(Clone)]
@@ -84,16 +88,10 @@ struct MockAXWindow {
     native_fullscreen: Rc<Cell<bool>>,
     min_size: Rc<Cell<Option<(i32, i32)>>>,
     max_size: Rc<Cell<Option<(i32, i32)>>>,
-    /// When set, `set_frame` and `hide_at` snap to this position/size instead
-    /// of the requested one, simulating a window that resists placement.
     override_frame: OverrideFrame,
     /// Whether this window is currently in the OS-level minimized state
-    /// (in the dock). Flipped by `minimize()` / `unminimize()` to model the
-    /// AX side effect, and cleared by `simulate_external_move` because a
-    /// window producing a move event is by definition not in the dock.
+    /// (in the dock).
     is_minimized: Rc<Cell<bool>>,
-    /// Whether the cached AX handle reports as valid. Defaults to true.
-    /// Flip via `set_valid(false)` to simulate stale-handle invalidation.
     is_valid: Rc<Cell<bool>>,
     moves: MoveLog,
 }
@@ -144,8 +142,6 @@ impl MockAXWindow {
     }
 }
 
-// Marker params on read methods satisfy the trait contract. Tests never call
-// these methods directly — they feed pre-built data to Dome instead.
 impl ExternalWindow for MockAXWindow {
     fn cg_id(&self) -> CGWindowID {
         self.cg_id
@@ -345,15 +341,12 @@ impl MacOS {
     }
 
     /// Simulate the user minimizing the window at OS level (yellow button,
-    /// dock click, app's own minimize). Flips the mock's OS-level flag first,
-    /// then delivers the resulting AX notification to Dome via reconcile.
+    /// dock click, app's own minimize).
     fn user_minimize(&self, dome: &mut Dome, cg_id: CGWindowID) {
         self.window(cg_id).is_minimized.set(true);
         dome.reconcile_windows(&[], &[], &[cg_id], vec![], &[], &[]);
     }
 
-    /// Whether the window is currently in the OS-level minimized (dock) state.
-    /// Mirrors what `ax.is_minimized()` would report on real macOS.
     fn is_minimized(&self, cg_id: CGWindowID) -> bool {
         self.window(cg_id).is_minimized.get()
     }
@@ -367,12 +360,9 @@ impl MacOS {
     // sees observed_at.first well within 1s of placed_at.
 
     /// Simulate an external move (app/macOS moved the window) and feed it to Dome.
-    /// Sets mock state and notifies Dome in one step.
     ///
     /// Clears `is_minimized`: a window emitting a move event is, by definition,
-    /// out of the dock. This mirrors what tests would observe on real macOS
-    /// and lets later settle iterations check that Dome reacts (e.g. by
-    /// re-issuing `ax.minimize()` if the window comes back still fullscreen).
+    /// out of the dock.
     fn simulate_external_move(
         &self,
         dome: &mut Dome,

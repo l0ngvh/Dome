@@ -22,7 +22,7 @@ use crate::config::{
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
-use crate::core::node::{Direction, Length, Logical, WindowId};
+use crate::core::node::{Direction, Length, Logical, Pixels, WindowId};
 use crate::core::strategy::TilingAction;
 use crate::core::{
     ContainerPlacement, FloatWindowPlacement, PixelRect, TilingWindowPlacement, WindowMetadata,
@@ -37,7 +37,6 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     validate_hub(hub);
     let mut s = snapshot_text(hub);
 
-    // ASCII visualization uses screen coords from get_visible_placements
     let mut grid = vec![vec![' '; ASCII_WIDTH]; ASCII_HEIGHT];
     let all = hub.get_visible_placements();
     let mp = &all.monitors[0];
@@ -67,14 +66,12 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         }
     };
 
-    // Draw tiling windows
     for wp in tiling_windows {
         let d = wp.visible_border_box;
         let clip = clip_edges(wp.border_box, wp.visible_border_box);
         draw_rect(&mut grid, d, &format!("W{}", wp.id.get()), clip);
     }
 
-    // Draw tab bars
     for cp in containers {
         if cp.is_tabbed {
             let d = cp.visible_border_box;
@@ -82,7 +79,6 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         }
     }
 
-    // Draw focus border for non-float focused
     let focused_float = float_windows.iter().find(|p| p.is_highlighted);
     if focused_float.is_none() {
         if let Some(wp) = tiling_windows.iter().find(|p| p.is_highlighted) {
@@ -96,7 +92,6 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         }
     }
 
-    // Draw float windows on top
     for wp in float_windows {
         let d = wp.visible_border_box;
         let clip = clip_edges(wp.border_box, wp.visible_border_box);
@@ -114,7 +109,6 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         draw_rect(&mut grid, d, &format!("F{}", wp.id.get()), clip);
     }
 
-    // Draw focus border for float focused (on top of everything)
     if let Some(wp) = focused_float {
         let d = wp.visible_border_box;
         let clip = clip_edges(wp.border_box, wp.visible_border_box);
@@ -277,14 +271,12 @@ fn draw_tab_bar(grid: &mut [Vec<char>], rect: PixelRect, labels: &[String], acti
     let inner_width = x2 - x1 - 1;
     let tab_count = labels.len();
 
-    // Draw top border
     for col in x1..=x2 {
         grid[y1][col] = '-';
     }
     grid[y1][x1] = '+';
     grid[y1][x2] = '+';
 
-    // Draw side borders
     for row in (y1 + 1)..=y2 {
         grid[row][x1] = '|';
         grid[row][x2] = '|';
@@ -294,7 +286,6 @@ fn draw_tab_bar(grid: &mut [Vec<char>], rect: PixelRect, labels: &[String], acti
         return;
     }
 
-    // Draw tab labels evenly spread with separators (centered vertically in content area)
     let label_row = y1 + 1 + (y2 - y1 - 1) / 2;
     let tab_width = inner_width / tab_count;
     for (i, label) in labels.iter().enumerate() {
@@ -531,7 +522,6 @@ fn validate_minimized(hub: &Hub) {
             "{id} is minimized but has a workspace",
         );
     }
-    // Converse: any window with workspace = None must be in minimized_windows.
     for (wid, window) in hub.access.windows.all_active() {
         if window.workspace().is_none() {
             assert!(
@@ -546,9 +536,6 @@ fn validate_minimized(hub: &Hub) {
     }
 }
 
-/// Test convenience methods that wrap handle_tiling_action with the appropriate
-/// TilingAction variant. Keeps test call sites readable (e.g. hub.focus_left()
-/// instead of hub.handle_tiling_action(TilingAction::FocusDirection { ... })).
 impl Hub {
     pub(crate) fn focus_left(&mut self) {
         self.handle_tiling_action(TilingAction::FocusDirection {
@@ -709,10 +696,10 @@ impl LayoutConfigBuilder {
                 automatic_tiling: false,
             },
             size_constraints: SizeConstraints {
-                minimum_width: SizeConstraint::Pixels(Length::new(1.0)),
-                minimum_height: SizeConstraint::Pixels(Length::new(1.0)),
-                maximum_width: SizeConstraint::Pixels(Length::new(0.0)),
-                maximum_height: SizeConstraint::Pixels(Length::new(0.0)),
+                minimum_width: SizeConstraint::Pixels(Pixels::new(1)),
+                minimum_height: SizeConstraint::Pixels(Pixels::new(1)),
+                maximum_width: SizeConstraint::Pixels(Pixels::new(0)),
+                maximum_height: SizeConstraint::Pixels(Pixels::new(0)),
             },
             float: vec![],
             fullscreen: vec![],
@@ -942,7 +929,6 @@ pub(super) fn setup_with_layout(layout: GlobalLayoutConfig) -> Hub {
     TestHubBuilder::new().with_layout(layout).build()
 }
 
-/// A matcher on one exact window title, not a pattern.
 pub(super) fn titled_matcher(title: &str) -> WindowMatcher {
     WindowMatcher {
         title: Some(title.to_string()),
@@ -950,8 +936,6 @@ pub(super) fn titled_matcher(title: &str) -> WindowMatcher {
     }
 }
 
-/// Minimal test metadata with no structure — title set via `titled` or
-/// left blank.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TestMetadata {
     pub title: Option<String>,
@@ -1021,7 +1005,6 @@ pub(crate) fn default_rect() -> PixelRect {
     PixelRect::new(0, 0, 100, 100)
 }
 
-/// Convenience: create a boxed `TestMetadata` with the given title.
 pub(crate) fn titled(t: &str) -> Box<dyn WindowMetadata> {
     Box::new(TestMetadata {
         title: Some(t.to_owned()),
@@ -1029,7 +1012,6 @@ pub(crate) fn titled(t: &str) -> Box<dyn WindowMetadata> {
     })
 }
 
-/// Build metadata with the given process name.
 pub(crate) fn process_meta(p: &str) -> Box<dyn WindowMetadata> {
     Box::new(TestMetadata {
         process: Some(p.into()),
@@ -1037,7 +1019,6 @@ pub(crate) fn process_meta(p: &str) -> Box<dyn WindowMetadata> {
     })
 }
 
-/// Build metadata with the given title and process name.
 pub(crate) fn titled_process(title: &str, process: &str) -> Box<dyn WindowMetadata> {
     Box::new(TestMetadata {
         title: Some(title.into()),
