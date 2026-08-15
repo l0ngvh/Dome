@@ -129,6 +129,7 @@ impl Hub {
                     window_id,
                     current_ws,
                 );
+                self.set_workspace_focus(window_id);
 
                 tracing::debug!(%window_id, "Window is now tiling");
             }

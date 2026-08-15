@@ -10,6 +10,7 @@ use super::node::{
     ContainerId, Dimension, DisplayMode, Length, Logical, Monitor, MonitorId, Window, WindowId,
     WindowMetadata, WindowRestrictions, Workspace, WorkspaceId,
 };
+use super::partition_tree::Child;
 use super::strategy::{StrategySet, TilingAction, WorkspaceExport, clip};
 
 pub(crate) struct VisiblePlacements {
@@ -302,6 +303,18 @@ impl Hub {
     #[tracing::instrument(skip(self))]
     pub(crate) fn set_focus(&mut self, window_id: WindowId) {
         tracing::debug!("Setting focus to window");
+        let ws = self
+            .access
+            .windows
+            .get(window_id)
+            .workspace()
+            .expect("non-minimized window has a workspace");
+        self.set_workspace_focus(window_id);
+        self.focus_workspace_with_id(ws);
+    }
+
+    /// Focus `window_id` within its own workspace, without switching workspace.
+    pub(super) fn set_workspace_focus(&mut self, window_id: WindowId) {
         let window = self.access.windows.get(window_id);
         let ws = window
             .workspace()
@@ -319,12 +332,12 @@ impl Hub {
                 self.focus_float(ws, window_id);
             }
             DisplayMode::Tiling => {
+                self.access.workspaces.get_mut(ws).is_float_focused = false;
                 self.strategies
                     .for_workspace_mut(ws)
                     .set_focus(&mut self.access, window_id);
             }
         }
-        self.focus_workspace_with_id(ws);
     }
 
     pub(crate) fn focused_monitor(&self) -> MonitorId {
@@ -563,6 +576,7 @@ impl Hub {
                     window_id,
                     target_ws,
                 );
+                self.set_focus(window_id);
                 window_id
             }
             WindowMode::Float => {
@@ -573,6 +587,7 @@ impl Hub {
                 tracing::debug!(%window_id, ?dimension, "Inserting float window");
                 // `occupy_id` links the window back to the matcher that routed it.
                 self.attach_float_to_workspace(target_ws, window_id, dimension, occupy_id);
+                self.set_focus(window_id);
                 window_id
             }
             WindowMode::Fullscreen => {
@@ -882,5 +897,8 @@ impl Hub {
         self.strategies
             .for_workspace_mut(to)
             .reattach_child(&mut self.access, child, to);
+        if let Child::Window(window_id) = child {
+            self.set_workspace_focus(window_id);
+        }
     }
 }

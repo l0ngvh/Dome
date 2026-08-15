@@ -21,7 +21,6 @@ impl PartitionTreeStrategy {
         let Some(insert_anchor) = insert_anchor else {
             self.workspaces.get_mut(&ws_id).unwrap().root = Some(child);
             self.set_parent(child, Parent::Workspace(ws_id));
-            self.set_focus(hub, child);
             self.compute_placement(hub, ws_id);
             return;
         };
@@ -73,7 +72,6 @@ impl PartitionTreeStrategy {
         }
 
         self.compute_placement(hub, ws_id);
-        self.set_focus(hub, child);
     }
 
     /// Detach a `Child` (window or container) from its workspace.
@@ -105,8 +103,7 @@ impl PartitionTreeStrategy {
     /// Establish invariant 3 of `Container` for `child`: writes `child` to
     /// `container.focused` on every ancestor up to the workspace, and updates
     /// `active_tab` on each tabbed ancestor with the walk position (not
-    /// `child`). At the workspace level, sets `focused_tiling = Some(child)`
-    /// and clears `is_float_focused`.
+    /// `child`). At the workspace level, sets `focused_tiling = Some(child)`.
     pub(super) fn set_focus(&mut self, hub: &mut HubAccess, child: Child) {
         let path: Vec<_> = self.ancestors_of(child).collect();
         for (walk_pos, parent_id) in &path {
@@ -126,7 +123,6 @@ impl PartitionTreeStrategy {
             panic!("set_focus: top of ancestor path has no workspace parent");
         };
         self.workspaces.get_mut(&ws).unwrap().focused_tiling = Some(child);
-        hub.workspaces.get_mut(ws).is_float_focused = false;
         self.scroll_into_view(hub, ws);
     }
 

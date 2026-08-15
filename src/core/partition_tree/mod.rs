@@ -209,6 +209,7 @@ impl TilingStrategy for PartitionTreeStrategy {
                 .insert(wid, TilingWindowData::new(ws_id));
         }
         self.attach_child_according_to_spawn_mode(hub, child, ws_id);
+        self.set_focus(hub, child);
     }
 
     /// Counts tiling windows by walking the container tree from root.

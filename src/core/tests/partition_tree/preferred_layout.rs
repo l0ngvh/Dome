@@ -1316,13 +1316,10 @@ fn insert_preferred_window_to_non_focused_workspace() {
         ),
         WindowRestrictions::None,
     );
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=None)
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-    ");
 
-    hub.focus_workspace("10");
-    assert_snapshot!(snapshot(&hub), @r"
+    let prev_snapshot = snapshot(&hub);
+
+    assert_snapshot!(prev_snapshot, @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=top)
@@ -1360,6 +1357,9 @@ fn insert_preferred_window_to_non_focused_workspace() {
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************
     ");
+
+    hub.focus_workspace("10");
+    assert_eq!(prev_snapshot, snapshot(&hub));
 }
 
 #[test]

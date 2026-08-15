@@ -175,7 +175,6 @@ impl PartitionTreeStrategy {
         }
         self.occupy_window_slot(slot_id, window_id);
         self.compute_placement(hub, ws_id);
-        self.set_focus(hub, new_child);
     }
 
     /// When lowest common ancestor of the being inserted window and the current preferred root is
@@ -245,7 +244,6 @@ impl PartitionTreeStrategy {
             .occupied_preferred_root = Some(PreferredSlot::Container(lca));
 
         self.compute_placement(hub, ws_id);
-        self.set_focus(hub, Child::Window(window_id));
     }
 
     pub(super) fn attach_window_into_occupied_ancestor(
@@ -282,7 +280,7 @@ impl PartitionTreeStrategy {
                     self.container_slot_split(lca),
                 );
                 self.occupy_container_slot(lca, new_container_id);
-                self.mark_slot_occupied_and_focus(hub, window_id, ws_id, slot_id);
+                self.mark_slot_occupied(hub, window_id, ws_id, slot_id);
                 return;
             }
 
@@ -296,7 +294,7 @@ impl PartitionTreeStrategy {
         tracing::debug!(%window_id, ?slot_id, %container_id, insert_pos, "Inserting window into occupied ancestor container");
         self.attach_child_to_container(Child::Window(window_id), container_id, Some(insert_pos));
 
-        self.mark_slot_occupied_and_focus(hub, window_id, ws_id, slot_id);
+        self.mark_slot_occupied(hub, window_id, ws_id, slot_id);
     }
 
     pub(super) fn detach_preferred_slot(&mut self, workspace_id: WorkspaceId, child: Child) {
@@ -572,7 +570,7 @@ impl PartitionTreeStrategy {
         false
     }
 
-    fn mark_slot_occupied_and_focus(
+    fn mark_slot_occupied(
         &mut self,
         hub: &mut HubAccess,
         window_id: WindowId,
@@ -581,7 +579,6 @@ impl PartitionTreeStrategy {
     ) {
         self.occupy_window_slot(slot_id, window_id);
         self.compute_placement(hub, ws_id);
-        self.set_focus(hub, Child::Window(window_id));
     }
 
     fn build_from_live_tree(

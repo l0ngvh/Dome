@@ -1,7 +1,8 @@
 use crate::config::{Strategy, WindowMatcher};
+use crate::core::node::{Dimension, Length};
 use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim,
-    setup_logger_with_level, snapshot, titled, titled_process,
+    setup_logger_with_level, snapshot, titled, titled_matcher, titled_process,
 };
 use crate::core::{Hub, MonitorLayout, WindowId, WindowRestrictions};
 use insta::assert_snapshot;
@@ -167,7 +168,7 @@ fn move_direction_up_down_wraps_within_three_window_pane() {
 }
 
 #[test]
-fn single_window_focus_move_noop() {
+fn focus_and_move_noop() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
@@ -189,6 +190,42 @@ fn single_window_focus_move_noop() {
     hub.move_down();
 
     assert_eq!(snapshot(&hub), before);
+
+    // Nothing renders while the float holds focus, though master does hoist
+    // focus_history underneath.
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .with_float(vec![titled_matcher("w17")])
+                .build(),
+        )
+        .build();
+    hub.insert_window(titled("w18"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w19"), default_dim(), WindowRestrictions::None);
+    let float_id = hub
+        .insert_window(
+            titled("w17"),
+            Dimension::new(
+                Length::new(50.0),
+                Length::new(5.0),
+                Length::new(40.0),
+                Length::new(15.0),
+            ),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let ws = hub.current_workspace();
+
+    let before = snapshot(&hub);
+
+    hub.focus_left();
+    hub.focus_right();
+    hub.focus_up();
+    hub.focus_down();
+
+    assert_eq!(snapshot(&hub), before);
+    assert_eq!(hub.focused_window(ws), Some(float_id));
 }
 
 #[test]
