@@ -209,7 +209,6 @@ pub(super) struct TilingContainerData {
 }
 
 impl TilingContainerData {
-    /// `split_mode` seeds `direction` and `spawn_mode` to match.
     pub(super) fn new(parent: Parent, workspace: WorkspaceId, split_mode: SplitMode) -> Self {
         let (direction, spawn_mode, is_tabbed) = match split_mode {
             SplitMode::Horizontal => (Direction::Horizontal, SpawnMode::horizontal(), false),

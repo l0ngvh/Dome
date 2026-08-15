@@ -23,7 +23,7 @@ impl PartitionTreeStrategy {
             let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
             let scale = monitor.scale;
 
-            let order: Vec<_> = self.containers_preorder(root_id).collect();
+            let order = hub.containers_preorder(root_id);
 
             // Reversed pre-order visits children before parents.
             for &cid in order.iter().rev() {
@@ -54,13 +54,13 @@ impl PartitionTreeStrategy {
             return;
         };
 
-        let order: Vec<_> = self.containers_preorder(root_id).collect();
+        let order = hub.containers_preorder(root_id);
 
         for cid in order {
             let data = self.tiling_containers.get(&cid).unwrap();
             let dim = data.dimension;
             let direction = data.direction();
-            let children = self.containers.get(cid).children.clone();
+            let children = hub.containers.get(cid).children.clone();
             for (child, child_dim) in children.iter().zip(self.layout_children(
                 hub,
                 &children,
@@ -138,7 +138,7 @@ impl PartitionTreeStrategy {
                     }
                 }
                 Child::Container(id) => {
-                    let container = self.containers.get(id);
+                    let container = hub.containers.get(id);
                     let data = self.tiling_containers.get(&id).unwrap();
                     let dim = self.child_dimension(child);
                     let border_box = translate(dim, offset_x, offset_y, screen.x(), screen.y());
@@ -185,7 +185,7 @@ impl PartitionTreeStrategy {
                             })
                             .collect(),
                     });
-                    if let Some(active) = self.active_tab(id) {
+                    if let Some(active) = self.active_tab(hub, id) {
                         stack.push(active);
                     } else {
                         for &c in container.children() {
@@ -333,7 +333,7 @@ impl PartitionTreeStrategy {
     ) {
         let data = self.tiling_containers.get(&container_id).unwrap();
         let direction = data.direction();
-        let children = self.containers.get(container_id).children.clone();
+        let children = hub.containers.get(container_id).children.clone();
 
         let child_constraints: Vec<Constraints> = children
             .iter()

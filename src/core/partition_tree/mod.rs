@@ -32,7 +32,6 @@ use crate::core::strategy::{
 /// layout. This is the default (and currently only) tiling strategy.
 #[derive(Debug)]
 pub(crate) struct PartitionTreeStrategy {
-    containers: Allocator<Container>,
     tiling_containers: HashMap<ContainerId, TilingContainerData>,
     tiling_windows: HashMap<WindowId, TilingWindowData>,
     workspaces: HashMap<WorkspaceId, WorkspaceTilingState>,
@@ -119,7 +118,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         tracing::debug!(%window_id, ?slot_id, "First preferred window, established as root");
     }
 
-    fn detach_window(&mut self, hub: &HubAccess, window_id: WindowId) -> PixelRect {
+    fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> PixelRect {
         let child_dim = self.tiling_windows.get(&window_id).unwrap().dimension;
         let workspace_id = hub
             .windows
@@ -193,7 +192,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         }
     }
 
-    fn detach_focused_child(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<Child> {
+    fn detach_focused_child(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Option<Child> {
         let focused = self.workspaces.get(&ws_id)?.focused_tiling?;
         self.detach_child(hub, focused);
 
@@ -215,11 +214,12 @@ impl TilingStrategy for PartitionTreeStrategy {
     /// Counts tiling windows by walking the container tree from root.
     /// A tree walk is necessary because `self.tiling_windows` is a global map
     /// across all workspaces and cannot be filtered by workspace without it.
-    fn tiling_window_count(&self, ws_id: WorkspaceId) -> usize {
+    fn tiling_window_count(&self, hub: &HubAccess, ws_id: WorkspaceId) -> usize {
         let Some(root) = self.workspaces.get(&ws_id).and_then(|s| s.root) else {
             return 0;
         };
-        self.children_dfs(root)
+        hub.children_dfs(root)
+            .into_iter()
             .filter(|c| matches!(c, Child::Window(_)))
             .count()
     }
@@ -231,14 +231,19 @@ impl TilingStrategy for PartitionTreeStrategy {
         self.find_window_slot(root, metadata).is_some()
     }
 
-    fn migrate(&mut self, ws_id: WorkspaceId) -> (Vec<WindowId>, Option<WindowId>) {
+    fn migrate(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+    ) -> (Vec<WindowId>, Option<WindowId>) {
         let focused = self.focused_tiling_window(ws_id);
         let mut tiling: Vec<WindowId> = self
             .workspaces
             .get(&ws_id)
             .and_then(|ws| ws.root)
             .map(|root| {
-                self.children_dfs(root)
+                hub.children_dfs(root)
+                    .into_iter()
                     .filter_map(|c| match c {
                         Child::Window(id) => Some(id),
                         Child::Container(_) => None,
@@ -282,7 +287,6 @@ impl PartitionTreeStrategy {
         size_constraints: SizeConstraints,
     ) -> Self {
         Self {
-            containers: Allocator::new(),
             tiling_containers: HashMap::new(),
             tiling_windows: HashMap::new(),
             workspaces: HashMap::new(),

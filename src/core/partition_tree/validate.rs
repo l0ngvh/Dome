@@ -87,7 +87,7 @@ impl PartitionTreeStrategy {
             );
         }
 
-        self.validate_focus_history(workspace_id, root);
+        self.validate_focus_history(hub, workspace_id, root);
 
         if let Some(Child::Window(wid)) = focused_tiling {
             assert_eq!(
@@ -105,7 +105,7 @@ impl PartitionTreeStrategy {
             for (child, parent_id) in self.ancestors_of(focused) {
                 if self.tiling_containers.get(&parent_id).unwrap().is_tabbed() {
                     assert_eq!(
-                        self.active_tab(parent_id),
+                        self.active_tab(hub, parent_id),
                         Some(child),
                         "Workspace {workspace_id}: tabbed container {parent_id} holds the focus \
                          path in a hidden tab, so the focused node is never drawn"
@@ -115,13 +115,19 @@ impl PartitionTreeStrategy {
         }
     }
 
-    fn validate_focus_history(&self, workspace_id: WorkspaceId, root: Option<Child>) {
+    fn validate_focus_history(
+        &self,
+        hub: &HubAccess,
+        workspace_id: WorkspaceId,
+        root: Option<Child>,
+    ) {
         let Some(state) = self.workspaces.get(&workspace_id) else {
             return;
         };
         let tree_windows: HashSet<crate::core::node::WindowId> = root
             .map(|r| {
-                self.children_dfs(r)
+                hub.children_dfs(r)
+                    .into_iter()
                     .filter_map(|c| match c {
                         Child::Window(wid) => Some(wid),
                         Child::Container(_) => None,
@@ -154,7 +160,7 @@ impl PartitionTreeStrategy {
         workspace_id: WorkspaceId,
         stack: &mut Vec<(Child, Parent)>,
     ) {
-        let container = self.containers.get(cid);
+        let container = hub.containers.get(cid);
         let data = self.tiling_containers.get(&cid).unwrap();
         assert_eq!(
             data.parent, expected_parent,
@@ -169,7 +175,7 @@ impl PartitionTreeStrategy {
             "Container {cid} has less than 2 children"
         );
 
-        self.validate_container_tabbed(cid);
+        self.validate_container_tabbed(hub, cid);
         self.validate_container_direction(cid, expected_parent);
         self.validate_container_dimensions(hub, cid);
 
@@ -178,13 +184,13 @@ impl PartitionTreeStrategy {
         }
     }
 
-    fn validate_container_tabbed(&self, cid: ContainerId) {
+    fn validate_container_tabbed(&self, hub: &HubAccess, cid: ContainerId) {
         let data = self.tiling_containers.get(&cid).unwrap();
         if !data.is_tabbed() {
             return;
         }
         assert!(
-            data.active_tab_index() < self.containers.get(cid).children().len(),
+            data.active_tab_index() < hub.containers.get(cid).children().len(),
             "Container {cid} active_tab out of bounds"
         );
     }
@@ -224,7 +230,7 @@ impl PartitionTreeStrategy {
     fn validate_container_dimensions(&self, hub: &HubAccess, cid: ContainerId) {
         let data = self.tiling_containers.get(&cid).unwrap();
         let dim = data.dimension;
-        let children = self.containers.get(cid).children();
+        let children = hub.containers.get(cid).children();
         let constraints: Vec<_> = children
             .iter()
             .map(|&c| self.child_constraints(hub, c))

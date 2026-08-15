@@ -36,6 +36,7 @@ impl PartitionTreeStrategy {
                 .unwrap()
                 .active_tab_index();
             self.attach_child_to_container(
+                hub,
                 child,
                 tabbed_self_or_ancestor,
                 Some(active_tab_index + 1),
@@ -47,7 +48,7 @@ impl PartitionTreeStrategy {
                 .unwrap()
                 .can_accommodate(spawn_mode)
         {
-            self.attach_child_to_container(child, cid, None);
+            self.attach_child_to_container(hub, child, cid, None);
         } else {
             match self.parent(insert_anchor) {
                 Parent::Container(container_id) => {
@@ -58,8 +59,13 @@ impl PartitionTreeStrategy {
                         .can_accommodate(spawn_mode)
                     {
                         let anchor_index =
-                            self.containers.get(container_id).position_of(insert_anchor);
-                        self.attach_child_to_container(child, container_id, Some(anchor_index + 1));
+                            hub.containers.get(container_id).position_of(insert_anchor);
+                        self.attach_child_to_container(
+                            hub,
+                            child,
+                            container_id,
+                            Some(anchor_index + 1),
+                        );
                     } else {
                         self.replace_anchor_with_container(
                             hub,
@@ -84,15 +90,15 @@ impl PartitionTreeStrategy {
     }
 
     /// Detach a `Child` (window or container) from its workspace.
-    pub(super) fn detach_child(&mut self, hub: &HubAccess, child: Child) {
+    pub(super) fn detach_child(&mut self, hub: &mut HubAccess, child: Child) {
         let workspace_id = self.child_workspace(hub, child);
 
         match self.parent(child) {
-            Parent::Container(parent_id) => self.detach_child_from_container(parent_id, child),
+            Parent::Container(parent_id) => self.detach_child_from_container(hub, parent_id, child),
             Parent::Workspace(_) => self.workspaces.get_mut(&workspace_id).unwrap().root = None,
         }
 
-        if self.forget_subtree(workspace_id, child) {
+        if self.forget_subtree(hub, workspace_id, child) {
             let successor = self
                 .workspaces
                 .get(&workspace_id)
@@ -102,7 +108,7 @@ impl PartitionTreeStrategy {
                 .copied();
             match successor {
                 Some(wid) => {
-                    self.set_focus_pointer(Child::Window(wid));
+                    self.set_focus_pointer(hub, Child::Window(wid));
                 }
                 None => {
                     self.workspaces
@@ -117,15 +123,15 @@ impl PartitionTreeStrategy {
         // surviving focus rather than the one that just left.
         self.compute_placement(hub, workspace_id);
 
-        self.detach_preferred_slot(workspace_id, child);
+        self.detach_preferred_slot(hub, workspace_id, child);
     }
 
     /// Drop every window of `subtree` from `ws`'s focus history. Returns whether the
     /// workspace focus pointed into `subtree`, so the caller knows it owes a
     /// successor. Reads the subtree's own internals, which a structural detach
     /// leaves intact.
-    fn forget_subtree(&mut self, ws: WorkspaceId, subtree: Child) -> bool {
-        let nodes: Vec<_> = self.children_dfs(subtree).collect();
+    fn forget_subtree(&mut self, hub: &HubAccess, ws: WorkspaceId, subtree: Child) -> bool {
+        let nodes = hub.children_dfs(subtree);
         let state = self.workspaces.get_mut(&ws).unwrap();
         let mut held_focus = false;
         for node in nodes {
@@ -139,18 +145,18 @@ impl PartitionTreeStrategy {
 
     /// Internal set_focus that works with `Child` (window or container).
     pub(super) fn set_focus(&mut self, hub: &mut HubAccess, child: Child) {
-        let ws = self.set_focus_pointer(child);
+        let ws = self.set_focus_pointer(hub, child);
         self.scroll_into_view(hub, ws);
     }
 
-    /// The state half of `set_focus`, without the hub. Returns the workspace so
-    /// callers do not re-derive it through `hub`, which can disagree with the tree
+    /// The state half of `set_focus`, without the placement pass. Returns the workspace
+    /// so callers do not re-derive it through `hub`, which can disagree with the tree
     /// mid-surgery.
-    pub(super) fn set_focus_pointer(&mut self, child: Child) -> WorkspaceId {
+    pub(super) fn set_focus_pointer(&mut self, hub: &HubAccess, child: Child) -> WorkspaceId {
         let path: Vec<_> = self.ancestors_of(child).collect();
         for (walk_pos, parent_id) in &path {
             if self.tiling_containers.get(parent_id).unwrap().is_tabbed {
-                self.set_active_tab_to_child(*parent_id, *walk_pos);
+                self.set_active_tab_to_child(hub, *parent_id, *walk_pos);
             }
         }
         // Workspace-level focus state lives above the container tree.
@@ -189,39 +195,6 @@ impl PartitionTreeStrategy {
                     None
                 }
             }
-        })
-    }
-
-    pub(super) fn containers_preorder(
-        &self,
-        root: ContainerId,
-    ) -> impl Iterator<Item = ContainerId> + '_ {
-        let mut stack = vec![root];
-        let mut bound = crate::core::bounded_loop();
-        std::iter::from_fn(move || {
-            bound.next()?;
-            let id = stack.pop()?;
-            for &child in &self.containers.get(id).children {
-                if let Child::Container(child_id) = child {
-                    stack.push(child_id);
-                }
-            }
-            Some(id)
-        })
-    }
-
-    pub(super) fn children_dfs(&self, root: Child) -> impl Iterator<Item = Child> + '_ {
-        let mut stack = vec![root];
-        let mut bound = crate::core::bounded_loop();
-        std::iter::from_fn(move || {
-            bound.next()?;
-            let child = stack.pop()?;
-            if let Child::Container(cid) = child {
-                for &c in &self.containers.get(cid).children {
-                    stack.push(c);
-                }
-            }
-            Some(child)
         })
     }
 
@@ -292,7 +265,7 @@ impl PartitionTreeStrategy {
         child: Child,
         workspace_id: WorkspaceId,
     ) {
-        let nodes: Vec<_> = self.children_dfs(child).collect();
+        let nodes = hub.children_dfs(child);
         for node in nodes {
             match node {
                 Child::Window(wid) => {
@@ -322,7 +295,7 @@ impl PartitionTreeStrategy {
 
     /// Ensures all child containers have different direction than their parent.
     /// Skips tabbed containers.
-    pub(super) fn maintain_direction_invariance(&mut self, parent: Parent) {
+    pub(super) fn maintain_direction_invariance(&mut self, hub: &HubAccess, parent: Parent) {
         let container_id = match parent {
             Parent::Container(id) => id,
             Parent::Workspace(ws_id) => match self.workspaces.get(&ws_id).unwrap().root {
@@ -330,12 +303,12 @@ impl PartitionTreeStrategy {
                 _ => return,
             },
         };
-        let order: Vec<_> = self.containers_preorder(container_id).collect();
+        let order = hub.containers_preorder(container_id);
         for id in order {
             let Some(direction) = self.tiling_containers.get(&id).unwrap().direction() else {
                 continue;
             };
-            for &child in &self.containers.get(id).children.clone() {
+            for &child in hub.containers.get(id).children() {
                 if let Child::Container(child_id) = child
                     && self
                         .tiling_containers
@@ -363,7 +336,7 @@ impl PartitionTreeStrategy {
         let spawn_mode = SpawnMode::from(split_mode);
         let parent = self.parent(anchor);
         let workspace_id = self.child_workspace(hub, anchor);
-        let container_id = self.containers.allocate(Container {
+        let container_id = hub.allocate_container(Container {
             children: children.clone(),
         });
         self.tiling_containers.insert(
@@ -389,7 +362,7 @@ impl PartitionTreeStrategy {
             self.set_parent(child, Parent::Container(container_id));
         }
         match parent {
-            Parent::Container(cid) => self
+            Parent::Container(cid) => hub
                 .containers
                 .get_mut(cid)
                 .replace_child_if_present(anchor, Child::Container(container_id)),
@@ -398,7 +371,7 @@ impl PartitionTreeStrategy {
                     Some(Child::Container(container_id));
             }
         }
-        self.maintain_direction_invariance(parent);
+        self.maintain_direction_invariance(hub, parent);
         container_id
     }
 }

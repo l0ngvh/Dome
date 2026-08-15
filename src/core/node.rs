@@ -917,11 +917,8 @@ impl std::fmt::Display for Child {
     }
 }
 
-/// An ordered group of children in a workspace layout. Each child is either a
-/// window or a nested group.
-///
-/// Invariant: `children.len() >= 2`. A group left with one child is dissolved
-/// and that child is promoted to the group's own parent.
+/// Invariant: `children.len() >= 2`. A container that drops to one child is dissolved
+/// and the survivor is promoted to its parent.
 #[derive(Debug, Clone)]
 pub(crate) struct Container {
     pub(super) children: Vec<Child>,

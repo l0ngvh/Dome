@@ -8,9 +8,9 @@ use crate::config::{
 use super::allocator::{Allocator, NodeId};
 use super::matcher::{FloatFullscreenMatcherId, MatcherHit};
 use super::node::{
-    ContainerId, DisplayMode, Length, LimitObservation, LimitUpdate, Logical, Monitor, MonitorId,
-    PixelRect, Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions, Workspace,
-    WorkspaceId,
+    Container, ContainerId, DisplayMode, Length, LimitObservation, LimitUpdate, Logical, Monitor,
+    MonitorId, PixelRect, Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions,
+    Workspace, WorkspaceId,
 };
 use super::partition_tree::Child;
 use super::strategy::{StrategySet, TilingAction, WorkspaceExport};
@@ -166,6 +166,47 @@ pub(crate) struct HubAccess {
     pub(super) preferred_layouts: Vec<LayoutWorkspaceConfig>,
     pub(super) workspaces: Allocator<Workspace>,
     pub(super) windows: Allocator<Window>,
+    pub(super) containers: Allocator<Container>,
+}
+
+impl HubAccess {
+    pub(super) fn allocate_container(&mut self, container: Container) -> ContainerId {
+        self.containers.allocate(container)
+    }
+
+    pub(super) fn free_container(&mut self, id: ContainerId) {
+        self.containers.delete(id);
+    }
+
+    pub(super) fn containers_preorder(&self, root: ContainerId) -> Vec<ContainerId> {
+        let mut stack = vec![root];
+        let mut order = Vec::new();
+        for _ in super::bounded_loop() {
+            let Some(id) = stack.pop() else { break };
+            order.push(id);
+            for &child in &self.containers.get(id).children {
+                if let Child::Container(child_id) = child {
+                    stack.push(child_id);
+                }
+            }
+        }
+        order
+    }
+
+    pub(super) fn children_dfs(&self, root: Child) -> Vec<Child> {
+        let mut stack = vec![root];
+        let mut order = Vec::new();
+        for _ in super::bounded_loop() {
+            let Some(child) = stack.pop() else { break };
+            order.push(child);
+            if let Child::Container(cid) = child {
+                for &c in &self.containers.get(cid).children {
+                    stack.push(c);
+                }
+            }
+        }
+        order
+    }
 }
 
 impl HubAccess {
@@ -208,6 +249,7 @@ impl Hub {
                 preferred_layouts,
                 workspaces: Allocator::new(),
                 windows: Allocator::new(),
+                containers: Allocator::new(),
             },
             strategies,
             minimized_windows: Vec::new(),
@@ -397,7 +439,7 @@ impl Hub {
         let tiling_count = self
             .strategies
             .for_workspace(ws_id)
-            .tiling_window_count(ws_id);
+            .tiling_window_count(&self.access, ws_id);
         tiling_count + ws.float_windows.len() + ws.fullscreen_windows.len()
     }
 
@@ -722,8 +764,8 @@ impl Hub {
                 DisplayMode::Fullscreen { .. } => self.detach_fullscreen_from_workspace(id),
                 DisplayMode::Tiling => {
                     let strategy = self.strategies.for_workspace_mut(ws_id);
-                    strategy.detach_window(&self.access, id);
-                    if strategy.tiling_window_count(ws_id) == 0 {
+                    strategy.detach_window(&mut self.access, id);
+                    if strategy.tiling_window_count(&self.access, ws_id) == 0 {
                         let ws = self.access.workspaces.get_mut(ws_id);
                         if ws.fullscreen_windows.is_empty() {
                             ws.is_float_focused = !ws.float_windows.is_empty();
@@ -908,11 +950,11 @@ impl Hub {
 
     pub(super) fn move_focused_across_workspaces(&mut self, from: WorkspaceId, to: WorkspaceId) {
         let strategy = self.strategies.for_workspace_mut(from);
-        let child = strategy.detach_focused_child(&self.access, from);
+        let child = strategy.detach_focused_child(&mut self.access, from);
         let Some(child) = child else {
             return;
         };
-        if strategy.tiling_window_count(from) == 0 {
+        if strategy.tiling_window_count(&self.access, from) == 0 {
             let ws = self.access.workspaces.get_mut(from);
             if ws.fullscreen_windows.is_empty() {
                 ws.is_float_focused = !ws.float_windows.is_empty();

@@ -100,7 +100,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Remove a window from its workspace's tiling tree. Returns the window's
     /// dimension in screen-absolute coordinates (translated before detach
     /// because detach triggers layout, which can change viewport_offset).
-    fn detach_window(&mut self, hub: &HubAccess, window_id: WindowId) -> PixelRect;
+    fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> PixelRect;
 
     /// Dispatch a tiling-specific action. Reads the current workspace from
     /// `hub.focused_monitor` internally. Both mutates state and triggers
@@ -127,10 +127,10 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// if the workspace is empty.
     fn focused_tiling_window(&self, ws_id: WorkspaceId) -> Option<WindowId>;
 
-    fn detach_focused_child(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<Child>;
+    fn detach_focused_child(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Option<Child>;
 
     /// Returns the number of tiling windows in the workspace.
-    fn tiling_window_count(&self, ws_id: WorkspaceId) -> usize;
+    fn tiling_window_count(&self, hub: &HubAccess, ws_id: WorkspaceId) -> usize;
 
     /// Return true if this workspace's tiling layout has a matcher that matches
     /// the given window. Read-only routing query used by resolve_matcher on
@@ -145,7 +145,11 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Migrate windows out of a workspace being rebuilt after a strategy
     /// change. Returns the list of tiling window IDs and the focused tiling
     /// window (if any), then removes all per-workspace state.
-    fn migrate(&mut self, ws_id: WorkspaceId) -> (Vec<WindowId>, Option<WindowId>);
+    fn migrate(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+    ) -> (Vec<WindowId>, Option<WindowId>);
 
     /// Synchronize the preferred layout for a single workspace from an incoming
     /// workspace override.
@@ -457,7 +461,7 @@ impl StrategySet {
                     new = ?new,
                     "Per-workspace strategy changed, rebuilding",
                 );
-                let (tiling_windows, focused) = self.get_mut(old).migrate(ws_id);
+                let (tiling_windows, focused) = self.get_mut(old).migrate(hub, ws_id);
                 self.get_mut(new).prepare_workspace(ws_id, incoming);
 
                 for wid in &tiling_windows {

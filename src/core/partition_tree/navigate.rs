@@ -33,7 +33,7 @@ impl PartitionTreeStrategy {
             .get(&direct_parent_id)
             .unwrap()
             .direction();
-        let direct_parent = self.containers.get(direct_parent_id);
+        let direct_parent = hub.containers.get(direct_parent_id);
         if direct_parent_direction.is_some_and(|d| d == direction) {
             let pos = direct_parent.position_of(child);
             let target_pos = if forward {
@@ -45,7 +45,7 @@ impl PartitionTreeStrategy {
                 tracing::debug!(
                     ?child, from = pos, to = target_pos, %direct_parent_id, "Swapping child position"
                 );
-                self.containers
+                hub.containers
                     .get_mut(direct_parent_id)
                     .children
                     .swap(pos, target_pos);
@@ -66,10 +66,7 @@ impl PartitionTreeStrategy {
             {
                 continue;
             }
-            let pos = self
-                .containers
-                .get(container_id)
-                .position_of(current_anchor);
+            let pos = hub.containers.get(container_id).position_of(current_anchor);
             let insert_pos = if forward { pos + 1 } else { pos };
             found_ancestor = Some((container_id, insert_pos));
             break;
@@ -79,13 +76,13 @@ impl PartitionTreeStrategy {
             tracing::debug!(
                 ?child, from = %direct_parent_id, to = %container_id, insert_pos, "Moving child to ancestor"
             );
-            self.detach_child_from_container(direct_parent_id, child);
-            self.attach_child_to_container(child, container_id, Some(insert_pos));
+            self.detach_child_from_container(hub, direct_parent_id, child);
+            self.attach_child_to_container(hub, child, container_id, Some(insert_pos));
             self.compute_placement(hub, current_ws);
             self.set_focus(hub, child);
         } else {
             tracing::debug!(?child, %current_ws, "Moving child to new root container");
-            self.detach_child_from_container(direct_parent_id, child);
+            self.detach_child_from_container(hub, direct_parent_id, child);
             let root = self.workspaces.get(&current_ws).unwrap().root.unwrap();
             let children = if forward {
                 vec![root, child]
@@ -120,7 +117,7 @@ impl PartitionTreeStrategy {
             {
                 continue;
             }
-            let container = self.containers.get(parent_id);
+            let container = hub.containers.get(parent_id);
             let pos = container.position_of(current);
             let has_sibling = if forward {
                 pos + 1 < container.children.len()
@@ -164,7 +161,7 @@ impl PartitionTreeStrategy {
             .get_mut(&root_id)
             .unwrap()
             .toggle_direction();
-        self.maintain_direction_invariance(Parent::Container(root_id));
+        self.maintain_direction_invariance(hub, Parent::Container(root_id));
         self.compute_placement(hub, workspace_id);
     }
 
@@ -195,13 +192,13 @@ impl PartitionTreeStrategy {
                     .map(|(child, _)| child)
             });
             if let Some(active_tab) = active_tab {
-                self.set_active_tab_to_child(container_id, active_tab);
+                self.set_active_tab_to_child(hub, container_id, active_tab);
             }
         } else {
             // Toggled from tabbed to split
-            self.maintain_direction_invariance(Parent::Container(container_id));
+            self.maintain_direction_invariance(hub, Parent::Container(container_id));
         }
-        self.maintain_direction_invariance(parent);
+        self.maintain_direction_invariance(hub, parent);
         self.compute_placement(hub, ws);
     }
 
@@ -265,7 +262,7 @@ impl PartitionTreeStrategy {
         let Some(container_id) = self.find_tabbed_self_or_ancestor(focused) else {
             return;
         };
-        let new_child = self.switch_tab(container_id, forward).unwrap();
+        let new_child = self.switch_tab(hub, container_id, forward).unwrap();
         let focus_target = self.focus_target_in(new_child);
         tracing::debug!(forward, %container_id, ?focus_target, "Focusing tab");
         self.set_focus(hub, focus_target);
@@ -277,7 +274,7 @@ impl PartitionTreeStrategy {
         container_id: ContainerId,
         index: usize,
     ) {
-        let Some(new_child) = self.set_active_tab_by_index(container_id, index) else {
+        let Some(new_child) = self.set_active_tab_by_index(hub, container_id, index) else {
             return;
         };
         let focus_target = self.focus_target_in(new_child);

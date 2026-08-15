@@ -39,8 +39,8 @@ impl Hub {
         match prior_mode {
             DisplayMode::Tiling => {
                 let strategy = self.strategies.for_workspace_mut(prior_workspace);
-                strategy.detach_window(&self.access, window_id);
-                if strategy.tiling_window_count(prior_workspace) == 0 {
+                strategy.detach_window(&mut self.access, window_id);
+                if strategy.tiling_window_count(&self.access, prior_workspace) == 0 {
                     let ws = self.access.workspaces.get_mut(prior_workspace);
                     if ws.fullscreen_windows.is_empty() {
                         ws.is_float_focused = !ws.float_windows.is_empty();

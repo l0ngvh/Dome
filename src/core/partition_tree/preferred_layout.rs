@@ -170,8 +170,8 @@ impl PartitionTreeStrategy {
             let Parent::Container(parent_cid) = self.parent(last_sibling) else {
                 unreachable!();
             };
-            let pos = self.containers.get(parent_cid).position_of(last_sibling) + 1;
-            self.attach_child_to_container(new_child, parent_cid, Some(pos));
+            let pos = hub.containers.get(parent_cid).position_of(last_sibling) + 1;
+            self.attach_child_to_container(hub, new_child, parent_cid, Some(pos));
         }
         self.occupy_window_slot(slot_id, window_id);
         self.compute_placement(hub, ws_id);
@@ -255,7 +255,7 @@ impl PartitionTreeStrategy {
         ancestor_slot: PreferredContainerSlotId,
     ) {
         let container_id = self.occupied_container(ancestor_slot).unwrap();
-        let live_children = self.containers.get(container_id).children.clone();
+        let live_children = hub.containers.get(container_id).children.clone();
 
         let mut insert_pos = 0;
 
@@ -292,13 +292,23 @@ impl PartitionTreeStrategy {
         }
 
         tracing::debug!(%window_id, ?slot_id, %container_id, insert_pos, "Inserting window into occupied ancestor container");
-        self.attach_child_to_container(Child::Window(window_id), container_id, Some(insert_pos));
+        self.attach_child_to_container(
+            hub,
+            Child::Window(window_id),
+            container_id,
+            Some(insert_pos),
+        );
 
         self.mark_slot_occupied(hub, window_id, ws_id, slot_id);
     }
 
-    pub(super) fn detach_preferred_slot(&mut self, workspace_id: WorkspaceId, child: Child) {
-        let children: Vec<_> = self.children_dfs(child).collect();
+    pub(super) fn detach_preferred_slot(
+        &mut self,
+        hub: &HubAccess,
+        workspace_id: WorkspaceId,
+        child: Child,
+    ) {
+        let children = hub.children_dfs(child);
         for child in children {
             match child {
                 Child::Window(wid) => {
@@ -397,7 +407,8 @@ impl PartitionTreeStrategy {
             let windows: Vec<WindowId> = state
                 .root
                 .map(|r| {
-                    self.children_dfs(r)
+                    hub.children_dfs(r)
+                        .into_iter()
                         .filter_map(|c| match c {
                             Child::Window(id) => Some(id),
                             Child::Container(_) => None,
@@ -647,7 +658,7 @@ impl PartitionTreeStrategy {
                     self.tiling_windows.get_mut(&wid).unwrap().occupy = Some(slot);
                 }
                 Child::Container(cid) => {
-                    let children = self.containers.get(cid).children.clone();
+                    let children = hub.containers.get(cid).children.clone();
 
                     let split = {
                         let data = self.tiling_containers.get(&cid).unwrap();

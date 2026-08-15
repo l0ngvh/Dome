@@ -140,7 +140,7 @@ impl Hub {
                 let border_box = self
                     .strategies
                     .for_workspace_mut(current_ws)
-                    .detach_window(&self.access, window_id);
+                    .detach_window(&mut self.access, window_id);
                 self.attach_float_to_workspace(current_ws, window_id, border_box, None);
                 tracing::debug!(%window_id, "Window is now floating");
             }
