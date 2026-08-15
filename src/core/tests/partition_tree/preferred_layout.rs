@@ -2197,3 +2197,33 @@ fn sync_preferred_layout_keeps_focus_history() {
     assert_eq!(hub.focused_window(ws), Some(aaa));
     assert_ne!(hub.focused_window(ws), Some(bbb));
 }
+
+#[test]
+fn sync_preferred_layout_focuses_window_inside_previously_highlighted_container() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(LayoutConfigBuilder::new().build())
+        .build();
+    hub.focus_workspace("3");
+    hub.insert_window(titled("AAA"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let bbb = hub
+        .insert_window(titled("BBB"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let ws = hub.current_workspace();
+
+    // focus_parent highlights the container, so no window is the focused node.
+    hub.focus_parent();
+    assert_eq!(hub.focused_window(ws), None);
+
+    hub.sync_preferred_layout(vec![
+        LayoutWorkspaceConfigBuilder::new("3")
+            .with_tree(TreeLayoutNode::Leaf(WindowMatcher {
+                title: Some("pref-0".into()),
+                ..Default::default()
+            }))
+            .build(),
+    ]);
+
+    // The rebuild deletes the container, so the highlight cannot survive it.
+    assert_eq!(hub.focused_window(ws), Some(bbb));
+}

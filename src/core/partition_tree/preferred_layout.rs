@@ -405,7 +405,6 @@ impl PartitionTreeStrategy {
             (windows, state.root)
         };
 
-        let focused = self.focused_tiling_window(ws_id);
         // Re-attaching seeds the history in tree order, losing recency.
         let previous_history = self.workspaces.get(&ws_id).unwrap().focus_history.clone();
 
@@ -434,8 +433,18 @@ impl PartitionTreeStrategy {
         }
         self.workspaces.get_mut(&ws_id).unwrap().focus_history = previous_history;
 
-        if let Some(f) = focused {
-            self.set_focus(hub, Child::Window(f));
+        // Detaching the root left the workspace unfocused. The history front is the
+        // window the user was on, including when the focus was a highlighted
+        // container standing on it, whose id does not survive the rebuild.
+        let restored = self
+            .workspaces
+            .get(&ws_id)
+            .unwrap()
+            .focus_history
+            .first()
+            .copied();
+        if let Some(target) = restored {
+            self.set_focus(hub, Child::Window(target));
         }
     }
 
