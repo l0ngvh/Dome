@@ -4,6 +4,8 @@ use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
 use crate::core::partition_tree::{Child, Container, Parent};
 use crate::core::strategy::ValidateStrategy;
 
+use std::collections::HashSet;
+
 use super::PartitionTreeStrategy;
 
 const VALIDATION_TOLERANCE: Length = Length::new(0.01);
@@ -47,8 +49,10 @@ impl PartitionTreeStrategy {
     /// Validate workspace focus invariants:
     /// - `is_float_focused` is false when `float_windows` is empty
     /// - `focused_tiling` points to a tiling-mode window (not float/fullscreen)
-    /// - `focused_tiling` is reachable from root by walking `container.focused`
     /// - `root.is_some()` implies `focused_tiling.is_some()`
+    /// - `focus_history` is a permutation of the workspace's tiling windows
+    /// - a focused window is the front of `focus_history`
+    /// - every tabbed ancestor of `focused_tiling` has it as the active tab
     fn validate_workspace_focus(
         &self,
         hub: &HubAccess,
@@ -72,24 +76,10 @@ impl PartitionTreeStrategy {
         }
 
         if let Some(child) = focused_tiling {
-            let root = root.unwrap_or_else(|| {
-                panic!("Workspace {workspace_id}: focused_tiling is {child:?} but root is None")
-            });
-            // Walk the focus chain from root to check reachability of focused_tiling
-            let mut current = root;
-            for _ in crate::core::bounded_loop() {
-                if current == child {
-                    break;
-                }
-                match current {
-                    Child::Window(_) => {
-                        panic!(
-                            "Workspace {workspace_id}: focused_tiling ({child:?}) not reachable from root ({root:?})"
-                        );
-                    }
-                    Child::Container(cid) => current = self.containers.get(cid).focused,
-                }
-            }
+            assert!(
+                root.is_some(),
+                "Workspace {workspace_id}: focused_tiling is {child:?} but root is None"
+            );
         }
 
         if root.is_some() {
@@ -98,6 +88,65 @@ impl PartitionTreeStrategy {
                 "Workspace {workspace_id}: root is Some but focused_tiling is None"
             );
         }
+
+        self.validate_focus_history(workspace_id, root);
+
+        if let Some(Child::Window(wid)) = focused_tiling {
+            assert_eq!(
+                self.workspaces
+                    .get(&workspace_id)
+                    .unwrap()
+                    .focus_history
+                    .first(),
+                Some(&wid),
+                "Workspace {workspace_id}: focused window {wid} is not the front of focus_history"
+            );
+        }
+
+        if let Some(focused) = focused_tiling {
+            for (child, parent_id) in self.ancestors_of(focused) {
+                let container = self.containers.get(parent_id);
+                if container.is_tabbed() {
+                    assert_eq!(
+                        container.active_tab(),
+                        Some(child),
+                        "Workspace {workspace_id}: tabbed container {parent_id} holds the focus \
+                         path in a hidden tab, so the focused node is never drawn"
+                    );
+                }
+            }
+        }
+    }
+
+    fn validate_focus_history(&self, workspace_id: WorkspaceId, root: Option<Child>) {
+        let Some(state) = self.workspaces.get(&workspace_id) else {
+            return;
+        };
+        let tree_windows: HashSet<crate::core::node::WindowId> = root
+            .map(|r| {
+                self.children_dfs(r)
+                    .filter_map(|c| match c {
+                        Child::Window(wid) => Some(wid),
+                        Child::Container(_) => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        assert_eq!(
+            state.focus_history.len(),
+            tree_windows.len(),
+            "Workspace {workspace_id}: focus_history has {} entries for {} tiling windows, \
+             so it holds a duplicate or a stale window",
+            state.focus_history.len(),
+            tree_windows.len()
+        );
+        let history_seen: HashSet<crate::core::node::WindowId> =
+            state.focus_history.iter().copied().collect();
+        assert_eq!(
+            history_seen, tree_windows,
+            "Workspace {workspace_id}: focus_history does not match the tiling windows in the tree"
+        );
     }
 
     fn validate_container(
@@ -122,17 +171,9 @@ impl PartitionTreeStrategy {
             "Container {cid} has less than 2 children"
         );
 
-        if let Child::Window(wid) = container.focused {
-            assert!(
-                !hub.windows.get(wid).is_float(),
-                "Container {cid} focused on float {wid}"
-            );
-        }
-
         self.validate_container_tabbed(cid, container);
         self.validate_container_direction(cid, container, expected_parent);
         self.validate_container_dimensions(hub, cid, container);
-        self.validate_container_focus(hub, cid, container);
 
         for &c in container.children() {
             stack.push((c, Parent::Container(cid)));
@@ -146,18 +187,6 @@ impl PartitionTreeStrategy {
         assert!(
             container.active_tab_index() < container.children().len(),
             "Container {cid} active_tab out of bounds"
-        );
-        let active_tab = container.children()[container.active_tab_index()];
-        let expected_focus = match active_tab {
-            Child::Window(_) => active_tab,
-            Child::Container(child_cid) => self.containers.get(child_cid).focused,
-        };
-        assert!(
-            container.focused == expected_focus || container.focused == active_tab,
-            "Container {cid} focused {:?} doesn't match active_tab {:?} or its focused {:?}",
-            container.focused,
-            active_tab,
-            expected_focus
         );
     }
 
@@ -306,30 +335,6 @@ impl PartitionTreeStrategy {
             dim.height.value(),
             min_h.value()
         );
-    }
-
-    fn validate_container_focus(&self, hub: &HubAccess, cid: ContainerId, container: &Container) {
-        let focused = container.focused;
-        let is_direct_child = container.children().contains(&focused);
-        let matches_child_focus = container.children().iter().any(|&c| {
-            matches!(c, Child::Container(child_cid) if self.containers.get(child_cid).focused == focused)
-        });
-        assert!(
-            is_direct_child || matches_child_focus,
-            "Container {cid} focus {focused:?} is neither a direct child nor matches a child's focus"
-        );
-        self.validate_child_exists(hub, focused);
-    }
-
-    fn validate_child_exists(&self, hub: &HubAccess, child: Child) {
-        match child {
-            Child::Window(wid) => {
-                hub.windows.get(wid);
-            }
-            Child::Container(cid) => {
-                self.containers.get(cid);
-            }
-        }
     }
 
     fn validate_window(

@@ -15,7 +15,7 @@ fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
 }
 
 #[test]
-fn focus_falls_back_to_container_focus_after_float_delete() {
+fn focus_falls_back_to_last_focused_window_after_float_delete() {
     let mut hub = setup_with_layout(layout_floating(&["w3"]));
     hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
     hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
@@ -39,7 +39,7 @@ fn focus_falls_back_to_container_focus_after_float_delete() {
 
     hub.delete_window(f0);
 
-    // Focus should fall back to W1 (container's focus), not W2 (last window)
+    // Focus should fall back to W1 (last focused), not W2 (last window)
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

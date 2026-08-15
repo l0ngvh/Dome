@@ -119,7 +119,7 @@ impl PartitionTreeStrategy {
             }
         }
         if let Some(sibling) = sibling_found {
-            let focus_target = self.descend_to_focused(sibling);
+            let focus_target = self.focus_target_in(sibling);
             tracing::debug!(?direction, forward, from = ?focused, to = ?focus_target, "Changing focus");
             self.set_focus(hub, focus_target);
         }
@@ -162,20 +162,20 @@ impl PartitionTreeStrategy {
         container.is_tabbed = !container.is_tabbed;
         tracing::debug!(%container_id, from = ?direction, "Toggled container layout");
         if self.containers.get(container_id).is_tabbed() {
-            // Toggled from split to tabbed: find the direct child matching container's focus
-            let container = self.containers.get(container_id);
-            let focused = container.focused;
-            let active_tab = *container
-                .children()
-                .iter()
-                .find(|c| {
-                    **c == focused
-                        || matches!(c, Child::Container(cid) if self.containers.get(*cid).focused == focused)
-                })
-                .unwrap();
-            self.containers
-                .get_mut(container_id)
-                .set_active_tab_to_child(active_tab);
+            // Resolved through focus_target_in because highlight mode on this very
+            // container is not on its own ancestor path. None leaves the tab alone.
+            let focused = self.workspaces.get(&ws).unwrap().focused_tiling;
+            let active_tab = focused.and_then(|f| {
+                let target = self.focus_target_in(f);
+                self.ancestors_of(target)
+                    .find(|(_, pid)| *pid == container_id)
+                    .map(|(child, _)| child)
+            });
+            if let Some(active_tab) = active_tab {
+                self.containers
+                    .get_mut(container_id)
+                    .set_active_tab_to_child(active_tab);
+            }
         } else {
             // Toggled from tabbed to split
             self.maintain_direction_invariance(Parent::Container(container_id));
@@ -248,7 +248,7 @@ impl PartitionTreeStrategy {
             .get_mut(container_id)
             .switch_tab(forward)
             .unwrap();
-        let focus_target = self.descend_to_focused(new_child);
+        let focus_target = self.focus_target_in(new_child);
         tracing::debug!(forward, %container_id, ?focus_target, "Focusing tab");
         self.set_focus(hub, focus_target);
     }
@@ -266,7 +266,7 @@ impl PartitionTreeStrategy {
         else {
             return;
         };
-        let focus_target = self.descend_to_focused(new_child);
+        let focus_target = self.focus_target_in(new_child);
         self.set_focus(hub, focus_target);
     }
 

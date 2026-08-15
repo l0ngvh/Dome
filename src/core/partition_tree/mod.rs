@@ -77,6 +77,11 @@ impl TilingStrategy for PartitionTreeStrategy {
         };
         tracing::debug!(%window_id, ?slot_id, "Window matched preferred layout slot");
         hub.windows.get_mut(window_id).set_workspace(Some(ws_id));
+
+        self.workspaces
+            .get_mut(&ws_id)
+            .unwrap()
+            .add_to_history(window_id);
         if let Some(ancestor_slot) = self.first_occupied_ancestor(slot_id) {
             self.attach_window_into_occupied_ancestor(
                 hub,
@@ -166,8 +171,6 @@ impl TilingStrategy for PartitionTreeStrategy {
         self.compute_placement(hub, ws_id);
     }
 
-    /// Update tiling focus to a window. Delegates to `set_focus_child`, which writes
-    /// the window as the focused node on every ancestor container up to the workspace root.
     fn set_focus(&mut self, hub: &mut HubAccess, window_id: WindowId) {
         self.set_focus(hub, Child::Window(window_id));
     }

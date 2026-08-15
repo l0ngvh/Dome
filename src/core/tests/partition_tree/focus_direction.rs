@@ -960,7 +960,7 @@ fn focus_from_inside_tabbed_parent_goes_to_parent_sibling() {
 }
 
 #[test]
-fn focus_into_container_uses_container_focus() {
+fn focus_into_container_uses_last_focused_window() {
     let mut hub = setup();
 
     hub.insert_window(titled("w33"), default_dim(), WindowRestrictions::None);
@@ -1057,7 +1057,7 @@ fn focus_into_container_uses_container_focus() {
     ***************************************************************************+-------------------------------------------------------------------------+
     ");
 
-    // focus_right should go to W2 (container's focus), not W1 (first child)
+    // focus_right should go to W2 (last focused there), not W1 (first child)
     hub.focus_right();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))

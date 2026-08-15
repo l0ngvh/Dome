@@ -406,6 +406,8 @@ impl PartitionTreeStrategy {
         };
 
         let focused = self.focused_tiling_window(ws_id);
+        // Re-attaching seeds the history in tree order, losing recency.
+        let previous_history = self.workspaces.get(&ws_id).unwrap().focus_history.clone();
 
         // Phase: mutable — detach root (clears bookmarks + occupation,
         // triggers one layout on the now-empty workspace).
@@ -430,6 +432,7 @@ impl PartitionTreeStrategy {
         for &wid in &tiling_windows {
             self.attach_window(hub, wid, ws_id);
         }
+        self.workspaces.get_mut(&ws_id).unwrap().focus_history = previous_history;
 
         if let Some(f) = focused {
             self.set_focus(hub, Child::Window(f));

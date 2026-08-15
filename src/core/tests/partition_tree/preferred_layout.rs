@@ -621,47 +621,47 @@ fn clean_up_and_reforming_preferred_contaner() {
         .unwrap();
 
     hub.delete_window(w4);
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0))
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=bottom)
+        Window(id=WindowId(0), x=100.00, y=0.00, w=50.00, h=30.00)
         Window(id=WindowId(2), x=50.00, y=0.00, w=50.00, h=30.00)
-        Window(id=WindowId(3), x=0.00, y=15.00, w=50.00, h=15.00)
+        Window(id=WindowId(3), x=0.00, y=15.00, w=50.00, h=15.00, highlighted, spawn=bottom)
         Window(id=WindowId(1), x=0.00, y=0.00, w=50.00, h=15.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, CCC, DDD])
         Container(id=ContainerId(1), x=0.00, y=0.00, w=50.00, h=30.00, titles=[AAA, BBB])
       )
 
-    +------------------------------------------------++------------------------------------------------+**************************************************
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                       W1                       ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    +------------------------------------------------+|                                                |*                                                *
-    +------------------------------------------------+|                       W2                       |*                       W0                       *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                       W3                       ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    +------------------------------------------------++------------------------------------------------+**************************************************
+    +------------------------------------------------++------------------------------------------------++------------------------------------------------+
+    |                                                ||                                                ||                                                |
+    |                                                ||                                                ||                                                |
+    |                                                ||                                                ||                                                |
+    |                                                ||                                                ||                                                |
+    |                                                ||                                                ||                                                |
+    |                                                ||                                                ||                                                |
+    |                                                ||                                                ||                                                |
+    |                       W1                       ||                                                ||                                                |
+    |                                                ||                                                ||                                                |
+    |                                                ||                                                ||                                                |
+    |                                                ||                                                ||                                                |
+    |                                                ||                                                ||                                                |
+    |                                                ||                                                ||                                                |
+    +------------------------------------------------+|                                                ||                                                |
+    **************************************************|                       W2                       ||                       W0                       |
+    *                                                *|                                                ||                                                |
+    *                                                *|                                                ||                                                |
+    *                                                *|                                                ||                                                |
+    *                                                *|                                                ||                                                |
+    *                                                *|                                                ||                                                |
+    *                                                *|                                                ||                                                |
+    *                                                *|                                                ||                                                |
+    *                       W3                       *|                                                ||                                                |
+    *                                                *|                                                ||                                                |
+    *                                                *|                                                ||                                                |
+    *                                                *|                                                ||                                                |
+    *                                                *|                                                ||                                                |
+    *                                                *|                                                ||                                                |
+    **************************************************+------------------------------------------------++------------------------------------------------+
     ");
 
     let _w5 = hub
@@ -2136,4 +2136,64 @@ fn matches_tiling_no_preferred_root() {
     let ws = hub.current_workspace();
     let strategy = hub.strategies.for_workspace(ws);
     assert!(!strategy.matches_tiling(ws, titled("editor").as_ref()));
+}
+
+#[test]
+fn sync_preferred_layout_keeps_focus_history() {
+    let leaves = || {
+        vec![
+            TreeLayoutNode::Leaf(WindowMatcher {
+                title: Some("AAA".into()),
+                ..Default::default()
+            }),
+            TreeLayoutNode::Leaf(WindowMatcher {
+                title: Some("BBB".into()),
+                ..Default::default()
+            }),
+            TreeLayoutNode::Leaf(WindowMatcher {
+                title: Some("CCC".into()),
+                ..Default::default()
+            }),
+        ]
+    };
+    let mut hub = TestHubBuilder::new()
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("1")
+                .with_tree(TreeLayoutNode::Container {
+                    split: Some(SplitMode::Horizontal),
+                    children: leaves(),
+                })
+                .build(),
+        ])
+        .build();
+    hub.focus_workspace("1");
+
+    // Out of tree order on purpose: children_dfs yields siblings in reverse, so an
+    // insert order of AAA, BBB, CCC rebuilds the recency order by accident.
+    let bbb = hub
+        .insert_window(titled("BBB"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let aaa = hub
+        .insert_window(titled("AAA"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let ccc = hub
+        .insert_window(titled("CCC"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let ws = hub.current_workspace();
+
+    // Without the saved history, ccc's predecessor comes back as bbb.
+    hub.sync_preferred_layout(vec![
+        LayoutWorkspaceConfigBuilder::new("1")
+            .with_tree(TreeLayoutNode::Container {
+                split: Some(SplitMode::Vertical),
+                children: leaves(),
+            })
+            .build(),
+    ]);
+    assert_eq!(hub.focused_window(ws), Some(ccc));
+
+    hub.delete_window(ccc);
+    assert_eq!(hub.focused_window(ws), Some(aaa));
+    assert_ne!(hub.focused_window(ws), Some(bbb));
 }

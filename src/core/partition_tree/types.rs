@@ -2,7 +2,7 @@ use super::preferred_layout::{PreferredSlot, PreferredWindowSlotId};
 use crate::config::SplitMode;
 use crate::core::hub::SpawnIndicator;
 use crate::core::node::Child;
-use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
+use crate::core::node::{ContainerId, Dimension, Direction, Length, WindowId, WorkspaceId};
 
 /// Spawn mode of a container or window: where the next sibling will be
 /// inserted relative to it.
@@ -187,17 +187,37 @@ pub(super) struct WorkspaceTilingState {
     /// Tiling focus pointer. Usually a `Child::Window` (the focused window). Can be
     /// `Child::Container` for container-highlight mode, where
     /// `focused_tiling_window()` returns `None`. Can only be None in an empty workspace.
-    ///
-    /// Anchors invariant 3 of `Container`: when this is `Some(X)`, every ancestor
-    /// container of X has `focused == X`. Established by `set_focus_child`,
-    /// preserved by `replace_child_focus`.
     pub(super) focused_tiling: Option<Child>,
+    /// Windows of this workspace from most to least recently focused. Covers every
+    /// tiling window of the workspace.
+    pub(super) focus_history: Vec<WindowId>,
     /// Root of the static preferred layout tree. `None` when no layout is configured.
     pub(super) preferred_root: Option<PreferredSlot>,
     /// The highest occupied node in the preferred layout tree. `None` when no
     /// matched window has been placed.
     pub(super) occupied_preferred_root: Option<PreferredSlot>,
     pub(super) viewport_offset: (Length, Length),
+}
+
+impl WorkspaceTilingState {
+    pub(super) fn record_focus(&mut self, window_id: WindowId) {
+        self.drop_from_history(window_id);
+        self.focus_history.insert(0, window_id);
+    }
+
+    /// Enrolls as least recently focused without claiming focus. Idempotent, so a
+    /// window that never left the workspace keeps its place.
+    pub(super) fn add_to_history(&mut self, window_id: WindowId) {
+        if !self.focus_history.contains(&window_id) {
+            self.focus_history.push(window_id);
+        }
+    }
+
+    pub(super) fn drop_from_history(&mut self, window_id: WindowId) {
+        if let Some(pos) = self.focus_history.iter().position(|&w| w == window_id) {
+            self.focus_history.remove(pos);
+        }
+    }
 }
 
 impl From<SpawnMode> for SpawnIndicator {

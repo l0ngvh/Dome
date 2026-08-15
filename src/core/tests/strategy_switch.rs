@@ -1,12 +1,12 @@
-use crate::config::{LayoutWorkspaceConfig, MasterConfig, Strategy};
+use crate::config::{LayoutWorkspaceConfig, MasterConfig, SplitMode, Strategy, TreeLayoutNode};
 use crate::core::GlobalLayoutConfig;
 use crate::core::hub::Hub;
 use crate::core::node::{Dimension, Length, WindowRestrictions};
 use crate::core::tests::setup_logger_with_level;
 
 use super::{
-    LayoutConfigBuilder, default_dim, setup_hub, setup_with_layout, snapshot, titled,
-    titled_matcher,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, default_dim, setup_hub, setup_with_layout,
+    snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
@@ -623,4 +623,54 @@ fn same_kind_cross_workspace_move_preserves_container() {
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************
     ");
+}
+
+#[test]
+fn switch_into_preferred_tree_layout_focuses_every_migrated_window_in_turn() {
+    let mut hub = setup_hub_with_layout(
+        layout(Strategy::Master, 0.5, 1, &[], &[]),
+        vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .build(),
+        ],
+    );
+    let w30 = hub
+        .insert_window(titled("w30"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w31 = hub
+        .insert_window(titled("w31"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w32 = hub
+        .insert_window(titled("w32"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let ws = hub.current_workspace();
+
+    // Only w30 and w31 match a slot, so w31 reaches the tree through a
+    // preferred-layout attach helper, not the spawn-mode path.
+    hub.sync_preferred_layout(vec![
+        LayoutWorkspaceConfigBuilder::new("0")
+            .with_tree(TreeLayoutNode::Container {
+                split: Some(SplitMode::Vertical),
+                children: vec![
+                    TreeLayoutNode::Leaf(titled_matcher("w30")),
+                    TreeLayoutNode::Leaf(titled_matcher("w31")),
+                ],
+            })
+            .build(),
+    ]);
+
+    // Migration attaches all three but focuses one. Closing the focused window has
+    // to land on another migrated window until none are left.
+    let mut recovered = vec![hub.focused_window(ws).expect("migration focuses a window")];
+    while recovered.len() < 3 {
+        hub.delete_window(*recovered.last().unwrap());
+        recovered.push(
+            hub.focused_window(ws)
+                .expect("focus falls back to a migrated window"),
+        );
+    }
+    assert!(recovered.contains(&w30));
+    assert!(recovered.contains(&w31));
+    assert!(recovered.contains(&w32));
 }
