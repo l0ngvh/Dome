@@ -21,8 +21,20 @@ fn a_fractional_origin_rounds_rather_than_truncating() {
 
 #[test]
 fn adjacent_boxes_still_share_an_edge_after_rounding() {
-    let left = PixelRect::from_dimension(dim(0.0, 0.0, 100.5, 50.0));
-    let right = PixelRect::from_dimension(dim(100.5, 0.0, 100.5, 50.0));
+    let left = dim(10.5, 0.0, 10.5, 5.0);
+    let right = dim(21.0, 0.0, 10.0, 5.0);
+    assert_eq!(
+        left.x + left.width,
+        right.x,
+        "fixture is only meaningful while the two boxes abut exactly"
+    );
 
-    assert_eq!(left.right(), right.x());
+    let left = PixelRect::from_dimension(left);
+    let right = PixelRect::from_dimension(right);
+
+    assert_eq!(
+        left.right(),
+        right.x(),
+        "rounding the extents instead of the edges opened a seam"
+    );
 }

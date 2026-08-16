@@ -66,7 +66,7 @@ impl Hub {
     /// Write back the observed screen-absolute content box for a floating window,
     /// storing it as a border box.
     /// Called by platform shells after a user drag/resize settles.
-    /// Clients must make sure that the dimension and the monitor_id are consistent. If the
+    /// Clients must make sure that the content box and the monitor_id are consistent. If the
     /// `monitor_id` is not what the operating system agreed with, the window will be assigned to a
     /// wrong workspace and toggling workspace on this monitor will hide/show this window, causing
     /// confusion. It's not the end of the world though.
@@ -98,7 +98,7 @@ impl Hub {
         };
 
         let old_monitor = self.access.workspaces.get(old_ws).monitor;
-        tracing::debug!("{old_monitor} {monitor_id} {border_box:?}");
+        tracing::debug!(%old_monitor, %monitor_id, ?border_box, "Float rect updated");
         if monitor_id != old_monitor {
             let target_ws = self.access.monitors.get(monitor_id).active_workspace;
             if target_ws != old_ws {

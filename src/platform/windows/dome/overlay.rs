@@ -757,6 +757,7 @@ impl FloatOverlayApi for FloatOverlay {
             self.height_phys = h_phys;
         }
 
+        // Position before showing, or the window flashes at its previous position.
         let z_after: Option<HWND> = z.into();
         let mut flags = SWP_NOACTIVATE | SWP_NOREDRAW;
         if z_after.is_none() {

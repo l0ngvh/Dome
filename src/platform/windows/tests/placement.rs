@@ -136,6 +136,7 @@ fn resize_detects_fullscreen() {
         w1,
         Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
     );
+    env.flush_moves();
     let d = env.dim(w1);
     assert_eq!(d.x, Length::ZERO);
     assert_eq!(d.y, Length::ZERO);
@@ -397,17 +398,13 @@ fn show_fullscreen_window_places_at_175pct() {
     let phys_w = SCREEN_WIDTH * 1.75;
     let phys_h = SCREEN_HEIGHT * 1.75;
 
-    // Simulate the user resizing to fill the screen (triggers fullscreen detection).
-    // The mock work area must match the physical monitor extent.
-    env.move_window_to(
-        w1,
-        Dimension::new(Length::ZERO, Length::ZERO, phys_w, phys_h),
-    );
+    // Toggle rather than simulate a resize: Dome leaves an already fullscreen-shaped
+    // window alone, so that path emits no write to observe.
     env.moves.lock().unwrap().clear();
-    env.dome.apply_layout();
+    env.run_actions("toggle fullscreen");
 
-    // Without this the assertions below would read back the rect the resize wrote and pass
-    // even if apply_layout emitted nothing.
+    // Guards against the earlier tautology, where the assertions below read back the
+    // rect the test itself wrote.
     assert!(
         env.moves.lock().unwrap().iter().any(|(id, ..)| *id == w1),
         "apply_layout must emit a placement for the fullscreen window"

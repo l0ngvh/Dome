@@ -290,6 +290,8 @@ pub(crate) struct Logical;
 )]
 pub(crate) struct Physical;
 
+/// Per-target alias pinning core's rects and scalars to one concrete unit. `Hub` and every
+/// core DTO keep the bare `PixelRect` spelling and resolve to `PixelRect<Unit>`.
 #[cfg(target_os = "windows")]
 pub(crate) type Unit = Physical;
 #[cfg(not(target_os = "windows"))]

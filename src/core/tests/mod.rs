@@ -451,6 +451,20 @@ fn validate_hub(hub: &Hub) {
 }
 
 fn validate_visible_placements(hub: &Hub) {
+    // Deliberately independent of `PixelRect::clip`. Production derives every
+    // `visible_border_box` with that method, so asserting against it would compare it
+    // with itself and the invariant could never fail.
+    fn clip(rect: PixelRect, bounds: PixelRect) -> Option<PixelRect> {
+        let x1 = rect.x().value().max(bounds.x().value());
+        let y1 = rect.y().value().max(bounds.y().value());
+        let x2 = rect.right().value().min(bounds.right().value());
+        let y2 = rect.bottom().value().min(bounds.bottom().value());
+        if x1 >= x2 || y1 >= y2 {
+            return None;
+        }
+        Some(PixelRect::new(x1, y1, x2 - x1, y2 - y1))
+    }
+
     let all_placements = hub.get_visible_placements();
     let mut seen_window_ids = HashSet::new();
 
@@ -475,7 +489,7 @@ fn validate_visible_placements(hub: &Hub) {
                 wp.id
             );
             assert_eq!(
-                wp.border_box.clip(screen),
+                clip(wp.border_box, screen),
                 Some(wp.visible_border_box),
                 "Window {} visible_border_box doesn't match clip(border_box, screen)",
                 wp.id
@@ -488,7 +502,7 @@ fn validate_visible_placements(hub: &Hub) {
                 wp.id
             );
             assert_eq!(
-                wp.border_box.clip(screen),
+                clip(wp.border_box, screen),
                 Some(wp.visible_border_box),
                 "Window {} visible_border_box doesn't match clip(border_box, screen)",
                 wp.id
@@ -496,7 +510,7 @@ fn validate_visible_placements(hub: &Hub) {
         }
         for cp in containers {
             assert_eq!(
-                cp.border_box.clip(screen),
+                clip(cp.border_box, screen),
                 Some(cp.visible_border_box),
                 "Container {} visible_border_box doesn't match clip(border_box, screen)",
                 cp.id
