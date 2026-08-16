@@ -1,33 +1,42 @@
 use crate::action::MonitorTarget;
 use crate::config::{
     Config, LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraints, Strategy,
-    WindowMatcher, WindowMode,
+    WindowMatcher, WindowMode, default_border_size, default_master_config,
+    default_partition_tree_config, default_strategy,
 };
 
 use super::allocator::{Allocator, NodeId};
 use super::matcher::{FloatFullscreenMatcherId, MatcherHit};
 use super::node::{
-    ContainerId, Dimension, DisplayMode, Length, Logical, Monitor, MonitorId, Window, WindowId,
-    WindowMetadata, WindowRestrictions, Workspace, WorkspaceId,
+    ContainerId, DisplayMode, Length, LimitObservation, LimitUpdate, Logical, Monitor, MonitorId,
+    PixelRect, Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions, Workspace,
+    WorkspaceId,
 };
 use super::partition_tree::Child;
-use super::strategy::{StrategySet, TilingAction, WorkspaceExport, clip};
+use super::strategy::{StrategySet, TilingAction, WorkspaceExport};
 
 pub(crate) struct VisiblePlacements {
-    /// Window that should receive keyboard focus
     pub(crate) focused_window: Option<WindowId>,
     pub(crate) focused_monitor: MonitorId,
-    /// Placement of windows per monitor
     pub(crate) monitors: Vec<MonitorPlacements>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TilingWindowPlacement {
     pub(crate) id: WindowId,
-    pub(crate) frame: Dimension,
-    pub(crate) visible_frame: Dimension,
-    /// Whether to highlight the window, for example when the window is focused. Doesn't require
-    /// that the window has keyboard focus.
+    pub(crate) border_box: PixelRect,
+    pub(crate) visible_border_box: PixelRect,
+    pub(crate) content_box: PixelRect,
+    /// `content_box` trimmed to the monitor. Zero-area when nothing remains.
+    #[cfg_attr(
+        target_os = "windows",
+        expect(
+            dead_code,
+            reason = "macOS trims tiling placements to the work area, Windows places them unclipped"
+        )
+    )]
+    pub(crate) visible_content_box: PixelRect,
+    /// Highlighting does not require keyboard focus.
     pub(crate) is_highlighted: bool,
     pub(crate) spawn_indicator: Option<SpawnIndicator>,
 }
@@ -35,16 +44,20 @@ pub(crate) struct TilingWindowPlacement {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FloatWindowPlacement {
     pub(crate) id: WindowId,
-    pub(crate) frame: Dimension,
-    pub(crate) visible_frame: Dimension,
+    pub(crate) border_box: PixelRect,
+    pub(crate) visible_border_box: PixelRect,
+    pub(crate) content_box: PixelRect,
     pub(crate) is_highlighted: bool,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct ContainerPlacement {
     pub(crate) id: ContainerId,
-    pub(crate) frame: Dimension,
-    pub(crate) visible_frame: Dimension,
+    pub(crate) border_box: PixelRect,
+    pub(crate) visible_border_box: PixelRect,
+    /// Top band of `border_box` reserved for the tab strip, zero-height when the container
+    /// is not tabbed.
+    pub(crate) tab_bar_band: PixelRect,
     pub(crate) is_highlighted: bool,
     pub(crate) spawn_indicator: Option<SpawnIndicator>,
     pub(crate) is_tabbed: bool,
@@ -54,6 +67,7 @@ pub(crate) struct ContainerPlacement {
 
 pub(crate) struct MonitorPlacements {
     pub(crate) monitor_id: MonitorId,
+    pub(crate) border_thickness: Pixels<Unit>,
     pub(crate) layout: MonitorLayout,
 }
 
@@ -67,8 +81,8 @@ pub(crate) enum MonitorLayout {
 }
 
 /// Which border edges to highlight with the spawn indicator color.
-/// Each bool means "highlight this edge." `left` is always false today
-/// but included so we don't need a struct change if a future spawn mode uses it.
+/// `left` is always false today but included so we don't need a struct change
+/// if a future spawn mode uses it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SpawnIndicator {
     pub(crate) top: bool,
@@ -97,10 +111,10 @@ pub(super) enum RestrictedAction {
 }
 
 /// Convenience bundle of the global layout fields from Config.
-/// Hub and strategies use this instead of threading 9 separate fields.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GlobalLayoutConfig {
     pub(crate) strategy: Strategy,
+    pub(crate) border_size: Pixels<Logical>,
     pub(crate) partition_tree: PartitionTreeConfig,
     pub(crate) master: MasterConfig,
     pub(crate) size_constraints: SizeConstraints,
@@ -113,6 +127,7 @@ impl From<&Config> for GlobalLayoutConfig {
     fn from(c: &Config) -> Self {
         Self {
             strategy: c.strategy,
+            border_size: c.border_size,
             partition_tree: c.partition_tree.clone(),
             master: c.master.clone(),
             size_constraints: c.size_constraints,
@@ -126,16 +141,13 @@ impl From<&Config> for GlobalLayoutConfig {
 impl Default for GlobalLayoutConfig {
     fn default() -> Self {
         Self {
-            strategy: Strategy::PartitionTree,
-            partition_tree: PartitionTreeConfig {
-                tab_bar_height: Length::<Logical>::new(24.0),
-                automatic_tiling: true,
-            },
-            master: MasterConfig {
-                master_ratio: 0.5,
-                master_count: 1,
-            },
+            strategy: default_strategy(),
+            border_size: default_border_size(),
+            partition_tree: default_partition_tree_config(),
+            master: default_master_config(),
             size_constraints: SizeConstraints::default(),
+            // Empty rather than `Config::default()`'s bundled matcher lists, so a fixture
+            // manages every window it inserts.
             float: Vec::new(),
             fullscreen: Vec::new(),
             ignore: Vec::new(),
@@ -156,6 +168,18 @@ pub(crate) struct HubAccess {
     pub(super) windows: Allocator<Window>,
 }
 
+impl HubAccess {
+    /// Rounding here rather than at the call sites is what makes
+    /// `border_box - content_box` exactly the thickness on every edge: a
+    /// thickness ending in `.5` would otherwise round the two opposite edges
+    /// apart by a pixel.
+    pub(super) fn border(&self, monitor: MonitorId) -> Pixels<Unit> {
+        Pixels::round(
+            Length::from_pixels(self.layout.border_size).to_unit(self.monitors.get(monitor).scale),
+        )
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Hub {
     pub(super) access: HubAccess,
@@ -168,7 +192,7 @@ pub(crate) struct Hub {
 
 impl Hub {
     pub(crate) fn new(
-        primary_screen: Dimension,
+        primary_screen: PixelRect,
         primary_scale: f32,
         layout: GlobalLayoutConfig,
         preferred_layouts: Vec<LayoutWorkspaceConfig>,
@@ -206,8 +230,6 @@ impl Hub {
             .active_workspace
     }
 
-    /// Return the window that should get keyboard focus.
-    ///
     /// The top most fullscreen window will get the focus, if any, as fullscreen windows take over
     /// the whole workspaces they are in.
     /// If none is present, focus between float and tiling windows will be decided by is_float_focused
@@ -243,8 +265,7 @@ impl Hub {
         }
     }
 
-    /// Single entry point for tiling actions. Checks restrictions and delegates
-    /// to the strategy.
+    /// Single entry point for tiling actions.
     #[tracing::instrument(skip(self))]
     pub(crate) fn handle_tiling_action(&mut self, action: TilingAction) {
         if self.is_restricted(RestrictedAction::TilingNavigation) {
@@ -415,12 +436,12 @@ impl Hub {
     pub(crate) fn add_monitor(
         &mut self,
         name: String,
-        dimension: Dimension,
+        work_area: PixelRect,
         scale: f32,
     ) -> MonitorId {
         let monitor_id = self.access.monitors.allocate(Monitor {
             name: name.clone(),
-            dimension,
+            work_area,
             scale,
             active_workspace: WorkspaceId::new(0),
         });
@@ -433,7 +454,6 @@ impl Hub {
         let ws_id = self
             .access
             .workspaces
-            // Placeholder id. will be changed after inserting primary monitor
             .allocate(Workspace::new(workspace_name.clone(), monitor_id));
         self.access.monitors.get_mut(monitor_id).active_workspace = ws_id;
         let preferred_layout = self
@@ -477,11 +497,11 @@ impl Hub {
     pub(crate) fn update_monitor(
         &mut self,
         monitor_id: MonitorId,
-        dimension: Dimension,
+        work_area: PixelRect,
         scale: f32,
     ) {
         let monitor = self.access.monitors.get_mut(monitor_id);
-        monitor.dimension = dimension;
+        monitor.work_area = work_area;
         monitor.scale = scale;
         // Collect IDs first to avoid borrowing self.access.workspaces while
         // passing &mut self.access to the strategy.
@@ -501,6 +521,7 @@ impl Hub {
     }
 
     pub(crate) fn sync_configuration(&mut self, layout: GlobalLayoutConfig) {
+        self.access.layout = layout.clone();
         for (ws_id, _) in self.access.workspaces.all_active() {
             self.strategies
                 .for_workspace_mut(ws_id)
@@ -508,11 +529,9 @@ impl Hub {
         }
         let preferred_layouts = self.access.preferred_layouts.clone();
 
-        // Change the strategy of workspages without preferred layout
         self.strategies
             .resync(&mut self.access, &preferred_layouts, layout.strategy);
 
-        self.access.layout = layout;
         self.index_matchers(&preferred_layouts);
     }
 
@@ -533,7 +552,7 @@ impl Hub {
     pub(crate) fn insert_window(
         &mut self,
         metadata: Box<dyn WindowMetadata>,
-        dimension: Dimension,
+        rect: PixelRect,
         restrictions: WindowRestrictions,
     ) -> Option<WindowId> {
         if let Some(r) = self
@@ -583,10 +602,9 @@ impl Hub {
                 let window_id = self
                     .access
                     .windows
-                    .allocate(Window::float(target_ws, dimension, metadata));
-                tracing::debug!(%window_id, ?dimension, "Inserting float window");
-                // `occupy_id` links the window back to the matcher that routed it.
-                self.attach_float_to_workspace(target_ws, window_id, dimension, occupy_id);
+                    .allocate(Window::float(target_ws, rect, metadata));
+                tracing::debug!(%window_id, ?rect, "Inserting float window");
+                self.attach_float_to_workspace(target_ws, window_id, rect, occupy_id);
                 self.set_focus(window_id);
                 window_id
             }
@@ -622,12 +640,12 @@ impl Hub {
             .into_iter()
             .map(|ws_id| {
                 let ws = self.access.workspaces.get(ws_id);
-                let screen = self.access.monitors.get(ws.monitor).dimension;
+                let screen = self.access.monitors.get(ws.monitor).work_area;
 
-                // Fullscreen: only return topmost, skip tiling/float
                 if let Some(&fs_id) = ws.fullscreen_windows.last() {
                     return MonitorPlacements {
                         monitor_id: ws.monitor,
+                        border_thickness: self.access.border(ws.monitor),
                         layout: MonitorLayout::Fullscreen(fs_id),
                     };
                 }
@@ -645,19 +663,20 @@ impl Hub {
                     None
                 };
 
+                let border = self.access.border(ws.monitor);
                 let mut float_windows = Vec::new();
                 for &id in &ws.float_windows {
                     let window = self.access.windows.get(id);
-                    let DisplayMode::Float { dim, .. } = window.mode else {
+                    let DisplayMode::Float { border_box, .. } = window.mode else {
                         panic!("window {id} in float_windows but mode is not Float");
                     };
-                    let frame = dim;
-                    if let Some(visible_frame) = clip(frame, screen) {
+                    if let Some(visible_border_box) = border_box.clip(screen) {
                         let is_highlighted = focused == Some(id);
                         float_windows.push(FloatWindowPlacement {
                             id,
-                            frame,
-                            visible_frame,
+                            border_box,
+                            visible_border_box,
+                            content_box: border_box.inset_by(border),
                             is_highlighted,
                         });
                     }
@@ -665,6 +684,7 @@ impl Hub {
 
                 MonitorPlacements {
                     monitor_id: ws.monitor,
+                    border_thickness: border,
                     layout: MonitorLayout::Normal {
                         tiling_windows,
                         float_windows,
@@ -717,65 +737,64 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    /// Set size constraints for a window.
-    ///
-    /// - `None`: don't change existing value
-    /// - `Some(0.0)`: clear constraint
-    /// - `Some(x)`: set constraint to x
-    ///
     /// If setting min above existing max, max is raised to match min.
     pub(crate) fn set_window_constraint(
         &mut self,
         window_id: WindowId,
-        min_width: Option<f32>,
-        min_height: Option<f32>,
-        max_width: Option<f32>,
-        max_height: Option<f32>,
+        observed: LimitObservation,
     ) {
         let window = self.access.windows.get_mut(window_id);
 
         let update = |name: &str,
-                      min: &mut f32,
-                      max: &mut f32,
-                      new_min: Option<f32>,
-                      new_max: Option<f32>| {
-            if let Some(new_min) = new_min {
-                *min = new_min;
-                if *max > 0.0 && *max < new_min {
-                    tracing::debug!(
-                        "{name}: existing max {:.2} < new min {:.2}, raising max",
-                        *max,
-                        new_min
-                    );
-                    *max = new_min;
+                      min: &mut Option<Length<Unit>>,
+                      max: &mut Option<Length<Unit>>,
+                      new_min: LimitUpdate,
+                      new_max: LimitUpdate| {
+            match new_min {
+                LimitUpdate::Unchanged => {}
+                LimitUpdate::Cleared => *min = None,
+                LimitUpdate::Set(new_min) => {
+                    *min = Some(new_min);
+                    if max.is_some_and(|m| m < new_min) {
+                        tracing::debug!(
+                            "{name}: existing max {:.2} < new min {:.2}, raising max",
+                            max.unwrap_or(Length::ZERO).value(),
+                            new_min.value()
+                        );
+                        *max = Some(new_min);
+                    }
                 }
             }
-            if let Some(new_max) = new_max {
-                *max = if new_max > 0.0 { new_max } else { 0.0 };
-                if *max > 0.0 && *min > *max {
-                    tracing::debug!(
-                        "{name}: existing min {:.2} > new max {:.2}, lowering min",
-                        *min,
-                        *max
-                    );
-                    *min = *max;
+            match new_max {
+                LimitUpdate::Unchanged => {}
+                LimitUpdate::Cleared => *max = None,
+                LimitUpdate::Set(new_max) => {
+                    *max = Some(new_max);
+                    if min.is_some_and(|m| m > new_max) {
+                        tracing::debug!(
+                            "{name}: existing min {:.2} > new max {:.2}, lowering min",
+                            min.unwrap_or(Length::ZERO).value(),
+                            new_max.value()
+                        );
+                        *min = Some(new_max);
+                    }
                 }
             }
         };
 
         update(
             "width",
-            &mut window.min_width,
-            &mut window.max_width,
-            min_width,
-            max_width,
+            &mut window.limits.min_width,
+            &mut window.limits.max_width,
+            observed.min_width,
+            observed.max_width,
         );
         update(
             "height",
-            &mut window.min_height,
-            &mut window.max_height,
-            min_height,
-            max_height,
+            &mut window.limits.min_height,
+            &mut window.limits.max_height,
+            observed.min_height,
+            observed.max_height,
         );
 
         tracing::debug!("Window constraint set");
@@ -850,9 +869,15 @@ impl Hub {
                 .find(|(_, m)| m.name == *name)
                 .map(|(id, _)| *id),
             direction => {
-                let current = self.access.monitors.get(self.access.focused_monitor);
-                let cx = current.dimension.x + current.dimension.width / 2.0;
-                let cy = current.dimension.y + current.dimension.height / 2.0;
+                let current = self
+                    .access
+                    .monitors
+                    .get(self.access.focused_monitor)
+                    .work_area;
+                // Doubled centres, so an odd extent does not lose half a unit to integer
+                // division. Only differences of centres are used, so the factor cancels.
+                let cx2 = 2 * current.x() + current.width();
+                let cy2 = 2 * current.y() + current.height();
 
                 self.access
                     .monitors
@@ -860,23 +885,22 @@ impl Hub {
                     .iter()
                     .filter(|(id, _)| *id != self.access.focused_monitor)
                     .filter_map(|(id, m)| {
-                        let mx = m.dimension.x + m.dimension.width / 2.0;
-                        let my = m.dimension.y + m.dimension.height / 2.0;
-                        let dx = mx - cx;
-                        let dy = my - cy;
+                        let m = m.work_area;
+                        let dx = 2 * m.x() + m.width() - cx2;
+                        let dy = 2 * m.y() + m.height() - cy2;
 
                         let valid = match direction {
-                            MonitorTarget::Left => dx < Length::ZERO,
-                            MonitorTarget::Right => dx > Length::ZERO,
-                            MonitorTarget::Up => dy < Length::ZERO,
-                            MonitorTarget::Down => dy > Length::ZERO,
+                            MonitorTarget::Left => dx < Pixels::ZERO,
+                            MonitorTarget::Right => dx > Pixels::ZERO,
+                            MonitorTarget::Up => dy < Pixels::ZERO,
+                            MonitorTarget::Down => dy > Pixels::ZERO,
                             MonitorTarget::Name(_) => false,
                         };
-                        // Use raw f32 for distance² comparison (unit is irrelevant for ordering)
-                        let dist_sq = dx.value() * dx.value() + dy.value() * dy.value();
-                        valid.then_some((*id, dist_sq))
+                        let dx = i64::from(dx.value());
+                        let dy = i64::from(dy.value());
+                        valid.then_some((*id, dx * dx + dy * dy))
                     })
-                    .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                    .min_by_key(|(_, dist_sq)| *dist_sq)
                     .map(|(id, _)| id)
             }
         }

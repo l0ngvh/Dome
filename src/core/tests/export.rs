@@ -1,9 +1,9 @@
 use crate::config::{TreeLayoutNode, WindowMatcher};
-use crate::core::node::{Dimension, Length, WindowRestrictions};
+use crate::core::node::WindowRestrictions;
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, process_meta, titled,
-    titled_process,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, process_meta,
+    titled, titled_process,
 };
 
 struct CleanupFile(std::path::PathBuf);
@@ -11,15 +11,6 @@ impl Drop for CleanupFile {
     fn drop(&mut self) {
         std::fs::remove_file(&self.0).ok();
     }
-}
-
-fn dim() -> Dimension {
-    Dimension::new(
-        Length::new(0.0),
-        Length::new(0.0),
-        Length::new(100.0),
-        Length::new(100.0),
-    )
 }
 
 #[test]
@@ -55,19 +46,23 @@ fn export_reemits_config_matchers_across_float_and_fullscreen() {
 
     hub.insert_window(
         process_meta("float-window-alpha"),
-        dim(),
+        default_rect(),
         WindowRestrictions::None,
     );
     hub.insert_window(
         process_meta("float-window-beta"),
-        dim(),
+        default_rect(),
         WindowRestrictions::None,
     );
-    hub.insert_window(process_meta("orphan.exe"), dim(), WindowRestrictions::None)
-        .unwrap();
+    hub.insert_window(
+        process_meta("orphan.exe"),
+        default_rect(),
+        WindowRestrictions::None,
+    )
+    .unwrap();
     hub.insert_window(
         process_meta("fs-window-alpha"),
-        dim(),
+        default_rect(),
         WindowRestrictions::None,
     );
 
@@ -98,13 +93,21 @@ fn export_synthesises_from_live_across_float_and_fullscreen() {
     let ws_id = hub.current_workspace();
 
     let float_wid = hub
-        .insert_window(titled("float-live-alpha"), dim(), WindowRestrictions::None)
+        .insert_window(
+            titled("float-live-alpha"),
+            default_rect(),
+            WindowRestrictions::None,
+        )
         .unwrap();
     hub.set_focus(float_wid);
     hub.toggle_float();
 
     let fullscreen_wid = hub
-        .insert_window(titled("fs-live-beta"), dim(), WindowRestrictions::None)
+        .insert_window(
+            titled("fs-live-beta"),
+            default_rect(),
+            WindowRestrictions::None,
+        )
         .unwrap();
     hub.set_focus(fullscreen_wid);
     hub.set_fullscreen(fullscreen_wid, WindowRestrictions::None);
@@ -144,7 +147,7 @@ fn export_synthesises_from_live_for_global_matched_float() {
 
     hub.insert_window(
         process_meta("float-window-alpha"),
-        dim(),
+        default_rect(),
         WindowRestrictions::None,
     );
 
@@ -181,7 +184,7 @@ fn export_drops_matcher_on_cross_workspace_move() {
     let wid = hub
         .insert_window(
             titled_process("distinct-alpha", "float.exe"),
-            dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -225,7 +228,7 @@ fn export_drops_matcher_on_unminimize() {
     let wid = hub
         .insert_window(
             titled_process("distinct-alpha", "float.exe"),
-            dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
@@ -265,7 +268,11 @@ fn export_returns_empty_export_for_empty_workspace() {
     let ws_id = hub.current_workspace();
 
     let wid = hub
-        .insert_window(process_meta("float.exe"), dim(), WindowRestrictions::None)
+        .insert_window(
+            process_meta("float.exe"),
+            default_rect(),
+            WindowRestrictions::None,
+        )
         .unwrap();
     hub.delete_window(wid);
 
@@ -286,7 +293,11 @@ fn export_layout_writes_entry_for_empty_workspace() {
         .build();
     hub.focus_workspace("1");
     hub.focus_workspace("2");
-    hub.insert_window(titled("tiled-alpha"), dim(), WindowRestrictions::None);
+    hub.insert_window(
+        titled("tiled-alpha"),
+        default_rect(),
+        WindowRestrictions::None,
+    );
 
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -335,7 +346,11 @@ fn export_float_toggled_to_tiling_returns_to_tree() {
     let ws_id = hub.current_workspace();
 
     let wid = hub
-        .insert_window(process_meta("float.exe"), dim(), WindowRestrictions::None)
+        .insert_window(
+            process_meta("float.exe"),
+            default_rect(),
+            WindowRestrictions::None,
+        )
         .unwrap();
     hub.set_focus(wid);
     hub.toggle_float();

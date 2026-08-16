@@ -1,24 +1,10 @@
 use std::collections::HashSet;
 
-use crate::core::{Dimension, Length, Logical, MonitorLayout, MonitorPlacements, WindowId};
+use crate::core::{Length, MonitorLayout, MonitorPlacements, WindowId};
 use crate::platform::macos::objc2_wrapper::dimension_to_ns_rect_cocoa;
 
 use super::Dome;
 use super::events::{ContainerShow, FloatShow, HubMessage, MonitorTilingData, RenderFrame};
-use super::window::{apply_inset, clip_to_bounds};
-
-/// Top `tab_bar_height` strip of a tabbed container's frame, in logical points.
-fn tab_bar_dimension(
-    container_frame: Dimension<Logical>,
-    tab_bar_height: Length<Logical>,
-) -> Dimension<Logical> {
-    Dimension::new(
-        container_frame.x,
-        container_frame.y,
-        container_frame.width,
-        tab_bar_height,
-    )
-}
 
 impl Dome {
     /// All fullscreen -> normal and normal -> fullscreen must be resolved before this step
@@ -113,7 +99,6 @@ impl Dome {
             float_shows,
             focused_window,
             focused_monitor_id: focused_monitor,
-            tab_bar_height: self.config.partition_tree.tab_bar_height,
             workspaces: self.hub.query_workspaces(),
         }));
     }
@@ -127,7 +112,7 @@ impl Dome {
             MonitorLayout::Fullscreen(window_id) => {
                 self.place_fullscreen_window(*window_id, mp.monitor_id);
                 let monitor = self.monitor_registry.monitor(mp.monitor_id);
-                let dim = monitor.work_area();
+                let dim = monitor.work_area().to_dimension();
                 (
                     MonitorTilingData {
                         monitor_id: mp.monitor_id,
@@ -137,6 +122,7 @@ impl Dome {
                             dim,
                         ),
                         scale: monitor.egui_scale(),
+                        border_thickness: Length::from_pixels(mp.border_thickness),
                         windows: Vec::new(),
                         containers: Vec::new(),
                     },
@@ -148,38 +134,43 @@ impl Dome {
                 float_windows,
                 containers,
             } => {
-                let border_size = self
-                    .monitor_registry
-                    .physical_border(mp.monitor_id, Length::new(self.config.border_size));
                 let monitor = self.monitor_registry.monitor(mp.monitor_id);
-                let monitor_dim = monitor.work_area();
+                let monitor_dim = monitor.work_area().to_dimension();
                 let scale = monitor.egui_scale();
 
                 let mut placed_tiling = Vec::new();
                 let mut float_shows = Vec::new();
 
                 for wp in tiling_windows {
-                    let content_dim = apply_inset(wp.frame, border_size);
-                    // Clip to visible_frame bounds -- macOS doesn't reliably allow
-                    // placing windows partially off-screen (especially above menu bar)
-                    let visible_content = clip_to_bounds(content_dim, wp.visible_frame);
-                    let Some(target) = visible_content else {
-                        let _span = tracing::debug_span!("empty_visible_content", ?content_dim, visible_frame = ?wp.visible_frame).entered();
+                    // macOS doesn't reliably allow placing windows partially off-screen
+                    // (especially above the menu bar), so place the trimmed rect.
+                    // Tiling placements are always Positioned, so parking is legal here.
+                    if wp.visible_content_box.is_empty() {
+                        tracing::debug!(
+                            window_id = %wp.id,
+                            border_box = ?wp.border_box,
+                            content_box = ?wp.content_box,
+                            "No visible content box, parking window"
+                        );
                         self.move_window_offscreen(wp.id);
                         continue;
-                    };
-                    self.show_tiling(wp.id, target);
+                    }
+                    self.show_tiling(wp.id, wp.visible_content_box);
                     placed_tiling.push(*wp);
                 }
 
                 for wp in float_windows {
                     // Float dimensions are screen-absolute. The OS clips at screen
-                    // edges, so we use wp.frame for everything (no visible_frame).
-                    let content_dim = apply_inset(wp.frame, border_size);
+                    // edges, so we use wp.border_box for everything (no visible_border_box).
+                    if wp.content_box.is_empty() {
+                        tracing::debug!(window_id = %wp.id, "Float content box entirely border, parking window");
+                        self.move_window_offscreen(wp.id);
+                        continue;
+                    }
                     if focused_window != Some(wp.id) {
                         self.move_window_offscreen(wp.id);
                     } else {
-                        self.show_float(wp.id, content_dim);
+                        self.show_float(wp.id, wp.content_box);
                     }
                     let Some(entry) = self.registry.by_id(wp.id) else {
                         continue;
@@ -189,17 +180,17 @@ impl Dome {
                         placement: *wp,
                         cocoa_frame: dimension_to_ns_rect_cocoa(
                             Length::new(self.primary_full_height),
-                            wp.frame,
+                            wp.border_box.to_dimension(),
                         ),
                         scale,
-                        content_dim,
+                        border_thickness: Length::from_pixels(mp.border_thickness),
+                        content_dim: wp.content_box.to_dimension(),
                     });
                 }
 
                 let mut container_data = Vec::with_capacity(containers.len());
                 for cp in containers {
-                    let tab_bar_dim =
-                        tab_bar_dimension(cp.frame, self.config.partition_tree.tab_bar_height);
+                    let tab_bar_dim = cp.tab_bar_band.to_dimension();
                     let tab_bar_cocoa_frame = dimension_to_ns_rect_cocoa(
                         Length::new(self.primary_full_height),
                         tab_bar_dim,
@@ -220,6 +211,7 @@ impl Dome {
                             monitor_dim,
                         ),
                         scale,
+                        border_thickness: Length::from_pixels(mp.border_thickness),
                         windows: placed_tiling,
                         containers: container_data,
                     },

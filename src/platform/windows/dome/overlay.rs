@@ -1,9 +1,7 @@
-// Coordinate systems: wgpu surface sizing (SurfaceConfiguration.width/height) and SetWindowPos
-// use physical pixels (cached as width_phys/height_phys via Dimension<Physical>::to_surface_size).
-// The overlay paint boundary (TilingOverlay::rerender, FloatOverlay::update) projects physical
-// Dimensions via .to_logical(scale) and passes
-// pixels_per_point = scale so egui rescales back to physical. BorderMetrics/OverlayMetrics pass
-// through unscaled -- never pre-multiply thickness/radius/tab-bar-height here.
+// Coordinate systems: wgpu surface sizing and SetWindowPos use physical pixels, cached here as
+// width_phys and height_phys. The overlay paint boundary projects those to logical and passes
+// pixels_per_point = scale so egui rescales back to physical. BorderMetrics pass through
+// unscaled, so never pre-multiply thickness, radius, or tab-bar height here.
 
 use std::sync::Arc;
 
@@ -30,14 +28,12 @@ use windows::core::{Interface, PCWSTR};
 
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, Physical,
-    TilingWindowPlacement,
+    PixelRect, Pixels, TilingWindowPlacement,
 };
 use crate::overlay;
 use crate::platform::windows::dome::CreateOverlay;
 use crate::platform::windows::external::{HwndId, ZOrder};
 
-/// Owns an HWND and calls `DestroyWindow` on drop.
-///
 /// Struct fields must be declared before this so their renderer resources
 /// drop before the window's HDC.
 pub(super) struct OwnedHwnd {
@@ -84,7 +80,6 @@ impl OwnedHwnd {
     /// `HWND_BROADCAST` shell messages. `HWND_BROADCAST` does not reach message-only
     /// windows, so a top-level HWND is required. `WS_EX_TOOLWINDOW` hides it from the
     /// taskbar and Alt-Tab. `WS_EX_NOACTIVATE` keeps it out of the activation chain.
-    /// No `WS_VISIBLE`, no `ShowWindow` call, and zero geometry, so nothing is ever drawn.
     pub(in crate::platform::windows) fn new_hidden_top_level(
         class_name: PCWSTR,
         instance: HINSTANCE,
@@ -125,7 +120,6 @@ impl OwnedHwnd {
 
     pub(super) fn hide(&mut self) {
         if self.is_visible {
-            // BOOL is previous visibility state, not an error indicator
             unsafe { ShowWindow(self.hwnd, SW_HIDE).ok().ok() };
             self.is_visible = false;
         }
@@ -141,7 +135,7 @@ impl Drop for OwnedHwnd {
 /// wgpu + DirectComposition renderer for overlay windows.
 ///
 /// `surface` must drop before the DComp objects it references, and `painter`
-/// before the device. Rust drops fields in declaration order.
+/// before the device.
 pub(super) struct Renderer {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
@@ -151,7 +145,6 @@ pub(super) struct Renderer {
     egui_ctx: egui::Context,
     _dcomp_visual: IDCompositionVisual,
     _dcomp_target: IDCompositionTarget,
-    // Also used by resize() to Commit after reconfigure.
     dcomp_device: IDCompositionDevice,
 }
 
@@ -268,7 +261,6 @@ impl Renderer {
         mut ctx_fn: impl FnMut(&mut egui::Ui) -> R,
     ) -> R {
         // Acquire before running egui so a skipped frame still processes input.
-        // Transient statuses skip only the GPU paint. Lost and Validation panic.
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => Some(frame),
@@ -381,46 +373,36 @@ pub(in crate::platform::windows) const TILING_OVERLAY_CLASS: PCWSTR =
 pub(in crate::platform::windows) const TAB_BAR_OVERLAY_CLASS: PCWSTR =
     windows::core::w!("DomeTabBarOverlay");
 
-/// Per-monitor overlay that draws all tiling window borders and container tab bars.
+/// Per-monitor overlay that draws all tiling window borders.
 /// `renderer` is declared before `window` so it drops first.
 pub(in crate::platform::windows) struct TilingOverlay {
     renderer: Renderer,
-    monitor: Dimension,
-    // Physical-pixel cache for the last `surface_size_from_physical` result.
+    monitor: PixelRect,
     width_phys: u32,
     height_phys: u32,
     windows: Vec<TilingWindowPlacement>,
     containers: Vec<(ContainerPlacement, Vec<String>)>,
     config: Config,
-    tab_bar_height: Length<Logical>,
+    border_thickness: Pixels<Physical>,
     window: OwnedHwnd,
     scale: f32,
 }
 
 impl TilingOverlay {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "wgpu handles travel together at construction"
-    )]
     pub(in crate::platform::windows) fn new(
         instance: &wgpu::Instance,
         adapter: &wgpu::Adapter,
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         config: Config,
-        tab_bar_height: Length<Logical>,
-        monitor: Dimension,
+        monitor: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<Self>> {
         let flavor = config.theme;
         let font = &config.font;
         // Initialize the wgpu surface at the monitor's physical size so the
         // overlay is ready to render without a preceding update() call.
-        // Monitor dimensions are already physical under the agnostic-core
-        // design, so this is a cast-only conversion (same as update()).
         let (x_phys, y_phys, init_w, init_h) = monitor.to_surface_size();
-        // WS_EX_NOACTIVATE prevents DefWindowProcW from returning MA_ACTIVATE on clicks,
-        // stopping the overlay from being raised above managed windows by user input.
         // WS_EX_LAYERED | WS_EX_TRANSPARENT keeps the tiling overlay
         // click-through so pointer events reach managed windows below.
         let mut window = OwnedHwnd::new(
@@ -459,8 +441,8 @@ impl TilingOverlay {
             height_phys: init_h,
             windows: Vec::new(),
             containers: Vec::new(),
+            border_thickness: Pixels::ZERO,
             config,
-            tab_bar_height,
             window,
             scale,
         });
@@ -476,8 +458,8 @@ impl TilingOverlay {
             .iter()
             .map(|wp| overlay::LogicalTiledWindow {
                 id: wp.id,
-                frame: wp.frame.to_logical(scale),
-                visible_frame: wp.visible_frame.to_logical(scale),
+                frame: wp.border_box.to_logical(scale),
+                visible_frame: wp.visible_border_box.to_logical(scale),
                 is_highlighted: wp.is_highlighted,
                 spawn_indicator: wp.spawn_indicator,
             })
@@ -487,8 +469,9 @@ impl TilingOverlay {
             .iter()
             .map(|(cp, titles)| overlay::LogicalTiledContainer {
                 id: cp.id,
-                frame: cp.frame.to_logical(scale),
-                visible_frame: cp.visible_frame.to_logical(scale),
+                frame: cp.border_box.to_logical(scale),
+                visible_frame: cp.visible_border_box.to_logical(scale),
+                tab_bar_height: Length::from_pixels(cp.tab_bar_band.height()).to_logical(scale),
                 is_highlighted: cp.is_highlighted,
                 spawn_indicator: cp.spawn_indicator,
                 is_tabbed: cp.is_tabbed,
@@ -497,12 +480,9 @@ impl TilingOverlay {
             .collect();
         let config = &self.config;
         let theme = config.theme();
-        let metrics = overlay::OverlayMetrics {
-            border: overlay::BorderMetrics::from_thickness(Length::<Logical>::new(
-                config.border_size,
-            )),
-            tab_bar_height: self.tab_bar_height,
-        };
+        let border = overlay::BorderMetrics::from_thickness(
+            Length::from_pixels(self.border_thickness).to_logical(scale),
+        );
         let w_phys = self.width_phys;
         let h_phys = self.height_phys;
         // Borders-only mode: tab bars live in dedicated per-container windows,
@@ -515,7 +495,7 @@ impl TilingOverlay {
                 &windows_logical,
                 &containers_logical,
                 &theme,
-                metrics,
+                border,
             )
         });
     }
@@ -524,10 +504,11 @@ impl TilingOverlay {
 impl TilingOverlayApi for TilingOverlay {
     fn update(
         &mut self,
-        monitor: Dimension,
+        monitor: PixelRect,
         windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
         scale: f32,
+        border_thickness: Pixels<Physical>,
     ) {
         let (x_phys, y_phys, w_phys, h_phys) = monitor.to_surface_size();
 
@@ -559,6 +540,7 @@ impl TilingOverlayApi for TilingOverlay {
         self.windows = windows.to_vec();
         self.containers = containers.to_vec();
         self.scale = scale;
+        self.border_thickness = border_thickness;
         self.rerender();
     }
 
@@ -581,10 +563,6 @@ impl TilingOverlayApi for TilingOverlay {
             self.renderer.apply_font(&config.font);
         }
         self.config = config.clone();
-    }
-
-    fn set_tab_bar_height(&mut self, height: Length<Logical>) {
-        self.tab_bar_height = height;
     }
 
     fn window_above(&self) -> Option<HwndId> {
@@ -666,7 +644,14 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
 }
 
 pub(in crate::platform::windows) trait FloatOverlayApi {
-    fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder, scale: f32);
+    fn update(
+        &mut self,
+        wp: &FloatWindowPlacement,
+        config: &Config,
+        z: ZOrder,
+        scale: f32,
+        border_thickness: Pixels<Physical>,
+    );
     fn hide(&mut self);
     fn set_config(&mut self, config: &Config);
 }
@@ -674,24 +659,22 @@ pub(in crate::platform::windows) trait FloatOverlayApi {
 pub(in crate::platform::windows) trait TilingOverlayApi {
     fn update(
         &mut self,
-        monitor: Dimension,
+        monitor: PixelRect,
         windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
         scale: f32,
+        border_thickness: Pixels<Physical>,
     );
     fn clear(&mut self);
     fn set_config(&mut self, config: &Config);
-    fn set_tab_bar_height(&mut self, height: Length<Logical>);
-    /// Pulls keyboard focus to this monitor's overlay HWND. The Win32
-    /// close-time focus walk lands here when the user closes a managed
-    /// window with no obvious successor on the same monitor, replacing the
-    /// process-wide focus-sink window the platform shell used to keep below
+    /// The Win32 close-time focus walk lands here when the user closes a
+    /// managed window with no obvious successor on the same monitor, replacing
+    /// the process-wide focus-sink window the platform shell used to keep below
     /// every overlay. The overlay HWND is `WS_EX_TRANSPARENT`, so claiming
     /// foreground does not take pointer events away from anything below.
     fn focus(&self);
     /// Returns the HWND sitting directly above this overlay in z-order.
-    /// Wraps `GetWindow(GW_HWNDPREV)` in production. Used by `show_tiling`
-    /// to slot tiling windows above the overlay on band transitions.
+    /// Wraps `GetWindow(GW_HWNDPREV)` in production.
     fn window_above(&self) -> Option<HwndId>;
     /// Demotes the overlay below `managed` via a z-only `SetWindowPos`.
     /// Fallback for when `window_above()` returns None (overlay at top).
@@ -703,8 +686,6 @@ pub(in crate::platform::windows) const FLOAT_OVERLAY_CLASS: PCWSTR =
 
 pub(in crate::platform::windows) struct FloatOverlay {
     renderer: Renderer,
-    // Physical-pixel cache for the last `SetWindowPos` / `renderer.resize`.
-    // Asserted positive on construction and update (zero would be a logic bug).
     width_phys: u32,
     height_phys: u32,
     window: OwnedHwnd,
@@ -759,8 +740,15 @@ impl FloatOverlay {
 }
 
 impl FloatOverlayApi for FloatOverlay {
-    fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder, scale: f32) {
-        let vf = wp.visible_frame;
+    fn update(
+        &mut self,
+        wp: &FloatWindowPlacement,
+        config: &Config,
+        z: ZOrder,
+        scale: f32,
+        border_thickness: Pixels<Physical>,
+    ) {
+        let vf = wp.visible_border_box;
         let (x_phys, y_phys, w_phys, h_phys) = vf.to_surface_size();
 
         if self.width_phys != w_phys || self.height_phys != h_phys {
@@ -769,7 +757,7 @@ impl FloatOverlayApi for FloatOverlay {
             self.height_phys = h_phys;
         }
 
-        // ORDERING INVARIANT: SetWindowPos, show, render.
+        // Position before showing, or the window flashes at its previous position.
         let z_after: Option<HWND> = z.into();
         let mut flags = SWP_NOACTIVATE | SWP_NOREDRAW;
         if z_after.is_none() {
@@ -792,10 +780,11 @@ impl FloatOverlayApi for FloatOverlay {
         self.window.show();
 
         let vf_logical = vf.to_logical(scale);
-        let frame_logical = wp.frame.to_logical(scale);
+        let frame_logical = wp.border_box.to_logical(scale);
         let theme = config.theme();
-        let border =
-            overlay::BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
+        let border = overlay::BorderMetrics::from_thickness(
+            Length::from_pixels(border_thickness).to_logical(scale),
+        );
         let is_highlighted = wp.is_highlighted;
 
         self.renderer.render(w_phys, h_phys, scale, vec![], |ui| {
@@ -868,8 +857,7 @@ impl CreateOverlay for WgpuOverlayFactory {
     fn create_tiling_overlay(
         &self,
         config: Config,
-        tab_bar_height: Length<Logical>,
-        monitor: Dimension,
+        monitor: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
         Ok(TilingOverlay::new(
@@ -878,7 +866,6 @@ impl CreateOverlay for WgpuOverlayFactory {
             Arc::clone(&self.device),
             Arc::clone(&self.queue),
             config,
-            tab_bar_height,
             monitor,
             scale,
         )?)
@@ -887,9 +874,9 @@ impl CreateOverlay for WgpuOverlayFactory {
         &self,
         config: Config,
         _scale: f32,
-        visible_frame: Dimension,
+        visible_border_box: PixelRect,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
-        let (x_phys, y_phys, w_phys, h_phys) = visible_frame.to_surface_size();
+        let (x_phys, y_phys, w_phys, h_phys) = visible_border_box.to_surface_size();
         Ok(FloatOverlay::new(
             &self.instance,
             &self.adapter,
@@ -906,7 +893,7 @@ impl CreateOverlay for WgpuOverlayFactory {
         &self,
         config: Config,
         container_id: ContainerId,
-        rect: Dimension,
+        rect: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<dyn TabBarOverlayApi>> {
         Ok(TabBarOverlay::new(
@@ -923,35 +910,49 @@ impl CreateOverlay for WgpuOverlayFactory {
     }
 }
 
-/// Windows-only conversions on physical-pixel dimensions for the wgpu/egui overlay pipeline.
-trait PhysicalDimensionExt {
+trait PhysicalRectExt {
     fn to_logical(self, scale: f32) -> Dimension<Logical>;
     fn to_surface_size(self) -> (i32, i32, u32, u32);
 }
 
-impl PhysicalDimensionExt for Dimension<Physical> {
-    fn to_logical(self, scale: f32) -> Dimension<Logical> {
+trait PhysicalLengthExt {
+    fn to_logical(self, scale: f32) -> Length<Logical>;
+}
+
+impl PhysicalLengthExt for Length<Physical> {
+    /// Deliberately does not round. Core insets by an integral physical thickness, so
+    /// dividing recovers it exactly on multiplication back, and rounding here would
+    /// reintroduce the disagreement between the painted band and the inset.
+    fn to_logical(self, scale: f32) -> Length<Logical> {
         debug_assert!(scale > 0.0, "scale must be positive, got {scale}");
+        Length::new(self.value() / scale)
+    }
+}
+
+impl PhysicalRectExt for PixelRect<Physical> {
+    fn to_logical(self, scale: f32) -> Dimension<Logical> {
         Dimension::new(
-            Length::new(self.x.value() / scale),
-            Length::new(self.y.value() / scale),
-            Length::new(self.width.value() / scale),
-            Length::new(self.height.value() / scale),
+            Length::from_pixels(self.x()).to_logical(scale),
+            Length::from_pixels(self.y()).to_logical(scale),
+            Length::from_pixels(self.width()).to_logical(scale),
+            Length::from_pixels(self.height()).to_logical(scale),
         )
     }
 
     fn to_surface_size(self) -> (i32, i32, u32, u32) {
-        let w = self.width.round().value() as u32;
-        let h = self.height.round().value() as u32;
+        // Assert before the cast, not after: `i32 as u32` wraps a negative extent
+        // into a huge positive one, where the `f32` path saturates to zero.
         assert!(
-            w > 0 && h > 0,
-            "overlay surface size must be positive; got {w}x{h}"
+            self.width() > Pixels::ZERO && self.height() > Pixels::ZERO,
+            "overlay surface size must be positive; got {}x{}",
+            self.width().value(),
+            self.height().value()
         );
         (
-            self.x.round().value() as i32,
-            self.y.round().value() as i32,
-            w,
-            h,
+            self.x().value(),
+            self.y().value(),
+            self.width().value() as u32,
+            self.height().value() as u32,
         )
     }
 }
@@ -959,11 +960,12 @@ impl PhysicalDimensionExt for Dimension<Physical> {
 pub(in crate::platform::windows) trait TabBarOverlayApi {
     fn update(
         &mut self,
-        rect: Dimension,
+        rect: PixelRect,
         titles: Vec<String>,
         active_index: usize,
         is_highlighted: bool,
         scale: f32,
+        border_thickness: Pixels<Physical>,
     );
     #[expect(
         dead_code,
@@ -989,6 +991,7 @@ pub(in crate::platform::windows) struct TabBarOverlay {
     hub_sender: HubSender,
     window: OwnedHwnd,
     scale: f32,
+    border_thickness: Pixels<Physical>,
     // First update positions and shows. Later updates skip SWP_SHOWWINDOW so a
     // hide() does not get clobbered by the next paint pass.
     placed: bool,
@@ -1006,7 +1009,7 @@ impl TabBarOverlay {
         queue: Arc<wgpu::Queue>,
         config: Config,
         container_id: ContainerId,
-        rect: Dimension,
+        rect: PixelRect,
         scale: f32,
         hub_sender: HubSender,
     ) -> anyhow::Result<Box<Self>> {
@@ -1039,6 +1042,7 @@ impl TabBarOverlay {
             container_id,
             width_phys: w_phys,
             height_phys: h_phys,
+            border_thickness: Pixels::ZERO,
             titles: Vec::new(),
             active_index: 0,
             is_highlighted: false,
@@ -1053,7 +1057,7 @@ impl TabBarOverlay {
     }
 
     /// Renders one frame and returns `Some((container_id, tab_index))` when a
-    /// click landed on a tab. Caller dispatches the click via the hub sender.
+    /// click landed on a tab.
     fn rerender(&mut self) -> Option<(ContainerId, usize)> {
         let events = std::mem::take(&mut self.events);
         let scale = self.scale;
@@ -1065,17 +1069,11 @@ impl TabBarOverlay {
         let container_id = self.container_id;
         let config = &self.config;
         let theme = config.theme();
-        // Canvas is the full bar, so paint_tab_bar's own height drives the
-        // metric. Otherwise the highlight underline math would diverge from
-        // the bar's actual logical height.
         let bar_h_logical = Length::<Logical>::new(h_phys as f32 / scale);
         let bar_w_logical = Length::<Logical>::new(w_phys as f32 / scale);
-        let metrics = overlay::OverlayMetrics {
-            border: overlay::BorderMetrics::from_thickness(Length::<Logical>::new(
-                config.border_size,
-            )),
-            tab_bar_height: bar_h_logical,
-        };
+        let border = overlay::BorderMetrics::from_thickness(
+            Length::from_pixels(self.border_thickness).to_logical(scale),
+        );
         let canvas_local =
             Dimension::<Logical>::new(Length::ZERO, Length::ZERO, bar_w_logical, bar_h_logical);
         self.renderer.render(w_phys, h_phys, scale, events, |ui| {
@@ -1086,7 +1084,7 @@ impl TabBarOverlay {
                 &titles,
                 active_index,
                 is_highlighted,
-                metrics,
+                border,
                 &theme,
             )
         })
@@ -1096,16 +1094,18 @@ impl TabBarOverlay {
 impl TabBarOverlayApi for TabBarOverlay {
     fn update(
         &mut self,
-        rect: Dimension,
+        rect: PixelRect,
         titles: Vec<String>,
         active_index: usize,
         is_highlighted: bool,
         scale: f32,
+        border_thickness: Pixels<Physical>,
     ) {
         self.titles = titles;
         self.active_index = active_index;
         self.is_highlighted = is_highlighted;
         self.scale = scale;
+        self.border_thickness = border_thickness;
         let (x_phys, y_phys, w_phys, h_phys) = rect.to_surface_size();
         if w_phys != self.width_phys || h_phys != self.height_phys {
             self.renderer.resize(w_phys, h_phys);

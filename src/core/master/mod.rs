@@ -13,10 +13,11 @@ use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
 use crate::core::master::preferred_layout::{Slot, SlotId};
 use crate::core::node::{
-    Child, Constraints, Dimension, Direction, Length, WindowId, WindowMetadata, WorkspaceId,
+    Child, Dimension, Direction, Length, PixelRect, WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::strategy::{
-    TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, distribute_space,
+    TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, distribute_space, translate,
+    window_constraints,
 };
 
 /// XMonad-style tiling: a master area on the left and a stack on the right.
@@ -108,16 +109,16 @@ impl TilingStrategy for MasterStrategy {
         self.compute_placement(hub, ws_id);
     }
 
-    fn detach_window(&mut self, hub: &HubAccess, id: WindowId) -> Dimension {
+    fn detach_window(&mut self, hub: &HubAccess, id: WindowId) -> PixelRect {
         let ws_id = hub
             .windows
             .get(id)
             .workspace()
             .expect("detaching tiling window has a workspace");
-        let screen = hub
+        let work_area = hub
             .monitors
             .get(hub.workspaces.get(ws_id).monitor)
-            .dimension;
+            .work_area;
 
         let state = self.workspaces.get_mut(&ws_id).unwrap_or_else(|| {
             panic!("master: detach_window called for {id:?} but workspace {ws_id} has no state")
@@ -132,12 +133,7 @@ impl TilingStrategy for MasterStrategy {
             self.slots.get_mut(sid).windows.retain(|w| w != &id);
         }
         let dim = removed.dimension;
-        let result = Dimension::new(
-            dim.x + screen.x,
-            dim.y - y_offset + screen.y,
-            dim.width,
-            dim.height,
-        );
+        let result = translate(dim, Length::ZERO, y_offset, work_area.x(), work_area.y());
 
         self.reconcile_master_count(hub, ws_id);
         self.compute_placement(hub, ws_id);
@@ -503,7 +499,7 @@ impl MasterStrategy {
         let constraints: Vec<(Length, Length)> = pane_windows
             .iter()
             .map(|&id| {
-                let c = effective_constraints(hub, &self.size_constraints, id);
+                let c = window_constraints(hub, &self.size_constraints, id);
                 (c.min_height, c.max_height)
             })
             .collect();
@@ -636,66 +632,5 @@ fn wrap_index(idx: usize, len: usize, forward: bool) -> usize {
         len - 1
     } else {
         idx - 1
-    }
-}
-
-fn effective_constraints(
-    hub: &HubAccess,
-    size_constraints: &SizeConstraints,
-    wid: WindowId,
-) -> Constraints {
-    let ws_id = hub
-        .windows
-        .get(wid)
-        .workspace()
-        .expect("tiling window has a workspace");
-    let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
-    let scale = monitor.scale;
-    let screen = monitor.dimension;
-
-    let global_min_w = size_constraints.minimum_width.resolve(screen.width, scale);
-    let global_min_h = size_constraints
-        .minimum_height
-        .resolve(screen.height, scale);
-    let global_max_w = size_constraints.maximum_width.resolve(screen.width, scale);
-    let global_max_h = size_constraints
-        .maximum_height
-        .resolve(screen.height, scale);
-
-    let window = hub.windows.get(wid);
-    let (raw_min_w, raw_min_h) = window.min_size();
-    let (raw_max_w, raw_max_h) = window.max_size();
-    let win_min_w = Length::new(raw_min_w);
-    let win_min_h = Length::new(raw_min_h);
-    let win_max_w = Length::new(raw_max_w);
-    let win_max_h = Length::new(raw_max_h);
-
-    let max_w = if win_max_w > Length::ZERO {
-        win_max_w
-    } else {
-        global_max_w
-    };
-    let max_h = if win_max_h > Length::ZERO {
-        win_max_h
-    } else {
-        global_max_h
-    };
-
-    let min_w = if max_w > Length::ZERO {
-        win_min_w.max(global_min_w).min(max_w)
-    } else {
-        win_min_w.max(global_min_w)
-    };
-    let min_h = if max_h > Length::ZERO {
-        win_min_h.max(global_min_h).min(max_h)
-    } else {
-        win_min_h.max(global_min_h)
-    };
-
-    Constraints {
-        min_width: min_w,
-        min_height: min_h,
-        max_width: max_w,
-        max_height: max_h,
     }
 }

@@ -1,9 +1,9 @@
 use crate::core::{
-    Dimension, Length, TilingWindowPlacement, WindowId,
+    Dimension, Length, PixelRect, TilingWindowPlacement, WindowId,
     hub::HubAccess,
-    master::{MasterStrategy, WindowState, effective_constraints},
+    master::{MasterStrategy, WindowState},
     node::WorkspaceId,
-    strategy::{TilingPlacements, clip, distribute_space, translate},
+    strategy::{TilingPlacements, distribute_space, translate, window_constraints},
 };
 
 impl MasterStrategy {
@@ -17,46 +17,47 @@ impl MasterStrategy {
             return;
         }
 
-        let screen = hub
+        let work_area = hub
             .monitors
             .get(hub.workspaces.get(ws_id).monitor)
-            .dimension;
-        let h = screen.height;
+            .work_area;
+        let screen_width = Length::from_pixels(work_area.width());
+        let h = Length::from_pixels(work_area.height());
 
         let master_ids: Vec<WindowId> = state.master.clone();
         let stack_ids: Vec<WindowId> = state.secondary.clone();
 
         match (master_n, stack_n) {
             (_, 0) => {
-                self.do_pane_layout(hub, &master_ids, screen.width, Length::ZERO, h);
+                self.do_pane_layout(hub, &master_ids, screen_width, Length::ZERO, h);
             }
             (0, _) => {
-                self.do_pane_layout(hub, &stack_ids, screen.width, Length::ZERO, h);
+                self.do_pane_layout(hub, &stack_ids, screen_width, Length::ZERO, h);
             }
             (_, _) => {
                 let master_min_w = master_ids
                     .iter()
-                    .map(|&id| effective_constraints(hub, &self.size_constraints, id).min_width)
+                    .map(|&id| window_constraints(hub, &self.size_constraints, id).min_width)
                     .fold(Length::ZERO, Length::max);
                 let stack_min_w = stack_ids
                     .iter()
-                    .map(|&id| effective_constraints(hub, &self.size_constraints, id).min_width)
+                    .map(|&id| window_constraints(hub, &self.size_constraints, id).min_width)
                     .fold(Length::ZERO, Length::max);
 
                 let desired_master_w = Length::new(
-                    (screen.width.value() * state.master_ratio.unwrap_or(self.master_ratio))
+                    (screen_width.value() * state.master_ratio.unwrap_or(self.master_ratio))
                         .floor(),
                 );
                 let total_min = master_min_w + stack_min_w;
 
-                let (master_w, stack_w) = if total_min >= screen.width {
+                let (master_w, stack_w) = if total_min >= screen_width {
                     (master_min_w, stack_min_w)
                 } else if desired_master_w < master_min_w {
-                    (master_min_w, screen.width - master_min_w)
-                } else if screen.width - desired_master_w < stack_min_w {
-                    (screen.width - stack_min_w, stack_min_w)
+                    (master_min_w, screen_width - master_min_w)
+                } else if screen_width - desired_master_w < stack_min_w {
+                    (screen_width - stack_min_w, stack_min_w)
                 } else {
-                    (desired_master_w, screen.width - desired_master_w)
+                    (desired_master_w, screen_width - desired_master_w)
                 };
 
                 self.do_pane_layout(hub, &master_ids, master_w, Length::ZERO, h);
@@ -82,7 +83,8 @@ impl MasterStrategy {
         };
 
         let ws = hub.workspaces.get(ws_id);
-        let screen = hub.monitors.get(ws.monitor).dimension;
+        let screen = hub.monitors.get(ws.monitor).work_area;
+        let border = hub.border(ws.monitor);
 
         let mut windows = Vec::with_capacity(state.master.len() + state.secondary.len());
 
@@ -95,13 +97,16 @@ impl MasterStrategy {
         let mut push_pane = |vec: &[WindowId], y_offset: Length| {
             for &wid in vec.iter() {
                 let dim = self.window_states[&wid].dimension;
-                let frame = translate(dim, Length::ZERO, y_offset, screen);
-                if let Some(visible_frame) = clip(frame, screen) {
+                let border_box = translate(dim, Length::ZERO, y_offset, screen.x(), screen.y());
+                if let Some(visible_border_box) = border_box.clip(screen) {
                     let is_highlighted = focused_id == Some(wid);
+                    let content_box = border_box.inset_by(border);
                     windows.push(TilingWindowPlacement {
                         id: wid,
-                        frame,
-                        visible_frame,
+                        border_box,
+                        visible_border_box,
+                        content_box,
+                        visible_content_box: content_box.clip(screen).unwrap_or(PixelRect::ZERO),
                         is_highlighted,
                         spawn_indicator: None,
                     });
@@ -131,14 +136,14 @@ impl MasterStrategy {
         }
         let pane_min_w = ids
             .iter()
-            .map(|&id| effective_constraints(hub, &self.size_constraints, id).min_width)
+            .map(|&id| window_constraints(hub, &self.size_constraints, id).min_width)
             .fold(Length::ZERO, Length::max);
         let adjusted_w = pane_min_w.max(pane_width);
 
         let constraints: Vec<(Length, Length)> = ids
             .iter()
             .map(|&id| {
-                let c = effective_constraints(hub, &self.size_constraints, id);
+                let c = window_constraints(hub, &self.size_constraints, id);
                 (c.min_height, c.max_height)
             })
             .collect();
@@ -150,7 +155,7 @@ impl MasterStrategy {
             Length::ZERO
         };
         for (i, &id) in ids.iter().enumerate() {
-            let c = effective_constraints(hub, &self.size_constraints, id);
+            let c = window_constraints(hub, &self.size_constraints, id);
             let (w, x_off) = apply_max_constraint(c.max_width, adjusted_w);
             let (slot_h, y_off) = apply_max_constraint(c.max_height, heights[i]);
             let dim = Dimension::new(x_start + x_off, y + y_off, w, slot_h);
@@ -167,11 +172,12 @@ impl MasterStrategy {
 
     fn clamp_scroll(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
         let state = self.workspaces.get(&ws_id).unwrap();
-        let pane_height = hub
-            .monitors
-            .get(hub.workspaces.get(ws_id).monitor)
-            .dimension
-            .height;
+        let pane_height = Length::from_pixels(
+            hub.monitors
+                .get(hub.workspaces.get(ws_id).monitor)
+                .work_area
+                .height(),
+        );
 
         let master_ids: Vec<WindowId> = state.master.clone();
         let master_max = if !master_ids.is_empty() {

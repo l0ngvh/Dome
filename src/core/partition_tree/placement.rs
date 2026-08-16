@@ -1,17 +1,20 @@
 use crate::core::hub::HubAccess;
 use crate::core::node::Constraints;
-use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
+use crate::core::node::{
+    ContainerId, Dimension, Direction, Length, PixelRect, Pixels, WorkspaceId,
+};
 use crate::core::partition_tree::{Child, SpawnMode};
-use crate::core::strategy::{TilingPlacements, clip, distribute_space, translate};
+use crate::core::strategy::{
+    TilingPlacements, clip, distribute_space, translate, window_constraints,
+};
 use crate::core::{ContainerPlacement, SpawnIndicator, TilingWindowPlacement};
 
 use super::PartitionTreeStrategy;
 
 impl PartitionTreeStrategy {
-    /// Two-pass layout: bottom-up to compute minimum sizes (a container's min
-    /// is the sum of its children's mins), then top-down to distribute space.
-    /// A single pass can't do both because the total minimum must be known
-    /// before distributing remaining space.
+    /// Two-pass layout: bottom-up to compute minimum sizes, then top-down to
+    /// distribute space. A single pass can't do both because the total minimum
+    /// must be known before distributing remaining space.
     pub(super) fn compute_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
         let ws_state = self.workspaces.get(&ws_id).unwrap();
         let Some(root) = ws_state.root else { return };
@@ -20,10 +23,9 @@ impl PartitionTreeStrategy {
             let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
             let scale = monitor.scale;
 
-            // Collect containers in pre-order
             let order: Vec<_> = self.containers_preorder(root_id).collect();
 
-            // Update minimum sizes bottom-up, as parent's minimum size depends on children's
+            // Reversed pre-order visits children before parents.
             for &cid in order.iter().rev() {
                 self.update_container_min_size(hub, cid, scale);
             }
@@ -33,19 +35,20 @@ impl PartitionTreeStrategy {
         self.scroll_into_view(hub, ws_id);
     }
 
-    /// Top-down placement pass: places the root and distributes space to
-    /// each container's children using the current viewport_offset.
+    /// Top-down half of the two-pass layout.
     pub(super) fn adjust_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
         let ws_state = self.workspaces.get(&ws_id).unwrap();
         let Some(root) = ws_state.root else { return };
         let viewport_offset = ws_state.viewport_offset;
         let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
-        let screen = monitor.dimension;
+        let work_area = monitor.work_area;
+        let screen_width = Length::from_pixels(work_area.width());
+        let screen_height = Length::from_pixels(work_area.height());
         let scale = monitor.scale;
         let (offset_x, offset_y) = viewport_offset;
-        let viewport_rect = Dimension::new(offset_x, offset_y, screen.width, screen.height);
+        let viewport_rect = Dimension::new(offset_x, offset_y, screen_width, screen_height);
 
-        self.set_root_dimension(hub, root, screen);
+        self.set_root_dimension(hub, root, screen_width, screen_height);
 
         let Child::Container(root_id) = root else {
             return;
@@ -85,10 +88,12 @@ impl PartitionTreeStrategy {
         };
         let ws = hub.workspaces.get(ws_id);
         let (offset_x, offset_y) = ws_state.viewport_offset;
-        let screen = hub.monitors.get(ws.monitor).dimension;
-        // Only highlight tiling focus when this is the current workspace AND
-        // the workspace's effective focus is on tiling (not float). Fullscreen
-        // workspaces never reach here (hub returns early with MonitorLayout::Fullscreen).
+        let monitor = hub.monitors.get(ws.monitor);
+        let screen = monitor.work_area;
+        let scale = monitor.scale;
+        let border = hub.border(ws.monitor);
+        // Fullscreen workspaces never reach here (hub returns early with
+        // MonitorLayout::Fullscreen).
         let focused = if focused && !ws.is_float_focused {
             ws_state.focused_tiling
         } else {
@@ -105,13 +110,24 @@ impl PartitionTreeStrategy {
             let Some(child) = stack.pop() else { break };
             match child {
                 Child::Window(id) => {
-                    let frame = translate(self.child_dimension(child), offset_x, offset_y, screen);
-                    if let Some(visible_frame) = clip(frame, screen) {
+                    let border_box = translate(
+                        self.child_dimension(child),
+                        offset_x,
+                        offset_y,
+                        screen.x(),
+                        screen.y(),
+                    );
+                    if let Some(visible_border_box) = border_box.clip(screen) {
                         let is_highlighted = focused == Some(Child::Window(id));
+                        let content_box = border_box.inset_by(border);
                         windows.push(TilingWindowPlacement {
                             id,
-                            frame,
-                            visible_frame,
+                            border_box,
+                            visible_border_box,
+                            content_box,
+                            visible_content_box: content_box
+                                .clip(screen)
+                                .unwrap_or(PixelRect::ZERO),
                             is_highlighted,
                             spawn_indicator: if is_highlighted {
                                 Some(SpawnIndicator::from(self.child_spawn_mode(child)))
@@ -123,15 +139,34 @@ impl PartitionTreeStrategy {
                 }
                 Child::Container(id) => {
                     let container = self.containers.get(id);
-                    let frame = translate(self.child_dimension(child), offset_x, offset_y, screen);
-                    let Some(visible_frame) = clip(frame, screen) else {
+                    let dim = self.child_dimension(child);
+                    let border_box = translate(dim, offset_x, offset_y, screen.x(), screen.y());
+                    let Some(visible_border_box) = border_box.clip(screen) else {
                         continue;
+                    };
+                    // Rounding the band height on its own would let round(y) + round(h) drift
+                    // a unit from the round(y + h) the content box uses. The content top comes
+                    // from the container's own dimension, not the active tab's, since a
+                    // max-constrained tab is centred within the content.
+                    let band_height = if container.is_tabbed() {
+                        let content_top =
+                            Pixels::round(dim.y + self.tab_bar_length(scale) - offset_y)
+                                + screen.y();
+                        content_top - border_box.y()
+                    } else {
+                        Pixels::ZERO
                     };
                     let is_highlighted = focused == Some(Child::Container(id));
                     containers.push(ContainerPlacement {
                         id,
-                        frame,
-                        visible_frame,
+                        border_box,
+                        visible_border_box,
+                        tab_bar_band: PixelRect::from_pixels(
+                            border_box.x(),
+                            border_box.y(),
+                            border_box.width(),
+                            band_height,
+                        ),
                         is_highlighted,
                         spawn_indicator: if is_highlighted {
                             Some(SpawnIndicator::from(self.child_spawn_mode(child)))
@@ -166,7 +201,6 @@ impl PartitionTreeStrategy {
         }
     }
 
-    /// Layout the children in the container.
     /// Max constrained children are centered inside of the visible portion of the container, or
     /// just centered inside the container if it's completely offscreen
     fn layout_children(
@@ -268,28 +302,28 @@ impl PartitionTreeStrategy {
             .collect()
     }
 
-    /// Place the root child within the screen. Base dimension is
-    /// `screen.max(min)` on each axis: the root grows past the screen when a
-    /// descendant's minimum exceeds the screen, and the viewport scrolls to it
-    /// instead of clipping. Then applies the root's max constraint with the
-    /// current viewport for centering.
-    fn set_root_dimension(&mut self, hub: &HubAccess, root: Child, screen: Dimension) {
+    /// The root grows past the screen when a descendant's minimum exceeds it, so
+    /// the viewport scrolls instead of clipping.
+    fn set_root_dimension(
+        &mut self,
+        hub: &HubAccess,
+        root: Child,
+        screen_width: Length,
+        screen_height: Length,
+    ) {
         let c = self.get_effective_constraints(hub, root);
         let base_dim: Dimension = Dimension::new(
             Length::ZERO,
             Length::ZERO,
-            screen.width.max(c.min_width),
-            screen.height.max(c.min_height),
+            screen_width.max(c.min_width),
+            screen_height.max(c.min_height),
         );
         let dim = place_in_visible(base_dim, (c.max_width, c.max_height), base_dim);
 
         self.set_child_dimension(root, dim);
     }
 
-    /// Bottom-up minimum size for one container. For split containers, sums
-    /// along the split axis and maxes across. For tabbed containers, maxes both
-    /// axes (tabs share area) and adds `tab_bar_length` to the height for the
-    /// tab strip above the active child.
+    /// A tabbed container maxes both axes because its tabs share one area.
     fn update_container_min_size(
         &mut self,
         hub: &HubAccess,
@@ -347,10 +381,8 @@ impl PartitionTreeStrategy {
         }
     }
 
-    /// Write `dim` to `child` and, when `automatic_tiling` is on, set the
-    /// child's `spawn_mode` to match the new aspect ratio (Horizontal if wider
-    /// than tall, otherwise Vertical). The `!is_tab()` guard keeps tabbed
-    /// children from being demoted to a split mode by a layout pass.
+    /// The `!is_tab()` guard keeps tabbed children from being demoted to a split
+    /// mode by a layout pass.
     fn set_child_dimension(&mut self, child: Child, dim: Dimension) {
         let spawn_mode = if dim.width >= dim.height {
             SpawnMode::horizontal()
@@ -376,79 +408,9 @@ impl PartitionTreeStrategy {
         }
     }
 
-    /// Resolve the effective constraints for a child.
-    ///
-    /// Window: per-instance max (`Window::max_size`) wins when non-zero,
-    /// otherwise the global `max_*` config applies. The resolved max also caps
-    /// the effective min so a window's min cannot exceed its max.
-    ///
-    /// Container: returns its tracked `min_size` and `(ZERO, ZERO)` for max.
-    /// Containers have no max constraint. `ZERO` is the sentinel that
-    /// downstream layout reads as "unconstrained".
     fn get_effective_constraints(&self, hub: &HubAccess, child: Child) -> Constraints {
-        let ws_id = self.child_workspace(hub, child);
-        let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
-        let screen = monitor.dimension;
-        let scale = monitor.scale;
-        let global_min_w = self
-            .size_constraints
-            .minimum_width
-            .resolve(screen.width, scale);
-        let global_min_h = self
-            .size_constraints
-            .minimum_height
-            .resolve(screen.height, scale);
-
         match child {
-            Child::Window(id) => {
-                let window = hub.windows.get(id);
-                // Window.min_*/max_* are raw f32 (pre-scaled platform hints); wrap at this Dimension seam.
-                let (win_min_w_raw, win_min_h_raw) = window.min_size();
-                let (win_max_w_raw, win_max_h_raw) = window.max_size();
-                let win_min_w = Length::new(win_min_w_raw);
-                let win_min_h = Length::new(win_min_h_raw);
-                let win_max_w = Length::new(win_max_w_raw);
-                let win_max_h = Length::new(win_max_h_raw);
-
-                let global_max_w = self
-                    .size_constraints
-                    .maximum_width
-                    .resolve(screen.width, scale);
-                let global_max_h = self
-                    .size_constraints
-                    .maximum_height
-                    .resolve(screen.height, scale);
-
-                let max_w = if win_max_w > Length::ZERO {
-                    win_max_w
-                } else {
-                    global_max_w
-                };
-                let max_h = if win_max_h > Length::ZERO {
-                    win_max_h
-                } else {
-                    global_max_h
-                };
-
-                // Window-specific max caps the effective min
-                let min_w = if max_w > Length::ZERO {
-                    win_min_w.max(global_min_w).min(max_w)
-                } else {
-                    win_min_w.max(global_min_w)
-                };
-                let min_h = if max_h > Length::ZERO {
-                    win_min_h.max(global_min_h).min(max_h)
-                } else {
-                    win_min_h.max(global_min_h)
-                };
-
-                Constraints {
-                    min_width: min_w,
-                    min_height: min_h,
-                    max_width: max_w,
-                    max_height: max_h,
-                }
-            }
+            Child::Window(id) => window_constraints(hub, &self.size_constraints, id),
             Child::Container(id) => {
                 let (min_w, min_h) = self.containers.get(id).min_size();
                 Constraints {
@@ -462,19 +424,15 @@ impl PartitionTreeStrategy {
     }
 
     pub(super) fn tab_bar_length(&self, scale: f32) -> Length {
-        self.tab_bar_height.to_unit(scale)
+        Length::from_pixels(self.tab_bar_height).to_unit(scale)
     }
 }
 
 /// Returns (size, offset) for a max-constrained child.
 ///
-/// `size` is the constrained extent on this axis. `offset` is the placement
-/// offset relative to the container origin so the child is centered inside the
-/// visible section of the container, clamped to stay inside the container.
-///
-/// When `visible_extent == container_extent` and `visible_origin == 0` (the
-/// container is fully on screen), this reduces to simple centering within the
-/// container.
+/// `offset` is the placement offset relative to the container origin so the
+/// child is centered inside the visible section of the container, clamped to
+/// stay inside the container.
 fn apply_max_constraint(
     max: Length,
     container_extent: Length,

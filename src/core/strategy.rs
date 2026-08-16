@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 
-use crate::config::{LayoutWorkspaceConfig, Strategy, TreeLayoutNode, WindowMatcher};
+use crate::config::{
+    LayoutWorkspaceConfig, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
+};
 use crate::core::GlobalLayoutConfig;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::master::MasterStrategy;
 use crate::core::node::{
-    Child, ContainerId, Dimension, Direction, Length, WindowId, WindowMetadata, WorkspaceId,
+    Child, Constraints, ContainerId, Dimension, Direction, Length, PixelRect, Pixels, Unit,
+    WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
 
-/// Actions that are specific to the tiling strategy.
 #[derive(Debug)]
 pub(crate) enum TilingAction {
     FocusDirection {
@@ -98,7 +100,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Remove a window from its workspace's tiling tree. Returns the window's
     /// dimension in screen-absolute coordinates (translated before detach
     /// because detach triggers layout, which can change viewport_offset).
-    fn detach_window(&mut self, hub: &HubAccess, window_id: WindowId) -> Dimension;
+    fn detach_window(&mut self, hub: &HubAccess, window_id: WindowId) -> PixelRect;
 
     /// Dispatch a tiling-specific action. Reads the current workspace from
     /// `hub.focused_monitor` internally. Both mutates state and triggers
@@ -170,20 +172,107 @@ pub(super) trait ValidateStrategy {
     fn validate(&self, hub: &HubAccess);
 }
 
-/// Convert layout-space coordinates to screen-absolute. Layout positions are
-/// relative to workspace origin (0,0); this applies viewport offset and
-/// monitor origin.
+/// Absorbs the f32 error a constraint accumulates while being distributed.
+#[cfg(test)]
+pub(super) const VALIDATION_TOLERANCE: Length = Length::new(0.01);
+
+/// Resolve one tiling window's effective constraints, in border-box space.
+///
+/// `Window::limits` records what the app asked for, which describes its content
+/// area, so each per-window limit gains `2 * border` here. The global
+/// `size_constraints` are already border-box and must not be outset, or what a
+/// percentage means would start depending on `border_size`.
+pub(crate) fn window_constraints(
+    hub: &HubAccess,
+    size_constraints: &SizeConstraints,
+    wid: WindowId,
+) -> Constraints {
+    let ws_id = hub
+        .windows
+        .get(wid)
+        .workspace()
+        .expect("tiling window has a workspace");
+    let monitor_id = hub.workspaces.get(ws_id).monitor;
+    let monitor = hub.monitors.get(monitor_id);
+    let scale = monitor.scale;
+    let work_area = monitor.work_area;
+    let screen_width = Length::from_pixels(work_area.width());
+    let screen_height = Length::from_pixels(work_area.height());
+
+    let global_min_w = size_constraints.minimum_width.resolve(screen_width, scale);
+    let global_min_h = size_constraints
+        .minimum_height
+        .resolve(screen_height, scale);
+    let global_max_w = size_constraints.maximum_width.resolve(screen_width, scale);
+    let global_max_h = size_constraints
+        .maximum_height
+        .resolve(screen_height, scale);
+
+    let outset = Length::from_pixels(hub.border(monitor_id) * 2);
+    let limits = hub.windows.get(wid).limits();
+    // Filter before the outset: a non-positive stored limit is not a limit at all, and outsetting
+    // it first would turn it into a spurious `2 * border` cap that collapses the slot.
+    let outset_limit = |v: Option<Length<Unit>>| {
+        v.filter(|v| *v > Length::ZERO)
+            .map_or(Length::ZERO, |v| v + outset)
+    };
+    let win_min_w = outset_limit(limits.min_width);
+    let win_min_h = outset_limit(limits.min_height);
+    let win_max_w = outset_limit(limits.max_width);
+    let win_max_h = outset_limit(limits.max_height);
+
+    let max_w = if win_max_w > Length::ZERO {
+        win_max_w
+    } else {
+        global_max_w
+    };
+    let max_h = if win_max_h > Length::ZERO {
+        win_max_h
+    } else {
+        global_max_h
+    };
+
+    let min_w = if max_w > Length::ZERO {
+        win_min_w.max(global_min_w).min(max_w)
+    } else {
+        win_min_w.max(global_min_w)
+    };
+    let min_h = if max_h > Length::ZERO {
+        win_min_h.max(global_min_h).min(max_h)
+    } else {
+        win_min_h.max(global_min_h)
+    };
+
+    Constraints {
+        min_width: min_w,
+        min_height: min_h,
+        max_width: max_w,
+        max_height: max_h,
+    }
+}
+
+/// Converts layout-space coordinates to screen-absolute. Layout positions are relative to
+/// the workspace origin plus the viewport offset, so the monitor origin is what makes them
+/// absolute. The origin is added after rounding rather than before, which is exact because
+/// it is integral.
 pub(crate) fn translate<U>(
     dim: Dimension<U>,
     offset_x: Length<U>,
     offset_y: Length<U>,
-    screen: Dimension<U>,
-) -> Dimension<U> {
-    Dimension::new(
-        dim.x - offset_x + screen.x,
-        dim.y - offset_y + screen.y,
+    screen_x: Pixels<U>,
+    screen_y: Pixels<U>,
+) -> PixelRect<U> {
+    let local = PixelRect::from_dimension(Dimension::new(
+        dim.x - offset_x,
+        dim.y - offset_y,
         dim.width,
         dim.height,
+    ));
+    PixelRect::from_pixels(
+        local.x() + screen_x,
+        local.y() + screen_y,
+        local.width(),
+        local.height(),
     )
 }
 

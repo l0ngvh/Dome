@@ -28,7 +28,7 @@ use crate::action::{
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig, WindowMatcher, pattern_matches};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
-    ContainerId, Dimension, Direction, Hub, Length, Logical, TilingAction, WindowId,
+    ContainerId, Dimension, Direction, Hub, Length, Logical, PixelRect, TilingAction, WindowId,
     WindowMetadata, WindowRestrictions,
 };
 use crate::platform::macos::accessibility::ExternalWindow;
@@ -36,8 +36,6 @@ use crate::platform::macos::accessibility::ExternalWindow;
 use monitor::MonitorRegistry;
 use recovery::Recovery;
 use registry::{ManagedWindow, WindowRegistry};
-
-pub(in crate::platform::macos) use window::RoundedDimension;
 
 pub(in crate::platform::macos) struct NewWindow {
     pub(in crate::platform::macos) ax: Arc<dyn ExternalWindow>,
@@ -127,10 +125,12 @@ impl WindowMetadata for MacOSMetadata {
 pub(in crate::platform::macos) enum PendingAdd {
     Positioned {
         new: NewWindow,
-        dim: RoundedDimension,
+        rect: PixelRect,
     },
     /// Native fullscreen windows lives on their own space and thus has no dimension
-    NativeFullscreen { new: NewWindow },
+    NativeFullscreen {
+        new: NewWindow,
+    },
 }
 
 /// Keyed by display id so a bar that moves between monitors or draws on
@@ -171,10 +171,7 @@ pub(in crate::platform::macos) struct DebounceBurst {
 
 pub(in crate::platform::macos) struct WindowMove {
     pub(in crate::platform::macos) cg_id: CGWindowID,
-    pub(in crate::platform::macos) x: i32,
-    pub(in crate::platform::macos) y: i32,
-    pub(in crate::platform::macos) w: i32,
-    pub(in crate::platform::macos) h: i32,
+    pub(in crate::platform::macos) rect: PixelRect,
     pub(in crate::platform::macos) observed_at: DebounceBurst,
 }
 
@@ -288,19 +285,18 @@ impl Dome {
                 PendingAdd::NativeFullscreen { new } => {
                     self.add_native_fullscreen_window(new);
                 }
-                PendingAdd::Positioned { new, dim } => {
+                PendingAdd::Positioned { new, rect } => {
                     let ax_for_recovery = new.ax.clone();
-                    let borderless_fs = self.is_borderless_fullscreen_at(dim);
+                    let borderless_fs = self.is_borderless_fullscreen_at(rect);
                     let restrictions = if borderless_fs {
                         WindowRestrictions::ProtectFullscreen
                     } else {
                         WindowRestrictions::None
                     };
-                    let Some(id) = self.hub.insert_window(
-                        Box::new(new.metadata.clone()),
-                        dim.to_dimension(),
-                        restrictions,
-                    ) else {
+                    let Some(id) =
+                        self.hub
+                            .insert_window(Box::new(new.metadata.clone()), rect, restrictions)
+                    else {
                         let cg_id = new.ax.cg_id();
                         let pid = new.ax.pid();
                         crate::trace_once!(
@@ -314,14 +310,15 @@ impl Dome {
                         WindowState::BorderlessFullscreen
                     } else {
                         WindowState::Positioned(window::PositionedState::Offscreen(
-                            window::OffscreenPlacement::new(dim),
+                            window::OffscreenPlacement::new(rect),
                         ))
                     };
-                    self.finalize_added_window(new, id, state);
+                    self.registry.insert(new, id, state);
+                    self.pending_created.push(id);
                     self.recovery.track(
                         ax_for_recovery,
-                        dim.width,
-                        dim.height,
+                        rect.width(),
+                        rect.height(),
                         self.monitor_registry.primary_monitor().work_area(),
                     );
                 }
@@ -342,10 +339,7 @@ impl Dome {
                 // NativeFullscreen doesn't emit any move/resize event, so we need to simulate one
                 self.window_moved(
                     window_id,
-                    e.x,
-                    e.y,
-                    e.w,
-                    e.h,
+                    e.rect,
                     DebounceBurst {
                         first: now,
                         last: now,
@@ -369,8 +363,6 @@ impl Dome {
         for (display_id, rect) in &rects {
             self.status_bars.record(*display_id, *rect);
         }
-        // update_monitors borrows &mut self, so self.monitors cannot be
-        // borrowed across the call. Cheap main-thread clone.
         let cached = self.monitors.clone();
         self.update_monitors(&cached);
         self.flush_layout();
@@ -383,7 +375,7 @@ impl Dome {
                 continue;
             };
             let window_id = entry.window_id;
-            self.window_moved(window_id, m.x, m.y, m.w, m.h, m.observed_at);
+            self.window_moved(window_id, m.rect, m.observed_at);
         }
         self.flush_layout();
     }
@@ -491,8 +483,7 @@ impl Dome {
     }
 
     /// Handles the frontmost window entering native fullscreen after a space
-    /// change. If `cg_id` is tracked, transitions it to `NativeFullscreen`
-    /// state. If untracked, inserts it as a new fullscreen window.
+    /// change.
     #[tracing::instrument(skip(self, new), fields(cg_id = %cg_id))]
     pub(in crate::platform::macos) fn enter_native_fullscreen(
         &mut self,
@@ -509,9 +500,8 @@ impl Dome {
     }
 
     /// Handles the frontmost window exiting native fullscreen after a space
-    /// change. Only acts if `cg_id` is tracked and currently in
-    /// `NativeFullscreen` state, routing through `window_moved` so the window
-    /// re-enters tiling via the same path as reconcile-detected exits.
+    /// change. Routes through `window_moved` so the window re-enters tiling via
+    /// the same path as reconcile-detected exits.
     #[tracing::instrument(skip(self, pos, size), fields(cg_id = %cg_id))]
     pub(in crate::platform::macos) fn exit_native_fullscreen(
         &mut self,
@@ -526,10 +516,7 @@ impl Dome {
             let now = Instant::now();
             self.window_moved(
                 window_id,
-                pos.0.value() as i32,
-                pos.1.value() as i32,
-                size.0.value() as i32,
-                size.1.value() as i32,
+                PixelRect::from_dimension(Dimension::new(pos.0, pos.1, size.0, size.1)),
                 DebounceBurst {
                     first: now,
                     last: now,
@@ -568,8 +555,6 @@ impl Dome {
         self.observed_pids.insert(pid);
     }
 
-    /// Replaces `observed_pids` wholesale with the given set. Called after
-    /// `refresh_all_observers` completes on the main thread.
     pub(in crate::platform::macos) fn set_observed_pids(&mut self, pids: HashSet<i32>) {
         self.observed_pids = pids;
     }
@@ -578,8 +563,6 @@ impl Dome {
         self.remove_app_windows(pid);
     }
 
-    /// Sends a message to the main thread to tear down all observers and
-    /// re-register from scratch.
     pub(in crate::platform::macos) fn refresh_observers(&self) {
         self.sender.send(HubMessage::RefreshObservers);
     }
@@ -621,7 +604,6 @@ impl Dome {
         serde_json::to_string(&entries).expect("MinimizedWindow is infallibly serializable")
     }
 
-    /// Clear the minimize flag on a window and drive the OS-side restore.
     #[tracing::instrument(skip(self), fields(window_id = %window_id))]
     pub(in crate::platform::macos) fn unminimize_window(&mut self, window_id: WindowId) {
         self.hub.unminimize_window(window_id);

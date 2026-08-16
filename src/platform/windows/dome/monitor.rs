@@ -9,7 +9,7 @@ use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotific
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, MONITORINFOF_PRIMARY};
 use windows::core::BOOL;
 
-use crate::core::{Dimension, Hub, Length, MonitorId, Physical, WindowId};
+use crate::core::{Dimension, Hub, MonitorId, Physical, PixelRect, WindowId};
 use crate::platform::windows::external::HwndId;
 use crate::platform::windows::handle;
 
@@ -17,10 +17,12 @@ use crate::platform::windows::handle;
 pub(in crate::platform::windows) struct MonitorInfo {
     pub handle: isize,
     pub name: String,
-    pub dimension: Dimension,
+    pub work_area: PixelRect,
+    /// Stays fractional because its only consumer is `reserve_for_bar`, whose
+    /// f32 edge math is shared with macOS.
     pub bounds: Dimension,
     pub is_primary: bool,
-    /// DPI scale factor for this monitor (e.g. 1.5 for 150%). Always > 0.
+    /// Always > 0.
     pub scale: f32,
 }
 
@@ -46,27 +48,22 @@ impl QueryDisplay for Win32Display {
     }
 }
 
-/// Per-monitor state: physical dimension, DPI scale, and the set of windows
-/// currently laid out on this monitor (rebuilt each `apply_layout` pass).
+/// Per-monitor state. `displayed` is rebuilt each `apply_layout` pass.
 pub(super) struct Monitor {
     id: MonitorId,
     handle: isize,
-    dimension: Dimension,
+    work_area: PixelRect,
     scale: f32,
     displayed: HashSet<WindowId>,
 }
 
 impl Monitor {
-    pub(super) fn dimension(&self) -> Dimension {
-        self.dimension
+    pub(super) fn work_area(&self) -> PixelRect {
+        self.work_area
     }
 
     pub(super) fn scale(&self) -> f32 {
         self.scale
-    }
-
-    pub(super) fn physical_border(&self, border_size: f32) -> Length<Physical> {
-        Length::new(border_size * self.scale)
     }
 
     pub(super) fn displayed(&self) -> &HashSet<WindowId> {
@@ -104,7 +101,7 @@ impl MonitorRegistry {
         &mut self,
         handle: isize,
         id: MonitorId,
-        dimension: Dimension,
+        work_area: PixelRect,
         scale: f32,
     ) {
         self.monitors.insert(
@@ -112,7 +109,7 @@ impl MonitorRegistry {
             Monitor {
                 id,
                 handle,
-                dimension,
+                work_area,
                 scale,
                 displayed: HashSet::new(),
             },
@@ -149,31 +146,24 @@ impl MonitorRegistry {
             .displayed = displayed;
     }
 
-    pub(super) fn physical_border(&self, id: MonitorId, border_size: f32) -> Length<Physical> {
-        self.monitor(id).physical_border(border_size)
-    }
-
     pub(super) fn is_borderless_fullscreen_at(
         &self,
-        rect: Dimension<Physical>,
+        rect: PixelRect<Physical>,
         handle: isize,
     ) -> bool {
         self.monitors
             .values()
             .find(|m| m.handle == handle)
             .map(|m| {
-                rect.x <= m.dimension.x
-                    && rect.y <= m.dimension.y
-                    && rect.x + rect.width >= m.dimension.x + m.dimension.width
-                    && rect.y + rect.height >= m.dimension.y + m.dimension.height
+                let mon = m.work_area;
+                rect.x() <= mon.x()
+                    && rect.y() <= mon.y()
+                    && rect.right() >= mon.right()
+                    && rect.bottom() >= mon.bottom()
             })
             .unwrap_or(false)
     }
 
-    /// Reconciles the registry against a fresh monitor list from the OS.
-    /// Adds new monitors, removes stale ones, and updates dimensions/scales
-    /// for monitors that changed. Returns the set of added and removed IDs
-    /// so the caller can drive overlay creation/destruction.
     pub(super) fn reconcile(&mut self, hub: &mut Hub, monitors: &[MonitorInfo]) -> MonitorChange {
         let mut added = Vec::new();
         let mut removed = Vec::new();
@@ -183,13 +173,13 @@ impl MonitorRegistry {
         for monitor in monitors {
             let already_tracked = self.monitors.values().any(|m| m.handle == monitor.handle);
             if !already_tracked {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.dimension, monitor.scale);
-                self.insert(monitor.handle, id, monitor.dimension, monitor.scale);
+                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, monitor.scale);
+                self.insert(monitor.handle, id, monitor.work_area, monitor.scale);
                 added.push(id);
                 tracing::info!(
                     name = %monitor.name,
                     handle = ?monitor.handle,
-                    dimension = ?monitor.dimension,
+                    work_area = ?monitor.work_area,
                     "Monitor added"
                 );
             }
@@ -222,22 +212,22 @@ impl MonitorRegistry {
         for monitor in monitors {
             if let Some(id) = self.id_for_handle(monitor.handle)
                 && let Some(ms) = self.monitors.get(&id)
-                && (ms.dimension != monitor.dimension || ms.scale != monitor.scale)
+                && (ms.work_area != monitor.work_area || ms.scale != monitor.scale)
             {
-                let old_dim = Some(ms.dimension);
+                let old_work_area = Some(ms.work_area);
                 let old_scale = Some(ms.scale);
                 tracing::info!(
                     name = %monitor.name,
-                    ?old_dim,
-                    new_dim = ?monitor.dimension,
+                    ?old_work_area,
+                    new_work_area = ?monitor.work_area,
                     ?old_scale,
                     new_scale = ?monitor.scale,
-                    "Monitor dimension changed"
+                    "Monitor work area changed"
                 );
                 let ms = self.monitors.get_mut(&id).expect("just checked");
-                ms.dimension = monitor.dimension;
+                ms.work_area = monitor.work_area;
                 ms.scale = monitor.scale;
-                hub.update_monitor(id, monitor.dimension, monitor.scale);
+                hub.update_monitor(id, monitor.work_area, monitor.scale);
             }
         }
 
@@ -258,17 +248,15 @@ impl MonitorRegistry {
             ms.scale = scale;
             prev
         });
-        let dim = self.monitors[&id].dimension;
+        let dim = self.monitors[&id].work_area;
         hub.update_monitor(id, dim, scale);
         tracing::info!(%id, dpi, scale, ?previous, "Monitor scale updated via DPI change");
     }
 }
 
-/// Windows baseline DPI (100% scaling). All scale factors are relative to this.
+/// Windows baseline DPI (100% scaling).
 const BASE_DPI: f32 = 96.0;
 
-/// Returns the scale factor for a monitor, e.g. 1.5 for 144 DPI (150%).
-/// Falls back to 1.0 with a warning on API failure.
 fn scale_for_monitor(hmonitor: HMONITOR) -> f32 {
     let mut dpi_x: u32 = 0;
     let mut dpi_y: u32 = 0;
@@ -322,7 +310,7 @@ fn get_all_monitors() -> anyhow::Result<Vec<MonitorInfo>> {
             monitors.push(MonitorInfo {
                 handle: hmonitor.0 as isize,
                 name,
-                dimension: handle::rect_to_dimension(rc),
+                work_area: handle::rect_to_pixel_rect(rc),
                 bounds: handle::rect_to_dimension(rc_monitor),
                 is_primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
                 scale,

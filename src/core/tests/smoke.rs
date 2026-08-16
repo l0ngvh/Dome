@@ -4,13 +4,16 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim, setup_hub,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, setup_hub,
     setup_logger_with_level, titled, validate_hub,
 };
 use crate::action::MonitorTarget;
 use crate::config::{SizeConstraint, SplitMode, Strategy, TreeLayoutNode, WindowMatcher};
 use crate::core::hub::{GlobalLayoutConfig, Hub};
-use crate::core::node::{Dimension, Length, MonitorId, WindowId, WindowRestrictions};
+use crate::core::node::{
+    Length, LimitObservation, LimitUpdate, MonitorId, PixelRect, Pixels, WindowId,
+    WindowRestrictions,
+};
 use crate::core::strategy::TilingAction;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -46,9 +49,8 @@ impl SmokeStrategy {
         }
     }
 
-    /// Build a hub from this strategy. Returns the hub, the list of preferred
-    /// titles (empty for non-preferred-tree strategies), and the tree ops used
-    /// (empty for non-preferred-tree strategies; needed by the reducer).
+    /// The returned preferred titles and tree ops are empty for
+    /// non-preferred-tree strategies. The reducer needs the tree ops.
     fn build_hub(
         self,
         rng: &mut ChaCha8Rng,
@@ -77,8 +79,7 @@ impl SmokeStrategy {
         }
     }
 
-    /// Return a plain `fn() -> Hub` for this strategy. Only valid for
-    /// non-preferred-tree strategies (used by the reducer's `ddmin` loop).
+    /// Only valid for non-preferred-tree strategies.
     fn make_simple_hub(self) -> fn() -> Hub {
         match self {
             SmokeStrategy::PartitionTree => setup_hub,
@@ -274,7 +275,7 @@ enum RecordedOp {
     AddMonitor {
         producer_id: usize,
         name: String,
-        dim: Dimension,
+        rect: PixelRect,
         scale: f32,
     },
     DeleteWindow {
@@ -296,10 +297,10 @@ enum RecordedOp {
     },
     SetWindowConstraint {
         window: RecordedWindow,
-        min_w: Option<f32>,
-        min_h: Option<f32>,
-        max_w: Option<f32>,
-        max_h: Option<f32>,
+        min_w: LimitUpdate,
+        min_h: LimitUpdate,
+        max_w: LimitUpdate,
+        max_h: LimitUpdate,
     },
     SetWindowTitle {
         window: RecordedWindow,
@@ -591,18 +592,13 @@ fn build_op(
             })
         }
         OpKind::AddMonitor => {
-            let x = monitors.len() as f32 * 150.0;
+            let x = monitors.len() as i32 * 150;
             let name = format!("monitor-{}", monitors.len());
-            let dim = Dimension::new(
-                Length::new(x),
-                Length::new(0.0),
-                Length::new(150.0),
-                Length::new(30.0),
-            );
+            let rect = PixelRect::new(x, 0, 150, 30);
             Some(RecordedOp::AddMonitor {
                 producer_id: next_op_index,
                 name,
-                dim,
+                rect,
                 scale: 1.0,
             })
         }
@@ -649,24 +645,24 @@ fn build_op(
             }
             let idx = rng.random_range(0..windows.len());
             let min_w = match rng.random_range(0..3) {
-                0 => None,
-                1 => Some(0.0),
-                _ => Some(rng.random_range(1.0f32..50.0)),
+                0 => LimitUpdate::Unchanged,
+                1 => LimitUpdate::Cleared,
+                _ => LimitUpdate::Set(Length::new(rng.random_range(1.0f32..50.0))),
             };
             let min_h = match rng.random_range(0..3) {
-                0 => None,
-                1 => Some(0.0),
-                _ => Some(rng.random_range(1.0f32..10.0)),
+                0 => LimitUpdate::Unchanged,
+                1 => LimitUpdate::Cleared,
+                _ => LimitUpdate::Set(Length::new(rng.random_range(1.0f32..10.0))),
             };
             let max_w = match rng.random_range(0..3) {
-                0 => None,
-                1 => Some(0.0),
-                _ => Some(rng.random_range(1.0f32..100.0)),
+                0 => LimitUpdate::Unchanged,
+                1 => LimitUpdate::Cleared,
+                _ => LimitUpdate::Set(Length::new(rng.random_range(1.0f32..100.0))),
             };
             let max_h = match rng.random_range(0..3) {
-                0 => None,
-                1 => Some(0.0),
-                _ => Some(rng.random_range(1.0f32..20.0)),
+                0 => LimitUpdate::Unchanged,
+                1 => LimitUpdate::Cleared,
+                _ => LimitUpdate::Set(Length::new(rng.random_range(1.0f32..20.0))),
             };
             Some(RecordedOp::SetWindowConstraint {
                 window: RecordedWindow(window_origin[idx]),
@@ -718,8 +714,8 @@ fn build_op(
                         !layout.partition_tree.automatic_tiling;
                 }
                 1 => {
-                    let h = rng.random_range(10.0f32..50.0);
-                    layout.partition_tree.tab_bar_height = Length::new(h);
+                    let h = rng.random_range(10i32..50);
+                    layout.partition_tree.tab_bar_height = Pixels::new(h);
                 }
                 2 => {
                     layout.master.master_ratio = rng.random_range(0.2f32..0.8);
@@ -728,8 +724,8 @@ fn build_op(
                     layout.master.master_count = rng.random_range(1..=4);
                 }
                 _ => {
-                    let v = rng.random_range(10.0f32..200.0);
-                    layout.size_constraints.minimum_width = SizeConstraint::Pixels(Length::new(v));
+                    let v = rng.random_range(10..200);
+                    layout.size_constraints.minimum_width = SizeConstraint::Pixels(Pixels::new(v));
                 }
             }
             Some(RecordedOp::ConfigReload { layout })
@@ -772,7 +768,7 @@ fn apply_op(
             let id = hub
                 .insert_window(
                     titled(window_title),
-                    default_dim(),
+                    default_rect(),
                     WindowRestrictions::None,
                 )
                 .expect("test ignore list is empty");
@@ -785,7 +781,7 @@ fn apply_op(
             restrictions,
         } => {
             let id = hub
-                .insert_window(titled("w3"), default_dim(), *restrictions)
+                .insert_window(titled("w3"), default_rect(), *restrictions)
                 .expect("test ignore list is empty");
             windows.push(id);
             window_origin.push(*producer_id);
@@ -794,10 +790,10 @@ fn apply_op(
         RecordedOp::AddMonitor {
             producer_id,
             name,
-            dim,
+            rect,
             scale,
         } => {
-            let id = hub.add_monitor(name.clone(), *dim, *scale);
+            let id = hub.add_monitor(name.clone(), *rect, *scale);
             monitors.push(id);
             monitor_origin.push(*producer_id);
         }
@@ -860,7 +856,15 @@ fn apply_op(
                 .iter()
                 .position(|&o| o == window.0)
                 .expect("apply_op: window producer_id not found");
-            hub.set_window_constraint(windows[pos], *min_w, *min_h, *max_w, *max_h);
+            hub.set_window_constraint(
+                windows[pos],
+                LimitObservation {
+                    min_width: *min_w,
+                    min_height: *min_h,
+                    max_width: *max_w,
+                    max_height: *max_h,
+                },
+            );
         }
         RecordedOp::SetWindowTitle { window, title } => {
             let pos = window_origin
@@ -989,8 +993,6 @@ fn capture_panic<F: FnOnce()>(f: F) -> Option<FailureSignature> {
             .unwrap_or_default();
         let line = info.location().map(|loc| loc.line()).unwrap_or(0);
 
-        // Payload is typically &str or String. unwrap_or_default is acceptable
-        // here: an empty string is a meaningful "no payload" representation.
         let raw_payload = info
             .payload()
             .downcast_ref::<&str>()
@@ -1137,7 +1139,7 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 let id = hub
                     .insert_window(
                         titled(window_title),
-                        default_dim(),
+                        default_rect(),
                         WindowRestrictions::None,
                     )
                     .expect("test ignore list is empty");
@@ -1148,17 +1150,17 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 restrictions,
             } => {
                 let id = hub
-                    .insert_window(titled("w3"), default_dim(), *restrictions)
+                    .insert_window(titled("w3"), default_rect(), *restrictions)
                     .expect("test ignore list is empty");
                 live_window[*producer_id] = Some(id);
             }
             RecordedOp::AddMonitor {
                 producer_id,
                 name,
-                dim,
+                rect,
                 scale,
             } => {
-                let id = hub.add_monitor(name.clone(), *dim, *scale);
+                let id = hub.add_monitor(name.clone(), *rect, *scale);
                 live_monitor[*producer_id] = Some(id);
             }
             RecordedOp::DeleteWindow { window } => {
@@ -1211,7 +1213,15 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 let Some(id) = live_window.get(window.0).copied().flatten() else {
                     continue;
                 };
-                hub.set_window_constraint(id, *min_w, *min_h, *max_w, *max_h);
+                hub.set_window_constraint(
+                    id,
+                    LimitObservation {
+                        min_width: *min_w,
+                        min_height: *min_h,
+                        max_width: *max_w,
+                        max_height: *max_h,
+                    },
+                );
             }
             RecordedOp::SetWindowTitle { window, title } => {
                 let Some(id) = live_window.get(window.0).copied().flatten() else {
@@ -1377,7 +1387,6 @@ fn generate_tree_ops(
             break;
         }
 
-        // Pick an anchor from among all existing tree nodes.
         let leaf_count = next_leaf_id;
         let total_nodes = leaf_count + container_ids.len();
         let pick = rng.random_range(0..total_nodes);

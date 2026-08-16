@@ -3,7 +3,7 @@ use insta::assert_snapshot;
 use crate::config::{MasterConfig, Strategy, WindowMatcher};
 use crate::core::WindowRestrictions;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim, snapshot,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, snapshot,
     titled, titled_process,
 };
 
@@ -17,11 +17,11 @@ fn delete_window() {
         )
         .build();
     let w0 = hub
-        .insert_window(titled("w25"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w25"), default_rect(), WindowRestrictions::None)
         .unwrap(); // W0 = master
-    hub.insert_window(titled("w26"), default_dim(), WindowRestrictions::None); // W1 = stack
+    hub.insert_window(titled("w26"), default_rect(), WindowRestrictions::None); // W1 = stack
     let w2 = hub
-        .insert_window(titled("w27"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w27"), default_rect(), WindowRestrictions::None)
         .unwrap(); // W2 = stack (focused)
 
     hub.delete_window(w2);
@@ -115,10 +115,10 @@ fn detach_refills_master_from_unmatched_secondary() {
         )
         .build();
     let w0 = hub
-        .insert_window(titled("w0"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
 
     hub.delete_window(w0);
     assert_snapshot!(snapshot(&hub), @r"
@@ -188,18 +188,18 @@ fn detach_keeps_matched_secondary_pinned() {
     let f0 = hub
         .insert_window(
             titled_process("Filler", "other.exe"),
-            default_dim(),
+            default_rect(),
             WindowRestrictions::None,
         )
         .unwrap();
     hub.insert_window(
         titled_process("Term", "terminal.exe"),
-        default_dim(),
+        default_rect(),
         WindowRestrictions::None,
     );
     hub.insert_window(
         titled_process("Editor", "editor.exe"),
-        default_dim(),
+        default_rect(),
         WindowRestrictions::None,
     );
 
@@ -253,9 +253,9 @@ fn detach_focused_child_refills_master() {
                 .build(),
         )
         .build();
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
 
     hub.focus_left();
     hub.move_focused_to_workspace("1");
@@ -313,13 +313,13 @@ fn detach_refills_when_master_count_above_one() {
                 .build(),
         )
         .build();
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     let w1 = hub
-        .insert_window(titled("w1"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("w1"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
 
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"

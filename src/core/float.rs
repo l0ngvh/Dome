@@ -2,7 +2,7 @@ use crate::core::{
     Hub, WindowId,
     hub::RestrictedAction,
     matcher::FloatFullscreenMatcherId,
-    node::{Dimension, DisplayMode, MonitorId, WorkspaceId},
+    node::{DisplayMode, MonitorId, PixelRect, WorkspaceId},
 };
 
 impl Hub {
@@ -25,20 +25,20 @@ impl Hub {
         &mut self,
         workspace_id: WorkspaceId,
         id: WindowId,
-        dim: Dimension,
+        border_box: PixelRect,
         occupy: Option<FloatFullscreenMatcherId>,
     ) {
         let window = self.access.windows.get_mut(id);
-        window.mode = DisplayMode::Float { dim, occupy };
+        window.mode = DisplayMode::Float { border_box, occupy };
         window.set_workspace(Some(workspace_id));
         let workspace = self.access.workspaces.get_mut(workspace_id);
         workspace.float_windows.push(id);
         self.focus_float(workspace_id, id);
     }
 
-    pub(super) fn detach_float_from_workspace(&mut self, id: WindowId) -> Dimension {
+    pub(super) fn detach_float_from_workspace(&mut self, id: WindowId) -> PixelRect {
         let window = self.access.windows.get(id);
-        let DisplayMode::Float { dim, .. } = window.mode else {
+        let DisplayMode::Float { border_box, .. } = window.mode else {
             panic!("detach_float_from_workspace: {id} is not Float");
         };
         let ws_id = window
@@ -60,27 +60,30 @@ impl Hub {
             workspace.is_float_focused = false;
         }
 
-        dim
+        border_box
     }
 
-    /// Write back the observed screen-absolute dimension for a floating window.
+    /// Write back the observed screen-absolute content box for a floating window,
+    /// storing it as a border box.
     /// Called by platform shells after a user drag/resize settles.
-    /// Clients must make sure that the dimension and the monitor_id are consistent. If the
+    /// Clients must make sure that the content box and the monitor_id are consistent. If the
     /// `monitor_id` is not what the operating system agreed with, the window will be assigned to a
     /// wrong workspace and toggling workspace on this monitor will hide/show this window, causing
     /// confusion. It's not the end of the world though.
     #[tracing::instrument(skip(self))]
-    pub(crate) fn update_float_dimension(
+    pub(crate) fn update_float_rect(
         &mut self,
         window_id: WindowId,
-        dim: Dimension,
+        content_box: PixelRect,
         monitor_id: MonitorId,
     ) {
+        let border = self.access.border(monitor_id);
+        let border_box = content_box.outset_by(border);
         let old_ws = {
             let window = self.access.windows.get_mut(window_id);
             assert!(
                 window.is_float(),
-                "update_float_dimension: {window_id} is not Float"
+                "update_float_rect: {window_id} is not Float"
             );
             let ws = window
                 .workspace()
@@ -90,12 +93,12 @@ impl Hub {
             let DisplayMode::Float { occupy, .. } = window.mode else {
                 unreachable!("is_float asserted above")
             };
-            window.mode = DisplayMode::Float { dim, occupy };
+            window.mode = DisplayMode::Float { border_box, occupy };
             ws
         };
 
         let old_monitor = self.access.workspaces.get(old_ws).monitor;
-        tracing::debug!("{old_monitor} {monitor_id} {dim:?}");
+        tracing::debug!(%old_monitor, %monitor_id, ?border_box, "Float rect updated");
         if monitor_id != old_monitor {
             let target_ws = self.access.monitors.get(monitor_id).active_workspace;
             if target_ws != old_ws {
@@ -134,11 +137,11 @@ impl Hub {
                 tracing::debug!(%window_id, "Window is now tiling");
             }
             DisplayMode::Tiling => {
-                let dim = self
+                let border_box = self
                     .strategies
                     .for_workspace_mut(current_ws)
                     .detach_window(&self.access, window_id);
-                self.attach_float_to_workspace(current_ws, window_id, dim, None);
+                self.attach_float_to_workspace(current_ws, window_id, border_box, None);
                 tracing::debug!(%window_id, "Window is now floating");
             }
         }

@@ -20,8 +20,10 @@ use crate::config::SizeConstraints;
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
-use crate::core::node::{Dimension, Length, Logical, WindowId, WindowMetadata, WorkspaceId};
-use crate::core::strategy::{TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport};
+use crate::core::node::{Logical, PixelRect, Pixels, WindowId, WindowMetadata, WorkspaceId};
+use crate::core::strategy::{
+    TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, translate,
+};
 
 /// i3-style manual tiling strategy. Manages a container tree where windows are
 /// leaves and containers define split direction (horizontal/vertical) or tabbed
@@ -33,7 +35,7 @@ pub(crate) struct PartitionTreeStrategy {
     workspaces: HashMap<WorkspaceId, WorkspaceTilingState>,
     window_slots: Allocator<PreferredWindowSlot>,
     container_slots: Allocator<PreferredContainerSlot>,
-    tab_bar_height: Length<Logical>,
+    tab_bar_height: Pixels<Logical>,
     automatic_tiling: bool,
     size_constraints: SizeConstraints,
 }
@@ -114,7 +116,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         tracing::debug!(%window_id, ?slot_id, "First preferred window, established as root");
     }
 
-    fn detach_window(&mut self, hub: &HubAccess, window_id: WindowId) -> Dimension {
+    fn detach_window(&mut self, hub: &HubAccess, window_id: WindowId) -> PixelRect {
         let child_dim = self.tiling_windows.get(&window_id).unwrap().dimension;
         let workspace_id = hub
             .windows
@@ -122,25 +124,17 @@ impl TilingStrategy for PartitionTreeStrategy {
             .workspace()
             .expect("detaching tiling window has a workspace");
         let (offset_x, offset_y) = self.workspaces.get(&workspace_id).unwrap().viewport_offset;
-        let screen = hub
+        let work_area = hub
             .monitors
             .get(hub.workspaces.get(workspace_id).monitor)
-            .dimension;
+            .work_area;
 
-        // Capture offset/screen before detach because detach triggers layout,
-        // which can change viewport_offset.
+        // Capture the offset before detach because detach triggers layout, which can
+        // change viewport_offset.
         self.detach_child(hub, Child::Window(window_id));
         self.tiling_windows.remove(&window_id);
 
-        // Convert layout-space coordinates to screen-absolute. Layout positions are
-        // relative to workspace origin (0,0) plus viewport offset; screen-absolute
-        // includes the monitor's origin.
-        Dimension::new(
-            child_dim.x - offset_x + screen.x,
-            child_dim.y - offset_y + screen.y,
-            child_dim.width,
-            child_dim.height,
-        )
+        translate(child_dim, offset_x, offset_y, work_area.x(), work_area.y())
     }
 
     fn handle_action(&mut self, hub: &mut HubAccess, action: TilingAction) {
@@ -280,7 +274,7 @@ impl TilingStrategy for PartitionTreeStrategy {
 
 impl PartitionTreeStrategy {
     pub(crate) fn new(
-        tab_bar_height: Length<Logical>,
+        tab_bar_height: Pixels<Logical>,
         automatic_tiling: bool,
         size_constraints: SizeConstraints,
     ) -> Self {

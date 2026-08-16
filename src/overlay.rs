@@ -1,10 +1,6 @@
-// Coordinate system: logical points throughout. Public entry points consume overlay-local types
-// defined in this file (Dimension<Logical>, BorderMetrics, OverlayMetrics,
-// LogicalTiledWindow, LogicalTiledContainer). On macOS, core `Dimension` is already
-// `Dimension<Logical>` so callers pass it directly. On Windows, callers produce
-// `Dimension<Logical>` via `.to_logical(scale)`. egui's pixels_per_point (set by each
-// platform shell to its monitor scale) rescales strokes, corner radii, and rects to
-// physical pixels at tessellation.
+// Logical points throughout. Each platform shell sets egui's pixels_per_point to its monitor
+// scale, so strokes, corner radii and rects are rescaled to physical pixels at tessellation
+// and must never be pre-multiplied here.
 
 use egui::{
     Align, Color32, CornerRadius, Id, LayerId, Layout, Order, Rect, RichText, Sense, Stroke,
@@ -19,8 +15,6 @@ use crate::theme::Theme;
 /// surface or into core, which has no view on pixels.
 const WINDOW_BORDER_RADIUS_LOGICAL: f32 = 12.0;
 
-/// Border-drawing parameters in logical points. The two values
-/// `paint_window_border` actually consumes.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct BorderMetrics {
     pub thickness: Length<Logical>,
@@ -28,9 +22,6 @@ pub(crate) struct BorderMetrics {
 }
 
 impl BorderMetrics {
-    /// Build metrics from just the border thickness; radius uses the
-    /// fixed logical value (`WINDOW_BORDER_RADIUS_LOGICAL`) that is
-    /// intentionally not user-configurable.
     pub(crate) fn from_thickness(thickness: Length<Logical>) -> Self {
         Self {
             thickness,
@@ -39,14 +30,6 @@ impl BorderMetrics {
     }
 }
 
-/// Full tiling-overlay metrics: the window border plus the tab-bar height.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct OverlayMetrics {
-    pub border: BorderMetrics,
-    pub tab_bar_height: Length<Logical>,
-}
-
-/// Overlay paint input for one tiled window, in logical points.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct LogicalTiledWindow {
     pub id: WindowId,
@@ -56,12 +39,14 @@ pub(crate) struct LogicalTiledWindow {
     pub spawn_indicator: Option<SpawnIndicator>,
 }
 
-/// Overlay paint input for one tiled container, in logical points. Owns its tab titles.
 #[derive(Clone, Debug)]
 pub(crate) struct LogicalTiledContainer {
     pub id: ContainerId,
     pub frame: Dimension<Logical>,
     pub visible_frame: Dimension<Logical>,
+    /// Reserved by core at the top of `frame`. Reading config here instead reopens a sub-unit
+    /// seam against the painted bar.
+    pub tab_bar_height: Length<Logical>,
     pub is_highlighted: bool,
     pub spawn_indicator: Option<SpawnIndicator>,
     pub is_tabbed: bool,
@@ -80,11 +65,10 @@ pub(crate) fn paint_tiling_overlay(
     windows: &[LogicalTiledWindow],
     containers: &[LogicalTiledContainer],
     theme: &Theme,
-    metrics: OverlayMetrics,
+    border: BorderMetrics,
 ) -> Vec<(ContainerId, usize)> {
     for wp in windows {
         let vf = wp.visible_frame;
-        // .logical() crosses the type boundary into egui's f32 coordinate space.
         let origin = vec2(
             vf.x.logical() - monitor.x.logical(),
             vf.y.logical() - monitor.y.logical(),
@@ -104,7 +88,7 @@ pub(crate) fn paint_tiling_overlay(
             wp.is_highlighted,
             wp.spawn_indicator,
             theme,
-            metrics.border,
+            border,
             origin,
         );
     }
@@ -120,10 +104,7 @@ pub(crate) fn paint_tiling_overlay(
             .fixed_pos(origin.to_pos2())
             .fade_in(false)
             .show(ctx, |ui| {
-                // Skip the sizing pass and request a discard so the container
-                // renders correctly on the first frame. Without this, egui's
-                // Area emits Shape::Noop during the sizing pass, producing a
-                // black/invisible first frame on Windows.
+                // Without the discard, egui's Area emits Shape::Noop during the sizing pass, producing a black/invisible first frame on Windows.
                 if ui.is_sizing_pass() {
                     ctx.request_discard("container first frame");
                     return;
@@ -132,14 +113,13 @@ pub(crate) fn paint_tiling_overlay(
                     origin.to_pos2(),
                     vec2(vf.width.logical(), vf.height.logical()),
                 ));
-                show_container(ui, cp, theme, metrics, origin);
+                show_container(ui, cp, theme, border, origin);
             });
     }
 
     Vec::new()
 }
 
-/// Draws 4 border edges for a window overlay.
 /// `origin` is the visible_frame's top-left in canvas coordinates.
 /// For per-window overlays (floats), pass `Vec2::ZERO`.
 /// For the tiling overlay, pass `vec2(vf.x - monitor.x, vf.y - monitor.y)`.
@@ -170,14 +150,7 @@ pub(crate) fn paint_window_border(
     );
 }
 
-/// Draws a tab bar in its own egui context for a single `ContainerId`. Used
-/// by per-tabbed-container windows the platform shell hosts. The per-monitor
-/// tiling overlay never paints tab bars itself, so this is the only path that
-/// reaches the tab-bar painter.
-/// `tab_bar_frame` is the tab bar's rect in window-local logical points. The
-/// caller's egui context's `pixels_per_point` rescales to physical pixels at
-/// tessellation. `is_highlighted` is supplied by the caller because this
-/// function does not own a `LogicalTiledContainer` to read it from.
+/// `tab_bar_frame` is the tab bar's rect in window-local logical points.
 #[expect(
     clippy::too_many_arguments,
     reason = "drawing params that must travel together"
@@ -189,7 +162,7 @@ pub(crate) fn paint_tab_bar(
     titles: &[String],
     active_index: usize,
     is_highlighted: bool,
-    metrics: OverlayMetrics,
+    border: BorderMetrics,
     theme: &Theme,
 ) -> Option<(ContainerId, usize)> {
     let origin = vec2(tab_bar_frame.x.logical(), tab_bar_frame.y.logical());
@@ -199,9 +172,7 @@ pub(crate) fn paint_tab_bar(
         .fixed_pos(origin.to_pos2())
         .fade_in(false)
         .show(ctx, |ui| {
-            // Mirrors the sizing-pass discard in `paint_tiling_overlay`'s
-            // container loop: without it, the first frame paints Shape::Noop
-            // and the tab bar shows up blank on Windows.
+            // Without the discard, the first frame paints Shape::Noop and the tab bar shows up blank on Windows.
             if ui.is_sizing_pass() {
                 ctx.request_discard("tab bar first frame");
                 return;
@@ -221,34 +192,31 @@ pub(crate) fn paint_tab_bar(
                 titles,
                 active_index,
                 is_highlighted,
-                metrics,
+                border,
                 theme,
             );
         });
     clicked.map(|tab_idx| (container_id, tab_idx))
 }
 
-/// Draws container borders for a tiled container. Tab bars (and their click
-/// hit-testing) live in per-`ContainerId` windows the platform shell hosts and
-/// do not paint from the per-monitor overlay.
 /// `origin` is the visible_frame's top-left in canvas coordinates (same as `paint_window_border`).
 fn show_container(
     ui: &mut egui::Ui,
     placement: &LogicalTiledContainer,
     theme: &Theme,
-    metrics: OverlayMetrics,
+    border: BorderMetrics,
     origin: egui::Vec2,
 ) {
     let vf = placement.visible_frame;
     let f = placement.frame;
     let ox = origin.x + f.x.logical() - vf.x.logical();
     let oy = origin.y + f.y.logical() - vf.y.logical();
-    let b = metrics.border.thickness.logical();
+    let b = border.thickness.logical();
     let w = f.width.logical();
     let h = f.height.logical();
     let is_tabbed = placement.is_tabbed && !placement.titles.is_empty();
-    let th = metrics.tab_bar_height.logical();
-    let r = effective_radius(metrics.border.radius.logical(), w, h);
+    let th = placement.tab_bar_height.logical();
+    let r = effective_radius(border.radius.logical(), w, h);
 
     if placement.is_highlighted {
         let colors = border_colors(true, placement.spawn_indicator, theme);
@@ -259,8 +227,7 @@ fn show_container(
             let body_h = h - th;
             let r_body = effective_radius(r, w, body_h);
 
-            // When r_body==0, clip rects collapse to zero dimensions (same bug as
-            // paint_border_edges). Draw filled rects for the body border instead.
+            // When r_body==0, clip rects collapse to zero dimensions and egui skips them entirely.
             if r_body == 0.0 {
                 let corners = corner_colors(colors, focused);
                 // Left/right edges inset by b at bottom to avoid overlap with corner squares
@@ -325,7 +292,6 @@ fn show_container(
                     cr,
                     (b, colors[2]),
                 );
-                // SW corner: top half = left edge, bottom half = bottom edge
                 paint_split_corner(
                     painter,
                     Rect::from_min_size(pos2(ox, oy + h - r_body), vec2(r_body, r_body)),
@@ -335,7 +301,6 @@ fn show_container(
                     colors[3],
                     colors[2],
                 );
-                // SE corner: top half = right edge, bottom half = bottom edge
                 paint_split_corner(
                     painter,
                     Rect::from_min_size(
@@ -364,10 +329,6 @@ fn show_container(
     }
 }
 
-/// Paints the tab-bar background, per-tab fills, separators, labels, and
-/// collects a click into the returned `Option<usize>`. Single source of truth
-/// for tab-bar visuals and hit-testing, called from `paint_tab_bar`'s
-/// per-`ContainerId` egui Area.
 #[expect(
     clippy::too_many_arguments,
     reason = "drawing params that must travel together"
@@ -379,14 +340,14 @@ fn paint_tab_bar_into_ui(
     titles: &[String],
     active_index: usize,
     is_highlighted: bool,
-    metrics: OverlayMetrics,
+    border: BorderMetrics,
     theme: &Theme,
 ) -> Option<usize> {
     let ox = tab_bar_rect.min.x;
     let oy = tab_bar_rect.min.y;
     let w = tab_bar_rect.width();
     let th = tab_bar_rect.height();
-    let b = metrics.border.thickness.logical();
+    let b = border.thickness.logical();
     let border_c = if is_highlighted {
         theme.focused_border
     } else {
@@ -398,14 +359,11 @@ fn paint_tab_bar_into_ui(
     let tab_cr = tab_bar_corner_radius(th);
     let tab_bar_cr = CornerRadius::same(cr_u8(tab_cr));
 
-    // Tab bar background
     ui.painter().rect_filled(tab_bar_rect, tab_bar_cr, bg);
 
-    // Tab bar border
     ui.painter()
         .rect_stroke(tab_bar_rect, tab_bar_cr, (b, border_c), StrokeKind::Inside);
 
-    // Tabs
     let tab_width = w / titles.len() as f32;
     let mut clicked = None;
     let focused_c = theme.focused_border;
@@ -477,14 +435,11 @@ fn stroke_clipped(
         .rect_stroke(full_rect, cr, stroke, StrokeKind::Inside);
 }
 
-/// Paints the inner stroke of `full_rect` twice, clipped to the top half and
-/// bottom half of `corner_rect`. Lets a rounded corner display two colours
-/// along its arc so a spawn-indicator edge tints only the half of the arc
-/// adjacent to the flagged edge rather than the entire 90-degree sweep.
+/// Lets a rounded corner display two colours along its arc so a
+/// spawn-indicator edge tints only the half of the arc adjacent to the flagged
+/// edge rather than the entire 90-degree sweep.
 /// When `top == bottom` the two strokes coincide and produce pixel-identical
-/// output to a single full-corner stroke. Kept for `r > 0` branches only;
-/// the `r == 0` square-corner paths continue to use `corner_colors` since
-/// there is no arc to split there.
+/// output to a single full-corner stroke.
 /// Horizontal (top/bottom) split chosen over diagonal because
 /// `egui::Painter::with_clip_rect` only accepts axis-aligned rects.
 fn paint_split_corner(
@@ -503,33 +458,26 @@ fn paint_split_corner(
     stroke_clipped(painter, bottom_half, full_rect, cr, (b, bottom));
 }
 
-/// Clamps radius to fit within the given dimensions.
 /// When r == w/2 or h/2, corner clips cover everything and edges have zero width, which is fine.
 fn effective_radius(r: f32, w: f32, h: f32) -> f32 {
     r.max(0.0).min(w / 2.0).min(h / 2.0)
 }
 
-/// Defensive clamp for converting f32 radius to u8 for CornerRadius fields.
 fn cr_u8(r: f32) -> u8 {
     r.clamp(0.0, 255.0) as u8
 }
 
-/// Tab-bar corner radius, sized to a quarter of the tab bar's thickness and
-/// clamped to `tab_bar_height / 2` so corners always fit. A quarter gives a
-/// visibly softer corner than the main window border (6px vs 12px at the
-/// default 24px tab-bar height) while scaling with the user-configured
-/// tab-bar thickness. Used for both the tab-bar outline and the active-tab
-/// highlight so they stay visually coherent.
+/// A quarter of the tab-bar thickness gives a visibly softer corner than
+/// `WINDOW_BORDER_RADIUS_LOGICAL` while still scaling with the
+/// user-configured bar thickness.
 fn tab_bar_corner_radius(tab_bar_height: f32) -> f32 {
     effective_radius(tab_bar_height * 0.25, tab_bar_height, tab_bar_height)
 }
 
-/// Returns the corner radius for the active-tab fill/highlight so its outer
-/// corners match the tab bar wherever the tab sits on a tab-bar outer
-/// corner. First tab rounds nw+sw, last tab rounds ne+se, a single tab
-/// rounds all four, middle tabs stay square. Assumes the tab bar has all
-/// four outer corners rounded with `tab_cr`; update in lockstep with the
-/// tab bar outline if that changes.
+/// Keeps the active tab's outer corners matching the tab bar wherever the tab
+/// sits on a tab-bar outer corner. Assumes the tab bar has all four outer
+/// corners rounded with `tab_cr`, so this needs updating in lockstep with the
+/// tab-bar outline.
 fn active_tab_corner_radius(index: usize, tab_count: usize, tab_cr: f32) -> CornerRadius {
     let r = cr_u8(tab_cr);
     let is_first = index == 0;
@@ -563,7 +511,7 @@ fn paint_border_edges(
     let r = effective_radius(r, w, h);
 
     // When r==0, clip rects for the 8-region approach collapse to zero dimensions
-    // and egui skips them entirely. Draw simple filled rects instead.
+    // and egui skips them entirely.
     if r == 0.0 {
         let corners = corner_colors(colors, focused);
         // Edges (inset by b at corners to avoid overlap with corner squares)
@@ -587,7 +535,6 @@ fn paint_border_edges(
             CornerRadius::ZERO,
             colors[3],
         );
-        // Corners: [nw, ne, sw, se]
         painter.rect_filled(
             Rect::from_min_size(pos2(ox, oy), vec2(b, b)),
             CornerRadius::ZERO,
@@ -643,7 +590,6 @@ fn paint_border_edges(
         (b, colors[3]),
     );
 
-    // NW corner: top half = top edge colour, bottom half = left edge colour
     paint_split_corner(
         painter,
         Rect::from_min_size(pos2(ox, oy), vec2(r, r)),
@@ -653,7 +599,6 @@ fn paint_border_edges(
         colors[0],
         colors[3],
     );
-    // NE corner: top half = top edge colour, bottom half = right edge colour
     paint_split_corner(
         painter,
         Rect::from_min_size(pos2(ox + w - r, oy), vec2(r, r)),
@@ -663,7 +608,6 @@ fn paint_border_edges(
         colors[0],
         colors[1],
     );
-    // SW corner: top half = left edge colour, bottom half = bottom edge colour
     paint_split_corner(
         painter,
         Rect::from_min_size(pos2(ox, oy + h - r), vec2(r, r)),
@@ -673,7 +617,6 @@ fn paint_border_edges(
         colors[3],
         colors[2],
     );
-    // SE corner: top half = right edge colour, bottom half = bottom edge colour
     paint_split_corner(
         painter,
         Rect::from_min_size(pos2(ox + w - r, oy + h - r), vec2(r, r)),
@@ -713,10 +656,10 @@ fn border_colors(
 fn corner_colors(edge_colors: [Color32; 4], focused: Color32) -> [Color32; 4] {
     let c = edge_colors; // [top, right, bottom, left]
     [
-        if c[0] != focused { c[0] } else { c[3] }, // NW: top first, then left
-        if c[0] != focused { c[0] } else { c[1] }, // NE: top first, then right
-        if c[2] != focused { c[2] } else { c[3] }, // SW: bottom first, then left
-        if c[2] != focused { c[2] } else { c[1] }, // SE: bottom first, then right
+        if c[0] != focused { c[0] } else { c[3] },
+        if c[0] != focused { c[0] } else { c[1] },
+        if c[2] != focused { c[2] } else { c[3] },
+        if c[2] != focused { c[2] } else { c[1] },
     ]
 }
 

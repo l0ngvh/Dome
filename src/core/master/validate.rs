@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use crate::core::{
     Length, WindowId,
     hub::HubAccess,
-    master::{MasterStrategy, effective_constraints},
-    strategy::ValidateStrategy,
+    master::MasterStrategy,
+    strategy::{VALIDATION_TOLERANCE, ValidateStrategy, window_constraints},
 };
 
 impl ValidateStrategy for MasterStrategy {
@@ -74,11 +74,12 @@ impl ValidateStrategy for MasterStrategy {
                 continue;
             }
 
-            let pane_height = hub
-                .monitors
-                .get(hub.workspaces.get(ws_id).monitor)
-                .dimension
-                .height;
+            let pane_height = Length::from_pixels(
+                hub.monitors
+                    .get(hub.workspaces.get(ws_id).monitor)
+                    .work_area
+                    .height(),
+            );
 
             for &wid in &state.master {
                 let dim = self.window_states[&wid].dimension;
@@ -92,19 +93,35 @@ impl ValidateStrategy for MasterStrategy {
                     "master-stack workspace {ws_id}: window {wid:?} has non-positive height {}",
                     dim.height
                 );
-                let c = effective_constraints(hub, &self.size_constraints, wid);
+                let c = window_constraints(hub, &self.size_constraints, wid);
                 assert!(
-                    dim.width >= c.min_width,
+                    dim.width >= c.min_width - VALIDATION_TOLERANCE,
                     "master-stack workspace {ws_id}: window {wid:?} width {} < effective min_width {}",
                     dim.width,
                     c.min_width
                 );
                 assert!(
-                    dim.height >= c.min_height,
+                    dim.height >= c.min_height - VALIDATION_TOLERANCE,
                     "master-stack workspace {ws_id}: window {wid:?} height {} < effective min_height {}",
                     dim.height,
                     c.min_height
                 );
+                if c.max_width > Length::ZERO {
+                    assert!(
+                        dim.width <= c.max_width + VALIDATION_TOLERANCE,
+                        "master-stack workspace {ws_id}: window {wid:?} width {} > effective max_width {}",
+                        dim.width,
+                        c.max_width
+                    );
+                }
+                if c.max_height > Length::ZERO {
+                    assert!(
+                        dim.height <= c.max_height + VALIDATION_TOLERANCE,
+                        "master-stack workspace {ws_id}: window {wid:?} height {} > effective max_height {}",
+                        dim.height,
+                        c.max_height
+                    );
+                }
             }
 
             for &wid in &state.secondary {
@@ -119,19 +136,35 @@ impl ValidateStrategy for MasterStrategy {
                     "master-stack workspace {ws_id}: window {wid:?} has non-positive height {}",
                     dim.height
                 );
-                let c = effective_constraints(hub, &self.size_constraints, wid);
+                let c = window_constraints(hub, &self.size_constraints, wid);
                 assert!(
-                    dim.width >= c.min_width,
+                    dim.width >= c.min_width - VALIDATION_TOLERANCE,
                     "master-stack workspace {ws_id}: window {wid:?} width {} < effective min_width {}",
                     dim.width,
                     c.min_width
                 );
                 assert!(
-                    dim.height >= c.min_height,
+                    dim.height >= c.min_height - VALIDATION_TOLERANCE,
                     "master-stack workspace {ws_id}: window {wid:?} height {} < effective min_height {}",
                     dim.height,
                     c.min_height
                 );
+                if c.max_width > Length::ZERO {
+                    assert!(
+                        dim.width <= c.max_width + VALIDATION_TOLERANCE,
+                        "master-stack workspace {ws_id}: window {wid:?} width {} > effective max_width {}",
+                        dim.width,
+                        c.max_width
+                    );
+                }
+                if c.max_height > Length::ZERO {
+                    assert!(
+                        dim.height <= c.max_height + VALIDATION_TOLERANCE,
+                        "master-stack workspace {ws_id}: window {wid:?} height {} > effective max_height {}",
+                        dim.height,
+                        c.max_height
+                    );
+                }
             }
 
             let master_ids: Vec<WindowId> = state.master.clone();

@@ -3,10 +3,11 @@ use std::sync::Arc;
 
 use objc2_core_graphics::CGWindowID;
 
+use crate::core::{Dimension, PixelRect};
 use crate::platform::macos::accessibility::{AXApp, ExternalWindow};
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::registry::ManagedWindow;
-use crate::platform::macos::dome::window::{RoundedDimension, WindowState};
+use crate::platform::macos::dome::window::WindowState;
 use crate::platform::macos::dome::{MacOSMetadata, NewWindow, PendingAdd};
 use crate::platform::macos::running_application::RunningApp;
 
@@ -14,18 +15,12 @@ use crate::platform::macos::running_application::RunningApp;
 /// (includes minimized, excludes windows on other Spaces).
 pub(in crate::platform::macos) struct ExistingWindow {
     pub(in crate::platform::macos) cg_id: CGWindowID,
-    pub(in crate::platform::macos) x: i32,
-    pub(in crate::platform::macos) y: i32,
-    pub(in crate::platform::macos) w: i32,
-    pub(in crate::platform::macos) h: i32,
+    pub(in crate::platform::macos) rect: PixelRect,
 }
 
 pub(in crate::platform::macos) struct ExitNativeFullscreen {
     pub(in crate::platform::macos) cg_id: CGWindowID,
-    pub(in crate::platform::macos) x: i32,
-    pub(in crate::platform::macos) y: i32,
-    pub(in crate::platform::macos) w: i32,
-    pub(in crate::platform::macos) h: i32,
+    pub(in crate::platform::macos) rect: PixelRect,
 }
 
 pub(in crate::platform::macos) struct ReconcileResult {
@@ -129,10 +124,7 @@ pub(in crate::platform::macos) fn compute_reconciliation(
             };
             to_exit_native_fullscreen.push(ExitNativeFullscreen {
                 cg_id,
-                x: x.value() as i32,
-                y: y.value() as i32,
-                w: w.value() as i32,
-                h: h.value() as i32,
+                rect: PixelRect::from_dimension(Dimension::new(x, y, w, h)),
             });
         }
     }
@@ -177,12 +169,7 @@ pub(in crate::platform::macos) fn compute_reconciliation(
         };
         to_add.push(PendingAdd::Positioned {
             new,
-            dim: RoundedDimension {
-                x: x.value() as i32,
-                y: y.value() as i32,
-                width: w.value() as i32,
-                height: h.value() as i32,
-            },
+            rect: PixelRect::from_dimension(Dimension::new(x, y, w, h)),
         });
     }
 
@@ -238,10 +225,7 @@ fn read_existing_window(
     let (w, h) = window.ext.get_size(marker).ok()?;
     Some(ExistingWindow {
         cg_id,
-        x: x.value() as i32,
-        y: y.value() as i32,
-        w: w.value() as i32,
-        h: h.value() as i32,
+        rect: PixelRect::from_dimension(Dimension::new(x, y, w, h)),
     })
 }
 

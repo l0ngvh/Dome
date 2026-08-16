@@ -1,8 +1,8 @@
 use insta::assert_snapshot;
 
-use crate::core::node::{Length, Logical, WindowRestrictions};
+use crate::core::node::{Pixels, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder, default_dim, snapshot, titled,
+    LayoutConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder, default_rect, snapshot, titled,
 };
 
 #[test]
@@ -12,22 +12,22 @@ fn sync_config_updates_tab_bar_height() {
             LayoutConfigBuilder::new()
                 .with_partition_tree_config(
                     PartitionTreeConfigBuilder::new()
-                        .with_tab_bar_height(Length::<Logical>::new(5.0))
+                        .with_tab_bar_height(Pixels::new(5))
                         .with_automatic_tiling(true)
                         .build(),
                 )
                 .build(),
         )
         .build();
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
 
     hub.sync_configuration(
         LayoutConfigBuilder::new()
             .with_partition_tree_config(
                 PartitionTreeConfigBuilder::new()
-                    .with_tab_bar_height(Length::<Logical>::new(10.0))
+                    .with_tab_bar_height(Pixels::new(10))
                     .with_automatic_tiling(true)
                     .build(),
             )
@@ -81,27 +81,27 @@ fn sync_config_recalculates_all_workspaces() {
             LayoutConfigBuilder::new()
                 .with_partition_tree_config(
                     PartitionTreeConfigBuilder::new()
-                        .with_tab_bar_height(Length::<Logical>::new(10.0))
+                        .with_tab_bar_height(Pixels::new(10))
                         .with_automatic_tiling(true)
                         .build(),
                 )
                 .build(),
         )
         .build();
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
 
     hub.focus_workspace("1");
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
 
     hub.sync_configuration(
         LayoutConfigBuilder::new()
             .with_partition_tree_config(
                 PartitionTreeConfigBuilder::new()
-                    .with_tab_bar_height(Length::<Logical>::new(5.0))
+                    .with_tab_bar_height(Pixels::new(5))
                     .with_automatic_tiling(true)
                     .build(),
             )

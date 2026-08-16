@@ -28,9 +28,7 @@ use crate::core::{
     ContainerId, Dimension, FloatWindowPlacement, Length, Logical, TilingWindowPlacement,
 };
 use crate::font::FontConfig;
-use crate::overlay::{
-    self, BorderMetrics, LogicalTiledContainer, LogicalTiledWindow, OverlayMetrics,
-};
+use crate::overlay::{self, BorderMetrics, LogicalTiledContainer, LogicalTiledWindow};
 use crate::theme::Flavor;
 
 define_class!(
@@ -72,6 +70,7 @@ pub(super) struct FloatOverlay {
     is_focused: Cell<bool>,
     placement: Option<FloatWindowPlacement>,
     scale: f64,
+    border_thickness: Length<Logical>,
     config: Config,
 }
 
@@ -152,6 +151,7 @@ impl FloatOverlay {
             is_focused: Cell::new(false),
             placement: None,
             scale: 1.0,
+            border_thickness: Length::new(0.0),
             config,
         }
     }
@@ -161,10 +161,12 @@ impl FloatOverlay {
         placement: &FloatWindowPlacement,
         cocoa_frame: NSRect,
         scale: f64,
+        border_thickness: Length<Logical>,
         is_focused: bool,
     ) {
         self.placement = Some(*placement);
         self.scale = scale;
+        self.border_thickness = border_thickness;
         self.is_focused.set(is_focused);
 
         self.window.setFrame_display(cocoa_frame, true);
@@ -181,7 +183,7 @@ impl FloatOverlay {
         }
 
         let config = &self.config;
-        let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
+        let border = BorderMetrics::from_thickness(self.border_thickness);
         let theme = config.theme();
         self.renderer.render(scale as f32, Vec::new(), |ui| {
             // layer_painter bypasses egui's Area sizing pass, avoiding
@@ -190,17 +192,18 @@ impl FloatOverlay {
                 egui::Order::Middle,
                 egui::Id::new("border"),
             ));
+            let visible_border_box = placement.visible_border_box.to_dimension();
             let clip = egui::Rect::from_min_size(
                 egui::pos2(0.0, 0.0),
                 egui::vec2(
-                    placement.visible_frame.width.logical(),
-                    placement.visible_frame.height.logical(),
+                    visible_border_box.width.logical(),
+                    visible_border_box.height.logical(),
                 ),
             );
             overlay::paint_window_border(
                 &painter.with_clip_rect(clip),
-                placement.frame,
-                placement.visible_frame,
+                placement.border_box.to_dimension(),
+                visible_border_box,
                 placement.is_highlighted,
                 None,
                 &theme,
@@ -224,24 +227,27 @@ impl FloatOverlay {
         self.config = config.clone();
         if let Some(placement) = self.placement {
             let config = &self.config;
-            let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
+            // The stored thickness is one frame stale after a config change. The
+            // following flush_layout carries the new one.
+            let border = BorderMetrics::from_thickness(self.border_thickness);
             let theme = config.theme();
             self.renderer.render(self.scale as f32, Vec::new(), |ui| {
                 let painter = ui.ctx().layer_painter(egui::LayerId::new(
                     egui::Order::Middle,
                     egui::Id::new("border"),
                 ));
+                let visible_border_box = placement.visible_border_box.to_dimension();
                 let clip = egui::Rect::from_min_size(
                     egui::pos2(0.0, 0.0),
                     egui::vec2(
-                        placement.visible_frame.width.logical(),
-                        placement.visible_frame.height.logical(),
+                        visible_border_box.width.logical(),
+                        visible_border_box.height.logical(),
                     ),
                 );
                 overlay::paint_window_border(
                     &painter.with_clip_rect(clip),
-                    placement.frame,
-                    placement.visible_frame,
+                    placement.border_box.to_dimension(),
+                    visible_border_box,
                     placement.is_highlighted,
                     None,
                     &theme,
@@ -286,7 +292,6 @@ impl TilingOverlay {
         mtm: MainThreadMarker,
         wgpu_factory: Rc<WgpuFactory>,
         config: Config,
-        tab_bar_height: Length<Logical>,
         cocoa_frame: NSRect,
         scale: f64,
     ) -> Self {
@@ -308,15 +313,7 @@ impl TilingOverlay {
         // which is hosted as a sibling NSWindow at the same level.
         window.setIgnoresMouseEvents(true);
 
-        let view = TilingOverlayView::new(
-            mtm,
-            wgpu_factory,
-            config,
-            tab_bar_height,
-            scale,
-            flavor,
-            &font,
-        );
+        let view = TilingOverlayView::new(mtm, wgpu_factory, config, scale, flavor, &font);
         window.setContentView(Some(&view));
         window.setFrame_display(cocoa_frame, false);
         window.orderFront(None);
@@ -336,8 +333,8 @@ impl TilingOverlay {
         self.view.update(monitor, windows, containers, scale);
     }
 
-    pub(super) fn set_tab_bar_height(&self, h: Length<Logical>) {
-        self.view.ivars().tab_bar_height.set(h);
+    pub(super) fn set_border_thickness(&self, t: Length<Logical>) {
+        self.view.ivars().border_thickness.set(t);
     }
 
     pub(super) fn clear(&self) {
@@ -434,7 +431,7 @@ pub(super) struct TilingOverlayViewIvars {
     windows: RefCell<Vec<TilingWindowPlacement>>,
     containers: RefCell<Vec<ContainerShow>>,
     config: RefCell<Config>,
-    tab_bar_height: Cell<Length<Logical>>,
+    border_thickness: Cell<Length<Logical>>,
     scale: Cell<f64>,
 }
 
@@ -459,7 +456,6 @@ impl TilingOverlayView {
         mtm: MainThreadMarker,
         wgpu_factory: Rc<WgpuFactory>,
         config: Config,
-        tab_bar_height: Length<Logical>,
         scale: f64,
         flavor: Flavor,
         font: &FontConfig,
@@ -473,7 +469,7 @@ impl TilingOverlayView {
             windows: RefCell::new(Vec::new()),
             containers: RefCell::new(Vec::new()),
             config: RefCell::new(config),
-            tab_bar_height: Cell::new(tab_bar_height),
+            border_thickness: Cell::new(Length::new(0.0)),
             scale: Cell::new(scale),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
@@ -541,8 +537,8 @@ impl TilingOverlayView {
             .iter()
             .map(|wp| LogicalTiledWindow {
                 id: wp.id,
-                frame: wp.frame,
-                visible_frame: wp.visible_frame,
+                frame: wp.border_box.to_dimension(),
+                visible_frame: wp.visible_border_box.to_dimension(),
                 is_highlighted: wp.is_highlighted,
                 spawn_indicator: wp.spawn_indicator,
             })
@@ -551,24 +547,18 @@ impl TilingOverlayView {
             .iter()
             .map(|cs| LogicalTiledContainer {
                 id: cs.placement.id,
-                frame: cs.placement.frame,
-                visible_frame: cs.placement.visible_frame,
+                frame: cs.placement.border_box.to_dimension(),
+                visible_frame: cs.placement.visible_border_box.to_dimension(),
+                tab_bar_height: Length::from_pixels(cs.placement.tab_bar_band.height()),
                 is_highlighted: cs.placement.is_highlighted,
                 spawn_indicator: cs.placement.spawn_indicator,
                 is_tabbed: cs.placement.is_tabbed,
                 titles: cs.placement.titles.clone(),
             })
             .collect();
-        let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
-        let metrics = OverlayMetrics {
-            border,
-            tab_bar_height: ivars.tab_bar_height.get(),
-        };
+        let border = BorderMetrics::from_thickness(ivars.border_thickness.get());
         let theme = config.theme();
 
-        // Tab-bar painting and click collection live in per-container
-        // TabBarOverlay windows. The per-monitor overlay paints only window
-        // borders and container highlights.
         ivars
             .renderer
             .borrow_mut()
@@ -579,7 +569,7 @@ impl TilingOverlayView {
                     &windows_logical,
                     &containers_logical,
                     &theme,
-                    metrics,
+                    border,
                 )
             });
     }
@@ -589,7 +579,7 @@ impl TilingOverlayView {
 /// the container is tabbed and on the active workspace, reconciled per-frame
 /// in the UI thread's frame callback. Owns its own borderless window and
 /// receives mouse events directly so a tab click never has to traverse the
-/// per-monitor `TilingOverlay` (which is now click-through).
+/// per-monitor `TilingOverlay` (which is click-through).
 pub(super) struct TabBarOverlay {
     window: Retained<NSWindow>,
     view: Retained<TabBarOverlayView>,
@@ -632,8 +622,6 @@ impl TabBarOverlay {
                 | NSWindowCollectionBehavior::IgnoresCycle,
         );
         unsafe { window.setReleasedWhenClosed(false) };
-        // Inverse of the tiling overlay's setting: this window exists to
-        // receive tab clicks.
         window.setIgnoresMouseEvents(false);
 
         let view = TabBarOverlayView::new(
@@ -653,18 +641,16 @@ impl TabBarOverlay {
         Self { window, view }
     }
 
-    pub(super) fn render(
-        &self,
-        cocoa_frame: NSRect,
-        scale: f64,
-        bar: Dimension<Logical>,
-        titles: Vec<String>,
-        active_tab_index: usize,
-        is_highlighted: bool,
-    ) {
-        self.window.setFrame_display(cocoa_frame, false);
-        self.view
-            .update(scale, bar, titles, active_tab_index, is_highlighted);
+    pub(super) fn render(&self, cs: &ContainerShow, scale: f64, border_thickness: Length<Logical>) {
+        self.window.setFrame_display(cs.tab_bar_cocoa_frame, false);
+        self.view.update(
+            scale,
+            cs.tab_bar_dim,
+            border_thickness,
+            cs.placement.titles.clone(),
+            cs.placement.active_tab_index,
+            cs.placement.is_highlighted,
+        );
         self.window.setIsVisible(true);
     }
 
@@ -685,6 +671,7 @@ pub(super) struct TabBarOverlayViewIvars {
     events: RefCell<Vec<egui::Event>>,
     renderer: RefCell<Renderer>,
     bar: Cell<Dimension<Logical>>,
+    border_thickness: Cell<Length<Logical>>,
     titles: RefCell<Vec<String>>,
     active_tab_index: Cell<usize>,
     is_highlighted: Cell<bool>,
@@ -764,6 +751,7 @@ impl TabBarOverlayView {
             events: RefCell::new(Vec::new()),
             renderer: RefCell::new(renderer),
             bar: Cell::new(Dimension::default()),
+            border_thickness: Cell::new(Length::new(0.0)),
             titles: RefCell::new(Vec::new()),
             active_tab_index: Cell::new(0),
             is_highlighted: Cell::new(false),
@@ -784,12 +772,14 @@ impl TabBarOverlayView {
         &self,
         scale: f64,
         bar: Dimension<Logical>,
+        border_thickness: Length<Logical>,
         titles: Vec<String>,
         active_tab_index: usize,
         is_highlighted: bool,
     ) {
         let ivars = self.ivars();
         ivars.bar.set(bar);
+        ivars.border_thickness.set(border_thickness);
         ivars.scale.set(scale);
         *ivars.titles.borrow_mut() = titles;
         ivars.active_tab_index.set(active_tab_index);
@@ -831,11 +821,7 @@ impl TabBarOverlayView {
         let scale = ivars.scale.get();
         let container_id = ivars.container_id;
 
-        let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
-        let metrics = OverlayMetrics {
-            border,
-            tab_bar_height: bar.height,
-        };
+        let border = BorderMetrics::from_thickness(ivars.border_thickness.get());
         let theme = config.theme();
 
         // The tab-bar window's canvas is exactly the bar, so paint at the
@@ -855,7 +841,7 @@ impl TabBarOverlayView {
                     &titles,
                     active_tab_index,
                     is_highlighted,
-                    metrics,
+                    border,
                     &theme,
                 )
             });

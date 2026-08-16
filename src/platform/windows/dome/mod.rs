@@ -21,9 +21,9 @@ use crate::action::{
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
-    ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, Length,
-    Logical, MonitorId, MonitorLayout, Physical, TilingAction, TilingWindowPlacement, WindowId,
-    WindowRestrictions, WorkspaceInfo,
+    ContainerId, ContainerPlacement, Direction, FloatWindowPlacement, Hub, LimitObservation,
+    MonitorId, MonitorLayout, Physical, PixelRect, Pixels, TilingAction, TilingWindowPlacement,
+    WindowId, WindowRestrictions, WorkspaceInfo,
 };
 
 use self::app_window::AppWindowApi;
@@ -75,7 +75,8 @@ pub(super) enum HubEvent {
 
 struct MonitorPositionData {
     monitor_id: MonitorId,
-    dimension: Dimension,
+    work_area: PixelRect,
+    border_thickness: Pixels<Physical>,
     tiling_windows: Vec<TilingWindowPlacement>,
     float_windows: Vec<FloatWindowPlacement>,
     containers: Vec<(ContainerPlacement, Vec<String>)>,
@@ -85,21 +86,20 @@ pub(super) trait CreateOverlay {
     fn create_tiling_overlay(
         &self,
         config: Config,
-        tab_bar_height: Length<Logical>,
-        monitor: Dimension,
+        monitor: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>>;
     fn create_float_overlay(
         &self,
         config: Config,
         scale: f32,
-        visible_frame: Dimension,
+        visible_border_box: PixelRect,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>>;
     fn create_tab_bar(
         &self,
         config: Config,
         container_id: ContainerId,
-        rect: Dimension,
+        rect: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<dyn TabBarOverlayApi>>;
 }
@@ -151,7 +151,7 @@ impl Dome {
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(
-            primary.dimension,
+            primary.work_area,
             primary.scale,
             GlobalLayoutConfig::from(&config),
             workspace_overrides.clone(),
@@ -162,32 +162,28 @@ impl Dome {
         monitors_reg.insert(
             primary.handle,
             primary_monitor_id,
-            primary.dimension,
+            primary.work_area,
             primary.scale,
         );
-        if let Ok(overlay) = overlay_factory.create_tiling_overlay(
-            config.clone(),
-            config.partition_tree.tab_bar_height,
-            primary.dimension,
-            primary.scale,
-        ) {
+        if let Ok(overlay) =
+            overlay_factory.create_tiling_overlay(config.clone(), primary.work_area, primary.scale)
+        {
             tiling_overlays.insert(primary_monitor_id, overlay);
         }
         tracing::info!(
             name = %primary.name,
             handle = ?primary.handle,
-            dimension = ?primary.dimension,
+            work_area = ?primary.work_area,
             "Primary monitor"
         );
 
         for monitor in &monitors {
             if monitor.handle != primary.handle {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.dimension, monitor.scale);
-                monitors_reg.insert(monitor.handle, id, monitor.dimension, monitor.scale);
+                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, monitor.scale);
+                monitors_reg.insert(monitor.handle, id, monitor.work_area, monitor.scale);
                 if let Ok(overlay) = overlay_factory.create_tiling_overlay(
                     config.clone(),
-                    config.partition_tree.tab_bar_height,
-                    monitor.dimension,
+                    monitor.work_area,
                     monitor.scale,
                 ) {
                     tiling_overlays.insert(id, overlay);
@@ -195,7 +191,7 @@ impl Dome {
                 tracing::info!(
                     name = %monitor.name,
                     handle = ?monitor.handle,
-                    dimension = ?monitor.dimension,
+                    work_area = ?monitor.work_area,
                     "Monitor"
                 );
             }
@@ -232,7 +228,6 @@ impl Dome {
         self.config = new_config;
         for overlay in self.tiling_overlays.values_mut() {
             overlay.set_config(&self.config);
-            overlay.set_tab_bar_height(self.config.partition_tree.tab_bar_height);
         }
         for overlay in self.float_overlays.values_mut() {
             overlay.set_config(&self.config);
@@ -347,7 +342,6 @@ impl Dome {
         }
     }
 
-    /// Adding a manageable window.
     #[tracing::instrument(skip_all, fields(pid = ext.pid(), hwnd = %ext.id(), metadata = %metadata))]
     pub(super) fn add_window(
         &mut self,
@@ -356,7 +350,7 @@ impl Dome {
             metadata,
             constraints,
         }: NewWindow,
-        rect: Dimension<Physical>,
+        rect: PixelRect<Physical>,
         monitor: isize,
     ) {
         if self.registry.contains_hwnd(ext.id()) {
@@ -385,7 +379,7 @@ impl Dome {
             })
         };
         let id_key = ext.id();
-        self.set_constraints(id, constraints);
+        self.hub.set_window_constraint(id, constraints);
         self.recovery.track(&ext);
         self.registry.insert(
             id_key,
@@ -400,32 +394,11 @@ impl Dome {
         self.apply_layout();
     }
 
-    fn resolve_window_monitor(&self, id: WindowId) -> MonitorId {
-        let Some(entry) = self.registry.get(id) else {
-            return self.hub.focused_monitor();
-        };
-        if entry.is_minimized {
-            return self.hub.focused_monitor();
-        }
-        match entry.state {
-            WindowState::Positioned(PositionedState::Tiling(d)) => d.monitor,
-            WindowState::Positioned(PositionedState::Float(fp)) => fp.monitor,
-            // Offscreen, BorderlessFullscreen, ExclusiveFullscreen, or unregistered:
-            // best-effort fallback to focused monitor.
-            // The next apply_layout retriggers set_constraints via the Tiling/Float branch.
-            _ => self.hub.focused_monitor(),
-        }
-    }
-
-    pub(super) fn set_constraints_for(
-        &mut self,
-        hwnd_id: HwndId,
-        constraints: (f32, f32, f32, f32),
-    ) {
+    pub(super) fn set_constraints_for(&mut self, hwnd_id: HwndId, constraints: LimitObservation) {
         let Some(id) = self.registry.get_id(hwnd_id) else {
             return;
         };
-        self.set_constraints(id, constraints);
+        self.hub.set_window_constraint(id, constraints);
     }
 
     #[tracing::instrument(
@@ -561,9 +534,8 @@ impl Dome {
             entry.ext.show_cmd(ShowCmd::Restore);
             entry.is_minimized = false;
             // entry.state holds the prior Positioned(Tiling/Float/Offscreen) or
-            // BorderlessFullscreen variant. The next apply_layout dispatches
-            // through show_fullscreen_window / show_tiling / show_float against
-            // that preserved state.
+            // BorderlessFullscreen variant. That state is deliberately preserved
+            // so the next apply_layout dispatches against it.
         }
     }
 
@@ -591,14 +563,14 @@ impl Dome {
         let mut new_displayed: HashMap<MonitorId, HashSet<WindowId>> = HashMap::new();
 
         for mp in result.monitors {
-            let dimension = self.monitors.monitor(mp.monitor_id).dimension();
+            let work_area = self.monitors.monitor(mp.monitor_id).work_area();
 
             let mut window_ids = HashSet::new();
 
             match &mp.layout {
                 MonitorLayout::Fullscreen(id) => {
                     window_ids.insert(*id);
-                    self.show_fullscreen_window(*id, dimension, mp.monitor_id);
+                    self.show_fullscreen_window(*id, work_area, mp.monitor_id);
                 }
                 MonitorLayout::Normal {
                     tiling_windows,
@@ -609,9 +581,20 @@ impl Dome {
                     let mut placed_floats = Vec::new();
                     let mut container_data = Vec::new();
 
+                    // Windows places tiles unclipped, so a tile extending past the work area stays where core put it.
+                    // That is a current choice, not an invariant. macOS trims instead.
                     for wp in tiling_windows {
                         window_ids.insert(wp.id);
                         if self.registry.get(wp.id).is_none() {
+                            continue;
+                        }
+                        if wp.content_box.is_empty() {
+                            tracing::debug!(
+                                window_id = %wp.id,
+                                border_box = ?wp.border_box,
+                                "Content box entirely border, hiding window"
+                            );
+                            self.hide_window(wp.id);
                             continue;
                         }
                         placed_tiling.push(*wp);
@@ -619,6 +602,15 @@ impl Dome {
                     for wp in fw {
                         window_ids.insert(wp.id);
                         if self.registry.get(wp.id).is_none() {
+                            continue;
+                        }
+                        if wp.content_box.is_empty() {
+                            tracing::debug!(
+                                window_id = %wp.id,
+                                border_box = ?wp.border_box,
+                                "Float content box entirely border, hiding window"
+                            );
+                            self.hide_window(wp.id);
                             continue;
                         }
                         placed_floats.push(*wp);
@@ -633,7 +625,8 @@ impl Dome {
 
                     per_monitor.push(MonitorPositionData {
                         monitor_id: mp.monitor_id,
-                        dimension,
+                        work_area,
+                        border_thickness: mp.border_thickness,
                         tiling_windows: placed_tiling,
                         float_windows: placed_floats,
                         containers: container_data,
@@ -644,7 +637,6 @@ impl Dome {
             new_displayed.insert(mp.monitor_id, window_ids);
         }
 
-        // Global diff
         let old_window_ids: HashSet<WindowId> = self
             .monitors
             .monitors()
@@ -661,8 +653,6 @@ impl Dome {
             .copied()
             .collect();
 
-        // Update displayed state on each monitor.
-        // Clear all first, then set the ones that have placements this pass.
         self.monitors.clear_all_displayed();
         for (mid, dm) in new_displayed {
             self.monitors.set_displayed_windows(mid, dm);
@@ -670,7 +660,7 @@ impl Dome {
 
         for &id in &to_hide {
             // Keep taskbar tab for user-minimized windows so the user can
-            // click it to restore. Dome-hidden windows get their tab removed.
+            // click it to restore.
             if let Some(entry) = self.registry.get(id)
                 && !entry.is_minimized
             {
@@ -685,10 +675,8 @@ impl Dome {
             }
         }
 
-        // Position
         self.position_windows(&per_monitor, focused);
 
-        // Clean up float overlays for windows that are no longer float
         let current_float_ids: HashSet<WindowId> = per_monitor
             .iter()
             .flat_map(|m| m.float_windows.iter().map(|wp| wp.id))
@@ -696,14 +684,12 @@ impl Dome {
         self.float_overlays
             .retain(|id, _| current_float_ids.contains(id));
 
-        // Taskbar
         for &id in &tabs_to_add {
             if let Some(entry) = self.registry.get(id) {
                 self.taskbar.add_tab(entry.ext.id());
             }
         }
 
-        // Focus
         let current_monitor = focused_monitor;
         let monitor_changed = self
             .last_focused_monitor
@@ -743,7 +729,7 @@ impl Dome {
                     match self.overlay_factory.create_float_overlay(
                         self.config.clone(),
                         self.monitors.monitor(data.monitor_id).scale(),
-                        wp.visible_frame,
+                        wp.visible_border_box,
                     ) {
                         Ok(o) => {
                             self.float_overlays.insert(wp.id, o);
@@ -760,6 +746,7 @@ impl Dome {
                     focus_changed,
                     focused == Some(wp.id),
                     data.monitor_id,
+                    data.border_thickness,
                 );
             }
 
@@ -790,14 +777,14 @@ impl Dome {
                 .get_mut(&data.monitor_id)
                 .unwrap()
                 .update(
-                    data.dimension,
+                    data.work_area,
                     &data.tiling_windows,
                     &data.containers,
                     scale,
+                    data.border_thickness,
                 );
-            let tab_bar_h_logical = self.config.partition_tree.tab_bar_height;
             for (placement, titles) in data.containers.iter().filter(|(p, _)| p.is_tabbed) {
-                let rect = compute_tab_bar_rect(placement.frame, tab_bar_h_logical, scale);
+                let rect = placement.tab_bar_band;
                 let tab_bar = match self.tab_bars.entry(placement.id) {
                     std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
                     std::collections::hash_map::Entry::Vacant(e) => {
@@ -821,6 +808,7 @@ impl Dome {
                     placement.active_tab_index,
                     placement.is_highlighted,
                     scale,
+                    data.border_thickness,
                 );
             }
         }
@@ -839,7 +827,7 @@ impl Dome {
     pub(super) fn handle_window_moved(
         &mut self,
         id_key: HwndId,
-        new_placement: Dimension<Physical>,
+        new_placement: PixelRect<Physical>,
         monitor_handle: isize,
         observed_at: Instant,
     ) {
@@ -874,8 +862,7 @@ impl Dome {
             let m = self.monitors.monitor(id);
             if let Ok(overlay) = self.overlay_factory.create_tiling_overlay(
                 self.config.clone(),
-                self.config.partition_tree.tab_bar_height,
-                m.dimension(),
+                m.work_area(),
                 m.scale(),
             ) {
                 self.tiling_overlays.insert(id, overlay);
@@ -900,7 +887,7 @@ impl Dome {
         &mut self,
         hwnd_id: HwndId,
         monitor: isize,
-        rect: Dimension<Physical>,
+        rect: PixelRect<Physical>,
     ) {
         if let Some(mid) = self.monitors.id_for_handle(monitor) {
             self.status_bars.capture(hwnd_id, mid, rect);
@@ -932,7 +919,7 @@ impl Dome {
         &mut self,
         hwnd_id: HwndId,
         monitor_handle: isize,
-        rect: Dimension<Physical>,
+        rect: PixelRect<Physical>,
     ) {
         if let Some(mid) = self.monitors.id_for_handle(monitor_handle) {
             self.status_bars.move_to(hwnd_id, mid, rect);
@@ -968,57 +955,15 @@ impl Dome {
         }
     }
 
-    fn set_constraints(&mut self, id: WindowId, constraints: (f32, f32, f32, f32)) {
-        // FIXME: resolve_window_monitor is best effort, so it can return the wrong monitor. If the
-        // window is immediately minimized after spawn, then we'd get the wrong border
-        let monitor = self.resolve_window_monitor(id);
-        let border = self
-            .monitors
-            .physical_border(monitor, self.config.border_size)
-            .value();
-        let (min_w, min_h, max_w, max_h) = constraints;
-        if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
-            let to_frame = |v: f32| {
-                if v > 0.0 {
-                    Some(v + 2.0 * border)
-                } else {
-                    None
-                }
-            };
-            // No pre-check against stored values: calling set_window_constraint with
-            // unchanged values is cheap (the runner's apply_layout diffs against cached
-            // placements and skips windows whose target is unchanged).
-            self.hub.set_window_constraint(
-                id,
-                to_frame(min_w),
-                to_frame(min_h),
-                to_frame(max_w),
-                to_frame(max_h),
-            );
-        }
-    }
-
     pub(super) fn is_managed(&self, id_key: HwndId) -> bool {
         self.registry.contains_hwnd(id_key)
     }
 }
 
 // Fallback display string derived from the executable name. Prefer
-// FileDescription from version info when available (see get_app_display_name).
+// FileDescription from version info when available.
 pub(super) fn display_from_process(process: &str) -> String {
     process.strip_suffix(".exe").unwrap_or(process).to_string()
-}
-
-// Tab bar rect from a tabbed container's physical-pixel `frame`. The bar
-// hugs the container's top edge with the configured logical height
-// rounded into the platform's `Unit` (physical pixels on Windows).
-fn compute_tab_bar_rect(
-    frame: Dimension,
-    tab_bar_h_logical: Length<Logical>,
-    scale: f32,
-) -> Dimension {
-    let h_phys = tab_bar_h_logical.to_unit(scale).round();
-    Dimension::new(frame.x, frame.y, frame.width, h_phys)
 }
 
 #[cfg(test)]

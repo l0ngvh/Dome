@@ -5,7 +5,7 @@ use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessageW, WM_QUIT};
 
 use crate::action::{Action, Actions};
-use crate::core::{Dimension, Physical};
+use crate::core::{Physical, PixelRect};
 use crate::keymap::KeymapState;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
 use crate::platform::windows::dome::{Dome, HubEvent, NewWindow, WindowsMetadata};
@@ -343,10 +343,10 @@ pub(super) type ApplyFn = Box<dyn FnOnce(&mut Runner)>;
 enum CreatedWindow {
     KnownBar {
         ext: Arc<dyn ManageExternalWindow>,
-        rect: Dimension<Physical>,
+        rect: PixelRect<Physical>,
         monitor: isize,
     },
-    Manageable(NewWindow, Dimension<Physical>, isize),
+    Manageable(NewWindow, PixelRect<Physical>, isize),
     Skip,
 }
 struct ReadDispatcher {

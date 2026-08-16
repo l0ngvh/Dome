@@ -7,6 +7,7 @@ mod minimize;
 mod monitor;
 mod move_to_workspace;
 mod partition_tree;
+mod pixel_rect;
 mod preferred_layout;
 mod query;
 mod set_focus;
@@ -22,21 +23,21 @@ use crate::config::{
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
-use crate::core::node::{Dimension, Direction, Length, Logical, WindowId};
+use crate::core::node::{Direction, Logical, Pixels, WindowId};
 use crate::core::strategy::TilingAction;
 use crate::core::{
-    ContainerPlacement, FloatWindowPlacement, TilingWindowPlacement, WindowMetadata,
+    ContainerPlacement, FloatWindowPlacement, PixelRect, TilingWindowPlacement, WindowMetadata,
 };
 
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;
-const TAB_BAR_HEIGHT: f32 = 2.0;
+const TAB_BAR_HEIGHT: i32 = 2;
+const BORDER_SIZE: i32 = 1;
 
 pub(super) fn snapshot(hub: &Hub) -> String {
     validate_hub(hub);
     let mut s = snapshot_text(hub);
 
-    // ASCII visualization uses screen coords from get_visible_placements
     let mut grid = vec![vec![' '; ASCII_WIDTH]; ASCII_HEIGHT];
     let all = hub.get_visible_placements();
     let mp = &all.monitors[0];
@@ -52,16 +53,8 @@ pub(super) fn snapshot(hub: &Hub) -> String {
             containers.as_slice(),
         ),
         MonitorLayout::Fullscreen(id) => {
-            let screen = hub.access.monitors.get(mp.monitor_id).dimension;
-            draw_rect(
-                &mut grid,
-                screen.x.value(),
-                screen.y.value(),
-                screen.width.value(),
-                screen.height.value(),
-                &format!("W{}", id.get()),
-                [false; 4],
-            );
+            let screen = hub.access.monitors.get(mp.monitor_id).work_area;
+            draw_rect(&mut grid, screen, &format!("W{}", id.get()), [false; 4]);
             s.push('\n');
             s.push_str(
                 &grid
@@ -74,102 +67,53 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         }
     };
 
-    // Draw tiling windows
     for wp in tiling_windows {
-        let d = wp.visible_frame;
-        let clip = clip_edges(wp.frame, wp.visible_frame);
-        draw_rect(
-            &mut grid,
-            d.x.value(),
-            d.y.value(),
-            d.width.value(),
-            d.height.value(),
-            &format!("W{}", wp.id.get()),
-            clip,
-        );
+        let d = wp.visible_border_box;
+        let clip = clip_edges(wp.border_box, wp.visible_border_box);
+        draw_rect(&mut grid, d, &format!("W{}", wp.id.get()), clip);
     }
 
-    // Draw tab bars
     for cp in containers {
         if cp.is_tabbed {
-            let d = cp.visible_frame;
-            draw_tab_bar(
-                &mut grid,
-                d.x.value(),
-                d.y.value(),
-                d.width.value(),
-                &cp.titles,
-                cp.active_tab_index,
-            );
+            let d = cp.visible_border_box;
+            draw_tab_bar(&mut grid, d, &cp.titles, cp.active_tab_index);
         }
     }
 
-    // Draw focus border for non-float focused
     let focused_float = float_windows.iter().find(|p| p.is_highlighted);
     if focused_float.is_none() {
         if let Some(wp) = tiling_windows.iter().find(|p| p.is_highlighted) {
-            let d = wp.visible_frame;
-            let clip = clip_edges(wp.frame, wp.visible_frame);
-            draw_focused_border(
-                &mut grid,
-                d.x.value(),
-                d.y.value(),
-                d.width.value(),
-                d.height.value(),
-                clip,
-            );
+            let d = wp.visible_border_box;
+            let clip = clip_edges(wp.border_box, wp.visible_border_box);
+            draw_focused_border(&mut grid, d, clip);
         } else if let Some(cp) = containers.iter().find(|p| p.is_highlighted) {
-            let d = cp.visible_frame;
-            let clip = clip_edges(cp.frame, cp.visible_frame);
-            draw_focused_border(
-                &mut grid,
-                d.x.value(),
-                d.y.value(),
-                d.width.value(),
-                d.height.value(),
-                clip,
-            );
+            let d = cp.visible_border_box;
+            let clip = clip_edges(cp.border_box, cp.visible_border_box);
+            draw_focused_border(&mut grid, d, clip);
         }
     }
 
-    // Draw float windows on top
     for wp in float_windows {
-        let d = wp.visible_frame;
-        let clip = clip_edges(wp.frame, wp.visible_frame);
+        let d = wp.visible_border_box;
+        let clip = clip_edges(wp.border_box, wp.visible_border_box);
         let grid_w = grid[0].len() as isize;
         let grid_h = grid.len() as isize;
-        let x1 = d.x.round().value() as isize;
-        let y1 = d.y.round().value() as isize;
-        let x2 = (d.x + d.width).round().value() as isize - 1;
-        let y2 = (d.y + d.height).round().value() as isize - 1;
+        let x1 = d.x().value() as isize;
+        let y1 = d.y().value() as isize;
+        let x2 = d.right().value() as isize - 1;
+        let y2 = d.bottom().value() as isize - 1;
         for row in (y1 + 1).max(0)..y2.min(grid_h) {
             for col in (x1 + 1).max(0)..x2.min(grid_w) {
                 grid[row as usize][col as usize] = ' ';
             }
         }
-        draw_rect(
-            &mut grid,
-            d.x.value(),
-            d.y.value(),
-            d.width.value(),
-            d.height.value(),
-            &format!("F{}", wp.id.get()),
-            clip,
-        );
+        draw_rect(&mut grid, d, &format!("F{}", wp.id.get()), clip);
     }
 
-    // Draw focus border for float focused (on top of everything)
     if let Some(wp) = focused_float {
-        let d = wp.visible_frame;
-        let clip = clip_edges(wp.frame, wp.visible_frame);
-        draw_focused_border(
-            &mut grid,
-            d.x.value(),
-            d.y.value(),
-            d.width.value(),
-            d.height.value(),
-            clip,
-        );
+        let d = wp.visible_border_box;
+        let clip = clip_edges(wp.border_box, wp.visible_border_box);
+        draw_focused_border(&mut grid, d, clip);
     }
 
     s.push('\n');
@@ -191,7 +135,14 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
     };
     let mut s = format!("Hub({focused})\n");
     for mp in &vp.monitors {
-        let screen = hub.access.monitors.get(mp.monitor_id).dimension;
+        // `{:.2}` is a no-op on integer Display, so the printed screen goes through
+        // `to_dimension` to keep the snapshot format stable.
+        let screen = hub
+            .access
+            .monitors
+            .get(mp.monitor_id)
+            .work_area
+            .to_dimension();
         match &mp.layout {
             MonitorLayout::Normal {
                 tiling_windows,
@@ -258,7 +209,7 @@ fn fmt_spawn(indicator: &SpawnIndicator) -> String {
 }
 
 fn fmt_tiling_placement(wp: &TilingWindowPlacement) -> String {
-    let d = wp.visible_frame;
+    let d = wp.visible_border_box.to_dimension();
     let mut parts = format!(
         "    Window(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
         wp.id, d.x, d.y, d.width, d.height
@@ -274,7 +225,7 @@ fn fmt_tiling_placement(wp: &TilingWindowPlacement) -> String {
 }
 
 fn fmt_float_placement(wp: &FloatWindowPlacement) -> String {
-    let d = wp.visible_frame;
+    let d = wp.visible_border_box.to_dimension();
     let mut parts = format!(
         "    Window(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
         wp.id, d.x, d.y, d.width, d.height
@@ -288,7 +239,7 @@ fn fmt_float_placement(wp: &FloatWindowPlacement) -> String {
 }
 
 fn fmt_container_placement(cp: &ContainerPlacement) -> String {
-    let d = cp.visible_frame;
+    let d = cp.visible_border_box.to_dimension();
     let mut parts = format!(
         "    Container(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
         cp.id, d.x, d.y, d.width, d.height
@@ -312,29 +263,21 @@ fn fmt_container_placement(cp: &ContainerPlacement) -> String {
     clippy::needless_range_loop,
     reason = "grid indexing requires row/col indices"
 )]
-fn draw_tab_bar(
-    grid: &mut [Vec<char>],
-    x: f32,
-    y: f32,
-    width: f32,
-    labels: &[String],
-    active: usize,
-) {
-    let x1 = x.round() as usize;
-    let y1 = y.round() as usize;
+fn draw_tab_bar(grid: &mut [Vec<char>], rect: PixelRect, labels: &[String], active: usize) {
+    let (x, y, width) = (rect.x().value(), rect.y().value(), rect.width().value());
+    let x1 = x as usize;
+    let y1 = y as usize;
     let y2 = y1 + TAB_BAR_HEIGHT as usize - 1;
-    let x2 = (x + width).round() as usize - 1;
+    let x2 = (x + width) as usize - 1;
     let inner_width = x2 - x1 - 1;
     let tab_count = labels.len();
 
-    // Draw top border
     for col in x1..=x2 {
         grid[y1][col] = '-';
     }
     grid[y1][x1] = '+';
     grid[y1][x2] = '+';
 
-    // Draw side borders
     for row in (y1 + 1)..=y2 {
         grid[row][x1] = '|';
         grid[row][x2] = '|';
@@ -344,7 +287,6 @@ fn draw_tab_bar(
         return;
     }
 
-    // Draw tab labels evenly spread with separators (centered vertically in content area)
     let label_row = y1 + 1 + (y2 - y1 - 1) / 2;
     let tab_width = inner_width / tab_count;
     for (i, label) in labels.iter().enumerate() {
@@ -375,25 +317,32 @@ fn draw_tab_bar(
     }
 }
 
-fn clip_edges(frame: Dimension, visible: Dimension) -> [bool; 4] {
-    let half = Length::new(0.5);
+/// Integral edges make these comparisons exact, where the `Dimension` form needed a
+/// half-unit tolerance to avoid reporting a clip that rounding had already removed.
+fn clip_edges(border_box: PixelRect, visible: PixelRect) -> [bool; 4] {
     [
-        visible.x > frame.x + half,
-        (visible.x + visible.width) < (frame.x + frame.width) - half,
-        visible.y > frame.y + half,
-        (visible.y + visible.height) < (frame.y + frame.height) - half,
+        visible.x() > border_box.x(),
+        visible.right() < border_box.right(),
+        visible.y() > border_box.y(),
+        visible.bottom() < border_box.bottom(),
     ]
 }
 
-fn draw_rect(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, label: &str, clip: [bool; 4]) {
+fn draw_rect(grid: &mut [Vec<char>], rect: PixelRect, label: &str, clip: [bool; 4]) {
+    let (x, y, w, h) = (
+        rect.x().value(),
+        rect.y().value(),
+        rect.width().value(),
+        rect.height().value(),
+    );
     let grid_w = grid[0].len() as isize;
     let grid_h = grid.len() as isize;
     let [clip_l, clip_r, clip_t, clip_b] = clip;
 
-    let x1 = x.round() as isize;
-    let y1 = y.round() as isize;
-    let x2 = (x + w).round() as isize - 1;
-    let y2 = (y + h).round() as isize - 1;
+    let x1 = x as isize;
+    let y1 = y as isize;
+    let x2 = (x + w) as isize - 1;
+    let y2 = (y + h) as isize - 1;
 
     if !clip_t {
         for col in x1.max(0)..=x2.min(grid_w - 1) {
@@ -436,8 +385,8 @@ fn draw_rect(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, label: &str
         grid[y2 as usize][x2 as usize] = '+';
     }
 
-    let mid_x = (x + w / 2.0).round() as isize;
-    let mid_y = (y + h / 2.0).round() as isize;
+    let mid_x = (x as f32 + w as f32 / 2.0).round() as isize;
+    let mid_y = (y as f32 + h as f32 / 2.0).round() as isize;
     if mid_y >= 0 && mid_y < grid_h {
         let start_x = mid_x - (label.len() / 2) as isize;
         for (i, ch) in label.chars().enumerate() {
@@ -449,15 +398,21 @@ fn draw_rect(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, label: &str
     }
 }
 
-fn draw_focused_border(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, clip: [bool; 4]) {
+fn draw_focused_border(grid: &mut [Vec<char>], rect: PixelRect, clip: [bool; 4]) {
+    let (x, y, w, h) = (
+        rect.x().value(),
+        rect.y().value(),
+        rect.width().value(),
+        rect.height().value(),
+    );
     let grid_w = grid[0].len() as isize;
     let grid_h = grid.len() as isize;
     let [clip_l, clip_r, clip_t, clip_b] = clip;
 
-    let x1 = x.round() as isize;
-    let y1 = y.round() as isize;
-    let x2 = (x + w).round() as isize - 1;
-    let y2 = (y + h).round() as isize - 1;
+    let x1 = x as isize;
+    let y1 = y as isize;
+    let x2 = (x + w) as isize - 1;
+    let y2 = (y + h) as isize - 1;
 
     if !clip_t {
         for col in x1.max(0)..=x2.min(grid_w - 1) {
@@ -496,22 +451,25 @@ fn validate_hub(hub: &Hub) {
 }
 
 fn validate_visible_placements(hub: &Hub) {
-    fn clip(dim: Dimension, bounds: Dimension) -> Option<Dimension> {
-        let x1 = dim.x.max(bounds.x);
-        let y1 = dim.y.max(bounds.y);
-        let x2 = (dim.x + dim.width).min(bounds.x + bounds.width);
-        let y2 = (dim.y + dim.height).min(bounds.y + bounds.height);
+    // Deliberately independent of `PixelRect::clip`. Production derives every
+    // `visible_border_box` with that method, so asserting against it would compare it
+    // with itself and the invariant could never fail.
+    fn clip(rect: PixelRect, bounds: PixelRect) -> Option<PixelRect> {
+        let x1 = rect.x().value().max(bounds.x().value());
+        let y1 = rect.y().value().max(bounds.y().value());
+        let x2 = rect.right().value().min(bounds.right().value());
+        let y2 = rect.bottom().value().min(bounds.bottom().value());
         if x1 >= x2 || y1 >= y2 {
             return None;
         }
-        Some(Dimension::new(x1, y1, x2 - x1, y2 - y1))
+        Some(PixelRect::new(x1, y1, x2 - x1, y2 - y1))
     }
 
     let all_placements = hub.get_visible_placements();
     let mut seen_window_ids = HashSet::new();
 
     for mp in &all_placements.monitors {
-        let screen = hub.access.monitors.get(mp.monitor_id).dimension;
+        let screen = hub.access.monitors.get(mp.monitor_id).work_area;
         let (tiling_windows, float_windows, containers) = match &mp.layout {
             MonitorLayout::Normal {
                 tiling_windows,
@@ -531,9 +489,9 @@ fn validate_visible_placements(hub: &Hub) {
                 wp.id
             );
             assert_eq!(
-                clip(wp.frame, screen),
-                Some(wp.visible_frame),
-                "Window {} visible_frame doesn't match clip(frame, screen)",
+                clip(wp.border_box, screen),
+                Some(wp.visible_border_box),
+                "Window {} visible_border_box doesn't match clip(border_box, screen)",
                 wp.id
             );
         }
@@ -544,17 +502,17 @@ fn validate_visible_placements(hub: &Hub) {
                 wp.id
             );
             assert_eq!(
-                clip(wp.frame, screen),
-                Some(wp.visible_frame),
-                "Window {} visible_frame doesn't match clip(frame, screen)",
+                clip(wp.border_box, screen),
+                Some(wp.visible_border_box),
+                "Window {} visible_border_box doesn't match clip(border_box, screen)",
                 wp.id
             );
         }
         for cp in containers {
             assert_eq!(
-                clip(cp.frame, screen),
-                Some(cp.visible_frame),
-                "Container {} visible_frame doesn't match clip(frame, screen)",
+                clip(cp.border_box, screen),
+                Some(cp.visible_border_box),
+                "Container {} visible_border_box doesn't match clip(border_box, screen)",
                 cp.id
             );
         }
@@ -579,7 +537,6 @@ fn validate_minimized(hub: &Hub) {
             "{id} is minimized but has a workspace",
         );
     }
-    // Converse: any window with workspace = None must be in minimized_windows.
     for (wid, window) in hub.access.windows.all_active() {
         if window.workspace().is_none() {
             assert!(
@@ -594,9 +551,6 @@ fn validate_minimized(hub: &Hub) {
     }
 }
 
-/// Test convenience methods that wrap handle_tiling_action with the appropriate
-/// TilingAction variant. Keeps test call sites readable (e.g. hub.focus_left()
-/// instead of hub.handle_tiling_action(TilingAction::FocusDirection { ... })).
 impl Hub {
     pub(crate) fn focus_left(&mut self) {
         self.handle_tiling_action(TilingAction::FocusDirection {
@@ -725,12 +679,7 @@ impl TestHubBuilder {
 
     fn build(self) -> Hub {
         Hub::new(
-            Dimension::new(
-                Length::new(0.0),
-                Length::new(0.0),
-                Length::new(ASCII_WIDTH as f32),
-                Length::new(ASCII_HEIGHT as f32),
-            ),
+            PixelRect::new(0, 0, ASCII_WIDTH as i32, ASCII_HEIGHT as i32),
             self.scale,
             self.layout,
             self.preferred_layout,
@@ -740,6 +689,7 @@ impl TestHubBuilder {
 
 struct LayoutConfigBuilder {
     strategy: Strategy,
+    border_size: Pixels<Logical>,
     master: MasterConfig,
     partition_tree: PartitionTreeConfig,
     size_constraints: SizeConstraints,
@@ -751,19 +701,20 @@ impl LayoutConfigBuilder {
     fn new() -> Self {
         Self {
             strategy: Strategy::PartitionTree,
+            border_size: Pixels::new(BORDER_SIZE),
             master: MasterConfig {
                 master_ratio: 0.5,
                 master_count: 1,
             },
             partition_tree: PartitionTreeConfig {
-                tab_bar_height: Length::<Logical>::new(TAB_BAR_HEIGHT),
+                tab_bar_height: Pixels::new(TAB_BAR_HEIGHT),
                 automatic_tiling: false,
             },
             size_constraints: SizeConstraints {
-                minimum_width: SizeConstraint::Pixels(Length::new(1.0)),
-                minimum_height: SizeConstraint::Pixels(Length::new(1.0)),
-                maximum_width: SizeConstraint::Pixels(Length::new(0.0)),
-                maximum_height: SizeConstraint::Pixels(Length::new(0.0)),
+                minimum_width: SizeConstraint::Pixels(Pixels::new(1)),
+                minimum_height: SizeConstraint::Pixels(Pixels::new(1)),
+                maximum_width: SizeConstraint::Pixels(Pixels::new(0)),
+                maximum_height: SizeConstraint::Pixels(Pixels::new(0)),
             },
             float: vec![],
             fullscreen: vec![],
@@ -775,6 +726,13 @@ impl LayoutConfigBuilder {
 
     fn with_master_config(self, master: MasterConfig) -> Self {
         Self { master, ..self }
+    }
+
+    fn with_border_size(self, border_size: Pixels<Logical>) -> Self {
+        Self {
+            border_size,
+            ..self
+        }
     }
 
     fn with_min_width(self, min_width: SizeConstraint) -> Self {
@@ -835,6 +793,7 @@ impl LayoutConfigBuilder {
     fn build(self) -> GlobalLayoutConfig {
         GlobalLayoutConfig {
             strategy: self.strategy,
+            border_size: self.border_size,
             partition_tree: self.partition_tree,
             master: self.master,
             size_constraints: self.size_constraints,
@@ -846,19 +805,19 @@ impl LayoutConfigBuilder {
 }
 
 struct PartitionTreeConfigBuilder {
-    tab_bar_height: Length<Logical>,
+    tab_bar_height: Pixels<Logical>,
     automatic_tiling: bool,
 }
 
 impl PartitionTreeConfigBuilder {
     fn new() -> Self {
         Self {
-            tab_bar_height: Length::<Logical>::new(TAB_BAR_HEIGHT),
+            tab_bar_height: Pixels::new(TAB_BAR_HEIGHT),
             automatic_tiling: false,
         }
     }
 
-    fn with_tab_bar_height(self, tab_bar_height: Length<Logical>) -> Self {
+    fn with_tab_bar_height(self, tab_bar_height: Pixels<Logical>) -> Self {
         Self {
             tab_bar_height,
             ..self
@@ -985,7 +944,6 @@ pub(super) fn setup_with_layout(layout: GlobalLayoutConfig) -> Hub {
     TestHubBuilder::new().with_layout(layout).build()
 }
 
-/// A matcher on one exact window title, not a pattern.
 pub(super) fn titled_matcher(title: &str) -> WindowMatcher {
     WindowMatcher {
         title: Some(title.to_string()),
@@ -993,8 +951,6 @@ pub(super) fn titled_matcher(title: &str) -> WindowMatcher {
     }
 }
 
-/// Minimal test metadata with no structure — title set via `titled` or
-/// left blank.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TestMetadata {
     pub title: Option<String>,
@@ -1059,17 +1015,11 @@ impl WindowMetadata for TestMetadata {
     }
 }
 
-/// Dimension for test inserts where geometry is not under assertion. Tiling ignores it.
-pub(crate) fn default_dim() -> Dimension {
-    Dimension::new(
-        Length::new(0.0),
-        Length::new(0.0),
-        Length::new(100.0),
-        Length::new(100.0),
-    )
+/// Rect for test inserts where geometry is not under assertion. Tiling ignores it.
+pub(crate) fn default_rect() -> PixelRect {
+    PixelRect::new(0, 0, 100, 100)
 }
 
-/// Convenience: create a boxed `TestMetadata` with the given title.
 pub(crate) fn titled(t: &str) -> Box<dyn WindowMetadata> {
     Box::new(TestMetadata {
         title: Some(t.to_owned()),
@@ -1077,7 +1027,6 @@ pub(crate) fn titled(t: &str) -> Box<dyn WindowMetadata> {
     })
 }
 
-/// Build metadata with the given process name.
 pub(crate) fn process_meta(p: &str) -> Box<dyn WindowMetadata> {
     Box::new(TestMetadata {
         process: Some(p.into()),
@@ -1085,7 +1034,6 @@ pub(crate) fn process_meta(p: &str) -> Box<dyn WindowMetadata> {
     })
 }
 
-/// Build metadata with the given title and process name.
 pub(crate) fn titled_process(title: &str, process: &str) -> Box<dyn WindowMetadata> {
     Box::new(TestMetadata {
         title: Some(title.into()),

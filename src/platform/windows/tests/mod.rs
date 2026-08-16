@@ -16,8 +16,8 @@ use crate::action::{Action, Actions};
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
-    ContainerId, ContainerPlacement, Dimension, Length, Logical, Physical, TilingWindowPlacement,
-    WindowId, WorkspaceInfo,
+    ContainerId, ContainerPlacement, Dimension, Length, LimitObservation, LimitUpdate, Logical,
+    Physical, PixelRect, Pixels, TilingWindowPlacement, WindowId, WorkspaceInfo,
 };
 use crate::font::FontConfig;
 use crate::platform::windows::dome::MonitorInfo;
@@ -37,7 +37,10 @@ use crate::theme::Flavor;
 #[derive(Clone, Debug)]
 enum TilingOverlayState {
     Hidden,
-    Visible { windows: Vec<TilingWindowPlacement> },
+    Visible {
+        windows: Vec<TilingWindowPlacement>,
+        border_thickness: Pixels<Physical>,
+    },
 }
 
 /// Mirrors what the real float overlay shows on screen. `update` writes
@@ -47,7 +50,7 @@ enum FloatOverlayState {
     Hidden,
     Visible {
         window_id: WindowId,
-        visible_frame: Dimension,
+        visible_border_box: PixelRect,
         z_order: ZOrder,
     },
 }
@@ -129,7 +132,12 @@ fn default_monitor() -> MonitorInfo {
     MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
-        dimension: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
+        work_area: PixelRect::from_dimension(Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT,
+        )),
         bounds: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
         is_primary: true,
         scale: 1.0,
@@ -140,12 +148,12 @@ fn second_monitor() -> MonitorInfo {
     MonitorInfo {
         handle: 2,
         name: "External".to_string(),
-        dimension: Dimension::new(
+        work_area: PixelRect::from_dimension(Dimension::new(
             SCREEN_WIDTH,
             Length::ZERO,
             Length::new(2560.0),
             Length::new(1440.0),
-        ),
+        )),
         bounds: Dimension::new(
             SCREEN_WIDTH,
             Length::ZERO,
@@ -283,6 +291,29 @@ impl TestEnv {
         self.open_with(ext)
     }
 
+    fn open_with_min_size(
+        &mut self,
+        id: isize,
+        title: &str,
+        process: &str,
+        dim: Dimension<Physical>,
+        min: (f32, f32),
+    ) -> HwndId {
+        let ext = Arc::new(
+            MockExternalHwnd::with_title(
+                id,
+                title,
+                process,
+                self.moves.clone(),
+                self.z_stack.clone(),
+                self.focus_target.clone(),
+            )
+            .with_dimension(dim)
+            .with_min_size(min.0, min.1),
+        );
+        self.open_with(ext)
+    }
+
     /// Mirrors the runner's create-side fork instead of driving the real
     /// `dispatch_window_created` closure, so keep the two in sync.
     fn open_with(&mut self, ext: Arc<MockExternalHwnd>) -> HwndId {
@@ -297,7 +328,8 @@ impl TestEnv {
             app_name: ext.app_name.clone(),
         };
         if Dome::is_known_bar(&metadata) {
-            self.dome.capture_bar(hwnd_id, 1, ext.get_dim());
+            self.dome
+                .capture_bar(hwnd_id, 1, PixelRect::from_dimension(ext.get_dim()));
             return hwnd_id;
         }
         if !ext.manageable {
@@ -306,15 +338,10 @@ impl TestEnv {
         let new = NewWindow {
             ext: ext.clone(),
             metadata,
-            constraints: (
-                ext.min_size.0,
-                ext.min_size.1,
-                ext.max_size.0,
-                ext.max_size.1,
-            ),
+            constraints: ext.constraints,
         };
         let dim = ext.get_dim();
-        self.dome.add_window(new, dim, 1);
+        self.dome.add_window(new, PixelRect::from_dimension(dim), 1);
         hwnd_id
     }
 
@@ -335,7 +362,7 @@ impl TestEnv {
         monitors
             .iter()
             .find(|m| {
-                let d = m.dimension;
+                let d = m.work_area.to_dimension();
                 x >= d.x && x < d.x + d.width && y >= d.y && y < d.y + d.height
             })
             .map(|m| m.handle)
@@ -364,8 +391,12 @@ impl TestEnv {
                 continue;
             }
             let monitor = self.monitor_for_pos(dim.x, dim.y);
-            self.dome
-                .handle_window_moved(hwnd_id, dim, monitor, Instant::now());
+            self.dome.handle_window_moved(
+                hwnd_id,
+                PixelRect::from_dimension(dim),
+                monitor,
+                Instant::now(),
+            );
         }
         self.dome.apply_layout();
         true
@@ -693,8 +724,7 @@ struct MockExternalHwnd {
     dimension: Mutex<Dimension>,
     override_position: Mutex<Option<(i32, i32, i32, i32)>>,
     minimized: AtomicBool,
-    min_size: (f32, f32),
-    max_size: (f32, f32),
+    constraints: LimitObservation,
     z_stack: ZOrderStack,
     moves: MoveLog,
     focus_target: Arc<Mutex<FocusTarget>>,
@@ -726,8 +756,14 @@ impl MockExternalHwnd {
             )),
             override_position: Mutex::new(None),
             minimized: AtomicBool::new(false),
-            min_size: (0.0, 0.0),
-            max_size: (0.0, 0.0),
+            // Four Cleared, not LimitObservation::default(), because handle.rs reports
+            // Cleared for an app that sets no limits.
+            constraints: LimitObservation {
+                min_width: LimitUpdate::Cleared,
+                min_height: LimitUpdate::Cleared,
+                max_width: LimitUpdate::Cleared,
+                max_height: LimitUpdate::Cleared,
+            },
             z_stack,
             moves,
             focus_target,
@@ -751,6 +787,20 @@ impl MockExternalHwnd {
 
     fn with_dimension(self, dim: Dimension) -> Self {
         *self.dimension.lock().unwrap() = dim;
+        self
+    }
+
+    /// Mirrors `handle.rs`, where a non-positive component means no limit.
+    fn with_min_size(mut self, width: f32, height: f32) -> Self {
+        let limit = |v: f32| {
+            if v > 0.0 {
+                LimitUpdate::Set(Length::new(v))
+            } else {
+                LimitUpdate::Cleared
+            }
+        };
+        self.constraints.min_width = limit(width);
+        self.constraints.min_height = limit(height);
         self
     }
 
@@ -779,16 +829,20 @@ impl ManageExternalWindow for MockExternalHwnd {
         1
     }
 
-    fn set_position(&self, z: ZOrder, dim: Dimension) {
+    fn set_position(&self, z: ZOrder, rect: PixelRect) {
         self.minimized.store(false, Ordering::Relaxed);
-        let dim = self.override_position.lock().unwrap().map_or(dim, |pos| {
-            Dimension::new(
-                Length::new(pos.0 as f32),
-                Length::new(pos.1 as f32),
-                Length::new(pos.2 as f32),
-                Length::new(pos.3 as f32),
-            )
-        });
+        let dim = self
+            .override_position
+            .lock()
+            .unwrap()
+            .map_or(rect.to_dimension(), |pos| {
+                Dimension::new(
+                    Length::new(pos.0 as f32),
+                    Length::new(pos.1 as f32),
+                    Length::new(pos.2 as f32),
+                    Length::new(pos.3 as f32),
+                )
+            });
         *self.dimension.lock().unwrap() = dim;
         self.z_stack.apply(self.hwnd_id, z);
         self.moves.lock().unwrap().push((self.hwnd_id, dim));
@@ -858,28 +912,33 @@ impl Drop for MockExternalHwnd {
 }
 
 /// Assert that windows tile horizontally across the screen.
-fn assert_h_tiled(dims: &[Dimension], screen: Dimension, border: f32) {
-    let border_len = Length::new(border);
+fn assert_h_tiled(dims: &[Dimension], screen: PixelRect, border: Pixels<Logical>) {
+    let screen = screen.to_dimension();
+    // Every caller passes the `default_monitor`/`TestEnv::new` fixture, which is
+    // scale 1.0, so the logical border is also the physical one.
+    let border_len = Length::from_pixels(border).to_unit(1.0);
     assert!(!dims.is_empty());
     for (i, d) in dims.iter().enumerate() {
         assert_eq!(d.y, border_len, "window {i} y");
         assert_eq!(
             d.height,
-            screen.height - Length::new(2.0 * border),
+            screen.height - border_len * 2.0,
             "window {i} height"
         );
         assert!(d.width > Length::new(0.0), "window {i} width");
     }
     assert_eq!(dims[0].x, border_len, "first window x");
     let last = dims.last().unwrap();
-    assert!(
-        (last.x + last.width - (screen.width - border_len)).abs() < Length::new(1.0),
+    assert_eq!(
+        last.x + last.width,
+        screen.width - border_len,
         "last window right edge"
     );
     for i in 1..dims.len() {
         let gap = dims[i].x - (dims[i - 1].x + dims[i - 1].width);
-        assert!(
-            (gap - Length::new(2.0 * border)).abs() < Length::new(2.0),
+        assert_eq!(
+            gap,
+            border_len * 2.0,
             "gap between window {} and {}",
             i - 1,
             i
@@ -937,10 +996,11 @@ impl FloatOverlayApi for MockFloatOverlay {
         _: &Config,
         z_order: ZOrder,
         _scale: f32,
+        _border_thickness: Pixels<Physical>,
     ) {
         self.shared.state.set(FloatOverlayState::Visible {
             window_id: wp.id,
-            visible_frame: wp.visible_frame,
+            visible_border_box: wp.visible_border_box,
             z_order,
         });
         self.overlays
@@ -966,7 +1026,7 @@ impl Drop for MockFloatOverlay {
     }
 }
 
-/// `monitor` is shared (not just `Cell<Dimension>`) so the struct stays
+/// `monitor` is shared (not just `Cell<PixelRect>`) so the struct stays
 /// cheaply `Clone`: the factory hands clones to the Hub while `TestEnv`
 /// retains one for inspection.
 #[derive(Clone)]
@@ -976,7 +1036,7 @@ struct MockTilingOverlay {
     state: Rc<RefCell<TilingOverlayState>>,
     flavor: Rc<Cell<Flavor>>,
     font: Rc<RefCell<FontConfig>>,
-    monitor: Rc<Cell<Dimension>>,
+    monitor: Rc<Cell<PixelRect>>,
     config: Rc<RefCell<Config>>,
     focus_target: Arc<Mutex<FocusTarget>>,
 }
@@ -994,7 +1054,7 @@ impl MockTilingOverlay {
             state: Rc::new(RefCell::new(TilingOverlayState::Hidden)),
             flavor: Rc::new(Cell::new(config.theme)),
             font: Rc::new(RefCell::new(config.font.clone())),
-            monitor: Rc::new(Cell::new(Dimension::default())),
+            monitor: Rc::new(Cell::new(PixelRect::ZERO)),
             config: Rc::new(RefCell::new(config)),
             focus_target,
         }
@@ -1016,10 +1076,11 @@ impl MockTilingOverlay {
 impl TilingOverlayApi for MockTilingOverlay {
     fn update(
         &mut self,
-        monitor: Dimension,
+        monitor: PixelRect,
         windows: &[TilingWindowPlacement],
         _containers: &[(ContainerPlacement, Vec<String>)],
         _scale: f32,
+        border_thickness: Pixels<Physical>,
     ) {
         if self.monitor.get() != monitor {
             self.monitor.set(monitor);
@@ -1030,6 +1091,7 @@ impl TilingOverlayApi for MockTilingOverlay {
         // where show_tiling's per-window lift maintains the invariant.
         *self.state.borrow_mut() = TilingOverlayState::Visible {
             windows: windows.to_vec(),
+            border_thickness,
         };
     }
     fn clear(&mut self) {
@@ -1040,7 +1102,6 @@ impl TilingOverlayApi for MockTilingOverlay {
         *self.font.borrow_mut() = config.font.clone();
         *self.config.borrow_mut() = config.clone();
     }
-    fn set_tab_bar_height(&mut self, _height: Length<Logical>) {}
     fn window_above(&self) -> Option<HwndId> {
         self.z_stack.window_above(self.overlay_id)
     }
@@ -1094,11 +1155,12 @@ struct MockTabBarHandle {
 impl TabBarOverlayApi for MockTabBarHandle {
     fn update(
         &mut self,
-        _rect: Dimension,
+        _rect: PixelRect,
         titles: Vec<String>,
         active_index: usize,
         _is_highlighted: bool,
         _scale: f32,
+        _border_thickness: Pixels<Physical>,
     ) {
         *self.inner.last_update.borrow_mut() = Some(TabBarUpdate {
             titles,
@@ -1130,8 +1192,7 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
     fn create_tiling_overlay(
         &self,
         config: Config,
-        _tab_bar_height: Length<Logical>,
-        monitor: Dimension,
+        monitor: PixelRect,
         _scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
         let this = self.borrow();
@@ -1145,7 +1206,7 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
             config.clone(),
             this.tiling_focus_target.clone(),
         );
-        // Record monitor dimension from create call (also updated on
+        // Record monitor work area from create call (also updated on
         // subsequent `update` calls).
         overlay.monitor.set(monitor);
         // Mirror production: CreateWindowExW seeds at top of normal band,
@@ -1163,7 +1224,7 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
         &self,
         config: Config,
         _scale: f32,
-        _visible_frame: Dimension,
+        _visible_border_box: PixelRect,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
         let this = self.borrow();
         let id_val = this.next_float_overlay_id.get();
@@ -1184,7 +1245,7 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
         &self,
         _config: Config,
         container_id: ContainerId,
-        _rect: Dimension,
+        _rect: PixelRect,
         _scale: f32,
     ) -> anyhow::Result<Box<dyn TabBarOverlayApi>> {
         let this = self.borrow();

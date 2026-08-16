@@ -276,10 +276,7 @@ fn stale_burst_discarded() {
     let stale_last = Instant::now() - Duration::from_secs(5);
     dome.windows_moved(vec![WindowMove {
         cg_id: cg1,
-        x: full_frame.0,
-        y: full_frame.1,
-        w: full_frame.2,
-        h: full_frame.3,
+        rect: PixelRect::new(full_frame.0, full_frame.1, full_frame.2, full_frame.3),
         observed_at: DebounceBurst {
             first: stale_first,
             last: stale_last,
@@ -312,10 +309,7 @@ fn stale_check_passes_when_any_timestamp_is_fresh() {
     // event passes the stale check.
     dome.windows_moved(vec![WindowMove {
         cg_id: cg1,
-        x: 50,
-        y: 50,
-        w: target_frame.2 + 100,
-        h: target_frame.3 + 100,
+        rect: PixelRect::new(50, 50, target_frame.2 + 100, target_frame.3 + 100),
         observed_at: DebounceBurst {
             first: stale_time,
             last: fresh_time,
@@ -356,10 +350,7 @@ fn user_moved_drift_handling() {
         let late = Instant::now() + Duration::from_secs(60);
         dome.windows_moved(vec![WindowMove {
             cg_id: cg,
-            x: target.0 + dx,
-            y: target.1 + dy,
-            w: target.2 + dw,
-            h: target.3 + dh,
+            rect: PixelRect::new(target.0 + dx, target.1 + dy, target.2 + dw, target.3 + dh),
             observed_at: DebounceBurst {
                 first: late,
                 last: late,
@@ -408,10 +399,7 @@ fn late_event_consumes_retry_budget() {
         let frame = drifted;
         dome.windows_moved(vec![WindowMove {
             cg_id: cg1,
-            x: frame.0,
-            y: frame.1,
-            w: frame.2,
-            h: frame.3,
+            rect: PixelRect::new(frame.0, frame.1, frame.2, frame.3),
             observed_at: DebounceBurst {
                 first: late,
                 last: late,
@@ -446,10 +434,7 @@ fn mixed_freshness_burst_runs_constraint_detection() {
     let now = Instant::now();
     dome.windows_moved(vec![WindowMove {
         cg_id: cg2,
-        x: x2,
-        y: y2,
-        w: 1200,
-        h: h2,
+        rect: PixelRect::new(x2, y2, 1200, h2),
         observed_at: DebounceBurst {
             first: before_placed,
             last: now,

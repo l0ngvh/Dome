@@ -144,6 +144,7 @@ impl BarQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::PixelRect;
     use crate::platform::reserve_for_bar;
 
     const SAMPLE: &str = r#"{
@@ -188,7 +189,7 @@ mod tests {
         MonitorInfo {
             display_id,
             name: format!("Monitor {display_id}"),
-            work_area: dim,
+            work_area: PixelRect::from_dimension_inward(dim),
             bounds: dim,
             full_height: h,
             is_primary: display_id == 1,
@@ -286,7 +287,7 @@ mod tests {
 
         let bar = rects.get(&1).copied().unwrap();
         assert_eq!(
-            reserve_for_bar(a.bounds, a.work_area, bar),
+            reserve_for_bar(a.bounds, a.work_area.to_dimension(), bar),
             Dimension::new(
                 Length::ZERO,
                 Length::new(30.0),

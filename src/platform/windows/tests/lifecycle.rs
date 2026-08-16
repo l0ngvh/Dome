@@ -24,7 +24,7 @@ fn window_destroyed_fills_screen() {
     assert!(!env.is_offscreen(w2));
     assert_h_tiled(
         &[env.dim(w2)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
 }
@@ -37,10 +37,9 @@ fn window_minimized_removes_from_tiling() {
 
     env.minimize_window(w2);
 
-    // w1 should now fill the screen
     assert_h_tiled(
         &[env.dim(w1)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
     // w2 stays tracked as a minimized window (not deleted), reachable
@@ -59,10 +58,9 @@ fn user_minimize_then_restore() {
 
     env.unminimize_window(w2);
     assert_eq!(minimized_json_len(&env.dome), 0);
-    // Both windows should be tiled again
     assert_h_tiled(
         &[env.dim(w1), env.dim(w2)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
 }
@@ -74,20 +72,16 @@ fn move_size_suppresses_placement() {
 
     let placed = env.dim(w1);
 
-    // Simulate user starting a drag
     env.dome.move_size_started(w1);
 
     // Add a second window -- triggers relayout, but w1 should be skipped
     let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
-    // w1 should still be at its original position (drag suppresses placement)
     assert_eq!(env.dim(w1), placed);
 
-    // End drag -- w1 should be repositioned on next layout
     env.dome.clear_move_state(w1);
     env.dome.apply_layout();
 
-    // Now both should be tiled
     assert!(!env.is_offscreen(w1));
     assert!(!env.is_offscreen(w2));
 }
@@ -99,16 +93,10 @@ fn monitors_changed_updates_layout() {
 
     let before = env.dim(w1);
 
-    // Monitor shrinks
     let new_monitor = MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
-        dimension: Dimension::new(
-            Length::ZERO,
-            Length::ZERO,
-            Length::new(1280.0),
-            Length::new(720.0),
-        ),
+        work_area: PixelRect::new(0, 0, 1280, 720),
         bounds: Dimension::new(
             Length::ZERO,
             Length::ZERO,
@@ -205,7 +193,7 @@ fn title_changed_manages_unknown_window() {
     assert!(!env.is_offscreen(w1));
     assert_h_tiled(
         &[env.dim(w1)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
 }
@@ -218,11 +206,10 @@ fn delete_currently_displayed_window() {
 
     env.destroy_window(w1);
 
-    // Remaining window fills screen
     assert!(!env.is_offscreen(w2));
     assert_h_tiled(
         &[env.dim(w2)],
-        default_monitor().dimension,
+        default_monitor().work_area,
         env.config.border_size,
     );
 
@@ -286,7 +273,7 @@ fn focus_child_after_parent_does_not_focus_overlay() {
         GlobalLayoutConfig {
             partition_tree: PartitionTreeConfig {
                 automatic_tiling: false,
-                tab_bar_height: Length::new(24.0),
+                tab_bar_height: Pixels::new(24),
             },
             ..GlobalLayoutConfig::default()
         },
@@ -349,7 +336,6 @@ fn multi_action_sequence_applies_each_hub_action() {
         }
     }
 
-    // After "focus ws 1, focus ws 0", workspace 0 is focused and windows are visible
     assert!(!env.is_offscreen(w1));
     assert!(!env.is_offscreen(w2));
 }
@@ -389,7 +375,6 @@ fn user_drag_keeps_tiling_overlay() {
     env.dome.move_size_started(w1);
     env.dome.apply_layout();
 
-    // Dragged window should not have been repositioned.
     assert_eq!(env.dim(w1), placed_w1);
     // Overlay must remain visible with both tiling windows; w2's border
     // must survive the drag.
@@ -408,8 +393,6 @@ fn empty_monitor_clears_tiling_overlay() {
     // No windows added. The primary monitor's tiling overlay exists from Dome::new.
     env.dome.apply_layout();
 
-    // Monitor has zero tiling windows and zero containers, so the overlay
-    // must be hidden.
     assert!(matches!(
         env.tiling_overlays()[0].state,
         TilingOverlayState::Hidden
@@ -422,7 +405,6 @@ fn monitor_dpi_changed_unknown_handle_noop() {
     let w = env.open(1, "App", "app.exe", SPAWN_DIM);
     let before = env.dim(w);
 
-    // Call with a bogus handle; should not panic or change placement.
     env.dome.monitor_dpi_changed(0xDEAD_BEEF_u64 as isize, 192);
     env.dome.apply_layout();
 
@@ -439,7 +421,7 @@ fn monitor_dpi_changed_same_scale_is_noop() {
     let w = env.open(1, "App", "app.exe", SPAWN_DIM);
     let before = env.dim(w);
 
-    // DPI 96 == scale 1.0, same as the fixture default. Placement must not change.
+    // DPI 96 is scale 1.0, same as the fixture default.
     env.dome.monitor_dpi_changed(1, 96);
     env.dome.apply_layout();
     let after1 = env.dim(w);
@@ -448,7 +430,6 @@ fn monitor_dpi_changed_same_scale_is_noop() {
     assert_eq!(after1.width, before.width);
     assert_eq!(after1.height, before.height);
 
-    // Call again with the same DPI; still a no-op.
     env.dome.monitor_dpi_changed(1, 96);
     env.dome.apply_layout();
     let after2 = env.dim(w);
@@ -466,40 +447,24 @@ fn dpi_change_then_apply_layout_places_at_new_scale() {
     let before = env.dim(w);
     assert!(before.width > Length::new(0.0));
 
-    // Change primary monitor from 96 DPI (1.0x) to 144 DPI (1.5x).
+    // 144 DPI is scale 1.5.
     env.dome.monitor_dpi_changed(1, 144);
     env.dome.apply_layout();
 
     let after = env.dim(w);
-    // Hub delivers frames in physical pixels. DPI change scales border but
-    // not the physical monitor dimension, so the content rect shrinks by
-    // 2 * border * (scale - 1) per axis.
-    let border = Length::new(env.config.border_size);
-    let expected_x = (before.x * 1.5).round();
-    let expected_y = (before.y * 1.5).round();
-    let expected_w = (before.width - border).round();
-    let expected_h = (before.height - border).round();
+    // Hub delivers frames in physical pixels. A DPI change scales the border but not the
+    // physical monitor work area, so the content rect shrinks by the extra border the new
+    // scale adds. At this test's 1.5 that extra happens to equal one unscaled border.
+    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
+    let expected_x = before.x * 1.5;
+    let expected_y = before.y * 1.5;
+    let expected_w = before.width - border;
+    let expected_h = before.height - border;
 
-    assert!(
-        (after.x - expected_x).abs() < Length::new(2.0),
-        "x: expected ~{expected_x}, got {}",
-        after.x
-    );
-    assert!(
-        (after.y - expected_y).abs() < Length::new(2.0),
-        "y: expected ~{expected_y}, got {}",
-        after.y
-    );
-    assert!(
-        (after.width - expected_w).abs() < Length::new(2.0),
-        "w: expected ~{expected_w}, got {}",
-        after.width
-    );
-    assert!(
-        (after.height - expected_h).abs() < Length::new(2.0),
-        "h: expected ~{expected_h}, got {}",
-        after.height
-    );
+    assert_eq!(after.x, expected_x);
+    assert_eq!(after.y, expected_y);
+    assert_eq!(after.width, expected_w);
+    assert_eq!(after.height, expected_h);
 }
 
 #[test]
@@ -512,32 +477,28 @@ fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
         vec![default_monitor(), second],
     );
 
-    // Add one window on primary.
     let w_a = env.open(1, "WinA", "a.exe", SPAWN_DIM);
     let before_a = env.dim(w_a);
 
-    // Add one window on secondary.
     env.run_actions("focus monitor right");
     let w_b = env.open(2, "WinB", "b.exe", SPAWN_DIM);
     let before_b = env.dim(w_b);
 
-    // Simulate DPI change only on secondary (192 DPI = 2.0x).
+    // 192 DPI is scale 2.0.
     env.dome.monitor_dpi_changed(2, 192);
     env.dome.apply_layout();
 
-    // Primary window placement must be unchanged (scale stayed 1.0).
     let after_a = env.dim(w_a);
     assert_eq!(after_a.x, before_a.x);
     assert_eq!(after_a.y, before_a.y);
     assert_eq!(after_a.width, before_a.width);
     assert_eq!(after_a.height, before_a.height);
 
-    // Secondary window placement must reflect the 2.0x scale change.
     // Hub delivers frames in physical pixels. DPI change scales border but
-    // not the physical monitor dimension, so the content rect shifts by
+    // not the physical monitor work area, so the content rect shifts by
     // border * (new_scale - old_scale) per axis and shrinks by 2 * that.
     let after_b = env.dim(w_b);
-    let border = Length::new(env.config.border_size);
+    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
     let expected_x = before_b.x + border;
     let expected_y = before_b.y + border;
     let expected_w = before_b.width - border * 2.0;
@@ -572,7 +533,6 @@ fn wm_getdpiscaledsize_reply_returns_current_size() {
     assert_eq!(output.cx, 1920);
     assert_eq!(output.cy, 1080);
 
-    // Zero-size edge case.
     let zero = SIZE { cx: 0, cy: 0 };
     let out_zero = crate::platform::windows::wm_getdpiscaledsize_reply(zero);
     assert_eq!(out_zero.cx, 0);

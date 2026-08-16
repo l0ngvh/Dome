@@ -1,14 +1,14 @@
 use crate::core::node::WindowRestrictions;
-use crate::core::tests::{default_dim, setup, snapshot, titled};
+use crate::core::tests::{default_rect, setup, snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
 fn focus_left_right_in_horizontal_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
 
     hub.focus_left();
     assert_snapshot!(snapshot(&hub), @r"
@@ -99,10 +99,10 @@ fn focus_left_right_in_horizontal_container() {
 fn focus_up_down_in_vertical_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
 
     hub.focus_up();
     assert_snapshot!(snapshot(&hub), @r"
@@ -193,22 +193,22 @@ fn focus_up_down_in_vertical_container() {
 fn focus_right_selects_first_child_of_next_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w7"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w7"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w8"), default_rect(), WindowRestrictions::None);
     hub.focus_up();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w9"), default_rect(), WindowRestrictions::None);
 
     // Focus w0
     hub.focus_left();
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=15.00)
-        Window(id=WindowId(3), x=112.50, y=0.00, w=37.50, h=15.00)
-        Window(id=WindowId(1), x=75.00, y=0.00, w=37.50, h=15.00, highlighted, spawn=right)
+        Window(id=WindowId(3), x=113.00, y=0.00, w=37.00, h=15.00)
+        Window(id=WindowId(1), x=75.00, y=0.00, w=38.00, h=15.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w6, Container])
         Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[Container, w8])
@@ -223,7 +223,7 @@ fn focus_right_selects_first_child_of_next_container() {
     |                                                                         |*                                    *|                                   |
     |                                                                         |*                                    *|                                   |
     |                                                                         |*                                    *|                                   |
-    |                                                                         |*                 W1                 *|                W3                 |
+    |                                                                         |*                 W1                 *|                 W3                |
     |                                                                         |*                                    *|                                   |
     |                                                                         |*                                    *|                                   |
     |                                                                         |*                                    *|                                   |
@@ -249,12 +249,12 @@ fn focus_right_selects_first_child_of_next_container() {
 
     // focus_right should select w2 (first child of first nested container)
     hub.focus_right();
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=15.00)
-        Window(id=WindowId(3), x=112.50, y=0.00, w=37.50, h=15.00, highlighted, spawn=right)
-        Window(id=WindowId(1), x=75.00, y=0.00, w=37.50, h=15.00)
+        Window(id=WindowId(3), x=113.00, y=0.00, w=37.00, h=15.00, highlighted, spawn=right)
+        Window(id=WindowId(1), x=75.00, y=0.00, w=38.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w6, Container])
         Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[Container, w8])
@@ -269,7 +269,7 @@ fn focus_right_selects_first_child_of_next_container() {
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *
-    |                                                                         ||                 W1                 |*                W3                 *
+    |                                                                         ||                 W1                 |*                 W3                *
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *
@@ -299,19 +299,19 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
     let mut hub = setup();
 
     // Create: [w0, [w1, [w2, w3]]]
-    hub.insert_window(titled("w10"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w10"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w11"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w12"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w12"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w13"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w13"), default_rect(), WindowRestrictions::None);
 
     hub.focus_left();
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(3), x=112.50, y=15.00, w=37.50, h=15.00)
-        Window(id=WindowId(2), x=75.00, y=15.00, w=37.50, h=15.00, highlighted, spawn=right)
+        Window(id=WindowId(3), x=113.00, y=15.00, w=37.00, h=15.00)
+        Window(id=WindowId(2), x=75.00, y=15.00, w=38.00, h=15.00, highlighted, spawn=right)
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w10, Container])
@@ -342,7 +342,7 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
     |                                                                         |*                                    *|                                   |
     |                                                                         |*                                    *|                                   |
     |                                                                         |*                                    *|                                   |
-    |                                                                         |*                 W2                 *|                W3                 |
+    |                                                                         |*                 W2                 *|                 W3                |
     |                                                                         |*                                    *|                                   |
     |                                                                         |*                                    *|                                   |
     |                                                                         |*                                    *|                                   |
@@ -352,11 +352,11 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
     ");
     hub.focus_left();
 
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(3), x=112.50, y=15.00, w=37.50, h=15.00)
-        Window(id=WindowId(2), x=75.00, y=15.00, w=37.50, h=15.00)
+        Window(id=WindowId(3), x=113.00, y=15.00, w=37.00, h=15.00)
+        Window(id=WindowId(2), x=75.00, y=15.00, w=38.00, h=15.00)
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w10, Container])
@@ -387,7 +387,7 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
     *                                                                         *|                                    ||                                   |
     *                                                                         *|                                    ||                                   |
     *                                                                         *|                                    ||                                   |
-    *                                                                         *|                 W2                 ||                W3                 |
+    *                                                                         *|                 W2                 ||                 W3                |
     *                                                                         *|                                    ||                                   |
     *                                                                         *|                                    ||                                   |
     *                                                                         *|                                    ||                                   |
@@ -401,22 +401,22 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
 fn focus_down_from_nested_container_goes_to_grandparent_next() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w14"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w14"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w15"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w15"), default_rect(), WindowRestrictions::None);
     hub.focus_up();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w16"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w16"), default_rect(), WindowRestrictions::None);
     hub.focus_left();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w17"), default_dim(), WindowRestrictions::None);
-    assert_snapshot!(snapshot(&hub), @r"
+    hub.insert_window(titled("w17"), default_rect(), WindowRestrictions::None);
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00)
         Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=15.00)
-        Window(id=WindowId(3), x=0.00, y=7.50, w=75.00, h=7.50, highlighted, spawn=bottom)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=7.50)
+        Window(id=WindowId(3), x=0.00, y=8.00, w=75.00, h=7.00, highlighted, spawn=bottom)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=8.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, w15])
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=15.00, titles=[Container, w16])
         Container(id=ContainerId(2), x=0.00, y=0.00, w=75.00, h=15.00, titles=[w14, w17])
@@ -433,8 +433,8 @@ fn focus_down_from_nested_container_goes_to_grandparent_next() {
     ***************************************************************************|                                    W2                                   |
     *                                                                         *|                                                                         |
     *                                                                         *|                                                                         |
-    *                                    W3                                   *|                                                                         |
     *                                                                         *|                                                                         |
+    *                                    W3                                   *|                                                                         |
     *                                                                         *|                                                                         |
     ***************************************************************************+-------------------------------------------------------------------------+
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -455,13 +455,13 @@ fn focus_down_from_nested_container_goes_to_grandparent_next() {
     ");
     hub.focus_down();
 
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00, highlighted, spawn=bottom)
         Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=15.00)
-        Window(id=WindowId(3), x=0.00, y=7.50, w=75.00, h=7.50)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=7.50)
+        Window(id=WindowId(3), x=0.00, y=8.00, w=75.00, h=7.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=8.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, w15])
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=15.00, titles=[Container, w16])
         Container(id=ContainerId(2), x=0.00, y=0.00, w=75.00, h=15.00, titles=[w14, w17])
@@ -478,8 +478,8 @@ fn focus_down_from_nested_container_goes_to_grandparent_next() {
     +-------------------------------------------------------------------------+|                                    W2                                   |
     |                                                                         ||                                                                         |
     |                                                                         ||                                                                         |
-    |                                    W3                                   ||                                                                         |
     |                                                                         ||                                                                         |
+    |                                    W3                                   ||                                                                         |
     |                                                                         ||                                                                         |
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     ******************************************************************************************************************************************************
@@ -505,12 +505,12 @@ fn focus_right_from_last_child_goes_to_next_sibling_in_parent() {
     let mut hub = setup();
 
     // Create: [w0, w1] [w2]
-    hub.insert_window(titled("w18"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w18"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w19"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w19"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w20"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w20"), default_rect(), WindowRestrictions::None);
 
     // Focus w1 (last in nested container)
     hub.focus_left();
@@ -606,12 +606,12 @@ fn focus_right_from_last_child_goes_to_next_sibling_in_parent() {
 fn focus_down_into_horizontal_nested_container() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w21"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w21"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w22"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w22"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w23"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w24"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w23"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w24"), default_rect(), WindowRestrictions::None);
 
     // Move to middle
     hub.focus_left();
@@ -710,8 +710,8 @@ fn focus_down_into_horizontal_nested_container() {
 fn focus_left_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w25"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w26"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w25"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w26"), default_rect(), WindowRestrictions::None);
     hub.focus_left();
     hub.focus_left(); // Already at leftmost
 
@@ -760,8 +760,8 @@ fn focus_left_at_boundary_does_nothing() {
 fn focus_right_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w27"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w28"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w27"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w28"), default_rect(), WindowRestrictions::None);
     hub.focus_right(); // Already at rightmost
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -809,9 +809,9 @@ fn focus_right_at_boundary_does_nothing() {
 fn focus_up_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w29"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w29"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w30"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w30"), default_rect(), WindowRestrictions::None);
     hub.focus_up();
     hub.focus_up(); // Already at topmost
 
@@ -860,9 +860,9 @@ fn focus_up_at_boundary_does_nothing() {
 fn focus_down_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w31"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w31"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w32"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w32"), default_rect(), WindowRestrictions::None);
     hub.focus_down(); // Already at bottommost
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -909,11 +909,11 @@ fn focus_down_at_boundary_does_nothing() {
 #[test]
 fn focus_from_inside_tabbed_parent_goes_to_parent_sibling() {
     let mut hub = setup();
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
 
     hub.focus_left();
@@ -963,11 +963,11 @@ fn focus_from_inside_tabbed_parent_goes_to_parent_sibling() {
 fn focus_into_container_uses_last_focused_window() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w33"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w34"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w33"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w34"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w35"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w36"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w35"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w36"), default_rect(), WindowRestrictions::None);
 
     hub.focus_up();
     assert_snapshot!(snapshot(&hub), @r"
@@ -1107,16 +1107,16 @@ fn focus_into_container_uses_last_focused_window() {
 fn focus_left_skips_tabbed_grandparent() {
     let mut hub = setup();
 
-    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
     let w1 = hub
-        .insert_window(titled("W1"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("W1"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.toggle_spawn_mode();
     let w2 = hub
-        .insert_window(titled("W2"), default_dim(), WindowRestrictions::None)
+        .insert_window(titled("W2"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
 
     hub.set_focus(w1);
     hub.toggle_container_layout();
@@ -1124,8 +1124,8 @@ fn focus_left_skips_tabbed_grandparent() {
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(3), x=112.50, y=2.00, w=37.50, h=28.00)
-        Window(id=WindowId(2), x=75.00, y=2.00, w=37.50, h=28.00, highlighted, spawn=right)
+        Window(id=WindowId(3), x=113.00, y=2.00, w=37.00, h=28.00)
+        Window(id=WindowId(2), x=75.00, y=2.00, w=38.00, h=28.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container])
         Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, titles=[W1, Container])
@@ -1148,7 +1148,7 @@ fn focus_left_skips_tabbed_grandparent() {
     |                                                                         |*                                    *|                                   |
     |                                                                         |*                                    *|                                   |
     |                                    W0                                   |*                                    *|                                   |
-    |                                                                         |*                 W2                 *|                W3                 |
+    |                                                                         |*                 W2                 *|                 W3                |
     |                                                                         |*                                    *|                                   |
     |                                                                         |*                                    *|                                   |
     |                                                                         |*                                    *|                                   |
@@ -1169,8 +1169,8 @@ fn focus_left_skips_tabbed_grandparent() {
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(3), x=112.50, y=2.00, w=37.50, h=28.00)
-        Window(id=WindowId(2), x=75.00, y=2.00, w=37.50, h=28.00)
+        Window(id=WindowId(3), x=113.00, y=2.00, w=37.00, h=28.00)
+        Window(id=WindowId(2), x=75.00, y=2.00, w=38.00, h=28.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container])
         Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, titles=[W1, Container])
@@ -1193,7 +1193,7 @@ fn focus_left_skips_tabbed_grandparent() {
     *                                                                         *|                                    ||                                   |
     *                                                                         *|                                    ||                                   |
     *                                    W0                                   *|                                    ||                                   |
-    *                                                                         *|                 W2                 ||                W3                 |
+    *                                                                         *|                 W2                 ||                 W3                |
     *                                                                         *|                                    ||                                   |
     *                                                                         *|                                    ||                                   |
     *                                                                         *|                                    ||                                   |
@@ -1223,7 +1223,7 @@ fn focus_direction_noop() {
     hub.focus_down();
     assert_eq!(before, snapshot(&hub));
 
-    hub.insert_window(titled("w37"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w37"), default_rect(), WindowRestrictions::None);
     let before = snapshot(&hub);
     hub.focus_left();
     assert_eq!(before, snapshot(&hub));

@@ -1,9 +1,9 @@
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST};
 
-use crate::core::{Dimension, Physical};
+use crate::core::{LimitObservation, Physical, PixelRect};
 
-/// Opaque window identity. Replaces `ManagedHwnd` throughout the codebase.
+/// Opaque window identity.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct HwndId(isize);
 
@@ -73,7 +73,7 @@ pub(crate) enum ShowCmd {
 pub(crate) trait ManageExternalWindow: Send + Sync {
     fn id(&self) -> HwndId;
     fn pid(&self) -> u32;
-    fn set_position(&self, z: ZOrder, dim: Dimension<Physical>);
+    fn set_position(&self, z: ZOrder, rect: PixelRect<Physical>);
     fn move_offscreen(&self);
     fn show_cmd(&self, cmd: ShowCmd);
     fn close(&self);
@@ -97,10 +97,10 @@ pub(crate) trait InspectExternalWindow: Send + Sync {
     /// Sibling of `get_process_name`. Returns the full path from
     /// `QueryFullProcessImageNameW` without splitting the basename off.
     fn get_process_path(&self) -> anyhow::Result<String>;
-    fn get_size_constraints(&self) -> (f32, f32, f32, f32);
-    /// Returns the visible frame bounds excluding invisible window borders,
-    /// in physical pixels. Same coordinate space as `set_position`.
-    fn get_visible_rect(&self) -> Dimension<Physical>;
+    fn get_size_constraints(&self) -> LimitObservation;
+    /// Excludes invisible window borders, unlike `get_pixel_rect`.
+    /// Same coordinate space as `set_position`.
+    fn get_visible_rect(&self) -> PixelRect<Physical>;
     fn get_app_display_name(&self) -> Option<String>;
     /// Native OS monitor ownership. Non-blocking; safe on external HWNDs.
     fn get_monitor(&self) -> isize;

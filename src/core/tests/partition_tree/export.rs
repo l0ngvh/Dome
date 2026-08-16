@@ -2,7 +2,7 @@ use crate::config::{SplitMode, TreeLayoutNode, WindowMatcher};
 use crate::core::node::WindowRestrictions;
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim, titled,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, titled,
 };
 
 #[test]
@@ -30,7 +30,7 @@ fn export_single_foreign_window() {
         .build();
     hub.focus_workspace("1");
     let ws_id = hub.current_workspace();
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
 
     let result = hub.export_workspace(ws_id);
     assert_eq!(
@@ -65,7 +65,7 @@ fn export_occupied_window_slot_uses_slot_matcher() {
 
     hub.insert_window(
         titled("preferred-title"),
-        default_dim(),
+        default_rect(),
         WindowRestrictions::None,
     );
 
@@ -87,9 +87,9 @@ fn export_foreign_container_with_two_windows() {
         .build();
     hub.focus_workspace("1");
     let ws_id = hub.current_workspace();
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
 
     let result = hub.export_workspace(ws_id);
     assert_eq!(
@@ -121,10 +121,10 @@ fn export_tabbed_container() {
         .build();
     hub.focus_workspace("1");
     let ws_id = hub.current_workspace();
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
 
     let result = hub.export_workspace(ws_id);
     assert_eq!(
@@ -157,12 +157,12 @@ fn export_nested_containers() {
     hub.focus_workspace("1");
     let ws_id = hub.current_workspace();
 
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
 
     let result = hub.export_workspace(ws_id);
     assert_eq!(
@@ -220,9 +220,9 @@ fn export_mixed_occupied_and_foreign() {
         .build();
     hub.focus_workspace("1");
     let ws_id = hub.current_workspace();
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("BBB"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("AAA"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("BBB"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("AAA"), default_rect(), WindowRestrictions::None);
 
     let result = hub.export_workspace(ws_id);
     assert_eq!(

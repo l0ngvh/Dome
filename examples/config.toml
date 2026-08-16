@@ -1,8 +1,8 @@
 # Dome configuration file
 # Changes to this file are automatically reloaded (hot reload)
 
-# Border size in pixels (default: 4.0)
-border_size = 4.0
+# Border size in pixels (default: 4)
+border_size = 4
 
 # Theme: one of "latte", "frappe", "macchiato", "mocha" (default: mocha)
 theme = "mocha"
@@ -24,17 +24,17 @@ fullscreen = [
   { process = "slides.exe" },
 ]
 
-# Minimum window size - float for pixels, string for percentage (default: "5%")
-min_width = 200
-min_height = "10%"
+# Minimum window size - whole number for pixels, string for percentage (default: "5%")
+minimum_width = 200
+minimum_height = "10%"
 
-# Maximum window size - float for pixels, string for percentage (default: 0 = no limit)
+# Maximum window size - whole number for pixels, string for percentage (default: 0 = no limit)
 # Windows that hit max constraints are centered within their allocated space
-max_width = 800
-max_height = "50%"
+maximum_width = 800
+maximum_height = "50%"
 
 [partition_tree]
-tab_bar_height = 24.0       # height of the tab bar in tabbed containers, logical pixels
+tab_bar_height = 24         # height of the tab bar in tabbed containers, logical pixels
 automatic_tiling = true     # pick split direction based on focused window dimensions
 
 [master]

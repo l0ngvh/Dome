@@ -24,14 +24,14 @@ impl std::fmt::Display for MonitorId {
     }
 }
 
-/// Core is coordinate-system-agnostic: `dimension` holds whatever rect
+/// Core is coordinate-system-agnostic: `work_area` holds whatever rect
 /// the platform supplies in its own native frame (logical on macOS,
 /// physical on Windows). Core never characterises or converts the
 /// unit -- all layout math is unit-agnostic.
 #[derive(Debug, Clone)]
 pub(crate) struct Monitor {
     pub(super) name: String,
-    pub(super) dimension: Dimension,
+    pub(super) work_area: PixelRect,
     /// Multiplier applied to config-denominated lengths before use in
     /// layout math on this monitor. Stored here so `SizeConstraint::resolve`
     /// can convert logical config values without re-reading platform state.
@@ -58,8 +58,8 @@ pub(crate) struct Workspace {
     /// set to false in that case
     pub(super) is_float_focused: bool,
     /// Float ids in this workspace, ordered by z-index (last is topmost).
-    /// Each id's screen-absolute dim lives on the window itself, in
-    /// `DisplayMode::Float { dim }`. Focusing a float moves it to the end.
+    /// Each id's screen-absolute rect lives on the window itself, in
+    /// `DisplayMode::Float`. Focusing a float moves it to the end.
     pub(super) float_windows: Vec<WindowId>,
     /// All fullscreen windows in this workspace, order by z-index with the last is the top most
     /// window. Only the top most fullscreen window is displayed.
@@ -107,7 +107,7 @@ pub(super) enum DisplayMode {
     #[default]
     Tiling,
     Float {
-        dim: Dimension,
+        border_box: PixelRect,
         occupy: Option<FloatFullscreenMatcherId>,
     },
     Fullscreen {
@@ -131,29 +131,20 @@ pub(crate) enum WindowRestrictions {
     None,
     /// Blocks all user-initiated operations globally (Windows exclusive fullscreen).
     BlockAll,
-    /// Blocks toggle_fullscreen, toggle_float, move_to_monitor on this window.
-    /// Allows move_to_workspace — fullscreen windows can move across workspaces.
-    /// Protects platform-initiated fullscreen — only the platform can undo it.
+    /// Protects platform-initiated fullscreen. Only the platform can undo it.
     ProtectFullscreen,
 }
 
-/// Per-platform metadata for a window (title, app name, etc.). Each platform
-/// provides its own concrete type implementing this trait.
 pub(crate) trait WindowMetadata:
     std::fmt::Display + std::fmt::Debug + Send + Sync + 'static
 {
-    /// Human-readable app name used by the minimized window listing.
     fn app_name(&self) -> Option<String>;
-    /// Current window title, if any.
     fn title(&self) -> Option<&str>;
-    /// Update the window title.
     fn set_title(&mut self, title: String);
-    /// Clone into a boxed trait object.
     fn clone_box(&self) -> Box<dyn WindowMetadata>;
 
     fn matches_window_matcher(&self, matcher: &WindowMatcher) -> bool;
 
-    /// Synthesise a `WindowMatcher` from this window's metadata.
     /// Every populated platform field is included for maximum specificity.
     fn to_window_matcher(&self) -> WindowMatcher;
 
@@ -166,7 +157,6 @@ pub(crate) trait WindowMetadata:
     }
 }
 
-/// Represents a single application window
 #[derive(Debug)]
 pub(crate) struct Window {
     pub(super) workspace: Option<WorkspaceId>,
@@ -174,10 +164,7 @@ pub(crate) struct Window {
     pub(super) restrictions: WindowRestrictions,
     is_minimized: bool,
     pub(super) metadata: Box<dyn WindowMetadata>,
-    pub(super) min_width: f32,
-    pub(super) min_height: f32,
-    pub(super) max_width: f32,
-    pub(super) max_height: f32,
+    pub(super) limits: SizeLimits,
 }
 
 impl Node for Window {
@@ -192,17 +179,13 @@ impl Clone for Window {
             mode: self.mode,
             restrictions: self.restrictions,
             is_minimized: self.is_minimized,
-            min_width: self.min_width,
-            min_height: self.min_height,
-            max_width: self.max_width,
-            max_height: self.max_height,
+            limits: self.limits,
         }
     }
 }
 
 impl Window {
-    /// Returns the workspace this window is attached to. None iff the
-    /// window is minimized (is_minimized <=> workspace().is_none()).
+    /// None iff the window is minimized (is_minimized <=> workspace().is_none()).
     pub(crate) fn workspace(&self) -> Option<WorkspaceId> {
         self.workspace
     }
@@ -226,28 +209,25 @@ impl Window {
             restrictions: WindowRestrictions::None,
             is_minimized: false,
             metadata,
-            min_width: 0.0,
-            min_height: 0.0,
-            max_width: 0.0,
-            max_height: 0.0,
+            limits: SizeLimits::default(),
         }
     }
 
     pub(super) fn float(
         workspace: WorkspaceId,
-        dim: Dimension,
+        border_box: PixelRect,
         metadata: Box<dyn WindowMetadata>,
     ) -> Self {
         Self {
             workspace: Some(workspace),
-            mode: DisplayMode::Float { dim, occupy: None },
+            mode: DisplayMode::Float {
+                border_box,
+                occupy: None,
+            },
             restrictions: WindowRestrictions::None,
             is_minimized: false,
             metadata,
-            min_width: 0.0,
-            min_height: 0.0,
-            max_width: 0.0,
-            max_height: 0.0,
+            limits: SizeLimits::default(),
         }
     }
 
@@ -262,19 +242,12 @@ impl Window {
             restrictions,
             is_minimized: false,
             metadata,
-            min_width: 0.0,
-            min_height: 0.0,
-            max_width: 0.0,
-            max_height: 0.0,
+            limits: SizeLimits::default(),
         }
     }
 
-    pub(crate) fn min_size(&self) -> (f32, f32) {
-        (self.min_width, self.min_height)
-    }
-
-    pub(crate) fn max_size(&self) -> (f32, f32) {
-        (self.max_width, self.max_height)
+    pub(crate) fn limits(&self) -> SizeLimits {
+        self.limits
     }
 
     pub(crate) fn title(&self) -> &str {
@@ -307,8 +280,7 @@ pub(crate) struct Logical;
 
 /// Unit marker for rectangles expressed in **physical pixels** (raw device coords).
 /// Used on Windows (PMv2 context: `GetWindowRect`, `SetWindowPos`, `GetMonitorInfoW`,
-/// DWM frame bounds). See `src/platform/windows/handle.rs::get_dimension` for the
-/// cross-DPI virtualization rationale.
+/// DWM frame bounds).
 #[cfg_attr(
     not(target_os = "windows"),
     expect(
@@ -318,15 +290,13 @@ pub(crate) struct Logical;
 )]
 pub(crate) struct Physical;
 
-/// Per-target alias pinning core's `Dimension` to one concrete unit. `Hub` and every
-/// core DTO keep the bare `Dimension` spelling and resolve to `Dimension<Unit>`.
+/// Per-target alias pinning core's rects and scalars to one concrete unit. `Hub` and every
+/// core DTO keep the bare `PixelRect` spelling and resolve to `PixelRect<Unit>`.
 #[cfg(target_os = "windows")]
 pub(crate) type Unit = Physical;
 #[cfg(not(target_os = "windows"))]
 pub(crate) type Unit = Logical;
 
-/// Trait encoding the logical-to-target conversion for each unit marker.
-/// `Logical::from_logical` is identity; `Physical::from_logical` multiplies by scale.
 /// Dispatch is on the target unit (not the input) so adding a new target (e.g. Linux)
 /// is just `impl UnitKind for NewMarker` plus a cfg arm on `Unit`.
 pub(crate) trait UnitKind {
@@ -403,12 +373,12 @@ impl<U> Length<U> {
         Self::new(self.v.abs())
     }
 
-    pub(crate) fn round(self) -> Self {
-        Self::new(self.v.round())
-    }
-
     pub(crate) fn clamp(self, lo: Self, hi: Self) -> Self {
         Self::new(self.v.clamp(lo.v, hi.v))
+    }
+
+    pub(crate) fn from_pixels(px: Pixels<U>) -> Self {
+        Self::new(px.v as f32)
     }
 }
 
@@ -437,9 +407,6 @@ impl<U> std::fmt::Display for Length<U> {
 }
 
 impl Length<Logical> {
-    /// Convert a logical config length into the binary's `Unit`. Identity on
-    /// macOS; multiplies by `scale` on Windows. This is the only method that
-    /// crosses the logical-to-unit boundary; core arithmetic reads go through it.
     pub(crate) fn to_unit(self, scale: f32) -> Length<Unit> {
         Length::new(<Unit as UnitKind>::from_logical(self.v, scale))
     }
@@ -454,17 +421,50 @@ impl Length<Logical> {
     }
 }
 
-/// Effective per-child layout constraints in the `Length` unit.
+/// Effective per-child layout constraints in the `Length` unit, in border-box
+/// space.
 ///
-/// `Length::ZERO` on a `max_*` field means "unbounded" on that axis. This
-/// matches the platform-side encoding of `Window::max_size` (zero means
-/// "no max"). Containers always set both maxes to `Length::ZERO`.
+/// `Length::ZERO` on a `max_*` field means "unbounded" on that axis. Containers
+/// always set both maxes to `Length::ZERO`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Constraints {
     pub(crate) min_width: Length,
     pub(crate) min_height: Length,
     pub(crate) max_width: Length,
     pub(crate) max_height: Length,
+}
+
+/// OS-reported size limits, in content-box space, which is what an app's stated
+/// minimum or maximum describes.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct SizeLimits {
+    pub(crate) min_width: Option<Length<Unit>>,
+    pub(crate) min_height: Option<Length<Unit>>,
+    pub(crate) max_width: Option<Length<Unit>>,
+    pub(crate) max_height: Option<Length<Unit>>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) enum LimitUpdate {
+    #[default]
+    Unchanged,
+    #[cfg_attr(
+        all(not(test), not(target_os = "windows")),
+        expect(
+            dead_code,
+            reason = "only the Windows shell reports a genuine no-limit observation"
+        )
+    )]
+    Cleared,
+    Set(Length<Unit>),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct LimitObservation {
+    pub(crate) min_width: LimitUpdate,
+    pub(crate) min_height: LimitUpdate,
+    pub(crate) max_width: LimitUpdate,
+    pub(crate) max_height: LimitUpdate,
 }
 
 impl Length<Unit> {
@@ -520,16 +520,119 @@ impl<U> SubAssign for Length<U> {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for Length<Logical> {
-    /// Deserializes a non-negative `f32` from TOML/serde into `Length<Logical>`.
-    /// Lives next to the type definition to keep serialisation coherent with the type.
-    /// Only `serde::Deserialize`/`Deserializer`/`Error::custom` are used -- no OS deps.
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let v = f32::deserialize(d)?;
-        if v < 0.0 {
-            return Err(serde::de::Error::custom("length must be non-negative"));
+/// A whole number of units, tagged with the same unit marker as `Length`. Where a
+/// `Length` holds any `f32`, this holds only a value already on the pixel grid.
+pub(crate) struct Pixels<U = Unit> {
+    v: i32,
+    _unit: PhantomData<fn() -> U>,
+}
+
+// Manual impls avoid the `U: Trait` bounds a derive would infer, as on `Length` above.
+impl<U> Clone for Pixels<U> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<U> Copy for Pixels<U> {}
+
+impl<U> std::fmt::Debug for Pixels<U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pixels").field("v", &self.v).finish()
+    }
+}
+
+impl<U> PartialEq for Pixels<U> {
+    fn eq(&self, other: &Self) -> bool {
+        self.v == other.v
+    }
+}
+
+impl<U> Eq for Pixels<U> {}
+
+impl<U> PartialOrd for Pixels<U> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<U> Ord for Pixels<U> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.v.cmp(&other.v)
+    }
+}
+
+// Intentionally no From<i32> and no From<Pixels> for Length. An Into would put the two
+// named crossings, Pixels::round and Length::from_pixels, back out of sight.
+impl<U> Pixels<U> {
+    pub(crate) const ZERO: Self = Self::new(0);
+
+    pub(crate) const fn new(v: i32) -> Self {
+        Self {
+            v,
+            _unit: PhantomData,
         }
-        Ok(Length::new(v))
+    }
+
+    pub(crate) fn round(length: Length<U>) -> Self {
+        Self::new(length.v.round() as i32)
+    }
+
+    pub(crate) const fn value(self) -> i32 {
+        self.v
+    }
+
+    #[cfg_attr(
+        target_os = "windows",
+        expect(
+            dead_code,
+            reason = "only the macOS borderless-fullscreen tolerance check compares distances"
+        )
+    )]
+    pub(crate) fn abs(self) -> Self {
+        Self::new(self.v.abs())
+    }
+
+    pub(crate) fn max(self, other: Self) -> Self {
+        Self::new(self.v.max(other.v))
+    }
+
+    pub(crate) fn min(self, other: Self) -> Self {
+        Self::new(self.v.min(other.v))
+    }
+}
+
+impl<U> Add for Pixels<U> {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        Self::new(self.v + rhs.v)
+    }
+}
+
+impl<U> Sub for Pixels<U> {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self {
+        Self::new(self.v - rhs.v)
+    }
+}
+
+impl<U> Mul<i32> for Pixels<U> {
+    type Output = Self;
+    fn mul(self, rhs: i32) -> Self {
+        Self::new(self.v * rhs)
+    }
+}
+
+impl<U> Mul<Pixels<U>> for i32 {
+    type Output = Pixels<U>;
+    fn mul(self, rhs: Pixels<U>) -> Pixels<U> {
+        Pixels::new(self * rhs.v)
+    }
+}
+
+impl<U> Div<i32> for Pixels<U> {
+    type Output = Self;
+    fn div(self, rhs: i32) -> Self {
+        Self::new(self.v / rhs)
     }
 }
 
@@ -544,11 +647,8 @@ pub(crate) struct Dimension<U = Unit> {
 }
 
 // Manual Debug avoids a `U: Debug` bound that #[derive(Debug)] would infer.
-// The phantom field contributes nothing to the output.
 impl<U> std::fmt::Debug for Dimension<U> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Reaches into Length's private v field to keep inline @"" snapshots byte-stable
-        // across the Dimension->Length retag; .value() is not available for Length<Logical>.
         f.debug_struct("Dimension")
             .field("x", &self.x.v)
             .field("y", &self.y.v)
@@ -558,8 +658,6 @@ impl<U> std::fmt::Debug for Dimension<U> {
     }
 }
 
-// Manual PartialEq avoids a `U: PartialEq` bound that #[derive(PartialEq)]
-// would infer. Only the Length fields matter; the phantom tag is zero-sized.
 impl<U> PartialEq for Dimension<U> {
     fn eq(&self, other: &Self) -> bool {
         self.x == other.x
@@ -569,9 +667,6 @@ impl<U> PartialEq for Dimension<U> {
     }
 }
 
-// Manual Copy/Clone impls avoid a `U: Copy`/`U: Clone` bound that
-// #[derive(Copy, Clone)] would infer. PhantomData<fn() -> U> is
-// unconditionally Copy+Clone.
 impl<U> Copy for Dimension<U> {}
 impl<U> Clone for Dimension<U> {
     fn clone(&self) -> Self {
@@ -580,9 +675,8 @@ impl<U> Clone for Dimension<U> {
 }
 
 impl<U> Dimension<U> {
-    /// Four positional `Length<U>` args. Does not catch positional swaps
-    /// (e.g. x vs width) since all share the same type; a builder would
-    /// be needed for that, which is out of scope.
+    /// Does not catch positional swaps (e.g. x vs width) since all four args share
+    /// the same type. A builder would be needed for that, which is out of scope.
     pub(crate) const fn new(
         x: Length<U>,
         y: Length<U>,
@@ -596,27 +690,184 @@ impl<U> Dimension<U> {
             height,
         }
     }
-
-    /// Pixel-snap all four fields via `Length::round`. This is a semantics
-    /// choice ("snap placement to whole pixels before writing to the OS"),
-    /// not a unit crossing. Keeping it here rather than inside the FFI
-    /// wrapper lets the shell decide when to snap and preserves
-    /// `Dimension<U>` as the shared boundary currency.
-    pub(crate) fn round(self) -> Self {
-        Self::new(
-            self.x.round(),
-            self.y.round(),
-            self.width.round(),
-            self.height.round(),
-        )
-    }
 }
 
-/// Manual `Default` avoids a `U: Default` bound that `#[derive(Default)]` would
-/// infer. Zero rectangle is meaningful as an initial placeholder.
+/// Zero rectangle is meaningful as an initial placeholder.
 impl<U> Default for Dimension<U> {
     fn default() -> Self {
         Self::new(Length::ZERO, Length::ZERO, Length::ZERO, Length::ZERO)
+    }
+}
+
+/// A rectangle whose four edges lie on integer unit boundaries, so the on-grid
+/// invariant is carried by the representation rather than by a rounding call at
+/// each producer. The integer backing is load-bearing: placements are compared
+/// for exact equality after an OS round-trip, which is not sound on `f32`.
+pub(crate) struct PixelRect<U = Unit> {
+    x: Pixels<U>,
+    y: Pixels<U>,
+    width: Pixels<U>,
+    height: Pixels<U>,
+}
+
+// Manual impls avoid the `U: Trait` bounds a derive would infer, as on Dimension above.
+impl<U> std::fmt::Debug for PixelRect<U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PixelRect")
+            .field("x", &self.x.v)
+            .field("y", &self.y.v)
+            .field("width", &self.width.v)
+            .field("height", &self.height.v)
+            .finish()
+    }
+}
+
+impl<U> PartialEq for PixelRect<U> {
+    fn eq(&self, other: &Self) -> bool {
+        self.x == other.x
+            && self.y == other.y
+            && self.width == other.width
+            && self.height == other.height
+    }
+}
+
+impl<U> Eq for PixelRect<U> {}
+
+impl<U> Copy for PixelRect<U> {}
+impl<U> Clone for PixelRect<U> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<U> PixelRect<U> {
+    pub(crate) const ZERO: Self = Self::new(0, 0, 0, 0);
+
+    /// Deliberately stays on `i32`. This is the raw entry point, where a caller asserts
+    /// gridness by choosing it, and `from_pixels` is the sibling for typed callers.
+    pub(crate) const fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
+        Self {
+            x: Pixels::new(x),
+            y: Pixels::new(y),
+            width: Pixels::new(width),
+            height: Pixels::new(height),
+        }
+    }
+
+    pub(crate) const fn from_pixels(
+        x: Pixels<U>,
+        y: Pixels<U>,
+        width: Pixels<U>,
+        height: Pixels<U>,
+    ) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    /// Rounds every edge to nearest. The far edges are derived from `x + width` rather
+    /// than by rounding the extents, because `round(x) + round(width)` can disagree with
+    /// `round(x + width)`, which opens gaps between adjacent boxes and overshoots the
+    /// monitor on the last one.
+    pub(crate) fn from_dimension(dim: Dimension<U>) -> Self {
+        let left = dim.x.v.round() as i32;
+        let top = dim.y.v.round() as i32;
+        let right = (dim.x + dim.width).v.round() as i32;
+        let bottom = (dim.y + dim.height).v.round() as i32;
+        Self::new(left, top, right - left, bottom - top)
+    }
+
+    /// The largest grid-aligned rectangle contained by `dim`: the origin moves up to
+    /// the next whole unit and the far edge back to the previous one, so the result can
+    /// only shrink. Used for the monitor work area, which is a region a window must stay
+    /// inside. Rounding to nearest would let a window cover a fraction of a pixel a
+    /// status bar reserved.
+    pub(crate) fn from_dimension_inward(dim: Dimension<U>) -> Self {
+        let left = dim.x.v.ceil() as i32;
+        let top = dim.y.v.ceil() as i32;
+        let right = (dim.x + dim.width).v.floor() as i32;
+        let bottom = (dim.y + dim.height).v.floor() as i32;
+        Self::new(left, top, (right - left).max(0), (bottom - top).max(0))
+    }
+
+    pub(crate) fn to_dimension(self) -> Dimension<U> {
+        Dimension::new(
+            Length::from_pixels(self.x),
+            Length::from_pixels(self.y),
+            Length::from_pixels(self.width),
+            Length::from_pixels(self.height),
+        )
+    }
+
+    pub(crate) const fn x(self) -> Pixels<U> {
+        self.x
+    }
+
+    pub(crate) const fn y(self) -> Pixels<U> {
+        self.y
+    }
+
+    pub(crate) const fn width(self) -> Pixels<U> {
+        self.width
+    }
+
+    pub(crate) const fn height(self) -> Pixels<U> {
+        self.height
+    }
+
+    // Adds through the private fields because the `Add` impl is not const-callable.
+    pub(crate) const fn right(self) -> Pixels<U> {
+        Pixels::new(self.x.v + self.width.v)
+    }
+
+    pub(crate) const fn bottom(self) -> Pixels<U> {
+        Pixels::new(self.y.v + self.height.v)
+    }
+
+    /// Mirrors `strategy::clip`, including returning `None` on an empty intersection,
+    /// so the two cannot drift apart in meaning. Exact on integers: an intersection of
+    /// two grid-aligned rectangles is grid-aligned, so nothing needs rounding after.
+    pub(crate) fn clip(self, bounds: Self) -> Option<Self> {
+        let x1 = self.x.max(bounds.x);
+        let y1 = self.y.max(bounds.y);
+        let x2 = self.right().min(bounds.right());
+        let y2 = self.bottom().min(bounds.bottom());
+        if x1 >= x2 || y1 >= y2 {
+            return None;
+        }
+        Some(Self::from_pixels(x1, y1, x2 - x1, y2 - y1))
+    }
+
+    /// `<=` rather than `==` so an inverted extent counts as empty, matching what
+    /// `strategy::clip` rejects.
+    pub(crate) const fn is_empty(self) -> bool {
+        self.width.v <= 0 || self.height.v <= 0
+    }
+
+    /// Clamps extent at zero rather than going negative. The origin is still pushed
+    /// inward, so a box narrower than `2 * border` ends up empty at an origin past
+    /// its own far edge.
+    pub(crate) fn inset_by(self, border: Pixels<U>) -> Self {
+        Self::from_pixels(
+            self.x + border,
+            self.y + border,
+            (self.width - border * 2).max(Pixels::ZERO),
+            (self.height - border * 2).max(Pixels::ZERO),
+        )
+    }
+
+    /// The exact left inverse of `inset_by` for any box wider and taller than
+    /// `2 * border`. Below that `inset_by` clamps its extents and the original is lost.
+    pub(crate) fn outset_by(self, border: Pixels<U>) -> Self {
+        Self::from_pixels(
+            self.x - border,
+            self.y - border,
+            self.width + border * 2,
+            self.height + border * 2,
+        )
     }
 }
 

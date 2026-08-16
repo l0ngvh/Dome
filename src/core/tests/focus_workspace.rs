@@ -1,22 +1,22 @@
 use crate::core::node::WindowRestrictions;
-use crate::core::tests::{default_dim, setup, snapshot, titled};
+use crate::core::tests::{default_rect, setup, snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
 fn switch_workspace_attaches_windows_correctly() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
 
     hub.focus_workspace("1");
 
-    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
 
     hub.focus_workspace("0");
 
-    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(4))
@@ -64,7 +64,7 @@ fn switch_workspace_attaches_windows_correctly() {
 fn focus_same_workspace() {
     let mut hub = setup();
 
-    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
     let initial_workspace = hub.current_workspace();
     hub.focus_workspace("0");
 
