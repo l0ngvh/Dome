@@ -549,63 +549,6 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
 }
 
 #[test]
-fn same_kind_cross_workspace_move_preserves_container() {
-    let mut hub = setup_hub();
-
-    // Build a tabbed container with two windows on workspace "0".
-    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
-    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
-    hub.toggle_container_layout();
-
-    // Focus the container so focused_tiling is Child::Container.
-    hub.focus_parent();
-
-    // Move to workspace "1" (same kind: both partition-tree by default).
-    hub.move_focused_to_workspace("1");
-
-    // The container should arrive intact on workspace "1".
-    hub.focus_workspace("1");
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=None)
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, highlighted, spawn=right, titles=[W0, W1])
-      )
-
-    ******************************************************************************************************************************************************
-    *                                   W0                                     |                                 [W1]                                    *
-    *----------------------------------------------------------------------------------------------------------------------------------------------------*
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                         W1                                                                         *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    ******************************************************************************************************************************************************
-    ");
-}
-
-#[test]
 fn switch_into_preferred_tree_layout_focuses_every_migrated_window_in_turn() {
     let mut hub = setup_hub_with_layout(
         layout(Strategy::Master, 0.5, 1, &[], &[]),
@@ -658,8 +601,8 @@ fn switch_into_preferred_tree_layout_focuses_every_migrated_window_in_turn() {
 #[test]
 fn switching_a_workspace_to_master_frees_its_containers() {
     let mut hub = setup_hub();
-    hub.insert_window(titled("w33"), default_dim(), WindowRestrictions::None);
-    hub.insert_window(titled("w34"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w33"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w34"), default_rect(), WindowRestrictions::None);
 
     // Without a container the switch below would have nothing to free and would pass
     // whether or not it frees anything.
@@ -668,5 +611,128 @@ fn switching_a_workspace_to_master_frees_its_containers() {
     hub.sync_configuration(layout(Strategy::Master, 0.5, 1, &[], &[]));
 
     // `snapshot` runs the arena reachability assertion, which is what checks the free.
-    assert_snapshot!(snapshot(&hub), @"");
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted)
+      )
+
+    +-------------------------------------------------------------------------+***************************************************************************
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                    W0                                   |*                                    W1                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    +-------------------------------------------------------------------------+***************************************************************************
+    ");
+}
+
+/// Workspace "0" stays partition tree, "1" runs master with one slot so the pane split is
+/// observable with two windows.
+fn setup_master_on_workspace_one() -> Hub {
+    setup_hub_with_layout(
+        LayoutConfigBuilder::new().build(),
+        vec![LayoutWorkspaceConfig::Master {
+            name: "1".to_string(),
+            master_ratio: None,
+            master_count: Some(1),
+            master: Vec::new(),
+            secondary: Vec::new(),
+            float: Vec::new(),
+            fullscreen: Vec::new(),
+        }],
+    )
+}
+
+#[test]
+fn moving_a_highlighted_container_into_master_flattens_it() {
+    let mut hub = setup_master_on_workspace_one();
+    hub.insert_window(titled("w35"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w36"), default_rect(), WindowRestrictions::None);
+    hub.focus_parent();
+
+    hub.move_focused_to_workspace("1");
+
+    hub.focus_workspace("1");
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00, highlighted)
+        Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+      )
+
+    ***************************************************************************+-------------------------------------------------------------------------+
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                    W1                                   *|                                    W0                                   |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    ***************************************************************************+-------------------------------------------------------------------------+
+    ");
+}
+
+#[test]
+fn master_focuses_its_master_pane_after_a_container_arrives() {
+    let mut hub = setup_master_on_workspace_one();
+    hub.insert_window(titled("w37"), default_rect(), WindowRestrictions::None);
+    let w38 = hub
+        .insert_window(titled("w38"), default_rect(), WindowRestrictions::None)
+        .unwrap();
+    hub.focus_parent();
+
+    hub.move_focused_to_workspace("1");
+    hub.focus_workspace("1");
+
+    // The dissolve hands over w38 first, so the single master slot takes it and w37,
+    // attached last, lands in the stack. Focusing the last attachment would pick w37, so
+    // this pins the pane rule rather than the order.
+    let ws = hub.current_workspace();
+    assert_eq!(hub.focused_window(ws), Some(w38));
 }

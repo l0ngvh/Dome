@@ -350,11 +350,22 @@ impl TilingStrategy for MasterStrategy {
     }
 
     fn reattach_child(&mut self, hub: &mut HubAccess, child: Child, ws_id: WorkspaceId) {
-        let Child::Window(id) = child else {
-            panic!("MasterStrategy does not support Container children");
-        };
-        self.attach_window(hub, id, ws_id);
-        self.set_focus(hub, id);
+        let windows = hub.take_windows(child);
+        assert!(
+            !windows.is_empty(),
+            "reattach_child received {child}, which carried no windows"
+        );
+        for id in windows {
+            self.attach_window(hub, id, ws_id);
+        }
+        // A later arrival can evict an earlier one out of the master pane, so the window
+        // attached last need not be the one in it.
+        let focus = self
+            .workspaces
+            .get(&ws_id)
+            .unwrap()
+            .last_focused_in(Pane::Master);
+        self.set_focus(hub, focus);
     }
 
     fn migrate(

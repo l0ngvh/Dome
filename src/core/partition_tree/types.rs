@@ -169,8 +169,16 @@ pub(super) struct TilingWindowData {
 
 impl TilingWindowData {
     pub(super) fn new(workspace: WorkspaceId) -> Self {
+        Self::with_parent(Parent::Workspace(workspace))
+    }
+
+    pub(super) fn in_container(container: ContainerId) -> Self {
+        Self::with_parent(Parent::Container(container))
+    }
+
+    fn with_parent(parent: Parent) -> Self {
         TilingWindowData {
-            parent: Parent::Workspace(workspace),
+            parent,
             // Zero placeholder -- layout_workspace at the end of this function
             // computes the real rect before any reader observes this entry.
             dimension: Dimension::default(),

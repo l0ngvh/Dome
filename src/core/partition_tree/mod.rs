@@ -196,16 +196,27 @@ impl TilingStrategy for PartitionTreeStrategy {
         let focused = self.workspaces.get(&ws_id)?.focused_tiling?;
         self.detach_child(hub, focused);
 
-        if let Child::Window(wid) = focused {
-            self.tiling_windows.remove(&wid);
+        // Ordered after the detach, which still reads the state being dropped.
+        for node in hub.children_dfs(focused) {
+            match node {
+                Child::Window(wid) => {
+                    self.tiling_windows.remove(&wid);
+                }
+                Child::Container(cid) => {
+                    self.tiling_containers.remove(&cid);
+                }
+            }
         }
         Some(focused)
     }
 
     fn reattach_child(&mut self, hub: &mut HubAccess, child: Child, ws_id: WorkspaceId) {
-        if let Child::Window(wid) = child {
-            self.tiling_windows
-                .insert(wid, TilingWindowData::new(ws_id));
+        match child {
+            Child::Window(wid) => {
+                self.tiling_windows
+                    .insert(wid, TilingWindowData::new(ws_id));
+            }
+            Child::Container(cid) => self.rebuild_subtree_state(hub, cid, ws_id),
         }
         self.attach_child_according_to_spawn_mode(hub, child, ws_id);
         self.set_focus(hub, child);
