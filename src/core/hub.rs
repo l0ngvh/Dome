@@ -1,7 +1,8 @@
 use crate::action::MonitorTarget;
 use crate::config::{
     Config, LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraints, Strategy,
-    WindowMatcher, WindowMode,
+    WindowMatcher, WindowMode, default_border_size, default_master_config,
+    default_partition_tree_config, default_strategy,
 };
 
 use super::allocator::{Allocator, NodeId};
@@ -140,17 +141,13 @@ impl From<&Config> for GlobalLayoutConfig {
 impl Default for GlobalLayoutConfig {
     fn default() -> Self {
         Self {
-            strategy: Strategy::PartitionTree,
-            border_size: Pixels::new(4),
-            partition_tree: PartitionTreeConfig {
-                tab_bar_height: Pixels::new(24),
-                automatic_tiling: true,
-            },
-            master: MasterConfig {
-                master_ratio: 0.5,
-                master_count: 1,
-            },
+            strategy: default_strategy(),
+            border_size: default_border_size(),
+            partition_tree: default_partition_tree_config(),
+            master: default_master_config(),
             size_constraints: SizeConstraints::default(),
+            // Empty rather than `Config::default()`'s bundled matcher lists, so a fixture
+            // manages every window it inserts.
             float: Vec::new(),
             fullscreen: Vec::new(),
             ignore: Vec::new(),

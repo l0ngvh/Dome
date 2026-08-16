@@ -322,7 +322,10 @@ impl MacOS {
             &[],
             vec![],
             &[],
-            &[ExitNativeFullscreen { cg_id, x, y, w, h }],
+            &[ExitNativeFullscreen {
+                cg_id,
+                rect: PixelRect::new(x, y, w, h),
+            }],
         );
     }
 
@@ -379,10 +382,7 @@ impl MacOS {
         ax.is_minimized.set(false);
         dome.windows_moved(vec![WindowMove {
             cg_id,
-            x,
-            y,
-            w,
-            h,
+            rect: PixelRect::new(x, y, w, h),
             observed_at: DebounceBurst {
                 first: observed_at,
                 last: observed_at,
@@ -402,10 +402,7 @@ impl MacOS {
             .into_iter()
             .map(|(cg_id, x, y, w, h)| WindowMove {
                 cg_id,
-                x,
-                y,
-                w,
-                h,
+                rect: PixelRect::new(x, y, w, h),
                 observed_at: DebounceBurst {
                     first: observed_at,
                     last: observed_at,
@@ -428,10 +425,7 @@ impl MacOS {
                 .into_iter()
                 .map(|(cg_id, x, y, w, h)| WindowMove {
                     cg_id,
-                    x,
-                    y,
-                    w,
-                    h,
+                    rect: PixelRect::new(x, y, w, h),
                     observed_at: DebounceBurst {
                         first: observed_at,
                         last: observed_at,
@@ -556,10 +550,7 @@ fn end_drag(
     let observed_at = Instant::now();
     dome.windows_moved(vec![WindowMove {
         cg_id,
-        x,
-        y,
-        w,
-        h,
+        rect: PixelRect::new(x, y, w, h),
         observed_at: DebounceBurst {
             first: observed_at,
             last: observed_at,

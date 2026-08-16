@@ -25,11 +25,11 @@ pub(crate) use node::Direction;
 #[cfg(target_os = "windows")]
 pub(crate) use node::Physical;
 pub(crate) use node::PixelRect;
+pub(crate) use node::Pixels;
 pub(crate) use node::{
     ContainerId, Dimension, Length, LimitObservation, LimitUpdate, Logical, MonitorId, Unit,
     WindowId, WindowMetadata, WindowRestrictions,
 };
-pub(crate) use node::{Pixels, pixels_from_config};
 pub(crate) use strategy::TilingAction;
 
 pub(crate) use dto::WorkspaceInfo;

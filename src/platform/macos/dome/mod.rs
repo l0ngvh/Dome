@@ -171,10 +171,7 @@ pub(in crate::platform::macos) struct DebounceBurst {
 
 pub(in crate::platform::macos) struct WindowMove {
     pub(in crate::platform::macos) cg_id: CGWindowID,
-    pub(in crate::platform::macos) x: i32,
-    pub(in crate::platform::macos) y: i32,
-    pub(in crate::platform::macos) w: i32,
-    pub(in crate::platform::macos) h: i32,
+    pub(in crate::platform::macos) rect: PixelRect,
     pub(in crate::platform::macos) observed_at: DebounceBurst,
 }
 
@@ -342,10 +339,7 @@ impl Dome {
                 // NativeFullscreen doesn't emit any move/resize event, so we need to simulate one
                 self.window_moved(
                     window_id,
-                    e.x,
-                    e.y,
-                    e.w,
-                    e.h,
+                    e.rect,
                     DebounceBurst {
                         first: now,
                         last: now,
@@ -381,7 +375,7 @@ impl Dome {
                 continue;
             };
             let window_id = entry.window_id;
-            self.window_moved(window_id, m.x, m.y, m.w, m.h, m.observed_at);
+            self.window_moved(window_id, m.rect, m.observed_at);
         }
         self.flush_layout();
     }
@@ -522,10 +516,7 @@ impl Dome {
             let now = Instant::now();
             self.window_moved(
                 window_id,
-                pos.0.value() as i32,
-                pos.1.value() as i32,
-                size.0.value() as i32,
-                size.1.value() as i32,
+                PixelRect::from_dimension(Dimension::new(pos.0, pos.1, size.0, size.1)),
                 DebounceBurst {
                     first: now,
                     last: now,

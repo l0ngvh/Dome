@@ -9,7 +9,7 @@ use std::str::FromStr;
 use crate::action::{
     Action, Actions, FocusTarget, MonitorTarget, MoveTarget, TabDirection, ToggleTarget,
 };
-use crate::core::{Length, Logical, Pixels, Unit, pixels_from_config};
+use crate::core::{Length, Logical, Pixels, Unit};
 use crate::font::{FontConfig, MAX_FONT_SIZE, MIN_FONT_SIZE, default_text_size};
 use crate::theme::{Flavor, Theme};
 
@@ -475,8 +475,7 @@ impl WalkRecover for LayoutConfig {
 impl WalkRecover for PartitionTreeConfig {
     fn walk(w: &mut Walker) -> Self {
         let tab_bar_height = w.field("tab_bar_height", default_tab_bar_height());
-        // Zero would make the tab bar band zero-height, and the Windows overlay asserts
-        // when asked for a zero-sized surface.
+        // A zero-height band drives the Windows tab bar overlay into a zero-sized surface.
         let tab_bar_height = if tab_bar_height > Pixels::ZERO {
             tab_bar_height
         } else {
@@ -662,6 +661,29 @@ impl SizeConstraint {
 
     pub(crate) fn default_min() -> Self {
         SizeConstraint::Percent(5.0)
+    }
+}
+
+/// Takes `f64` because narrowing first lands `100000000.5` on an exact `1e8` that then passes
+/// as whole.
+fn pixels_from_config<E: serde::de::Error>(v: f64) -> Result<Pixels<Logical>, E> {
+    if !v.is_finite() || v < 0.0 {
+        return Err(E::custom(
+            "pixel value must be a finite non-negative number",
+        ));
+    }
+    if v.fract() != 0.0 {
+        return Err(E::custom("pixel value must be a whole number"));
+    }
+    if v > i32::MAX as f64 {
+        return Err(E::custom("pixel value is out of range"));
+    }
+    Ok(Pixels::new(v as i32))
+}
+
+impl<'de> Deserialize<'de> for Pixels<Logical> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        pixels_from_config(f64::deserialize(d)?)
     }
 }
 
@@ -888,7 +910,7 @@ pub(crate) struct LayoutConfig {
     pub(crate) workspace: Vec<LayoutWorkspaceConfig>,
 }
 
-fn default_strategy() -> Strategy {
+pub(crate) fn default_strategy() -> Strategy {
     Strategy::PartitionTree
 }
 fn default_automatic_tiling() -> bool {
@@ -900,13 +922,13 @@ fn default_master_ratio() -> f32 {
 fn default_master_count() -> usize {
     1
 }
-fn default_partition_tree_config() -> PartitionTreeConfig {
+pub(crate) fn default_partition_tree_config() -> PartitionTreeConfig {
     PartitionTreeConfig {
         tab_bar_height: default_tab_bar_height(),
         automatic_tiling: default_automatic_tiling(),
     }
 }
-fn default_master_config() -> MasterConfig {
+pub(crate) fn default_master_config() -> MasterConfig {
     MasterConfig {
         master_ratio: default_master_ratio(),
         master_count: default_master_count(),
@@ -1075,7 +1097,7 @@ impl LogLevel {
     }
 }
 
-fn default_border_size() -> Pixels<Logical> {
+pub(crate) fn default_border_size() -> Pixels<Logical> {
     Pixels::new(4)
 }
 
@@ -1740,7 +1762,12 @@ mod tests {
     #[test]
     fn example_config_parses() {
         let path = format!("{}/examples/config.toml", env!("CARGO_MANIFEST_DIR"));
-        Config::load(&path).expect("example config failed to load");
+        let config = Config::load(&path).expect("example config failed to load");
+        // An unknown key only warns, so a successful load proves nothing about spelling.
+        assert_eq!(
+            config.size_constraints.minimum_width,
+            SizeConstraint::Pixels(Pixels::new(200))
+        );
     }
 
     #[test]

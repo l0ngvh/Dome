@@ -276,10 +276,7 @@ fn dispatch_check_positions(runner: &mut DomeRunner, pid: i32, observed_at: Debo
                     .into_iter()
                     .map(|e| WindowMove {
                         cg_id: e.cg_id,
-                        x: e.x,
-                        y: e.y,
-                        w: e.w,
-                        h: e.h,
+                        rect: e.rect,
                         observed_at,
                     })
                     .collect();

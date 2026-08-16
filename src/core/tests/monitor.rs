@@ -468,10 +468,10 @@ fn monitor_scale_multiplies_size_constraints() {
     ");
 }
 
-/// Only `Unit = Physical` scales the tab bar height, so this is the one target where an
-/// integral configured height can still yield a fractional band. The scale and the odd work
-/// area together put the container origin and the band height on half units, where
-/// `round(y) + round(h)` diverges by a unit from the `round(y + h)` the content box uses.
+/// Only `Unit = Physical` scales the tab bar height, so Windows is the one target where an
+/// integral configured height still yields a fractional band. The scale and odd work area put
+/// the origin and the band height on half units, where `round(y) + round(h)` diverges from the
+/// `round(y + h)` the content box uses.
 #[cfg(target_os = "windows")]
 #[test]
 fn tabbed_band_bottom_lands_on_the_content_top() {

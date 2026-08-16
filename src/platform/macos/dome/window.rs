@@ -441,13 +441,9 @@ impl Dome {
     pub(super) fn window_moved(
         &mut self,
         window_id: WindowId,
-        x: i32,
-        y: i32,
-        w: i32,
-        h: i32,
+        new_placement: PixelRect,
         observed_at: DebounceBurst,
     ) {
-        let new_placement = PixelRect::new(x, y, w, h);
         let is_borderless_fullscreen = self.is_borderless_fullscreen_at(new_placement);
         let monitors = self.monitor_registry.all_monitors();
         let Some(window) = self.registry.by_id_mut(window_id) else {
