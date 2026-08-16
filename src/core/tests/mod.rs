@@ -22,7 +22,7 @@ use crate::config::{
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
-use crate::core::node::{Direction, Length, Logical, Pixels, WindowId};
+use crate::core::node::{Direction, Logical, Pixels, WindowId};
 use crate::core::strategy::TilingAction;
 use crate::core::{
     ContainerPlacement, FloatWindowPlacement, PixelRect, TilingWindowPlacement, WindowMetadata,
@@ -30,8 +30,8 @@ use crate::core::{
 
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;
-const TAB_BAR_HEIGHT: f32 = 2.0;
-const BORDER_SIZE: f32 = 1.0;
+const TAB_BAR_HEIGHT: i32 = 2;
+const BORDER_SIZE: i32 = 1;
 
 pub(super) fn snapshot(hub: &Hub) -> String {
     validate_hub(hub);
@@ -674,7 +674,7 @@ impl TestHubBuilder {
 
 struct LayoutConfigBuilder {
     strategy: Strategy,
-    border_size: Length<Logical>,
+    border_size: Pixels<Logical>,
     master: MasterConfig,
     partition_tree: PartitionTreeConfig,
     size_constraints: SizeConstraints,
@@ -686,13 +686,13 @@ impl LayoutConfigBuilder {
     fn new() -> Self {
         Self {
             strategy: Strategy::PartitionTree,
-            border_size: Length::<Logical>::new(BORDER_SIZE),
+            border_size: Pixels::new(BORDER_SIZE),
             master: MasterConfig {
                 master_ratio: 0.5,
                 master_count: 1,
             },
             partition_tree: PartitionTreeConfig {
-                tab_bar_height: Length::<Logical>::new(TAB_BAR_HEIGHT),
+                tab_bar_height: Pixels::new(TAB_BAR_HEIGHT),
                 automatic_tiling: false,
             },
             size_constraints: SizeConstraints {
@@ -713,7 +713,7 @@ impl LayoutConfigBuilder {
         Self { master, ..self }
     }
 
-    fn with_border_size(self, border_size: Length<Logical>) -> Self {
+    fn with_border_size(self, border_size: Pixels<Logical>) -> Self {
         Self {
             border_size,
             ..self
@@ -790,19 +790,19 @@ impl LayoutConfigBuilder {
 }
 
 struct PartitionTreeConfigBuilder {
-    tab_bar_height: Length<Logical>,
+    tab_bar_height: Pixels<Logical>,
     automatic_tiling: bool,
 }
 
 impl PartitionTreeConfigBuilder {
     fn new() -> Self {
         Self {
-            tab_bar_height: Length::<Logical>::new(TAB_BAR_HEIGHT),
+            tab_bar_height: Pixels::new(TAB_BAR_HEIGHT),
             automatic_tiling: false,
         }
     }
 
-    fn with_tab_bar_height(self, tab_bar_height: Length<Logical>) -> Self {
+    fn with_tab_bar_height(self, tab_bar_height: Pixels<Logical>) -> Self {
         Self {
             tab_bar_height,
             ..self

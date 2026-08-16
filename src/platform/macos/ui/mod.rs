@@ -248,12 +248,10 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                             mtm,
                             wgpu_factory.clone(),
                             config.clone(),
-                            frame.tab_bar_height,
                             data.cocoa_frame,
                             data.scale,
                         )
                     });
-                    overlay.set_tab_bar_height(frame.tab_bar_height);
                     overlay.set_border_thickness(data.border_thickness);
                     if data.windows.is_empty() && data.containers.is_empty() {
                         overlay.clear();

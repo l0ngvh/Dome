@@ -113,7 +113,7 @@ pub(super) enum RestrictedAction {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GlobalLayoutConfig {
     pub(crate) strategy: Strategy,
-    pub(crate) border_size: Length<Logical>,
+    pub(crate) border_size: Pixels<Logical>,
     pub(crate) partition_tree: PartitionTreeConfig,
     pub(crate) master: MasterConfig,
     pub(crate) size_constraints: SizeConstraints,
@@ -141,9 +141,9 @@ impl Default for GlobalLayoutConfig {
     fn default() -> Self {
         Self {
             strategy: Strategy::PartitionTree,
-            border_size: Length::<Logical>::new(4.0),
+            border_size: Pixels::new(4),
             partition_tree: PartitionTreeConfig {
-                tab_bar_height: Length::<Logical>::new(24.0),
+                tab_bar_height: Pixels::new(24),
                 automatic_tiling: true,
             },
             master: MasterConfig {
@@ -178,9 +178,7 @@ impl HubAccess {
     /// apart by a pixel.
     pub(super) fn border(&self, monitor: MonitorId) -> Pixels<Unit> {
         Pixels::round(
-            self.layout
-                .border_size
-                .to_unit(self.monitors.get(monitor).scale),
+            Length::from_pixels(self.layout.border_size).to_unit(self.monitors.get(monitor).scale),
         )
     }
 }

@@ -1,6 +1,6 @@
 use insta::assert_snapshot;
 
-use crate::core::node::{Length, Logical, WindowRestrictions};
+use crate::core::node::{Pixels, WindowRestrictions};
 use crate::core::tests::{
     LayoutConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder, default_rect, snapshot, titled,
 };
@@ -12,7 +12,7 @@ fn sync_config_updates_tab_bar_height() {
             LayoutConfigBuilder::new()
                 .with_partition_tree_config(
                     PartitionTreeConfigBuilder::new()
-                        .with_tab_bar_height(Length::<Logical>::new(5.0))
+                        .with_tab_bar_height(Pixels::new(5))
                         .with_automatic_tiling(true)
                         .build(),
                 )
@@ -27,7 +27,7 @@ fn sync_config_updates_tab_bar_height() {
         LayoutConfigBuilder::new()
             .with_partition_tree_config(
                 PartitionTreeConfigBuilder::new()
-                    .with_tab_bar_height(Length::<Logical>::new(10.0))
+                    .with_tab_bar_height(Pixels::new(10))
                     .with_automatic_tiling(true)
                     .build(),
             )
@@ -81,7 +81,7 @@ fn sync_config_recalculates_all_workspaces() {
             LayoutConfigBuilder::new()
                 .with_partition_tree_config(
                     PartitionTreeConfigBuilder::new()
-                        .with_tab_bar_height(Length::<Logical>::new(10.0))
+                        .with_tab_bar_height(Pixels::new(10))
                         .with_automatic_tiling(true)
                         .build(),
                 )
@@ -101,7 +101,7 @@ fn sync_config_recalculates_all_workspaces() {
         LayoutConfigBuilder::new()
             .with_partition_tree_config(
                 PartitionTreeConfigBuilder::new()
-                    .with_tab_bar_height(Length::<Logical>::new(5.0))
+                    .with_tab_bar_height(Pixels::new(5))
                     .with_automatic_tiling(true)
                     .build(),
             )

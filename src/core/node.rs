@@ -647,6 +647,31 @@ impl<U> Div<i32> for Pixels<U> {
     }
 }
 
+/// Takes `f64` rather than `f32` because the range check has to happen at the width the config
+/// arrived in. Narrowing first lands `100000000.5` on an exact `1e8` and it passes as whole.
+/// Free function rather than a method on the `Deserialize` impl because `SizeConstraint`'s visitor
+/// reaches the same guard with a bare `f64` and no `Deserializer` to delegate to.
+pub(crate) fn pixels_from_config<E: serde::de::Error>(v: f64) -> Result<Pixels<Logical>, E> {
+    if !v.is_finite() || v < 0.0 {
+        return Err(E::custom(
+            "pixel value must be a finite non-negative number",
+        ));
+    }
+    if v.fract() != 0.0 {
+        return Err(E::custom("pixel value must be a whole number"));
+    }
+    if v > i32::MAX as f64 {
+        return Err(E::custom("pixel value is out of range"));
+    }
+    Ok(Pixels::new(v as i32))
+}
+
+impl<'de> serde::Deserialize<'de> for Pixels<Logical> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        pixels_from_config(f64::deserialize(d)?)
+    }
+}
+
 /// A rectangle tagged with a compile-time unit marker (`Logical` or `Physical`).
 /// The default type parameter `Unit` is cfg-aliased per target so core code can
 /// spell plain `Dimension` without an explicit generic.

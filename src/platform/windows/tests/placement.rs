@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::{GlobalLayoutConfig, Length, Logical, Pixels};
+use crate::core::{GlobalLayoutConfig, Length, Pixels};
 
 #[test]
 fn single_window_fills_screen() {
@@ -53,7 +53,7 @@ fn reported_min_width_binds_while_zero_min_height_is_cleared() {
     // The zero height component reads as Cleared, not a zero-height minimum.
     assert_eq!(
         env.dim(w1).height,
-        SCREEN_HEIGHT - env.config.border_size.to_unit(1.0) * 2.0
+        SCREEN_HEIGHT - Length::from_pixels(env.config.border_size).to_unit(1.0) * 2.0
     );
 }
 
@@ -128,7 +128,7 @@ fn resize_detects_fullscreen() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
-    let border = Length::new(env.config.border_size.logical());
+    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
     let d = env.dim(w1);
     assert_eq!(d.x, border, "should start tiled with border inset");
 
@@ -242,7 +242,8 @@ fn tiling_border_scales_with_dpi() {
         );
         let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
         let wp = only_recorded_tiling(&env);
-        let expected_inset = Pixels::new((env.config.border_size.logical() * scale).round() as i32);
+        let expected_inset =
+            Pixels::new((env.config.border_size.value() as f32 * scale).round() as i32);
 
         assert_eq!(env.dim(w1), wp.content_box.to_dimension(), "scale {scale}");
         assert_content_box_centered_in_border_box(&wp);
@@ -291,7 +292,7 @@ fn degenerate_content_box_hides_window() {
     // so core hands the shell an empty content box.
     let mut env = TestEnv::new_with_monitors(
         Config {
-            border_size: Length::new(600.0),
+            border_size: Pixels::new(600),
             ..Config::default()
         },
         LayoutConfig::default(),
@@ -349,7 +350,7 @@ fn show_tiling_places_at_200pct_offset_monitor() {
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     env.run_actions("move monitor right");
     env.settle(10);
-    let border = Length::new(env.config.border_size.logical());
+    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
     let scaled_border = border * 2.0;
     let d = env.dim(w1);
     // Hub places directly in physical coords on the secondary monitor.
@@ -570,7 +571,7 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
     };
     let config = Config::default();
     let mut layout = GlobalLayoutConfig::default();
-    layout.partition_tree.tab_bar_height = Length::<Logical>::new(30.0);
+    layout.partition_tree.tab_bar_height = Pixels::new(30);
     let mut config = config;
     config.strategy = layout.strategy;
     config.partition_tree = layout.partition_tree;
@@ -586,7 +587,7 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
     env.settle(10);
 
     let d_before = env.dim(w2);
-    let border = Length::new(env.config.border_size.logical());
+    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
     let tab_h_1x = Length::new(30.0);
     assert_eq!(d_before.y, (border + tab_h_1x));
 
@@ -631,7 +632,7 @@ fn float_move_monitor_same_dpi_preserves_content_rect() {
     };
 
     let overlay_dim = overlay_rect.to_dimension();
-    let border = Length::new(env.config.border_size.logical());
+    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
     assert_eq!(overlay_dim.x, Length::new(200.0) - border);
     assert_eq!(overlay_dim.y, Length::new(150.0) - border);
     assert_eq!(overlay_dim.width, Length::new(600.0) + 2.0 * border);
@@ -699,7 +700,7 @@ fn float_move_monitor_different_dpi_rescales_border() {
     env.dome.apply_layout();
     env.settle(10);
 
-    let border = Length::new(env.config.border_size.logical());
+    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
     env.moves.lock().unwrap().clear();
     env.move_window_to(w1, dim(2020, 100, 400, 300));
 
@@ -768,7 +769,7 @@ fn dome_new_assigns_per_monitor_scale() {
         LayoutConfig::default(),
         vec![primary, secondary],
     );
-    let border = Length::new(env.config.border_size.logical());
+    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
 
     let w_a = env.open(1, "AppA", "a.exe", SPAWN_DIM);
     let d_a = env.dim(w_a);
@@ -801,7 +802,7 @@ fn float_drift_repositions_overlay() {
     env.flush_moves();
 
     // The overlay paints the emitted visible border box, not the raw managed-window rect.
-    let border = Length::new(env.config.border_size.logical());
+    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
     let expected_outer = Dimension::new(
         Length::new(500.0) - border,
         Length::new(300.0) - border,
@@ -847,7 +848,7 @@ fn float_dragged_past_the_screen_origin_paints_a_clipped_overlay() {
 
     // Core stores the border box at (-border, -border, 400 + 2 * border, 250 + 2 * border) and
     // clips it to the screen before emitting, so the overlay loses one border off each extent.
-    let border = Length::new(env.config.border_size.logical());
+    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
     let expected_clipped = Dimension::new(
         Length::ZERO,
         Length::ZERO,
@@ -914,7 +915,7 @@ fn float_overlay_geometry_is_stable_across_repeated_apply_layout() {
 }
 
 fn full_work_area(env: &TestEnv) -> Dimension {
-    let border = Length::new(env.config.border_size.logical());
+    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
     Dimension::new(
         border,
         border,

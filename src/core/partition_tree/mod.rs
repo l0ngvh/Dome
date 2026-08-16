@@ -20,7 +20,7 @@ use crate::config::SizeConstraints;
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
-use crate::core::node::{Length, Logical, PixelRect, WindowId, WindowMetadata, WorkspaceId};
+use crate::core::node::{Logical, PixelRect, Pixels, WindowId, WindowMetadata, WorkspaceId};
 use crate::core::strategy::{
     TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, translate,
 };
@@ -35,7 +35,7 @@ pub(crate) struct PartitionTreeStrategy {
     workspaces: HashMap<WorkspaceId, WorkspaceTilingState>,
     window_slots: Allocator<PreferredWindowSlot>,
     container_slots: Allocator<PreferredContainerSlot>,
-    tab_bar_height: Length<Logical>,
+    tab_bar_height: Pixels<Logical>,
     automatic_tiling: bool,
     size_constraints: SizeConstraints,
 }
@@ -274,7 +274,7 @@ impl TilingStrategy for PartitionTreeStrategy {
 
 impl PartitionTreeStrategy {
     pub(crate) fn new(
-        tab_bar_height: Length<Logical>,
+        tab_bar_height: Pixels<Logical>,
         automatic_tiling: bool,
         size_constraints: SizeConstraints,
     ) -> Self {

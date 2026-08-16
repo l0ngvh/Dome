@@ -714,8 +714,8 @@ fn build_op(
                         !layout.partition_tree.automatic_tiling;
                 }
                 1 => {
-                    let h = rng.random_range(10.0f32..50.0);
-                    layout.partition_tree.tab_bar_height = Length::new(h);
+                    let h = rng.random_range(10i32..50);
+                    layout.partition_tree.tab_bar_height = Pixels::new(h);
                 }
                 2 => {
                     layout.master.master_ratio = rng.random_range(0.2f32..0.8);

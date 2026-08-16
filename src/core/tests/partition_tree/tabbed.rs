@@ -1,13 +1,9 @@
 use crate::core::ContainerId;
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::NodeId;
-use crate::core::hub::MonitorLayout;
-use crate::core::node::{
-    Length, LimitObservation, LimitUpdate, Logical, PixelRect, WindowRestrictions,
-};
+use crate::core::node::{Length, LimitObservation, LimitUpdate, PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, PartitionTreeConfigBuilder, default_rect, setup, setup_with_layout,
-    snapshot, titled, titled_matcher,
+    LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
@@ -1555,53 +1551,4 @@ fn tab_bar_visible_when_min_height_exceeds_screen() {
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     ");
-}
-
-/// The monitor height and tab bar height are odd and fractional on purpose. They put the
-/// container origin on a half unit, where `round(y) + round(h)` diverges by a unit from the
-/// `round(y + h)` the content box uses.
-#[test]
-fn tabbed_band_bottom_lands_on_the_content_top() {
-    let mut hub = setup_with_layout(
-        LayoutConfigBuilder::new()
-            .with_partition_tree_config(
-                PartitionTreeConfigBuilder::new()
-                    .with_tab_bar_height(Length::<Logical>::new(24.5))
-                    .build(),
-            )
-            .build(),
-    );
-    let monitor_id = hub.focused_monitor();
-    hub.update_monitor(monitor_id, PixelRect::new(0, 0, 1000, 201), 1.0);
-
-    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
-    hub.toggle_spawn_mode();
-    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
-    hub.toggle_spawn_mode();
-    hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
-    hub.toggle_container_layout();
-
-    let placements = hub.get_visible_placements();
-    let active_tab = placements.focused_window.expect("focus on the active tab");
-    let MonitorLayout::Normal {
-        tiling_windows,
-        containers,
-        ..
-    } = &placements.monitors[0].layout
-    else {
-        panic!("expected a normally tiled monitor");
-    };
-    let tabbed = containers
-        .iter()
-        .find(|c| c.is_tabbed)
-        .expect("a tabbed container");
-    let content_top = tiling_windows
-        .iter()
-        .find(|w| w.id == active_tab)
-        .expect("the active tab is placed")
-        .border_box
-        .y();
-
-    assert_eq!(tabbed.tab_bar_band.bottom(), content_top);
 }

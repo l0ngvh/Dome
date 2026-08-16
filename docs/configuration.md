@@ -12,7 +12,7 @@ All settings are hot-reloaded on save.
 ## General
 
 ```toml
-border_size = 4.0
+border_size = 4
 theme = "mocha"
 log_level = "info"
 start_at_login = false
@@ -20,7 +20,7 @@ start_at_login = false
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `border_size` | float | `4.0` | Border width around windows, in logical pixels. |
+| `border_size` | integer | `4` | Border width around windows, in logical pixels. |
 | `theme` | string | `"mocha"` | Color theme. One of `"latte"`, `"frappe"`, `"macchiato"`, `"mocha"` ([Catppuccin](https://catppuccin.com/) flavors). |
 | `log_level` | string | `"info"` | Log verbosity. One of `trace`, `debug`, `info`, `warn`, `error`. |
 | `start_at_login` | boolean | `false` | Launch Dome at user login. |
@@ -37,7 +37,7 @@ maximum_width = 0
 maximum_height = 0
 
 [partition_tree]
-tab_bar_height = 24.0
+tab_bar_height = 24
 automatic_tiling = true
 
 [master]
@@ -48,9 +48,9 @@ master_count = 1
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `strategy` | string | `"partition_tree"` | Default tiling strategy. One of `"partition_tree"` or `"master"`. Per-workspace preferred layouts in `layout.toml` can set this per workspace. |
-| `minimum_width` / `minimum_height` | size | `"5%"` | Minimum window size. Float (e.g. `200`) parses as logical pixels. String with `%` suffix (e.g. `"10%"`) parses as percentage of workspace dimension. Use `0` to disable. |
+| `minimum_width` / `minimum_height` | size | `"5%"` | Minimum window size. A whole number (e.g. `200`) parses as logical pixels. String with `%` suffix (e.g. `"10%"`) parses as percentage of workspace dimension. Use `0` to disable. |
 | `maximum_width` / `maximum_height` | size | `0` | Maximum window size. Same parsing rules as min. `0` means no limit. Windows clamped by max are centered within their allocated space. |
-| `partition_tree.tab_bar_height` | float | `24.0` | Height of the tab bar in tabbed containers, logical pixels. This value does not auto-scale with `font.text_size`, so long tab titles may truncate earlier as the body size grows. |
+| `partition_tree.tab_bar_height` | integer | `24` | Height of the tab bar in tabbed containers, logical pixels, `>= 1`. This value does not auto-scale with `font.text_size`, so long tab titles may truncate earlier as the body size grows. |
 | `partition_tree.automatic_tiling` | boolean | `true` | Pick split direction based on the focused window's dimensions. |
 | `master.master_ratio` | float | `0.5` | Width of the master area, in `[0.1, 0.9]`. |
 | `master.master_count` | integer | `1` | Number of master windows, `>= 1`. |

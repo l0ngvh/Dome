@@ -2,9 +2,7 @@ use insta::assert_snapshot;
 
 use crate::config::SizeConstraint;
 
-use crate::core::node::{
-    Length, LimitObservation, LimitUpdate, Logical, Pixels, WindowRestrictions,
-};
+use crate::core::node::{Length, LimitObservation, LimitUpdate, Pixels, WindowRestrictions};
 use crate::core::tests::{
     LayoutConfigBuilder, PartitionTreeConfigBuilder, default_rect, setup, snapshot, titled,
 };
@@ -2092,7 +2090,7 @@ fn constraint_survives_border_size_change() {
 
     hub.sync_configuration(
         LayoutConfigBuilder::new()
-            .with_border_size(Length::<Logical>::new(5.0))
+            .with_border_size(Pixels::new(5))
             .build(),
     );
 

@@ -120,7 +120,6 @@ pub(in crate::platform::macos) struct RenderFrame {
     pub(in crate::platform::macos) float_shows: Vec<FloatShow>,
     pub(in crate::platform::macos) focused_window: Option<WindowId>,
     pub(in crate::platform::macos) focused_monitor_id: MonitorId,
-    pub(in crate::platform::macos) tab_bar_height: Length<Logical>,
     pub(in crate::platform::macos) workspaces: Vec<WorkspaceInfo>,
 }
 

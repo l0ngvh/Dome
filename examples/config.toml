@@ -1,8 +1,8 @@
 # Dome configuration file
 # Changes to this file are automatically reloaded (hot reload)
 
-# Border size in pixels (default: 4.0)
-border_size = 4.0
+# Border size in pixels (default: 4)
+border_size = 4
 
 # Theme: one of "latte", "frappe", "macchiato", "mocha" (default: mocha)
 theme = "mocha"
@@ -34,7 +34,7 @@ max_width = 800
 max_height = "50%"
 
 [partition_tree]
-tab_bar_height = 24.0       # height of the tab bar in tabbed containers, logical pixels
+tab_bar_height = 24         # height of the tab bar in tabbed containers, logical pixels
 automatic_tiling = true     # pick split direction based on focused window dimensions
 
 [master]

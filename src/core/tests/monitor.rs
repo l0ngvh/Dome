@@ -7,7 +7,9 @@ use super::{PartitionTreeConfigBuilder, TestHubBuilder};
 use crate::config::SizeConstraint;
 use crate::core::GlobalLayoutConfig;
 #[cfg(target_os = "windows")]
-use crate::core::node::{Length, Logical};
+use crate::core::hub::MonitorLayout;
+#[cfg(target_os = "windows")]
+use crate::core::node::Pixels;
 use crate::core::node::{PixelRect, WindowRestrictions};
 
 use crate::core::tests::{
@@ -387,7 +389,7 @@ fn monitor_scale_multiplies_tab_bar_height() {
     let l = LayoutConfigBuilder::new()
         .with_partition_tree_config(
             PartitionTreeConfigBuilder::new()
-                .with_tab_bar_height(Length::<Logical>::new(5.0))
+                .with_tab_bar_height(Pixels::new(5))
                 .with_automatic_tiling(true)
                 .build(),
         )
@@ -426,7 +428,7 @@ fn monitor_scale_multiplies_size_constraints() {
             LayoutConfigBuilder::new()
                 .with_partition_tree_config(
                     PartitionTreeConfigBuilder::new()
-                        .with_tab_bar_height(Length::<Logical>::new(10.0))
+                        .with_tab_bar_height(Pixels::new(10))
                         .with_automatic_tiling(false)
                         .build(),
                 )
@@ -464,4 +466,55 @@ fn monitor_scale_multiplies_size_constraints() {
         Container(id=ContainerId(0), x=0.00, y=0.00, w=500.00, h=1000.00, titles=[w0, w1, w2, w3, w4, w5])
       )
     ");
+}
+
+/// Only `Unit = Physical` scales the tab bar height, so this is the one target where an
+/// integral configured height can still yield a fractional band. The scale and the odd work
+/// area together put the container origin and the band height on half units, where
+/// `round(y) + round(h)` diverges by a unit from the `round(y + h)` the content box uses.
+#[cfg(target_os = "windows")]
+#[test]
+fn tabbed_band_bottom_lands_on_the_content_top() {
+    let mut hub = setup_with_layout(
+        LayoutConfigBuilder::new()
+            .with_partition_tree_config(
+                PartitionTreeConfigBuilder::new()
+                    .with_tab_bar_height(Pixels::new(25))
+                    .build(),
+            )
+            .build(),
+    );
+    let monitor_id = hub.focused_monitor();
+    hub.update_monitor(monitor_id, PixelRect::new(0, 0, 1000, 201), 1.5);
+
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    hub.toggle_spawn_mode();
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
+    hub.toggle_spawn_mode();
+    hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
+    hub.toggle_container_layout();
+
+    let placements = hub.get_visible_placements();
+    let active_tab = placements.focused_window.expect("focus on the active tab");
+    let MonitorLayout::Normal {
+        tiling_windows,
+        containers,
+        ..
+    } = &placements.monitors[0].layout
+    else {
+        panic!("expected a normally tiled monitor");
+    };
+    let tabbed = containers
+        .iter()
+        .find(|c| c.is_tabbed)
+        .expect("a tabbed container");
+    let content_top = tiling_windows
+        .iter()
+        .find(|w| w.id == active_tab)
+        .expect("the active tab is placed")
+        .border_box
+        .y();
+
+    assert_eq!(tabbed.tab_bar_band.bottom(), content_top);
 }

@@ -9,7 +9,7 @@ use std::str::FromStr;
 use crate::action::{
     Action, Actions, FocusTarget, MonitorTarget, MoveTarget, TabDirection, ToggleTarget,
 };
-use crate::core::{Length, Logical, Pixels, Unit};
+use crate::core::{Length, Logical, Pixels, Unit, pixels_from_config};
 use crate::font::{FontConfig, MAX_FONT_SIZE, MIN_FONT_SIZE, default_text_size};
 use crate::theme::{Flavor, Theme};
 
@@ -474,8 +474,21 @@ impl WalkRecover for LayoutConfig {
 
 impl WalkRecover for PartitionTreeConfig {
     fn walk(w: &mut Walker) -> Self {
+        let tab_bar_height = w.field("tab_bar_height", default_tab_bar_height());
+        // Zero would make the tab bar band zero-height, and the Windows overlay asserts
+        // when asked for a zero-sized surface.
+        let tab_bar_height = if tab_bar_height > Pixels::ZERO {
+            tab_bar_height
+        } else {
+            tracing::warn!(
+                field = %field_path(&w.prefix, "tab_bar_height"),
+                value = tab_bar_height.value(),
+                "Out of range, using default",
+            );
+            default_tab_bar_height()
+        };
         PartitionTreeConfig {
-            tab_bar_height: w.field("tab_bar_height", default_tab_bar_height()),
+            tab_bar_height,
             automatic_tiling: w.field("automatic_tiling", default_automatic_tiling()),
         }
     }
@@ -663,19 +676,12 @@ impl<'de> Deserialize<'de> for SizeConstraint {
             type Value = SizeConstraint;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a float for pixels or a string percentage (e.g., \"10%\")")
+                formatter
+                    .write_str("a whole number for pixels or a string percentage (e.g., \"10%\")")
             }
 
             fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
-                let val = v as f32;
-                if val < 0.0 {
-                    return Err(E::custom("pixel value must be non-negative"));
-                }
-                // Also rejects NaN and infinity, whose `fract` is NaN.
-                if val.fract() != 0.0 {
-                    return Err(E::custom("pixel value must be a whole number"));
-                }
-                Ok(SizeConstraint::Pixels(Pixels::round(Length::new(val))))
+                pixels_from_config(v).map(SizeConstraint::Pixels)
             }
 
             fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
@@ -734,7 +740,7 @@ pub(crate) enum Strategy {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub(crate) struct PartitionTreeConfig {
     #[serde(default = "default_tab_bar_height")]
-    pub(crate) tab_bar_height: Length<Logical>,
+    pub(crate) tab_bar_height: Pixels<Logical>,
     #[serde(default = "default_automatic_tiling")]
     pub(crate) automatic_tiling: bool,
 }
@@ -1021,7 +1027,7 @@ pub(crate) struct Config {
     #[serde(skip_deserializing, default = "default_keymaps")]
     pub(crate) keymaps: ModalKeymaps,
     #[serde(default = "default_border_size")]
-    pub(crate) border_size: Length<Logical>,
+    pub(crate) border_size: Pixels<Logical>,
     #[serde(default)]
     pub(crate) theme: Flavor,
     #[serde(default)]
@@ -1069,12 +1075,12 @@ impl LogLevel {
     }
 }
 
-fn default_border_size() -> Length<Logical> {
-    Length::new(4.0)
+fn default_border_size() -> Pixels<Logical> {
+    Pixels::new(4)
 }
 
-fn default_tab_bar_height() -> Length<Logical> {
-    Length::new(24.0)
+fn default_tab_bar_height() -> Pixels<Logical> {
+    Pixels::new(24)
 }
 
 impl Default for Config {
@@ -1462,7 +1468,7 @@ mod tests {
         std::fs::write(&path, "border_radius = 4\nborder_size = 5.0\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
         let config = load_or_default(path.to_str().unwrap(), Config::load);
-        assert_eq!(config.border_size.logical(), 5.0);
+        assert_eq!(config.border_size.value(), 5);
     }
 
     #[test]
@@ -1478,6 +1484,51 @@ mod tests {
         assert_eq!(
             config.size_constraints.minimum_width,
             SizeConstraint::default_min()
+        );
+    }
+
+    #[test]
+    fn fractional_border_size_falls_back_to_default() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_border_frac_{nanos}.toml"));
+        std::fs::write(&path, "border_size = 9.5\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
+        assert_eq!(config.border_size, default_border_size());
+    }
+
+    #[test]
+    fn fractional_tab_bar_height_falls_back_to_default() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_tab_bar_frac_{nanos}.toml"));
+        std::fs::write(&path, "[partition_tree]\ntab_bar_height = 40.5\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
+        assert_eq!(
+            config.partition_tree.tab_bar_height,
+            default_tab_bar_height()
+        );
+    }
+
+    #[test]
+    fn zero_tab_bar_height_falls_back_to_default() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_tab_bar_zero_{nanos}.toml"));
+        std::fs::write(&path, "[partition_tree]\ntab_bar_height = 0\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
+        assert_eq!(
+            config.partition_tree.tab_bar_height,
+            default_tab_bar_height()
         );
     }
 
@@ -1528,7 +1579,7 @@ mod tests {
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
         let config = load_or_default(path.to_str().unwrap(), Config::load);
-        assert_eq!(config.border_size.logical(), 5.0);
+        assert_eq!(config.border_size.value(), 5);
     }
 
     #[test]
@@ -1710,14 +1761,14 @@ mod tests {
         let config: Config =
             toml::from_str("[partition_tree]\ntab_bar_height = 30.0\nautomatic_tiling = false")
                 .unwrap();
-        assert_eq!(config.partition_tree.tab_bar_height.logical(), 30.0);
+        assert_eq!(config.partition_tree.tab_bar_height.value(), 30);
         assert!(!config.partition_tree.automatic_tiling);
     }
 
     #[test]
     fn partition_tree_config_defaults() {
         let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.partition_tree.tab_bar_height.logical(), 24.0);
+        assert_eq!(config.partition_tree.tab_bar_height.value(), 24);
         assert!(config.partition_tree.automatic_tiling);
     }
 
@@ -1734,7 +1785,7 @@ mod tests {
         let config: Config = toml::from_str("strategy = \"master\"\n").unwrap();
         assert_eq!(config.strategy, Strategy::Master);
         // Sub-tables still get their defaults
-        assert_eq!(config.partition_tree.tab_bar_height.logical(), 24.0);
+        assert_eq!(config.partition_tree.tab_bar_height.value(), 24);
         assert_eq!(config.master.master_ratio, 0.5);
     }
 
@@ -1774,7 +1825,7 @@ mod tests {
         std::fs::write(&path, "[partition_tree]\nfoo = 1\ntab_bar_height = 30.0\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
         let layout = load_or_default(path.to_str().unwrap(), Config::load);
-        assert_eq!(layout.partition_tree.tab_bar_height.logical(), 30.0);
+        assert_eq!(layout.partition_tree.tab_bar_height.value(), 30);
     }
 
     #[test]
@@ -2077,7 +2128,7 @@ mod tests {
         let _cleanup = CleanupFile(path.clone());
         let layout = Config::load(path.to_str().unwrap()).unwrap();
         assert_eq!(layout.strategy, Strategy::Master);
-        assert_eq!(layout.partition_tree.tab_bar_height.logical(), 32.0);
+        assert_eq!(layout.partition_tree.tab_bar_height.value(), 32);
         assert_eq!(layout.master.master_ratio, 0.6);
         assert_eq!(layout.master.master_count, 2);
     }
@@ -2133,7 +2184,7 @@ mod tests {
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
         let config = Config::load(path.to_str().unwrap()).unwrap();
-        assert_eq!(config.border_size.logical(), 5.0);
+        assert_eq!(config.border_size.value(), 5);
     }
 
     #[test]

@@ -424,7 +424,7 @@ impl PartitionTreeStrategy {
     }
 
     pub(super) fn tab_bar_length(&self, scale: f32) -> Length {
-        self.tab_bar_height.to_unit(scale)
+        Length::from_pixels(self.tab_bar_height).to_unit(scale)
     }
 }
 

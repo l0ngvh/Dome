@@ -383,24 +383,18 @@ pub(in crate::platform::windows) struct TilingOverlay {
     windows: Vec<TilingWindowPlacement>,
     containers: Vec<(ContainerPlacement, Vec<String>)>,
     config: Config,
-    tab_bar_height: Length<Logical>,
     border_thickness: Pixels<Physical>,
     window: OwnedHwnd,
     scale: f32,
 }
 
 impl TilingOverlay {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "wgpu handles travel together at construction"
-    )]
     pub(in crate::platform::windows) fn new(
         instance: &wgpu::Instance,
         adapter: &wgpu::Adapter,
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         config: Config,
-        tab_bar_height: Length<Logical>,
         monitor: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<Self>> {
@@ -449,7 +443,6 @@ impl TilingOverlay {
             containers: Vec::new(),
             border_thickness: Pixels::ZERO,
             config,
-            tab_bar_height,
             window,
             scale,
         });
@@ -572,10 +565,6 @@ impl TilingOverlayApi for TilingOverlay {
         self.config = config.clone();
     }
 
-    fn set_tab_bar_height(&mut self, height: Length<Logical>) {
-        self.tab_bar_height = height;
-    }
-
     fn window_above(&self) -> Option<HwndId> {
         let prev = unsafe { GetWindow(self.window.hwnd(), GW_HWNDPREV) }.ok();
         prev.map(HwndId::from)
@@ -678,7 +667,6 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
     );
     fn clear(&mut self);
     fn set_config(&mut self, config: &Config);
-    fn set_tab_bar_height(&mut self, height: Length<Logical>);
     /// The Win32 close-time focus walk lands here when the user closes a
     /// managed window with no obvious successor on the same monitor, replacing
     /// the process-wide focus-sink window the platform shell used to keep below
@@ -868,7 +856,6 @@ impl CreateOverlay for WgpuOverlayFactory {
     fn create_tiling_overlay(
         &self,
         config: Config,
-        tab_bar_height: Length<Logical>,
         monitor: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
@@ -878,7 +865,6 @@ impl CreateOverlay for WgpuOverlayFactory {
             Arc::clone(&self.device),
             Arc::clone(&self.queue),
             config,
-            tab_bar_height,
             monitor,
             scale,
         )?)

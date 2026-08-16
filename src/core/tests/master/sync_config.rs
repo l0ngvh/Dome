@@ -1,6 +1,6 @@
 use crate::config::{MasterConfig, Strategy};
 use crate::core::WindowRestrictions;
-use crate::core::node::{Length, LimitObservation, LimitUpdate, Logical};
+use crate::core::node::{Length, LimitObservation, LimitUpdate, Pixels};
 use crate::core::strategy::TilingAction;
 use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, snapshot,
@@ -576,7 +576,7 @@ fn constraint_survives_border_size_change() {
     hub.sync_configuration(
         LayoutConfigBuilder::new()
             .with_strategy(Strategy::Master)
-            .with_border_size(Length::<Logical>::new(5.0))
+            .with_border_size(Pixels::new(5))
             .build(),
     );
 

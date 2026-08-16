@@ -21,9 +21,9 @@ use crate::action::{
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
-    ContainerId, ContainerPlacement, Direction, FloatWindowPlacement, Hub, Length,
-    LimitObservation, Logical, MonitorId, MonitorLayout, Physical, PixelRect, Pixels, TilingAction,
-    TilingWindowPlacement, WindowId, WindowRestrictions, WorkspaceInfo,
+    ContainerId, ContainerPlacement, Direction, FloatWindowPlacement, Hub, LimitObservation,
+    MonitorId, MonitorLayout, Physical, PixelRect, Pixels, TilingAction, TilingWindowPlacement,
+    WindowId, WindowRestrictions, WorkspaceInfo,
 };
 
 use self::app_window::AppWindowApi;
@@ -86,7 +86,6 @@ pub(super) trait CreateOverlay {
     fn create_tiling_overlay(
         &self,
         config: Config,
-        tab_bar_height: Length<Logical>,
         monitor: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>>;
@@ -166,12 +165,9 @@ impl Dome {
             primary.work_area,
             primary.scale,
         );
-        if let Ok(overlay) = overlay_factory.create_tiling_overlay(
-            config.clone(),
-            config.partition_tree.tab_bar_height,
-            primary.work_area,
-            primary.scale,
-        ) {
+        if let Ok(overlay) =
+            overlay_factory.create_tiling_overlay(config.clone(), primary.work_area, primary.scale)
+        {
             tiling_overlays.insert(primary_monitor_id, overlay);
         }
         tracing::info!(
@@ -187,7 +183,6 @@ impl Dome {
                 monitors_reg.insert(monitor.handle, id, monitor.work_area, monitor.scale);
                 if let Ok(overlay) = overlay_factory.create_tiling_overlay(
                     config.clone(),
-                    config.partition_tree.tab_bar_height,
                     monitor.work_area,
                     monitor.scale,
                 ) {
@@ -233,7 +228,6 @@ impl Dome {
         self.config = new_config;
         for overlay in self.tiling_overlays.values_mut() {
             overlay.set_config(&self.config);
-            overlay.set_tab_bar_height(self.config.partition_tree.tab_bar_height);
         }
         for overlay in self.float_overlays.values_mut() {
             overlay.set_config(&self.config);
@@ -868,7 +862,6 @@ impl Dome {
             let m = self.monitors.monitor(id);
             if let Ok(overlay) = self.overlay_factory.create_tiling_overlay(
                 self.config.clone(),
-                self.config.partition_tree.tab_bar_height,
                 m.work_area(),
                 m.scale(),
             ) {

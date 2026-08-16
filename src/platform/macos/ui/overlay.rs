@@ -292,7 +292,6 @@ impl TilingOverlay {
         mtm: MainThreadMarker,
         wgpu_factory: Rc<WgpuFactory>,
         config: Config,
-        tab_bar_height: Length<Logical>,
         cocoa_frame: NSRect,
         scale: f64,
     ) -> Self {
@@ -314,15 +313,7 @@ impl TilingOverlay {
         // which is hosted as a sibling NSWindow at the same level.
         window.setIgnoresMouseEvents(true);
 
-        let view = TilingOverlayView::new(
-            mtm,
-            wgpu_factory,
-            config,
-            tab_bar_height,
-            scale,
-            flavor,
-            &font,
-        );
+        let view = TilingOverlayView::new(mtm, wgpu_factory, config, scale, flavor, &font);
         window.setContentView(Some(&view));
         window.setFrame_display(cocoa_frame, false);
         window.orderFront(None);
@@ -340,10 +331,6 @@ impl TilingOverlay {
     ) {
         self.window.setFrame_display(cocoa_frame, false);
         self.view.update(monitor, windows, containers, scale);
-    }
-
-    pub(super) fn set_tab_bar_height(&self, h: Length<Logical>) {
-        self.view.ivars().tab_bar_height.set(h);
     }
 
     pub(super) fn set_border_thickness(&self, t: Length<Logical>) {
@@ -444,7 +431,6 @@ pub(super) struct TilingOverlayViewIvars {
     windows: RefCell<Vec<TilingWindowPlacement>>,
     containers: RefCell<Vec<ContainerShow>>,
     config: RefCell<Config>,
-    tab_bar_height: Cell<Length<Logical>>,
     border_thickness: Cell<Length<Logical>>,
     scale: Cell<f64>,
 }
@@ -470,7 +456,6 @@ impl TilingOverlayView {
         mtm: MainThreadMarker,
         wgpu_factory: Rc<WgpuFactory>,
         config: Config,
-        tab_bar_height: Length<Logical>,
         scale: f64,
         flavor: Flavor,
         font: &FontConfig,
@@ -484,7 +469,6 @@ impl TilingOverlayView {
             windows: RefCell::new(Vec::new()),
             containers: RefCell::new(Vec::new()),
             config: RefCell::new(config),
-            tab_bar_height: Cell::new(tab_bar_height),
             border_thickness: Cell::new(Length::new(0.0)),
             scale: Cell::new(scale),
         };

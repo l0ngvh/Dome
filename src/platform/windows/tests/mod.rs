@@ -912,11 +912,11 @@ impl Drop for MockExternalHwnd {
 }
 
 /// Assert that windows tile horizontally across the screen.
-fn assert_h_tiled(dims: &[Dimension], screen: PixelRect, border: Length<Logical>) {
+fn assert_h_tiled(dims: &[Dimension], screen: PixelRect, border: Pixels<Logical>) {
     let screen = screen.to_dimension();
     // Every caller passes the `default_monitor`/`TestEnv::new` fixture, which is
     // scale 1.0, so the logical border is also the physical one.
-    let border_len = border.to_unit(1.0);
+    let border_len = Length::from_pixels(border).to_unit(1.0);
     assert!(!dims.is_empty());
     for (i, d) in dims.iter().enumerate() {
         assert_eq!(d.y, border_len, "window {i} y");
@@ -1102,7 +1102,6 @@ impl TilingOverlayApi for MockTilingOverlay {
         *self.font.borrow_mut() = config.font.clone();
         *self.config.borrow_mut() = config.clone();
     }
-    fn set_tab_bar_height(&mut self, _height: Length<Logical>) {}
     fn window_above(&self) -> Option<HwndId> {
         self.z_stack.window_above(self.overlay_id)
     }
@@ -1193,7 +1192,6 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
     fn create_tiling_overlay(
         &self,
         config: Config,
-        _tab_bar_height: Length<Logical>,
         monitor: PixelRect,
         _scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {

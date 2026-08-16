@@ -99,7 +99,6 @@ impl Dome {
             float_shows,
             focused_window,
             focused_monitor_id: focused_monitor,
-            tab_bar_height: self.config.partition_tree.tab_bar_height,
             workspaces: self.hub.query_workspaces(),
         }));
     }

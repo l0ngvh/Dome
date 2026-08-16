@@ -273,7 +273,7 @@ fn focus_child_after_parent_does_not_focus_overlay() {
         GlobalLayoutConfig {
             partition_tree: PartitionTreeConfig {
                 automatic_tiling: false,
-                tab_bar_height: Length::new(24.0),
+                tab_bar_height: Pixels::new(24),
             },
             ..GlobalLayoutConfig::default()
         },
@@ -455,7 +455,7 @@ fn dpi_change_then_apply_layout_places_at_new_scale() {
     // Hub delivers frames in physical pixels. A DPI change scales the border but not the
     // physical monitor work area, so the content rect shrinks by the extra border the new
     // scale adds. At this test's 1.5 that extra happens to equal one unscaled border.
-    let border = Length::new(env.config.border_size.logical());
+    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
     let expected_x = before.x * 1.5;
     let expected_y = before.y * 1.5;
     let expected_w = before.width - border;
@@ -498,7 +498,7 @@ fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
     // not the physical monitor work area, so the content rect shifts by
     // border * (new_scale - old_scale) per axis and shrinks by 2 * that.
     let after_b = env.dim(w_b);
-    let border = Length::new(env.config.border_size.logical());
+    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
     let expected_x = before_b.x + border;
     let expected_y = before_b.y + border;
     let expected_w = before_b.width - border * 2.0;

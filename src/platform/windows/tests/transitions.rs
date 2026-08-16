@@ -54,7 +54,7 @@ fn toggle_float() {
     assert!(!env.is_topmost(w1));
     assert!(env.is_topmost(w2));
     let d1 = env.dim(w1);
-    let border = env.config.border_size.logical();
+    let border = Length::from_pixels(env.config.border_size).logical();
     assert!(
         (d1.width - (SCREEN_WIDTH - Length::new(2.0 * border))).abs() < Length::new(1.0),
         "w1 should fill screen width, got {}",
