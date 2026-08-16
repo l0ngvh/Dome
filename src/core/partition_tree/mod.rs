@@ -17,6 +17,7 @@ use std::collections::HashMap;
 
 use crate::config::LayoutWorkspaceConfig;
 use crate::config::SizeConstraints;
+use crate::config::SplitMode;
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
@@ -216,7 +217,38 @@ impl TilingStrategy for PartitionTreeStrategy {
                 self.tiling_windows
                     .insert(wid, TilingWindowData::new(ws_id));
             }
-            Child::Container(cid) => self.rebuild_subtree_state(hub, cid, ws_id),
+            Child::Container(root) => {
+                // Reversed because a preorder walk yields parents first, and a container must
+                // exist before its parent links to it. The root's parent is a placeholder,
+                // overwritten by the attach below.
+                for cid in hub.containers_preorder(root).into_iter().rev() {
+                    self.tiling_containers.insert(
+                        cid,
+                        TilingContainerData::new(
+                            Parent::Workspace(ws_id),
+                            ws_id,
+                            SplitMode::Horizontal,
+                        ),
+                    );
+                    for &member in hub.containers.get(cid).children() {
+                        match member {
+                            Child::Window(wid) => {
+                                self.tiling_windows
+                                    .insert(wid, TilingWindowData::in_container(cid));
+                            }
+                            Child::Container(nested) => {
+                                self.tiling_containers.get_mut(&nested).unwrap().parent =
+                                    Parent::Container(cid);
+                            }
+                        }
+                    }
+                }
+                // Every container was rebuilt with the same default direction, so a nested
+                // subtree arrives with a container inside a same-direction container. The
+                // attach path only re-derives direction when it wraps an anchor, which an
+                // empty destination skips.
+                self.maintain_direction_invariance(hub, Parent::Container(root));
+            }
         }
         self.attach_child_according_to_spawn_mode(hub, child, ws_id);
         self.set_focus(hub, child);

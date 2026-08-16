@@ -1,9 +1,7 @@
 use crate::config::SplitMode;
 use crate::core::hub::HubAccess;
 use crate::core::node::{ContainerId, Dimension, WindowId, WorkspaceId};
-use crate::core::partition_tree::{
-    Child, Container, Parent, SpawnMode, TilingContainerData, TilingWindowData,
-};
+use crate::core::partition_tree::{Child, Container, Parent, SpawnMode, TilingContainerData};
 
 use super::PartitionTreeStrategy;
 
@@ -274,35 +272,6 @@ impl PartitionTreeStrategy {
             self.ancestors_of(Child::Window(wid))
                 .any(|(_, pid)| pid == subtree)
         })
-    }
-
-    /// Reversed because a preorder walk yields parents first, and a container must exist
-    /// before its parent links to it. The root's parent is a placeholder, overwritten by
-    /// the attach path that follows.
-    pub(super) fn rebuild_subtree_state(
-        &mut self,
-        hub: &HubAccess,
-        root: ContainerId,
-        ws_id: WorkspaceId,
-    ) {
-        for cid in hub.containers_preorder(root).into_iter().rev() {
-            self.tiling_containers.insert(
-                cid,
-                TilingContainerData::new(Parent::Workspace(ws_id), ws_id, SplitMode::Horizontal),
-            );
-            for &child in hub.containers.get(cid).children() {
-                match child {
-                    Child::Window(wid) => {
-                        self.tiling_windows
-                            .insert(wid, TilingWindowData::in_container(cid));
-                    }
-                    Child::Container(nested) => {
-                        self.tiling_containers.get_mut(&nested).unwrap().parent =
-                            Parent::Container(cid);
-                    }
-                }
-            }
-        }
     }
 
     pub(super) fn assign_subtree_to_workspace(
