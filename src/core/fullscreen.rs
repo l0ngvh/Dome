@@ -17,7 +17,7 @@ impl Hub {
             DisplayMode::Tiling => {
                 self.strategies
                     .for_workspace_mut(ws)
-                    .detach_window(&self.access, window_id);
+                    .detach_window(&mut self.access, window_id);
             }
             DisplayMode::Float { .. } => {
                 self.detach_float_from_workspace(window_id);

@@ -88,7 +88,7 @@ impl PartitionTreeStrategy {
         let tb = self.tab_bar_length(scale);
         let mut total = Length::ZERO;
         for (_, parent_id) in self.ancestors_of(focused) {
-            if self.containers.get(parent_id).is_tabbed() {
+            if self.tiling_containers.get(&parent_id).unwrap().is_tabbed() {
                 total += tb;
             }
         }

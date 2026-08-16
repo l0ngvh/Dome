@@ -1,7 +1,7 @@
 use crate::core::hub::HubAccess;
 use crate::core::node::Constraints;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
-use crate::core::partition_tree::{Child, Container, Parent};
+use crate::core::partition_tree::{Child, Parent};
 use crate::core::strategy::{VALIDATION_TOLERANCE, ValidateStrategy, window_constraints};
 
 use std::collections::HashSet;
@@ -10,6 +10,7 @@ use super::PartitionTreeStrategy;
 
 impl ValidateStrategy for PartitionTreeStrategy {
     fn validate(&self, hub: &HubAccess) {
+        let mut reachable: HashSet<ContainerId> = HashSet::new();
         for (workspace_id, workspace) in hub.workspaces.all_active() {
             self.validate_workspace_focus(hub, workspace_id, &workspace);
 
@@ -29,6 +30,7 @@ impl ValidateStrategy for PartitionTreeStrategy {
                         self.validate_window(hub, wid, expected_parent, workspace_id)
                     }
                     Child::Container(cid) => {
+                        reachable.insert(cid);
                         self.validate_container(
                             hub,
                             cid,
@@ -40,6 +42,7 @@ impl ValidateStrategy for PartitionTreeStrategy {
                 }
             }
         }
+        self.validate_container_arena(hub, &reachable);
     }
 }
 
@@ -87,7 +90,7 @@ impl PartitionTreeStrategy {
             );
         }
 
-        self.validate_focus_history(workspace_id, root);
+        self.validate_focus_history(hub, workspace_id, root);
 
         if let Some(Child::Window(wid)) = focused_tiling {
             assert_eq!(
@@ -103,10 +106,9 @@ impl PartitionTreeStrategy {
 
         if let Some(focused) = focused_tiling {
             for (child, parent_id) in self.ancestors_of(focused) {
-                let container = self.containers.get(parent_id);
-                if container.is_tabbed() {
+                if self.tiling_containers.get(&parent_id).unwrap().is_tabbed() {
                     assert_eq!(
-                        container.active_tab(),
+                        self.active_tab(hub, parent_id),
                         Some(child),
                         "Workspace {workspace_id}: tabbed container {parent_id} holds the focus \
                          path in a hidden tab, so the focused node is never drawn"
@@ -116,13 +118,19 @@ impl PartitionTreeStrategy {
         }
     }
 
-    fn validate_focus_history(&self, workspace_id: WorkspaceId, root: Option<Child>) {
+    fn validate_focus_history(
+        &self,
+        hub: &HubAccess,
+        workspace_id: WorkspaceId,
+        root: Option<Child>,
+    ) {
         let Some(state) = self.workspaces.get(&workspace_id) else {
             return;
         };
         let tree_windows: HashSet<crate::core::node::WindowId> = root
             .map(|r| {
-                self.children_dfs(r)
+                hub.children_dfs(r)
+                    .into_iter()
                     .filter_map(|c| match c {
                         Child::Window(wid) => Some(wid),
                         Child::Container(_) => None,
@@ -147,6 +155,36 @@ impl PartitionTreeStrategy {
         );
     }
 
+    /// The arena is shared, so a container the tree no longer references is a leak that
+    /// only an arena-wide sweep can see. `StrategySet` holds one `PartitionTreeStrategy`
+    /// across every tree workspace, so `reachable` covers every root and this is exact.
+    fn validate_container_arena(&self, hub: &HubAccess, reachable: &HashSet<ContainerId>) {
+        let allocated: HashSet<ContainerId> = hub
+            .containers
+            .all_active()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(
+            sorted_difference(&allocated, reachable),
+            Vec::new(),
+            "Containers allocated but reachable from no workspace root, so they leaked"
+        );
+        assert_eq!(
+            sorted_difference(reachable, &allocated),
+            Vec::new(),
+            "Containers reachable from a workspace root but not allocated"
+        );
+
+        let with_state: HashSet<ContainerId> = self.tiling_containers.keys().copied().collect();
+        assert_eq!(
+            sorted_difference(&with_state, reachable),
+            Vec::new(),
+            "Containers holding tiling state but reachable from no workspace root, so their \
+             state leaked"
+        );
+    }
+
     fn validate_container(
         &self,
         hub: &HubAccess,
@@ -155,13 +193,14 @@ impl PartitionTreeStrategy {
         workspace_id: WorkspaceId,
         stack: &mut Vec<(Child, Parent)>,
     ) {
-        let container = self.containers.get(cid);
+        let container = hub.containers.get(cid);
+        let data = self.tiling_containers.get(&cid).unwrap();
         assert_eq!(
-            container.parent, expected_parent,
+            data.parent, expected_parent,
             "Container {cid} has wrong parent"
         );
         assert_eq!(
-            container.workspace, workspace_id,
+            data.workspace, workspace_id,
             "Container {cid} has wrong workspace"
         );
         assert!(
@@ -169,34 +208,30 @@ impl PartitionTreeStrategy {
             "Container {cid} has less than 2 children"
         );
 
-        self.validate_container_tabbed(cid, container);
-        self.validate_container_direction(cid, container, expected_parent);
-        self.validate_container_dimensions(hub, cid, container);
+        self.validate_container_tabbed(hub, cid);
+        self.validate_container_direction(cid, expected_parent);
+        self.validate_container_dimensions(hub, cid);
 
         for &c in container.children() {
             stack.push((c, Parent::Container(cid)));
         }
     }
 
-    fn validate_container_tabbed(&self, cid: ContainerId, container: &Container) {
-        if !container.is_tabbed() {
+    fn validate_container_tabbed(&self, hub: &HubAccess, cid: ContainerId) {
+        let data = self.tiling_containers.get(&cid).unwrap();
+        if !data.is_tabbed() {
             return;
         }
         assert!(
-            container.active_tab_index() < container.children().len(),
+            data.active_tab_index() < hub.containers.get(cid).children().len(),
             "Container {cid} active_tab out of bounds"
         );
     }
 
-    fn validate_container_direction(
-        &self,
-        cid: ContainerId,
-        container: &Container,
-        expected_parent: Parent,
-    ) {
+    fn validate_container_direction(&self, cid: ContainerId, expected_parent: Parent) {
         if let Parent::Container(parent_cid) = expected_parent
-            && let Some(parent_dir) = self.containers.get(parent_cid).direction()
-            && let Some(child_dir) = container.direction()
+            && let Some(parent_dir) = self.tiling_containers.get(&parent_cid).unwrap().direction()
+            && let Some(child_dir) = self.tiling_containers.get(&cid).unwrap().direction()
         {
             assert_ne!(
                 parent_dir, child_dir,
@@ -211,7 +246,7 @@ impl PartitionTreeStrategy {
         match child {
             Child::Window(wid) => (dim, window_constraints(hub, &self.size_constraints, wid)),
             Child::Container(id) => {
-                let (min_w, min_h) = self.containers.get(id).min_size();
+                let (min_w, min_h) = self.tiling_containers.get(&id).unwrap().min_size();
                 (
                     dim,
                     Constraints {
@@ -225,20 +260,16 @@ impl PartitionTreeStrategy {
         }
     }
 
-    fn validate_container_dimensions(
-        &self,
-        hub: &HubAccess,
-        cid: ContainerId,
-        container: &Container,
-    ) {
-        let dim = container.dimension;
-        let children = container.children();
+    fn validate_container_dimensions(&self, hub: &HubAccess, cid: ContainerId) {
+        let data = self.tiling_containers.get(&cid).unwrap();
+        let dim = data.dimension;
+        let children = hub.containers.get(cid).children();
         let constraints: Vec<_> = children
             .iter()
             .map(|&c| self.child_constraints(hub, c))
             .collect();
 
-        match container.direction() {
+        match data.direction() {
             Some(dir) => {
                 let (split_label, split_limit) = match dir {
                     Direction::Horizontal => ("width", dim.width.value()),
@@ -282,7 +313,7 @@ impl PartitionTreeStrategy {
             None => {
                 let scale = hub
                     .monitors
-                    .get(hub.workspaces.get(container.workspace).monitor)
+                    .get(hub.workspaces.get(data.workspace).monitor)
                     .scale;
                 let expected_height = dim.height - self.tab_bar_length(scale);
                 for (i, (child_dim, c)) in constraints.iter().enumerate() {
@@ -308,7 +339,7 @@ impl PartitionTreeStrategy {
             }
         }
 
-        let (min_w, min_h) = container.min_size();
+        let (min_w, min_h) = data.min_size();
         assert!(
             dim.width >= min_w - VALIDATION_TOLERANCE,
             "Container {cid} width {:.2} < min_width {:.2}",
@@ -405,4 +436,13 @@ impl PartitionTreeStrategy {
             );
         }
     }
+}
+
+fn sorted_difference(
+    from: &HashSet<ContainerId>,
+    minus: &HashSet<ContainerId>,
+) -> Vec<ContainerId> {
+    let mut extra: Vec<ContainerId> = from.difference(minus).copied().collect();
+    extra.sort_unstable();
+    extra
 }

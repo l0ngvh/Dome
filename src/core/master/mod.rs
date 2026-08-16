@@ -109,7 +109,7 @@ impl TilingStrategy for MasterStrategy {
         self.compute_placement(hub, ws_id);
     }
 
-    fn detach_window(&mut self, hub: &HubAccess, id: WindowId) -> PixelRect {
+    fn detach_window(&mut self, hub: &mut HubAccess, id: WindowId) -> PixelRect {
         let ws_id = hub
             .windows
             .get(id)
@@ -316,7 +316,7 @@ impl TilingStrategy for MasterStrategy {
         self.compute_placement(hub, ws_id);
     }
 
-    fn tiling_window_count(&self, ws_id: WorkspaceId) -> usize {
+    fn tiling_window_count(&self, _hub: &HubAccess, ws_id: WorkspaceId) -> usize {
         self.workspaces
             .get(&ws_id)
             .map_or(0, |ws| ws.master.len() + ws.secondary.len())
@@ -333,7 +333,7 @@ impl TilingStrategy for MasterStrategy {
             .any(|&sid| metadata.matches_window_matcher(&self.slots.get(sid).matcher))
     }
 
-    fn detach_focused_child(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<Child> {
+    fn detach_focused_child(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Option<Child> {
         let state = self.workspaces.get_mut(&ws_id)?;
         let focus_id = state.focused_window()?;
 
@@ -350,14 +350,24 @@ impl TilingStrategy for MasterStrategy {
     }
 
     fn reattach_child(&mut self, hub: &mut HubAccess, child: Child, ws_id: WorkspaceId) {
-        let Child::Window(id) = child else {
-            panic!("MasterStrategy does not support Container children");
-        };
-        self.attach_window(hub, id, ws_id);
-        self.set_focus(hub, id);
+        for id in hub.take_windows(child) {
+            self.attach_window(hub, id, ws_id);
+        }
+        // A later arrival can evict an earlier one out of the master pane, so the window
+        // attached last need not be the one in it.
+        let focus = self
+            .workspaces
+            .get(&ws_id)
+            .unwrap()
+            .last_focused_in(Pane::Master);
+        self.set_focus(hub, focus);
     }
 
-    fn migrate(&mut self, ws_id: WorkspaceId) -> (Vec<WindowId>, Option<WindowId>) {
+    fn migrate(
+        &mut self,
+        _hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+    ) -> (Vec<WindowId>, Option<WindowId>) {
         let focused = self.focused_tiling_window(ws_id);
         let mut tiling = Vec::new();
         if let Some(state) = self.workspaces.remove(&ws_id) {

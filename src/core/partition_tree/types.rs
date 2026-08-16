@@ -1,4 +1,4 @@
-use super::preferred_layout::{PreferredSlot, PreferredWindowSlotId};
+use super::preferred_layout::{PreferredContainerSlotId, PreferredSlot, PreferredWindowSlotId};
 use crate::config::SplitMode;
 use crate::core::hub::SpawnIndicator;
 use crate::core::node::Child;
@@ -169,14 +169,127 @@ pub(super) struct TilingWindowData {
 
 impl TilingWindowData {
     pub(super) fn new(workspace: WorkspaceId) -> Self {
+        Self::with_parent(Parent::Workspace(workspace))
+    }
+
+    pub(super) fn in_container(container: ContainerId) -> Self {
+        Self::with_parent(Parent::Container(container))
+    }
+
+    fn with_parent(parent: Parent) -> Self {
         TilingWindowData {
-            parent: Parent::Workspace(workspace),
+            parent,
             // Zero placeholder -- layout_workspace at the end of this function
             // computes the real rect before any reader observes this entry.
             dimension: Dimension::default(),
             spawn_mode: SpawnMode::default(),
             occupy: None,
         }
+    }
+}
+
+/// Per-container tiling state.
+///
+/// Invariant: a non-tabbed container's `direction` differs from its non-tabbed
+/// parent's direction. A tabbed container is exempt: `direction()` returns
+/// `None` for it, so the alternation rule does not apply across a tabbed
+/// boundary. `validate_container_direction` enforces this.
+#[derive(Debug)]
+pub(super) struct TilingContainerData {
+    pub(super) parent: Parent,
+    pub(super) workspace: WorkspaceId,
+    pub(super) dimension: Dimension,
+    /// Split axis. Read through `direction()`, which returns `None` when
+    /// `is_tabbed` is set. A value is stored while tabbed to keep the field
+    /// initialised, but it is unused until the container converts back to split.
+    direction: Direction,
+    /// Spawn mode for new children inserted under this container. Mutate via
+    /// `set_spawn_mode_reset` (drops history) or `set_spawn_mode_keep_history`
+    /// (preserves history). Direct field write would lose the `H <-> V <-> Tab`
+    /// rotation state.
+    spawn_mode: SpawnMode,
+    pub(super) is_tabbed: bool,
+    pub(super) active_tab_index: usize,
+    pub(super) min_width: Length,
+    pub(super) min_height: Length,
+    /// Preferred container slot this live container materializes, if any.
+    pub(super) occupy: Option<PreferredContainerSlotId>,
+}
+
+impl TilingContainerData {
+    pub(super) fn new(parent: Parent, workspace: WorkspaceId, split_mode: SplitMode) -> Self {
+        let (direction, spawn_mode, is_tabbed) = match split_mode {
+            SplitMode::Horizontal => (Direction::Horizontal, SpawnMode::horizontal(), false),
+            SplitMode::Vertical => (Direction::Vertical, SpawnMode::vertical(), false),
+            SplitMode::Tabbed => (Direction::Horizontal, SpawnMode::tabbed(), true),
+        };
+        Self {
+            parent,
+            workspace,
+            dimension: Dimension::default(),
+            direction,
+            spawn_mode,
+            is_tabbed,
+            active_tab_index: 0,
+            min_width: Length::ZERO,
+            min_height: Length::ZERO,
+            occupy: None,
+        }
+    }
+
+    pub(super) fn is_tabbed(&self) -> bool {
+        self.is_tabbed
+    }
+
+    pub(super) fn active_tab_index(&self) -> usize {
+        self.active_tab_index
+    }
+
+    pub(super) fn min_size(&self) -> (Length, Length) {
+        (self.min_width, self.min_height)
+    }
+
+    pub(super) fn direction(&self) -> Option<Direction> {
+        if self.is_tabbed {
+            None
+        } else {
+            Some(self.direction)
+        }
+    }
+
+    pub(super) fn can_accommodate(&self, spawn_mode: SpawnMode) -> bool {
+        spawn_mode
+            .as_direction()
+            .is_some_and(|d| self.has_direction(d))
+            || (spawn_mode.is_tab() && self.is_tabbed())
+    }
+
+    pub(super) fn has_direction(&self, direction: Direction) -> bool {
+        if self.is_tabbed {
+            false
+        } else {
+            self.direction == direction
+        }
+    }
+
+    pub(super) fn spawn_mode(&self) -> SpawnMode {
+        self.spawn_mode
+    }
+
+    pub(super) fn set_spawn_mode_reset(&mut self, spawn_mode: SpawnMode) {
+        self.spawn_mode = SpawnMode::without_history(spawn_mode)
+    }
+
+    pub(super) fn set_spawn_mode_keep_history(&mut self, spawn_mode: SpawnMode) {
+        self.spawn_mode = self.spawn_mode.switch_to(spawn_mode)
+    }
+
+    pub(super) fn toggle_direction(&mut self) -> Direction {
+        self.direction = match self.direction {
+            Direction::Horizontal => Direction::Vertical,
+            Direction::Vertical => Direction::Horizontal,
+        };
+        self.direction
     }
 }
 

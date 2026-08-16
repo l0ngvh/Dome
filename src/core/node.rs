@@ -917,6 +917,33 @@ impl std::fmt::Display for Child {
     }
 }
 
+/// Invariant: `children.len() >= 2`. A container that drops to one child is dissolved
+/// and the survivor is promoted to its parent.
+#[derive(Debug, Clone)]
+pub(crate) struct Container {
+    pub(super) children: Vec<Child>,
+}
+
+impl Node for Container {
+    type Id = ContainerId;
+}
+
+impl Container {
+    pub(super) fn children(&self) -> &[Child] {
+        &self.children
+    }
+
+    pub(super) fn position_of(&self, child: Child) -> usize {
+        self.children.iter().position(|c| *c == child).unwrap()
+    }
+
+    pub(super) fn replace_child_if_present(&mut self, old: Child, new: Child) {
+        if let Some(pos) = self.children.iter().position(|c| *c == old) {
+            self.children[pos] = new;
+        }
+    }
+}
+
 impl NodeId for WindowId {
     fn new(id: usize) -> Self {
         Self(id)

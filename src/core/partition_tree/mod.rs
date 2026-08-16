@@ -10,17 +10,20 @@ mod validate;
 
 use self::preferred_layout::{PreferredContainerSlot, PreferredSlot, PreferredWindowSlot};
 pub(crate) use crate::core::node::Child;
-pub(crate) use container::Container;
+pub(crate) use crate::core::node::Container;
 pub(crate) use types::*;
 
 use std::collections::HashMap;
 
 use crate::config::LayoutWorkspaceConfig;
 use crate::config::SizeConstraints;
+use crate::config::SplitMode;
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
-use crate::core::node::{Logical, PixelRect, Pixels, WindowId, WindowMetadata, WorkspaceId};
+use crate::core::node::{
+    ContainerId, Logical, PixelRect, Pixels, WindowId, WindowMetadata, WorkspaceId,
+};
 use crate::core::strategy::{
     TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, translate,
 };
@@ -30,7 +33,7 @@ use crate::core::strategy::{
 /// layout. This is the default (and currently only) tiling strategy.
 #[derive(Debug)]
 pub(crate) struct PartitionTreeStrategy {
-    containers: Allocator<Container>,
+    tiling_containers: HashMap<ContainerId, TilingContainerData>,
     tiling_windows: HashMap<WindowId, TilingWindowData>,
     workspaces: HashMap<WorkspaceId, WorkspaceTilingState>,
     window_slots: Allocator<PreferredWindowSlot>,
@@ -116,7 +119,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         tracing::debug!(%window_id, ?slot_id, "First preferred window, established as root");
     }
 
-    fn detach_window(&mut self, hub: &HubAccess, window_id: WindowId) -> PixelRect {
+    fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> PixelRect {
         let child_dim = self.tiling_windows.get(&window_id).unwrap().dimension;
         let workspace_id = hub
             .windows
@@ -190,20 +193,62 @@ impl TilingStrategy for PartitionTreeStrategy {
         }
     }
 
-    fn detach_focused_child(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<Child> {
+    fn detach_focused_child(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Option<Child> {
         let focused = self.workspaces.get(&ws_id)?.focused_tiling?;
         self.detach_child(hub, focused);
 
-        if let Child::Window(wid) = focused {
-            self.tiling_windows.remove(&wid);
+        // Ordered after the detach, which still reads the state being dropped.
+        for node in hub.children_dfs(focused) {
+            match node {
+                Child::Window(wid) => {
+                    self.tiling_windows.remove(&wid);
+                }
+                Child::Container(cid) => {
+                    self.tiling_containers.remove(&cid);
+                }
+            }
         }
         Some(focused)
     }
 
     fn reattach_child(&mut self, hub: &mut HubAccess, child: Child, ws_id: WorkspaceId) {
-        if let Child::Window(wid) = child {
-            self.tiling_windows
-                .insert(wid, TilingWindowData::new(ws_id));
+        match child {
+            Child::Window(wid) => {
+                self.tiling_windows
+                    .insert(wid, TilingWindowData::new(ws_id));
+            }
+            Child::Container(root) => {
+                // Reversed because a preorder walk yields parents first, and a container must
+                // exist before its parent links to it. The root's parent is a placeholder,
+                // overwritten by the attach below.
+                for cid in hub.containers_preorder(root).into_iter().rev() {
+                    self.tiling_containers.insert(
+                        cid,
+                        TilingContainerData::new(
+                            Parent::Workspace(ws_id),
+                            ws_id,
+                            SplitMode::Horizontal,
+                        ),
+                    );
+                    for &member in hub.containers.get(cid).children() {
+                        match member {
+                            Child::Window(wid) => {
+                                self.tiling_windows
+                                    .insert(wid, TilingWindowData::in_container(cid));
+                            }
+                            Child::Container(nested) => {
+                                self.tiling_containers.get_mut(&nested).unwrap().parent =
+                                    Parent::Container(cid);
+                            }
+                        }
+                    }
+                }
+                // Every container was rebuilt with the same default direction, so a nested
+                // subtree arrives with a container inside a same-direction container. The
+                // attach path only re-derives direction when it wraps an anchor, which an
+                // empty destination skips.
+                self.maintain_direction_invariance(hub, Parent::Container(root));
+            }
         }
         self.attach_child_according_to_spawn_mode(hub, child, ws_id);
         self.set_focus(hub, child);
@@ -212,11 +257,12 @@ impl TilingStrategy for PartitionTreeStrategy {
     /// Counts tiling windows by walking the container tree from root.
     /// A tree walk is necessary because `self.tiling_windows` is a global map
     /// across all workspaces and cannot be filtered by workspace without it.
-    fn tiling_window_count(&self, ws_id: WorkspaceId) -> usize {
+    fn tiling_window_count(&self, hub: &HubAccess, ws_id: WorkspaceId) -> usize {
         let Some(root) = self.workspaces.get(&ws_id).and_then(|s| s.root) else {
             return 0;
         };
-        self.children_dfs(root)
+        hub.children_dfs(root)
+            .into_iter()
             .filter(|c| matches!(c, Child::Window(_)))
             .count()
     }
@@ -228,24 +274,27 @@ impl TilingStrategy for PartitionTreeStrategy {
         self.find_window_slot(root, metadata).is_some()
     }
 
-    fn migrate(&mut self, ws_id: WorkspaceId) -> (Vec<WindowId>, Option<WindowId>) {
+    fn migrate(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+    ) -> (Vec<WindowId>, Option<WindowId>) {
         let focused = self.focused_tiling_window(ws_id);
-        let mut tiling: Vec<WindowId> = self
-            .workspaces
-            .get(&ws_id)
-            .and_then(|ws| ws.root)
-            .map(|root| {
-                self.children_dfs(root)
-                    .filter_map(|c| match c {
-                        Child::Window(id) => Some(id),
-                        Child::Container(_) => None,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let Some(state) = self.workspaces.remove(&ws_id) else {
+            return (Vec::new(), focused);
+        };
+        let mut tiling = match state.root {
+            Some(root) => self.free_container_subtree(hub, root),
+            None => Vec::new(),
+        };
+        if let Some(preferred_root) = state.preferred_root {
+            self.free_preferred_subtree(preferred_root);
+        }
+        for wid in &tiling {
+            self.tiling_windows.remove(wid);
+        }
         // To return the windows in inserted order
         tiling.reverse();
-        self.workspaces.remove(&ws_id);
         (tiling, focused)
     }
 
@@ -279,7 +328,7 @@ impl PartitionTreeStrategy {
         size_constraints: SizeConstraints,
     ) -> Self {
         Self {
-            containers: Allocator::new(),
+            tiling_containers: HashMap::new(),
             tiling_windows: HashMap::new(),
             workspaces: HashMap::new(),
             window_slots: Allocator::new(),

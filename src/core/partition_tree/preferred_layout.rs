@@ -170,8 +170,8 @@ impl PartitionTreeStrategy {
             let Parent::Container(parent_cid) = self.parent(last_sibling) else {
                 unreachable!();
             };
-            let pos = self.containers.get(parent_cid).position_of(last_sibling) + 1;
-            self.attach_child_to_container(new_child, parent_cid, Some(pos));
+            let pos = hub.containers.get(parent_cid).position_of(last_sibling) + 1;
+            self.attach_child_to_container(hub, new_child, parent_cid, Some(pos));
         }
         self.occupy_window_slot(slot_id, window_id);
         self.compute_placement(hub, ws_id);
@@ -255,7 +255,7 @@ impl PartitionTreeStrategy {
         ancestor_slot: PreferredContainerSlotId,
     ) {
         let container_id = self.occupied_container(ancestor_slot).unwrap();
-        let live_children = self.containers.get(container_id).children.clone();
+        let live_children = hub.containers.get(container_id).children.clone();
 
         let mut insert_pos = 0;
 
@@ -292,13 +292,23 @@ impl PartitionTreeStrategy {
         }
 
         tracing::debug!(%window_id, ?slot_id, %container_id, insert_pos, "Inserting window into occupied ancestor container");
-        self.attach_child_to_container(Child::Window(window_id), container_id, Some(insert_pos));
+        self.attach_child_to_container(
+            hub,
+            Child::Window(window_id),
+            container_id,
+            Some(insert_pos),
+        );
 
         self.mark_slot_occupied(hub, window_id, ws_id, slot_id);
     }
 
-    pub(super) fn detach_preferred_slot(&mut self, workspace_id: WorkspaceId, child: Child) {
-        let children: Vec<_> = self.children_dfs(child).collect();
+    pub(super) fn detach_preferred_slot(
+        &mut self,
+        hub: &HubAccess,
+        workspace_id: WorkspaceId,
+        child: Child,
+    ) {
+        let children = hub.children_dfs(child);
         for child in children {
             match child {
                 Child::Window(wid) => {
@@ -330,12 +340,32 @@ impl PartitionTreeStrategy {
         }
     }
 
+    pub(super) fn free_preferred_subtree(&mut self, root: PreferredSlot) {
+        let mut stack = vec![root];
+        for _ in crate::core::bounded_loop() {
+            let Some(slot) = stack.pop() else { break };
+            match slot {
+                PreferredSlot::Window(id) => self.window_slots.delete(id),
+                PreferredSlot::Container(id) => {
+                    let children = self.container_slots.get(id).children.clone();
+                    self.container_slots.delete(id);
+                    for &c in children.iter().rev() {
+                        stack.push(c);
+                    }
+                }
+            }
+        }
+    }
+
     pub(super) fn clean_up_occupied_container(&mut self, container_id: ContainerId) {
-        if let Some(slot_id) = self.containers.get(container_id).occupy {
-            let ws_id = self.containers.get(container_id).workspace;
+        if let Some(slot_id) = self.tiling_containers.get(&container_id).unwrap().occupy {
+            let ws_id = self.tiling_containers.get(&container_id).unwrap().workspace;
             let new_occupied_root = self.top_occupied_in(slot_id);
             self.clear_container_slot(slot_id);
-            self.containers.get_mut(container_id).occupy = None;
+            self.tiling_containers
+                .get_mut(&container_id)
+                .unwrap()
+                .occupy = None;
             if let Some(ws_state) = self.workspaces.get_mut(&ws_id)
                 && ws_state.occupied_preferred_root == Some(PreferredSlot::Container(slot_id))
             {
@@ -394,7 +424,8 @@ impl PartitionTreeStrategy {
             let windows: Vec<WindowId> = state
                 .root
                 .map(|r| {
-                    self.children_dfs(r)
+                    hub.children_dfs(r)
+                        .into_iter()
                         .filter_map(|c| match c {
                             Child::Window(id) => Some(id),
                             Child::Container(_) => None,
@@ -410,8 +441,11 @@ impl PartitionTreeStrategy {
 
         // Phase: mutable — detach root (clears bookmarks + occupation,
         // triggers one layout on the now-empty workspace).
+        // The free is ordered after the detach, which still reads the tiling state of the
+        // subtree it is unlinking.
         if let Some(root) = old_root {
             self.detach_child(hub, root);
+            self.free_container_subtree(hub, root);
         }
 
         // Set the new preferred layout.
@@ -488,8 +522,9 @@ impl PartitionTreeStrategy {
                 .occupy
                 .map(PreferredSlot::Window),
             Child::Container(cid) => self
-                .containers
-                .get(cid)
+                .tiling_containers
+                .get(&cid)
+                .unwrap()
                 .occupy
                 .map(PreferredSlot::Container),
         }
@@ -504,7 +539,10 @@ impl PartitionTreeStrategy {
 
     fn occupy_container_slot(&mut self, slot: PreferredContainerSlotId, container_id: ContainerId) {
         self.container_slots.get_mut(slot).occupied = Some(container_id);
-        self.containers.get_mut(container_id).occupy = Some(slot);
+        self.tiling_containers
+            .get_mut(&container_id)
+            .unwrap()
+            .occupy = Some(slot);
     }
 
     fn occupied_container(&self, slot: PreferredContainerSlotId) -> Option<ContainerId> {
@@ -640,11 +678,11 @@ impl PartitionTreeStrategy {
                     self.tiling_windows.get_mut(&wid).unwrap().occupy = Some(slot);
                 }
                 Child::Container(cid) => {
-                    let children = self.containers.get(cid).children.clone();
+                    let children = hub.containers.get(cid).children.clone();
 
                     let split = {
-                        let container = self.containers.get(cid);
-                        Some(match container.direction() {
+                        let data = self.tiling_containers.get(&cid).unwrap();
+                        Some(match data.direction() {
                             Some(Direction::Horizontal) => SplitMode::Horizontal,
                             Some(Direction::Vertical) => SplitMode::Vertical,
                             None => SplitMode::Tabbed,
@@ -664,7 +702,7 @@ impl PartitionTreeStrategy {
                     } else if pref_root.is_none() {
                         pref_root = Some(PreferredSlot::Container(cs));
                     }
-                    self.containers.get_mut(cid).occupy = Some(cs);
+                    self.tiling_containers.get_mut(&cid).unwrap().occupy = Some(cs);
                     for &c in children.iter().rev() {
                         stack.push((Some(cs), c));
                     }
@@ -673,20 +711,7 @@ impl PartitionTreeStrategy {
         }
 
         if let Some(old) = old_root {
-            let mut stack = vec![old];
-            for _ in crate::core::bounded_loop() {
-                let Some(slot) = stack.pop() else { break };
-                match slot {
-                    PreferredSlot::Window(id) => self.window_slots.delete(id),
-                    PreferredSlot::Container(id) => {
-                        let children = self.container_slots.get(id).children.clone();
-                        self.container_slots.delete(id);
-                        for &c in children.iter().rev() {
-                            stack.push(c);
-                        }
-                    }
-                }
-            }
+            self.free_preferred_subtree(old);
         }
 
         let pref_root = pref_root?;

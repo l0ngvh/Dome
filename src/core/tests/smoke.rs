@@ -4,11 +4,13 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, setup_hub,
-    setup_logger_with_level, titled, validate_hub,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect,
+    setup_logger_with_level, titled, titled_matcher, validate_hub,
 };
 use crate::action::MonitorTarget;
-use crate::config::{SizeConstraint, SplitMode, Strategy, TreeLayoutNode, WindowMatcher};
+use crate::config::{
+    LayoutWorkspaceConfig, SizeConstraint, SplitMode, Strategy, TreeLayoutNode, WindowMatcher,
+};
 use crate::core::hub::{GlobalLayoutConfig, Hub};
 use crate::core::node::{
     Length, LimitObservation, LimitUpdate, MonitorId, PixelRect, Pixels, WindowId,
@@ -23,80 +25,93 @@ const RUNS: usize = 200;
 const OPS_PER_RUN: usize = 10000;
 const SEED: u64 = 42u64;
 const PREF_TREE_MAX_LEAVES: usize = 30;
+
+/// The two titles the harness inserts under a fixed name. A generated matcher is
+/// inert unless it is written against one of these or a `pref-N` preferred title,
+/// so they are named rather than repeated at the four insert sites.
+const DEFAULT_TILING_TITLE: &str = "w1";
+const FULLSCREEN_TITLE: &str = "w3";
 const CONTAINER_BASE: usize = 1_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum SmokeStrategy {
     PartitionTree,
     Master,
-    PreferredTree,
 }
 
 impl SmokeStrategy {
     fn all() -> &'static [SmokeStrategy] {
-        &[
-            SmokeStrategy::PartitionTree,
-            SmokeStrategy::Master,
-            SmokeStrategy::PreferredTree,
-        ]
+        &[SmokeStrategy::PartitionTree, SmokeStrategy::Master]
     }
 
     fn test_name(self) -> &'static str {
         match self {
             SmokeStrategy::PartitionTree => "partition-tree",
             SmokeStrategy::Master => "master",
-            SmokeStrategy::PreferredTree => "pref-tree",
         }
     }
 
-    /// The returned preferred titles and tree ops are empty for
-    /// non-preferred-tree strategies. The reducer needs the tree ops.
-    fn build_hub(
-        self,
-        rng: &mut ChaCha8Rng,
-        abort: &AtomicBool,
-    ) -> (Hub, Vec<String>, Vec<PrefTreeBuildOp>) {
-        match self {
-            SmokeStrategy::PartitionTree => (setup_hub(), Vec::new(), Vec::new()),
-            SmokeStrategy::Master => (
-                TestHubBuilder::new()
-                    .with_layout(
-                        LayoutConfigBuilder::new()
-                            .with_strategy(Strategy::Master)
-                            .build(),
-                    )
-                    .build(),
-                Vec::new(),
-                Vec::new(),
-            ),
-            SmokeStrategy::PreferredTree => {
-                let (tree_ops, preferred_titles) =
-                    generate_tree_ops(rng, abort, PREF_TREE_MAX_LEAVES);
-                let tree_node = reconstruct_tree(&tree_ops);
-                let hub = make_pref_tree_hub(tree_node);
-                (hub, preferred_titles, tree_ops)
-            }
-        }
+    fn build_hub(self) -> Hub {
+        TestHubBuilder::new()
+            .with_layout(initial_layout(self))
+            .build()
     }
+}
 
-    /// Only valid for non-preferred-tree strategies.
-    fn make_simple_hub(self) -> fn() -> Hub {
-        match self {
-            SmokeStrategy::PartitionTree => setup_hub,
-            SmokeStrategy::Master => || {
-                TestHubBuilder::new()
-                    .with_layout(
-                        LayoutConfigBuilder::new()
-                            .with_strategy(Strategy::Master)
-                            .build(),
-                    )
-                    .build()
-            },
-            SmokeStrategy::PreferredTree => {
-                panic!("PreferredTree reduce uses pref_tree_shrink, not make_simple_hub")
-            }
+/// `DEFAULT_TILING_TITLE` is the title of nearly every plain tiling insert, so a
+/// matcher on it reroutes most of a run's inserts away from tiling. Kept rare so
+/// that most runs still exercise ordinary tiling behaviour.
+const DEFAULT_TITLE_MATCHER_PROBABILITY: f64 = 0.1;
+const PREFERRED_TITLE_FLOAT_PROBABILITY: f64 = 0.15;
+const PREFERRED_TITLE_FULLSCREEN_PROBABILITY: f64 = 0.1;
+
+/// Insert titles are drawn from this fixed pool rather than from whatever the
+/// generators happened to mint, so that a generated matcher is never inert once
+/// preferred layouts arrive as ops instead of as construction artifacts. Sized to
+/// cover every id the tree and pane generators can produce.
+const PREF_TITLE_POOL_SIZE: usize = PREF_TREE_MAX_LEAVES;
+
+fn pref_title(index: usize) -> String {
+    format!("pref-{index}")
+}
+
+fn pref_title_pool() -> Vec<String> {
+    (0..PREF_TITLE_POOL_SIZE).map(pref_title).collect()
+}
+
+fn initial_layout(strategy: SmokeStrategy) -> GlobalLayoutConfig {
+    match strategy {
+        SmokeStrategy::PartitionTree => LayoutConfigBuilder::new().build(),
+        SmokeStrategy::Master => LayoutConfigBuilder::new()
+            .with_strategy(Strategy::Master)
+            .build(),
+    }
+}
+
+/// Titles are drawn only from what the harness actually inserts, since a matcher
+/// on anything else is inert. A title can land in both lists, which is what
+/// reaches fullscreen-beats-float in `resolve_matcher`.
+fn generate_matcher_titles(
+    rng: &mut ChaCha8Rng,
+    preferred_titles: &[String],
+) -> (Vec<String>, Vec<String>) {
+    let mut float = Vec::new();
+    let mut fullscreen = Vec::new();
+    if rng.random_bool(DEFAULT_TITLE_MATCHER_PROBABILITY) {
+        float.push(DEFAULT_TILING_TITLE.to_string());
+    }
+    if rng.random_bool(DEFAULT_TITLE_MATCHER_PROBABILITY) {
+        fullscreen.push(DEFAULT_TILING_TITLE.to_string());
+    }
+    for title in preferred_titles {
+        if rng.random_bool(PREFERRED_TITLE_FLOAT_PROBABILITY) {
+            float.push(title.clone());
+        }
+        if rng.random_bool(PREFERRED_TITLE_FULLSCREEN_PROBABILITY) {
+            fullscreen.push(title.clone());
         }
     }
+    (float, fullscreen)
 }
 
 fn strategy_for_seed(seed: u64) -> SmokeStrategy {
@@ -145,35 +160,21 @@ fn reduce_smoke_failure() {
     setup_logger_with_level("info");
     let seed = smoke_seed_from_env();
     let strategy = strategy_for_seed(seed);
-    let (tree_ops, window_ops, signature) = record(seed, OPS_PER_RUN, strategy);
+    let (window_ops, signature) = record(seed, OPS_PER_RUN, strategy);
 
-    match strategy {
-        SmokeStrategy::PreferredTree => {
-            tracing::info!(
-                tree_ops = tree_ops.len(),
-                window_ops = window_ops.len(),
-                ?signature,
-                "captured failure",
-            );
-            let (reduced_tree, reduced_window) = pref_tree_shrink(tree_ops, window_ops, &signature);
-            tracing::error!("=== REDUCED TREE OPS ({}) ===", reduced_tree.len());
-            for (i, op) in reduced_tree.iter().enumerate() {
-                tracing::error!("  {i}: {op:?}");
-            }
-            tracing::error!("=== REDUCED WINDOW OPS ({}) ===", reduced_window.len());
-            for (i, op) in reduced_window.iter().enumerate() {
-                tracing::error!("  {i}: {op:?}");
-            }
-        }
-        _ => {
-            tracing::info!(recorded = window_ops.len(), ?signature, "captured failure");
-            let make_hub = strategy.make_simple_hub();
-            let reduced = config_op_shrink(window_ops, &signature, make_hub);
-            tracing::error!("=== REDUCED OPERATIONS ({}) ===", reduced.len());
-            for (i, op) in reduced.iter().enumerate() {
-                tracing::error!("  {i}: {op:?}");
-            }
-        }
+    tracing::info!(
+        window_ops = window_ops.len(),
+        ?signature,
+        "captured failure"
+    );
+    let reduced = shrink_ops(window_ops, &signature, || strategy.build_hub());
+    log_reduced(&reduced);
+}
+
+fn log_reduced(window: &[RecordedOp]) {
+    tracing::error!("=== REDUCED WINDOW OPS ({}) ===", window.len());
+    for (i, op) in window.iter().enumerate() {
+        tracing::error!("  {i}: {op:?}");
     }
 }
 
@@ -350,7 +351,12 @@ enum RecordedOp {
     },
     SyncPreferredLayout {
         workspace_name: String,
+        strategy: Strategy,
         tree_ops: Vec<PrefTreeBuildOp>,
+        master: Vec<String>,
+        secondary: Vec<String>,
+        float: Vec<String>,
+        fullscreen: Vec<String>,
     },
 }
 
@@ -365,19 +371,8 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, strategy: SmokeStrategy, a
         return;
     }
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let (mut hub, preferred_titles, _tree_ops) = strategy.build_hub(&mut rng, abort);
-    if abort.load(Ordering::Relaxed) {
-        return;
-    }
-
-    let mut current_layout = match strategy {
-        SmokeStrategy::PartitionTree | SmokeStrategy::PreferredTree => {
-            LayoutConfigBuilder::new().build()
-        }
-        SmokeStrategy::Master => LayoutConfigBuilder::new()
-            .with_strategy(Strategy::Master)
-            .build(),
-    };
+    let mut hub = strategy.build_hub();
+    let mut current_layout = initial_layout(strategy);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run_iteration(
             &mut hub,
@@ -385,7 +380,6 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, strategy: SmokeStrategy, a
             |_| {},
             &mut rng,
             ops_per_run,
-            &preferred_titles,
             &mut current_layout,
         );
     }));
@@ -419,7 +413,6 @@ fn run_iteration<F>(
     mut observer: F,
     rng: &mut ChaCha8Rng,
     ops_per_run: usize,
-    preferred_titles: &[String],
     current_layout: &mut GlobalLayoutConfig,
 ) where
     F: FnMut(&RecordedOp),
@@ -446,7 +439,6 @@ fn run_iteration<F>(
             &monitors,
             &monitor_origin,
             next_op_index,
-            preferred_titles,
             current_layout,
             &workspace_names,
         ) else {
@@ -505,14 +497,14 @@ fn build_op(
     monitors: &[MonitorId],
     monitor_origin: &[usize],
     next_op_index: usize,
-    preferred_titles: &[String],
     current_layout: &mut GlobalLayoutConfig,
     workspace_names: &[String],
 ) -> Option<RecordedOp> {
     match kind {
         OpKind::InsertTiling => {
-            if rng.random_bool(0.5) && !preferred_titles.is_empty() {
-                let title = preferred_titles[rng.random_range(0..preferred_titles.len())].clone();
+            if rng.random_bool(0.5) {
+                let pool = pref_title_pool();
+                let title = pool[rng.random_range(0..pool.len())].clone();
                 return Some(RecordedOp::InsertTiling {
                     producer_id: next_op_index,
                     title: Some(title),
@@ -708,7 +700,7 @@ fn build_op(
         }
         OpKind::ConfigReload => {
             let mut layout = current_layout.clone();
-            match rng.random_range(0..5u8) {
+            match rng.random_range(0..8u8) {
                 0 => {
                     layout.partition_tree.automatic_tiling =
                         !layout.partition_tree.automatic_tiling;
@@ -723,9 +715,23 @@ fn build_op(
                 3 => {
                     layout.master.master_count = rng.random_range(1..=4);
                 }
-                _ => {
+                4 => {
                     let v = rng.random_range(10..200);
                     layout.size_constraints.minimum_width = SizeConstraint::Pixels(Pixels::new(v));
+                }
+                5 => {
+                    layout.strategy = match layout.strategy {
+                        Strategy::PartitionTree => Strategy::Master,
+                        Strategy::Master => Strategy::PartitionTree,
+                    };
+                }
+                6 => {
+                    let (float, _) = generate_matcher_titles(rng, &pref_title_pool());
+                    layout.float = float.iter().map(|t| titled_matcher(t)).collect();
+                }
+                _ => {
+                    let (_, fullscreen) = generate_matcher_titles(rng, &pref_title_pool());
+                    layout.fullscreen = fullscreen.iter().map(|t| titled_matcher(t)).collect();
                 }
             }
             Some(RecordedOp::ConfigReload { layout })
@@ -734,20 +740,41 @@ fn build_op(
             if workspace_names.is_empty() {
                 return None;
             }
-            if current_layout.strategy != Strategy::PartitionTree {
-                return None;
-            }
             let workspace_name =
                 workspace_names[rng.random_range(0..workspace_names.len())].clone();
-            let max_leaves = rng.random_range(2..=5);
-            let (tree_ops, _titles) =
-                generate_tree_ops_small(rng, &AtomicBool::new(false), max_leaves);
-            if tree_ops.is_empty() {
-                return None;
+            let strategy = current_layout.strategy;
+            let (float, fullscreen) = generate_matcher_titles(rng, &pref_title_pool());
+            let mut tree_ops = Vec::new();
+            let mut master = Vec::new();
+            let mut secondary = Vec::new();
+            match strategy {
+                Strategy::PartitionTree => {
+                    let max_leaves = sync_tree_max_leaves(rng);
+                    let (ops, _titles) =
+                        generate_tree_ops_small(rng, &AtomicBool::new(false), max_leaves);
+                    if ops.is_empty() {
+                        return None;
+                    }
+                    tree_ops = ops;
+                }
+                Strategy::Master => {
+                    for title in pref_title_pool() {
+                        match rng.random_range(0..4u8) {
+                            0 => master.push(title),
+                            1 => secondary.push(title),
+                            _ => {}
+                        }
+                    }
+                }
             }
             Some(RecordedOp::SyncPreferredLayout {
                 workspace_name,
+                strategy,
                 tree_ops,
+                master,
+                secondary,
+                float,
+                fullscreen,
             })
         }
     }
@@ -764,7 +791,7 @@ fn apply_op(
 ) {
     match op {
         RecordedOp::InsertTiling { producer_id, title } => {
-            let window_title = title.as_deref().unwrap_or("w1");
+            let window_title = title.as_deref().unwrap_or(DEFAULT_TILING_TITLE);
             let id = hub
                 .insert_window(
                     titled(window_title),
@@ -781,7 +808,7 @@ fn apply_op(
             restrictions,
         } => {
             let id = hub
-                .insert_window(titled("w3"), default_rect(), *restrictions)
+                .insert_window(titled(FULLSCREEN_TITLE), default_rect(), *restrictions)
                 .expect("test ignore list is empty");
             windows.push(id);
             window_origin.push(*producer_id);
@@ -937,15 +964,22 @@ fn apply_op(
         }
         RecordedOp::SyncPreferredLayout {
             workspace_name,
+            strategy,
             tree_ops,
+            master,
+            secondary,
+            float,
+            fullscreen,
         } => {
-            let tree = reconstruct_tree(tree_ops);
-            let mut ws_builder = LayoutWorkspaceConfigBuilder::new(workspace_name)
-                .with_strategy(Strategy::PartitionTree);
-            if let Some(t) = tree {
-                ws_builder = ws_builder.with_tree(t);
-            }
-            hub.sync_preferred_layout(vec![ws_builder.build()]);
+            hub.sync_preferred_layout(vec![preferred_workspace_config(
+                workspace_name,
+                *strategy,
+                tree_ops,
+                master,
+                secondary,
+                float,
+                fullscreen,
+            )]);
         }
     }
 }
@@ -1094,19 +1128,12 @@ fn record(
     seed: u64,
     ops_per_run: usize,
     strategy: SmokeStrategy,
-) -> (Vec<PrefTreeBuildOp>, Vec<RecordedOp>, FailureSignature) {
+) -> (Vec<RecordedOp>, FailureSignature) {
     let abort = AtomicBool::new(false);
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let (mut hub, preferred_titles, tree_ops) = strategy.build_hub(&mut rng, &abort);
+    let mut hub = strategy.build_hub();
     let mut ops: Vec<RecordedOp> = Vec::new();
-    let mut current_layout = match strategy {
-        SmokeStrategy::PartitionTree | SmokeStrategy::PreferredTree => {
-            LayoutConfigBuilder::new().build()
-        }
-        SmokeStrategy::Master => LayoutConfigBuilder::new()
-            .with_strategy(Strategy::Master)
-            .build(),
-    };
+    let mut current_layout = initial_layout(strategy);
     let signature = capture_panic(|| {
         run_iteration(
             &mut hub,
@@ -1114,12 +1141,10 @@ fn record(
             |op| ops.push(op.clone()),
             &mut rng,
             ops_per_run,
-            &preferred_titles,
             &mut current_layout,
         );
     });
     (
-        tree_ops,
         ops,
         signature.expect("seed did not panic, nothing to reduce"),
     )
@@ -1135,7 +1160,7 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
     for op in ops {
         match op {
             RecordedOp::InsertTiling { producer_id, title } => {
-                let window_title = title.as_deref().unwrap_or("w1");
+                let window_title = title.as_deref().unwrap_or(DEFAULT_TILING_TITLE);
                 let id = hub
                     .insert_window(
                         titled(window_title),
@@ -1150,7 +1175,7 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 restrictions,
             } => {
                 let id = hub
-                    .insert_window(titled("w3"), default_rect(), *restrictions)
+                    .insert_window(titled(FULLSCREEN_TITLE), default_rect(), *restrictions)
                     .expect("test ignore list is empty");
                 live_window[*producer_id] = Some(id);
             }
@@ -1289,15 +1314,22 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
             }
             RecordedOp::SyncPreferredLayout {
                 workspace_name,
+                strategy,
                 tree_ops,
+                master,
+                secondary,
+                float,
+                fullscreen,
             } => {
-                let tree = reconstruct_tree(tree_ops);
-                let mut ws_builder = LayoutWorkspaceConfigBuilder::new(workspace_name)
-                    .with_strategy(Strategy::PartitionTree);
-                if let Some(t) = tree {
-                    ws_builder = ws_builder.with_tree(t);
-                }
-                hub.sync_preferred_layout(vec![ws_builder.build()]);
+                hub.sync_preferred_layout(vec![preferred_workspace_config(
+                    workspace_name,
+                    *strategy,
+                    tree_ops,
+                    master,
+                    secondary,
+                    float,
+                    fullscreen,
+                )]);
             }
         }
         validate_hub(&hub);
@@ -1317,14 +1349,6 @@ fn resolve_monitor(
         return Some(primary);
     }
     live_monitor.get(recorded.0).copied().flatten()
-}
-
-fn reproduces_signature(
-    candidate: &[RecordedOp],
-    target: &FailureSignature,
-    make_hub: fn() -> Hub,
-) -> bool {
-    matches!(replay(candidate, make_hub), Some(ref sig) if sig == target)
 }
 
 #[derive(Debug, Clone)]
@@ -1368,7 +1392,7 @@ fn generate_tree_ops(
 
     // First leaf is the implicit root.
     let root_id = 0usize;
-    let title = format!("pref-{}", root_id);
+    let title = pref_title(root_id);
     titles.push(title.clone());
     ops.push(PrefTreeBuildOp::InsertLeaf {
         leaf_id: root_id,
@@ -1399,7 +1423,7 @@ fn generate_tree_ops(
 
         let leaf_id = next_leaf_id;
         next_leaf_id += 1;
-        let title = format!("pref-{}", leaf_id);
+        let title = pref_title(leaf_id);
         titles.push(title.clone());
 
         let split = random_split(rng);
@@ -1521,123 +1545,110 @@ fn reconstruct_tree(ops: &[PrefTreeBuildOp]) -> Option<TreeLayoutNode> {
     build_node_recursive(root_id, &leaves, &containers)
 }
 
-fn make_pref_tree_hub(tree: Option<TreeLayoutNode>) -> Hub {
-    let mut ws_builder =
-        LayoutWorkspaceConfigBuilder::new("1").with_strategy(Strategy::PartitionTree);
-    if let Some(t) = tree {
-        ws_builder = ws_builder.with_tree(t);
-    }
-    TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
-        .with_preferred_layout(vec![ws_builder.build()])
-        .build()
-}
-
-fn pref_tree_reproduces_signature(
+/// Only the fields the chosen strategy actually consumes are set, because
+/// `LayoutWorkspaceConfigBuilder::build` silently discards a tree under
+/// `Strategy::Master`, and generated input a builder throws away is fake coverage.
+fn preferred_workspace_config(
+    workspace_name: &str,
+    strategy: Strategy,
     tree_ops: &[PrefTreeBuildOp],
-    window_ops: &[RecordedOp],
-    target: &FailureSignature,
-) -> bool {
-    let tree = reconstruct_tree(tree_ops);
-    matches!(
-        replay(window_ops, || make_pref_tree_hub(tree)),
-        Some(ref sig) if sig == target
-    )
+    master: &[String],
+    secondary: &[String],
+    float: &[String],
+    fullscreen: &[String],
+) -> LayoutWorkspaceConfig {
+    let mut builder = LayoutWorkspaceConfigBuilder::new(workspace_name)
+        .with_strategy(strategy)
+        .with_float(float.iter().map(|t| titled_matcher(t)).collect())
+        .with_fullscreen(fullscreen.iter().map(|t| titled_matcher(t)).collect());
+    match strategy {
+        Strategy::PartitionTree => {
+            if let Some(tree) = reconstruct_tree(tree_ops) {
+                builder = builder.with_tree(tree);
+            }
+        }
+        Strategy::Master => {
+            builder = builder
+                .with_master(master.iter().map(|t| titled_matcher(t)).collect())
+                .with_secondary(secondary.iter().map(|t| titled_matcher(t)).collect());
+        }
+    }
+    builder.build()
 }
 
-fn pref_tree_shrink(
-    tree_ops: Vec<PrefTreeBuildOp>,
+/// Small trees stay common so a `SyncPreferredLayout` does not crowd out the rest of
+/// the op mix, while the range still reaches `PREF_TREE_MAX_LEAVES` so that moving
+/// tree generation off the construction path does not cut depth.
+fn sync_tree_max_leaves(rng: &mut ChaCha8Rng) -> usize {
+    if rng.random_bool(0.8) {
+        rng.random_range(2..=5)
+    } else {
+        rng.random_range(6..=PREF_TREE_MAX_LEAVES)
+    }
+}
+
+fn sync_tree_ops(op: &RecordedOp) -> Option<Vec<PrefTreeBuildOp>> {
+    match op {
+        RecordedOp::SyncPreferredLayout { tree_ops, .. } => Some(tree_ops.clone()),
+        _ => None,
+    }
+}
+
+fn set_sync_tree_ops(op: &mut RecordedOp, ops: Vec<PrefTreeBuildOp>) {
+    if let RecordedOp::SyncPreferredLayout { tree_ops, .. } = op {
+        *tree_ops = ops;
+    }
+}
+
+/// Shrink a generated build artifact and the recorded window ops together,
+/// keeping only what still reproduces `target`. `rebuild` turns a candidate
+/// artifact back into the hub the run started from, which is what lets a
+/// failure be reduced through generated input rather than only through ops.
+fn shrink_ops(
     window_ops: Vec<RecordedOp>,
     target: &FailureSignature,
-) -> (Vec<PrefTreeBuildOp>, Vec<RecordedOp>) {
-    let mut tree = tree_ops;
+    make_hub: impl Fn() -> Hub + Copy,
+) -> Vec<RecordedOp> {
     let mut window = window_ops;
     let target = target.clone();
+    let reproduces =
+        |w: &[RecordedOp]| matches!(replay(w, make_hub), Some(ref sig) if *sig == target);
     loop {
-        let new_tree = ddmin(tree.clone(), |t| {
-            pref_tree_reproduces_signature(t, &window, &target)
-        });
-        let new_window = ddmin(window.clone(), |w| {
-            pref_tree_reproduces_signature(&new_tree, w, &target)
-        });
+        let new_window = ddmin(window.clone(), |w| reproduces(w));
+        let payload_shrunk = shrink_op_payloads(&new_window, |w| reproduces(w));
 
-        let mut payload_shrunk = false;
-        let mut current_window = new_window.clone();
-        for i in 0..current_window.len() {
-            if let RecordedOp::SyncPreferredLayout {
-                ref workspace_name,
-                ref tree_ops,
-            } = current_window[i]
-            {
-                let reduced_tree = ddmin(tree_ops.clone(), |t| {
-                    let mut candidate = current_window.clone();
-                    candidate[i] = RecordedOp::SyncPreferredLayout {
-                        workspace_name: workspace_name.clone(),
-                        tree_ops: t.to_vec(),
-                    };
-                    pref_tree_reproduces_signature(&new_tree, &candidate, &target)
-                });
-                if reduced_tree.len() < tree_ops.len() {
-                    current_window[i] = RecordedOp::SyncPreferredLayout {
-                        workspace_name: workspace_name.clone(),
-                        tree_ops: reduced_tree,
-                    };
-                    payload_shrunk = true;
-                    break;
-                }
-            }
+        if new_window.len() == window.len() && payload_shrunk.is_none() {
+            return new_window;
         }
-
-        if new_tree.len() == tree.len() && new_window.len() == window.len() && !payload_shrunk {
-            return (tree, new_window);
-        }
-        tree = new_tree;
-        window = current_window;
-        tracing::info!(tree = tree.len(), window = window.len(), "shrink iteration");
+        window = payload_shrunk.unwrap_or(new_window);
+        tracing::info!(window = window.len(), "shrink iteration");
     }
 }
 
-fn config_op_shrink(
-    ops: Vec<RecordedOp>,
-    target: &FailureSignature,
-    make_hub: fn() -> Hub,
-) -> Vec<RecordedOp> {
-    let mut ops = ops;
-    let target = target.clone();
-    loop {
-        ops = ddmin(ops.clone(), |c| reproduces_signature(c, &target, make_hub));
-
-        let mut shrunk = false;
-        for i in 0..ops.len() {
-            if let RecordedOp::SyncPreferredLayout {
-                ref workspace_name,
-                ref tree_ops,
-            } = ops[i]
-            {
-                let reduced_tree = ddmin(tree_ops.clone(), |t| {
-                    let mut candidate = ops.clone();
-                    candidate[i] = RecordedOp::SyncPreferredLayout {
-                        workspace_name: workspace_name.clone(),
-                        tree_ops: t.to_vec(),
-                    };
-                    reproduces_signature(&candidate, &target, make_hub)
-                });
-                if reduced_tree.len() < tree_ops.len() {
-                    ops[i] = RecordedOp::SyncPreferredLayout {
-                        workspace_name: workspace_name.clone(),
-                        tree_ops: reduced_tree,
-                    };
-                    shrunk = true;
-                    break;
-                }
-            }
-        }
-
-        if !shrunk {
-            break;
+/// Shrinks the payload of the first op whose payload is reducible, returning
+/// `None` when no payload could be reduced. Op-level `ddmin` can only delete a
+/// whole op, so an op the failure needs keeps whatever payload it was recorded
+/// with unless it is shrunk here.
+fn shrink_op_payloads(
+    window: &[RecordedOp],
+    mut reproduces: impl FnMut(&[RecordedOp]) -> bool,
+) -> Option<Vec<RecordedOp>> {
+    for i in 0..window.len() {
+        let Some(tree_ops) = sync_tree_ops(&window[i]) else {
+            continue;
+        };
+        let reduced_tree = ddmin(tree_ops.clone(), |t| {
+            let mut candidate = window.to_vec();
+            set_sync_tree_ops(&mut candidate[i], t.to_vec());
+            reproduces(&candidate)
+        });
+        if reduced_tree.len() < tree_ops.len() {
+            let mut shrunk = window.to_vec();
+            set_sync_tree_ops(&mut shrunk[i], reduced_tree);
+            return Some(shrunk);
         }
     }
-    ops
+    None
 }
 
 mod tests {
@@ -1688,5 +1699,93 @@ mod tests {
             &reduced[0],
             RecordedOp::SetWindowTitle { title, .. } if title == sentinel_title
         ));
+    }
+
+    fn master_hub() -> Hub {
+        TestHubBuilder::new()
+            .with_layout(initial_layout(SmokeStrategy::Master))
+            .build()
+    }
+
+    /// `Hub::remove_monitor` asserts the fallback differs from the removed
+    /// monitor, and `resolve_monitor` maps `usize::MAX` to the primary, so both
+    /// fields resolve to the same id and the assert fires on every replay. This
+    /// gives the reducer tests a panic that does not depend on a real bug.
+    fn panicking_op() -> RecordedOp {
+        RecordedOp::RemoveMonitor {
+            monitor: RecordedMonitor(usize::MAX),
+            fallback: RecordedMonitor(usize::MAX),
+        }
+    }
+
+    fn padded_with(op: RecordedOp) -> Vec<RecordedOp> {
+        vec![
+            RecordedOp::QueryWorkspaces,
+            RecordedOp::FocusParent,
+            RecordedOp::ToggleSpawnMode,
+            op,
+            RecordedOp::QueryWorkspaces,
+            RecordedOp::FocusParent,
+            RecordedOp::ToggleSpawnMode,
+        ]
+    }
+
+    #[test]
+    fn shrink_reduces_window_ops_to_the_panicking_op() {
+        let ops = padded_with(panicking_op());
+        let signature = replay(&ops, master_hub).expect("fixture op must panic");
+
+        let reduced = shrink_ops(ops, &signature, master_hub);
+
+        assert_eq!(reduced.len(), 1);
+        assert!(matches!(reduced[0], RecordedOp::RemoveMonitor { .. }));
+    }
+
+    #[test]
+    fn shrink_reduces_a_sync_preferred_layout_payload() {
+        let window = vec![RecordedOp::SyncPreferredLayout {
+            workspace_name: "1".into(),
+            strategy: Strategy::PartitionTree,
+            tree_ops: vec![
+                PrefTreeBuildOp::InsertLeaf {
+                    leaf_id: 0,
+                    title: pref_title(0),
+                    anchor: None,
+                    split: SplitMode::Horizontal,
+                },
+                PrefTreeBuildOp::InsertLeaf {
+                    leaf_id: 1,
+                    title: pref_title(1),
+                    anchor: Some(0),
+                    split: SplitMode::Vertical,
+                },
+                PrefTreeBuildOp::InsertLeaf {
+                    leaf_id: 2,
+                    title: pref_title(2),
+                    anchor: Some(1),
+                    split: SplitMode::Tabbed,
+                },
+            ],
+            master: Vec::new(),
+            secondary: Vec::new(),
+            float: Vec::new(),
+            fullscreen: Vec::new(),
+        }];
+
+        let reduced = shrink_op_payloads(&window, |candidate| {
+            candidate
+                .iter()
+                .any(|op| matches!(op, RecordedOp::SyncPreferredLayout { .. }))
+        })
+        .expect("a three-leaf payload must shrink");
+
+        // The predicate ignores payload size, so every leaf is individually
+        // removable. `ddmin` still bottoms out at one element: granularity floors
+        // at 2, so its `granularity > ops.len()` guard exits once a single element
+        // is left.
+        assert_eq!(
+            sync_tree_ops(&reduced[0]).expect("still a sync op").len(),
+            1
+        );
     }
 }
