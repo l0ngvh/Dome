@@ -350,12 +350,7 @@ impl TilingStrategy for MasterStrategy {
     }
 
     fn reattach_child(&mut self, hub: &mut HubAccess, child: Child, ws_id: WorkspaceId) {
-        let windows = hub.take_windows(child);
-        assert!(
-            !windows.is_empty(),
-            "reattach_child received {child}, which carried no windows"
-        );
-        for id in windows {
+        for id in hub.take_windows(child) {
             self.attach_window(hub, id, ws_id);
         }
         // A later arrival can evict an earlier one out of the master pane, so the window
