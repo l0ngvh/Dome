@@ -1055,8 +1055,8 @@ pub(crate) fn default_rect() -> PixelRect {
     PixelRect::new(0, 0, 100, 100)
 }
 
-/// Convenience: a 100x30 monitor rect at the given origin.
-pub(super) fn dim_at(x: i32, y: i32) -> PixelRect {
+/// Convenience: a 100x30 monitor work area at the given origin.
+pub(super) fn work_area_at(x: i32, y: i32) -> PixelRect {
     PixelRect::new(x, y, 100, 30)
 }
 
