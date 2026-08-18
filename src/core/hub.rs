@@ -430,26 +430,31 @@ impl Hub {
     /// its `#N` suffixes by that same order, so generated config agrees with the
     /// names inside it.
     pub(crate) fn query_monitors(&self) -> Vec<crate::action::MonitorDetails> {
-        let mut monitors = self.access.monitors.all_active();
-        monitors.sort_by_key(|(_, m)| (m.work_area.x(), m.work_area.y()));
-        monitors
-            .into_iter()
-            .map(|(_, m)| crate::action::MonitorDetails {
-                device_name: m.device_name,
-                unique_name: m.unique_name,
-                cg_display_id: m.cg_display_id,
-                gdi_device: m.gdi_device,
-                work_area: crate::action::MonitorFrame {
-                    x: m.work_area.x().value(),
-                    y: m.work_area.y().value(),
-                    width: m.work_area.width().value(),
-                    height: m.work_area.height().value(),
-                },
+        let mut ids = self.access.monitors.sorted_ids();
+        ids.sort_by_key(|&id| {
+            let work_area = self.access.monitors.get(id).work_area;
+            (work_area.x(), work_area.y())
+        });
+        ids.into_iter()
+            .map(|id| {
+                let m = self.access.monitors.get(id);
+                crate::action::MonitorDetails {
+                    device_name: m.device_name.clone(),
+                    unique_name: m.unique_name.clone(),
+                    cg_display_id: m.cg_display_id,
+                    gdi_device: m.gdi_device.clone(),
+                    work_area: crate::action::MonitorFrame {
+                        x: m.work_area.x().value(),
+                        y: m.work_area.y().value(),
+                        width: m.work_area.width().value(),
+                        height: m.work_area.height().value(),
+                    },
+                }
             })
             .collect()
     }
 
-    fn count_workspace_windows(&self, ws_id: WorkspaceId, ws: &Workspace) -> usize {
+    pub(super) fn count_workspace_windows(&self, ws_id: WorkspaceId, ws: &Workspace) -> usize {
         let tiling_count = self
             .strategies
             .for_workspace(ws_id)
