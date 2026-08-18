@@ -445,7 +445,7 @@ impl Hub {
             .collect()
     }
 
-    fn count_workspace_windows(&self, ws_id: WorkspaceId, ws: &Workspace) -> usize {
+    pub(super) fn count_workspace_windows(&self, ws_id: WorkspaceId, ws: &Workspace) -> usize {
         let tiling_count = self
             .strategies
             .for_workspace(ws_id)

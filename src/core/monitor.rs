@@ -99,23 +99,11 @@ impl Hub {
             gdi_device: None,
             work_area,
             scale,
-            // Overwritten below. Workspace::new needs the monitor id, so
-            // neither can be built first.
+            // Set at the end, once it is known whether a parked workspace
+            // returns or a default has to be minted. Workspace::new needs the
+            // monitor id, so neither can be built first.
             active_workspace: WorkspaceId::new(0),
         });
-        let workspace_name = "0".to_string();
-        let ws_id = self
-            .access
-            .workspaces
-            .allocate(Workspace::new(workspace_name.clone(), monitor_id));
-        self.access.monitors.get_mut(monitor_id).active_workspace = ws_id;
-        let preferred_layout = self
-            .access
-            .preferred_layouts
-            .iter()
-            .find(|w| w.name() == workspace_name);
-        self.strategies
-            .register(ws_id, &self.access.layout, preferred_layout);
         self.recompute_monitor_names();
 
         // The name recompute above restamped `unique_name` across the now-larger
@@ -124,7 +112,7 @@ impl Hub {
         // monitor. The match must read the stored name post-recompute: a
         // pre-recompute read could carry a stale suffix and miss a real origin.
         let origin_name = self.access.monitors.get(monitor_id).unique_name.clone();
-        let reattaching: Vec<WorkspaceId> = self
+        let mut returning: Vec<WorkspaceId> = self
             .access
             .workspaces
             .all_active()
@@ -132,7 +120,11 @@ impl Hub {
             .filter(|(_, ws)| ws.origin() == Some(origin_name.as_str()))
             .map(|(ws_id, _)| *ws_id)
             .collect();
-        for ws_id in reattaching {
+        // Ordered by name so the choice below breaks ties deterministically
+        // rather than by allocator order.
+        returning.sort_by_key(|ws_id| self.access.workspaces.get(*ws_id).name.clone());
+
+        for &ws_id in &returning {
             let ws = self.access.workspaces.get_mut(ws_id);
             // While parked, `monitor` still points at the rental host. The
             // re-home writes below overwrite it, so capture the old host now.
@@ -159,6 +151,44 @@ impl Hub {
                 }
             }
         }
+
+        // A monitor that brought workspaces back needs no default. Minting one
+        // regardless would leave two workspaces named "0" after every replug,
+        // because the previous default parks and returns alongside the new one,
+        // and only one of two same-named workspaces is reachable by name.
+        //
+        // Among the returning ones the first holding windows wins. The monitor's
+        // own active pointer died with it, so no stored answer survives to
+        // restore, and showing an empty workspace while the windows sit on a
+        // sibling reads as the replug having lost them.
+        let returning_active = returning
+            .iter()
+            .find(|&&ws_id| {
+                let ws = self.access.workspaces.get(ws_id);
+                self.count_workspace_windows(ws_id, ws) > 0
+            })
+            .or(returning.first())
+            .copied();
+
+        let active = match returning_active {
+            Some(ws_id) => ws_id,
+            None => {
+                let workspace_name = "0".to_string();
+                let ws_id = self
+                    .access
+                    .workspaces
+                    .allocate(Workspace::new(workspace_name.clone(), monitor_id));
+                let preferred_layout = self
+                    .access
+                    .preferred_layouts
+                    .iter()
+                    .find(|w| w.name() == workspace_name);
+                self.strategies
+                    .register(ws_id, &self.access.layout, preferred_layout);
+                ws_id
+            }
+        };
+        self.access.monitors.get_mut(monitor_id).active_workspace = active;
         monitor_id
     }
 

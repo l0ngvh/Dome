@@ -187,8 +187,8 @@ fn replugging_monitor_moves_workspaces_back_to_it() {
 
     // Stage 3: replug with the same device name and position so the returning
     // monitor recomputes to B's old name. Both parked workspaces re-home onto
-    // it, and it also gets its own fresh "0". Visiting each by name shows the
-    // reattached window on screen.
+    // it, so no fresh "0" is minted. Visiting each by name shows the reattached
+    // window on screen.
     hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
     hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
     hub.focus_workspace("1", None);
@@ -209,12 +209,63 @@ fn replugging_monitor_moves_workspaces_back_to_it() {
         Window(id=WindowId(2), x=150.00, y=0.00, w=100.00, h=30.00, highlighted, spawn=right)
       )
     "#);
-    hub.focus_workspace("0", None);
-    assert_snapshot!(snapshot(&hub), @r#"
-    Hub(focused=None)
-      Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-      Monitor(id=MonitorId(2), name="external", screen=(x=150.00 y=0.00 w=100.00 h=30.00))
-    "#);
+}
+
+#[test]
+fn replug_cycles_do_not_accumulate_default_workspaces() {
+    let mut hub = setup();
+    let primary = hub.focused_monitor();
+    let external = hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
+
+    // A window on external's own workspace, so a returning workspace stays
+    // distinguishable from a freshly minted one.
+    hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
+    hub.insert_window(titled("e1"), default_rect(), WindowRestrictions::None);
+
+    hub.remove_monitor(external, primary);
+    let external = hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
+
+    // The second cycle is the one that matters. A default minted on the first
+    // replug would park here and return alongside the next one.
+    hub.remove_monitor(external, primary);
+    hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
+
+    let rows: Vec<_> = hub
+        .query_workspaces()
+        .into_iter()
+        .filter(|w| w.monitor == "external")
+        .collect();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, "0");
+    assert_eq!(rows[0].window_count, 1);
+    assert!(rows[0].is_visible);
+}
+
+#[test]
+fn replug_shows_a_returning_workspace_that_holds_windows() {
+    let mut hub = setup();
+    let primary = hub.focused_monitor();
+    let external = hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
+
+    // external keeps its empty default "0" and puts its window on "2", so the
+    // lowest-named returning workspace is not the one worth showing.
+    hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
+    hub.focus_workspace("2", None);
+    hub.insert_window(titled("e1"), default_rect(), WindowRestrictions::None);
+
+    hub.remove_monitor(external, primary);
+    hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
+
+    // Landing on the empty "0" while the window sits on "2" reads as the replug
+    // having lost it, so the workspace holding windows is the one shown.
+    let visible: Vec<_> = hub
+        .query_workspaces()
+        .into_iter()
+        .filter(|w| w.monitor == "external" && w.is_visible)
+        .collect();
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].name, "2");
+    assert_eq!(visible[0].window_count, 1);
 }
 
 #[test]
