@@ -15,7 +15,7 @@ use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotific
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, MONITORINFOF_PRIMARY};
 use windows::core::BOOL;
 
-use crate::core::{Dimension, Hub, MonitorId, Physical, PixelRect, WindowId};
+use crate::core::{Dimension, Hub, MonitorId, Physical, PixelRect};
 use crate::platform::windows::external::HwndId;
 use crate::platform::windows::handle;
 
@@ -60,14 +60,12 @@ impl QueryDisplay for Win32Display {
     }
 }
 
-/// Per-monitor state. `displayed` is rebuilt each `apply_layout` pass.
 pub(super) struct Monitor {
     id: MonitorId,
     handle: isize,
     name: String,
     work_area: PixelRect,
     scale: f32,
-    displayed: HashSet<WindowId>,
 }
 
 impl Monitor {
@@ -85,10 +83,6 @@ impl Monitor {
 
     pub(super) fn scale(&self) -> f32 {
         self.scale
-    }
-
-    pub(super) fn displayed(&self) -> &HashSet<WindowId> {
-        &self.displayed
     }
 }
 
@@ -114,10 +108,6 @@ impl MonitorRegistry {
         &self.monitors[&id]
     }
 
-    pub(super) fn monitors(&self) -> impl Iterator<Item = &Monitor> + '_ {
-        self.monitors.values()
-    }
-
     pub(super) fn insert(
         &mut self,
         handle: isize,
@@ -134,7 +124,6 @@ impl MonitorRegistry {
                 name,
                 work_area,
                 scale,
-                displayed: HashSet::new(),
             },
         );
     }
@@ -144,29 +133,6 @@ impl MonitorRegistry {
             .values()
             .find(|m| m.handle == handle)
             .map(|m| m.id)
-    }
-
-    pub(super) fn remove_window_from_displayed(&mut self, window_id: WindowId) {
-        for m in self.monitors.values_mut() {
-            m.displayed.remove(&window_id);
-        }
-    }
-
-    pub(super) fn clear_all_displayed(&mut self) {
-        for m in self.monitors.values_mut() {
-            m.displayed.clear();
-        }
-    }
-
-    pub(super) fn set_displayed_windows(
-        &mut self,
-        monitor_id: MonitorId,
-        displayed: HashSet<WindowId>,
-    ) {
-        self.monitors
-            .get_mut(&monitor_id)
-            .expect("monitor present")
-            .displayed = displayed;
     }
 
     pub(super) fn is_borderless_fullscreen_at(

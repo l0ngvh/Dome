@@ -5,7 +5,7 @@ use objc2_app_kit::NSScreen;
 use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
 use objc2_foundation::{NSNumber, NSString};
 
-use crate::core::{Dimension, Hub, Length, MonitorId, PixelRect, Pixels, WindowId};
+use crate::core::{Dimension, Hub, Length, MonitorId, PixelRect, Pixels};
 use crate::platform::reserve_for_bar;
 
 use super::Dome;
@@ -102,7 +102,6 @@ type DisplayId = u32;
 pub(in crate::platform::macos) struct Monitor {
     id: MonitorId,
     info: MonitorInfo,
-    displayed_windows: HashSet<WindowId>,
 }
 
 impl Monitor {
@@ -116,10 +115,6 @@ impl Monitor {
 
     pub(in crate::platform::macos) fn egui_scale(&self) -> f64 {
         self.info.scale
-    }
-
-    pub(in crate::platform::macos) fn displayed(&self) -> &HashSet<WindowId> {
-        &self.displayed_windows
     }
 }
 
@@ -138,7 +133,6 @@ impl MonitorRegistry {
             Monitor {
                 id: primary_monitor_id,
                 info: primary.clone(),
-                displayed_windows: HashSet::new(),
             },
         );
         reverse.insert(primary_monitor_id, primary.display_id);
@@ -162,18 +156,6 @@ impl MonitorRegistry {
             .get(&monitor_id)
             .and_then(|d| self.map.get(d))
             .expect("monitor not found in registry")
-    }
-
-    pub(in crate::platform::macos) fn set_displayed_windows(
-        &mut self,
-        monitor_id: MonitorId,
-        displayed: HashSet<WindowId>,
-    ) {
-        self.reverse
-            .get(&monitor_id)
-            .and_then(|d| self.map.get_mut(d))
-            .expect("monitor not found in registry")
-            .displayed_windows = displayed;
     }
 
     pub(super) fn primary_monitor(&self) -> &Monitor {
@@ -217,22 +199,9 @@ impl MonitorRegistry {
             Monitor {
                 id: monitor_id,
                 info: monitor.clone(),
-                displayed_windows: HashSet::new(),
             },
         );
         self.reverse.insert(monitor_id, monitor.display_id);
-    }
-
-    pub(super) fn remove_displayed_window(&mut self, window_id: WindowId) {
-        for entry in self.map.values_mut() {
-            entry.displayed_windows.remove(&window_id);
-        }
-    }
-
-    pub(super) fn is_displayed(&self, window_id: WindowId) -> bool {
-        self.map
-            .values()
-            .any(|entry| entry.displayed_windows.contains(&window_id))
     }
 
     fn remove_by_id(&mut self, monitor_id: MonitorId) {
