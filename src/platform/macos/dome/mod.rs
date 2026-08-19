@@ -188,6 +188,9 @@ pub(in crate::platform::macos) struct Dome {
     hub: Hub,
     registry: WindowRegistry,
     monitor_registry: MonitorRegistry,
+    /// The windows Dome currently has on screen. Owned here rather than per monitor entry
+    /// so it survives a monitor removal, which is what lets a departed monitor's windows hide.
+    displayed_windows: HashSet<WindowId>,
     config: Config,
     /// Full height of the primary display (including menu bar/dock), used for Quartz→Cocoa
     /// coordinate conversion in overlay rendering.
@@ -248,6 +251,7 @@ impl Dome {
             recovery: Recovery::new(),
             pending_created: Vec::new(),
             pending_deleted: Vec::new(),
+            displayed_windows: HashSet::new(),
             status_bars: StatusBarTracker::default(),
             monitors: monitors.to_vec(),
             monitor_settling: false,

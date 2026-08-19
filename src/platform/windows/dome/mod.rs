@@ -114,6 +114,9 @@ pub(super) struct Dome {
     hub: Hub,
     registry: WindowRegistry,
     monitors: MonitorRegistry,
+    /// The windows Dome currently has on screen. Owned here rather than per monitor entry
+    /// so it survives a monitor removal, which is what lets a departed monitor's windows hide.
+    displayed_windows: HashSet<WindowId>,
     config: Config,
     taskbar: Rc<dyn ManageTaskbar>,
     overlay_factory: Box<dyn CreateOverlay>,
@@ -224,6 +227,7 @@ impl Dome {
             last_focused_monitor: None,
             pending_created: Vec::new(),
             placement_tracker: PlacementTracker::new(),
+            displayed_windows: HashSet::new(),
             recovery: Recovery::new(taskbar),
             app_window,
             status_bars: StatusBars::default(),
@@ -268,7 +272,7 @@ impl Dome {
         if let Some(id) = self.registry.remove_by_hwnd(id_key) {
             tracing::info!(%id, "Window removed");
             self.float_overlays.remove(&id);
-            self.monitors.remove_window_from_displayed(id);
+            self.displayed_windows.remove(&id);
             self.hub.delete_window(id);
             self.apply_layout();
         }
@@ -582,7 +586,7 @@ impl Dome {
         let focused = focused_window;
 
         let mut per_monitor: Vec<MonitorPositionData> = Vec::new();
-        let mut new_displayed: HashMap<MonitorId, HashSet<WindowId>> = HashMap::new();
+        let mut new_window_ids: HashSet<WindowId> = HashSet::new();
 
         for mp in result.monitors {
             let work_area = self.monitors.monitor(mp.monitor_id).work_area();
@@ -656,29 +660,20 @@ impl Dome {
                 }
             }
 
-            new_displayed.insert(mp.monitor_id, window_ids);
+            new_window_ids.extend(window_ids);
         }
 
-        let old_window_ids: HashSet<WindowId> = self
-            .monitors
-            .monitors()
-            .flat_map(|m| m.displayed().iter())
-            .copied()
-            .collect();
-        let new_window_ids: HashSet<WindowId> = new_displayed.values().flatten().copied().collect();
-        let to_hide: Vec<WindowId> = old_window_ids
+        let to_hide: Vec<WindowId> = self
+            .displayed_windows
             .difference(&new_window_ids)
             .copied()
             .collect();
         let tabs_to_add: Vec<WindowId> = new_window_ids
-            .difference(&old_window_ids)
+            .difference(&self.displayed_windows)
             .copied()
             .collect();
 
-        self.monitors.clear_all_displayed();
-        for (mid, dm) in new_displayed {
-            self.monitors.set_displayed_windows(mid, dm);
-        }
+        self.displayed_windows = new_window_ids;
 
         for &id in &to_hide {
             // Keep taskbar tab for user-minimized windows so the user can
@@ -692,7 +687,7 @@ impl Dome {
         }
 
         for &id in &created {
-            if !new_window_ids.contains(&id) {
+            if !self.displayed_windows.contains(&id) {
                 self.hide_window(id);
             }
         }

@@ -317,21 +317,7 @@ fn multi_monitor_per_display() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
 
-    let second_monitor = MonitorInfo {
-        display_id: 2,
-        name: "External".to_string(),
-        work_area: PixelRect::new(1920, 0, 2560, 1440),
-        bounds: Dimension::new(
-            Length::new(1920.0),
-            Length::ZERO,
-            Length::new(2560.0),
-            Length::new(1440.0),
-        ),
-        full_height: 1440.0,
-        is_primary: false,
-        scale: 2.0,
-    };
-    dome.monitors_changed(vec![default_monitor(), second_monitor]);
+    dome.monitors_changed(vec![default_monitor(), second_monitor()]);
 
     let win1 = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win1)], &[], &[]);

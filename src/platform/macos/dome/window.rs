@@ -619,7 +619,7 @@ impl Dome {
             }
             WindowState::NativeFullscreen => {
                 if is_borderless_fullscreen {
-                    if self.monitor_registry.is_displayed(window_id) {
+                    if self.displayed_windows.contains(&window_id) {
                         window.state = WindowState::BorderlessFullscreen;
                     } else {
                         // Window exited native fullscreen on an unfocused workspace.
