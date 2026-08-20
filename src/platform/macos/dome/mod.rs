@@ -219,12 +219,13 @@ impl Dome {
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(
+            primary.name.clone(),
             primary.work_area,
             1.0,
             GlobalLayoutConfig::from(&config),
             workspace_overrides.clone(),
         );
-        let primary_monitor_id = hub.focused_monitor();
+        let primary_monitor_id = hub.primary_monitor();
         // The primary bypasses `add_monitor`, so without its own stamp a
         // single-display Mac would publish no display id at all.
         hub.set_monitor_cg_display_id(

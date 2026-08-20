@@ -162,6 +162,9 @@ impl Default for GlobalLayoutConfig {
 pub(crate) struct HubAccess {
     pub(super) monitors: Allocator<Monitor>,
     pub(super) focused_monitor: MonitorId,
+    /// Re-keyed onto a new primary display rather than replaced, so this id
+    /// never dies while any display exists.
+    pub(super) primary_monitor: MonitorId,
     pub(super) layout: GlobalLayoutConfig,
     pub(super) preferred_layouts: Vec<LayoutWorkspaceConfig>,
     pub(super) workspaces: Allocator<Workspace>,
@@ -247,6 +250,7 @@ pub(crate) struct Hub {
 
 impl Hub {
     pub(crate) fn new(
+        primary_name: String,
         primary_screen: PixelRect,
         primary_scale: f32,
         layout: GlobalLayoutConfig,
@@ -257,8 +261,9 @@ impl Hub {
         let mut hub = Self {
             access: HubAccess {
                 monitors: Allocator::new(),
-                // Placeholder id. will be changed after inserting primary monitor
+                // Placeholder ids. Both are set once the primary monitor exists.
                 focused_monitor: MonitorId::new(0),
+                primary_monitor: MonitorId::new(0),
                 layout,
                 preferred_layouts,
                 workspaces: Allocator::new(),
@@ -272,8 +277,9 @@ impl Hub {
             global_fullscreen_matchers: Vec::new(),
         };
 
-        let primary_id = hub.add_monitor("primary".to_string(), primary_screen, primary_scale);
+        let primary_id = hub.add_monitor(primary_name, primary_screen, primary_scale);
         hub.access.focused_monitor = primary_id;
+        hub.access.primary_monitor = primary_id;
         let preferred = hub.access.preferred_layouts.clone();
         hub.index_matchers(&preferred);
         hub
@@ -380,8 +386,19 @@ impl Hub {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "read by the core tests, which assert where focus lands"
+        )
+    )]
     pub(crate) fn focused_monitor(&self) -> MonitorId {
         self.access.focused_monitor
+    }
+
+    pub(crate) fn primary_monitor(&self) -> MonitorId {
+        self.access.primary_monitor
     }
 
     pub(crate) fn visible_workspaces(&self) -> Vec<WorkspaceId> {

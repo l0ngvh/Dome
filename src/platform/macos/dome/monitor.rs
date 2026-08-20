@@ -150,10 +150,6 @@ impl MonitorRegistry {
         self.map.contains_key(&display_id)
     }
 
-    pub(super) fn get(&self, display_id: DisplayId) -> Option<MonitorId> {
-        self.map.get(&display_id).map(|e| e.id)
-    }
-
     pub(in crate::platform::macos) fn monitor(&self, monitor_id: MonitorId) -> &Monitor {
         self.reverse
             .get(&monitor_id)
@@ -167,10 +163,6 @@ impl MonitorRegistry {
             .expect("primary monitor present")
     }
 
-    pub(super) fn primary_monitor_id(&self) -> MonitorId {
-        self.get(self.primary_display_id).unwrap()
-    }
-
     pub(in crate::platform::macos) fn primary_full_height(&self) -> f32 {
         self.map
             .get(&self.primary_display_id)
@@ -179,12 +171,13 @@ impl MonitorRegistry {
             .full_height
     }
 
-    pub(super) fn set_primary_display_id(&mut self, display_id: DisplayId) {
-        self.primary_display_id = display_id;
-    }
-
-    pub(super) fn replace_primary(&mut self, new_info: &MonitorInfo) {
-        debug_assert!(!self.map.contains_key(&new_info.display_id));
+    /// Returns the monitor displaced from the incoming primary display, if this
+    /// registry already tracked one there.
+    pub(super) fn replace_primary(&mut self, new_info: &MonitorInfo) -> Option<MonitorId> {
+        let displaced = self.map.get(&new_info.display_id).map(|m| m.id);
+        if let Some(displaced_id) = displaced {
+            self.reverse.remove(&displaced_id);
+        }
         if let Some(mut entry) = self.map.remove(&self.primary_display_id) {
             let old = self.primary_display_id;
             let monitor_id = entry.id;
@@ -194,6 +187,7 @@ impl MonitorRegistry {
             self.primary_display_id = new_info.display_id;
             tracing::info!(old, new = new_info.display_id, "Primary monitor replaced");
         }
+        displaced
     }
 
     pub(super) fn insert(&mut self, monitor: &MonitorInfo, monitor_id: MonitorId) {
@@ -303,21 +297,21 @@ impl MonitorRegistry {
     pub(super) fn reconcile(&mut self, hub: &mut Hub, monitors: &[MonitorInfo]) {
         let current_keys: HashSet<_> = monitors.iter().map(|s| s.display_id).collect();
 
-        // Special handling for when the primary monitor got replaced, i.e. due to mirroring to prevent
-        // disruption due to removal and addition of workspaces.
-        if let Some(new_primary) = monitors.iter().find(|s| s.is_primary) {
-            if !self.contains(new_primary.display_id) {
-                self.replace_primary(new_primary);
-                hub.update_monitor(self.primary_monitor_id(), new_primary.work_area, 1.0);
-                // `replace_primary` rebinds this MonitorId onto a different
-                // panel, so the previous stamp is now wrong.
-                hub.set_monitor_cg_display_id(
-                    self.primary_monitor_id(),
-                    publishable_display_id(new_primary.display_id),
-                );
-            } else {
-                self.set_primary_display_id(new_primary.display_id);
-            }
+        // Mirroring moves the primary role between displays, and the workspaces
+        // follow the role instead of parking.
+        if let Some(new_primary) = monitors.iter().find(|s| s.is_primary)
+            && new_primary.display_id != self.primary_display_id
+        {
+            let occupant = self.replace_primary(new_primary);
+            hub.apply_primary_display_change(occupant, new_primary.name.clone());
+            let primary_monitor_id = hub.primary_monitor();
+            hub.update_monitor(primary_monitor_id, new_primary.work_area, 1.0);
+            // `replace_primary` rebinds this MonitorId onto a different
+            // panel, so the previous stamp is now wrong.
+            hub.set_monitor_cg_display_id(
+                primary_monitor_id,
+                publishable_display_id(new_primary.display_id),
+            );
         }
 
         // Add new monitors first to prevent exhausting all monitors
@@ -332,13 +326,10 @@ impl MonitorRegistry {
 
         let removed = self.remove_stale(&current_keys);
         if !removed.is_empty() {
-            // Capture the primary once before the loop: it is never in `removed`
-            // (the primary is always a survivor), so the parked workspaces rent
-            // to a stable present id even as monitors are deleted per iteration.
-            let primary = self.primary_monitor_id();
             for monitor_id in &removed {
-                hub.remove_monitor(*monitor_id, primary);
+                hub.remove_monitor(*monitor_id);
             }
+            let primary = hub.primary_monitor();
             tracing::info!(?removed, %primary, "Monitors removed");
         }
 
@@ -352,6 +343,7 @@ impl MonitorRegistry {
                         "Monitor work area changed"
                     );
                 }
+                hub.rename_monitor(monitor_id, monitor.name.clone());
                 hub.update_monitor(monitor_id, monitor.work_area, 1.0);
             }
         }

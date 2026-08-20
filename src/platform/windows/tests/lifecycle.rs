@@ -638,3 +638,55 @@ fn tab_click_focuses_tab_index() {
         .active_index;
     assert_eq!(after_active, 0);
 }
+
+#[test]
+fn primary_monitor_answers_to_its_display_name() {
+    let env = TestEnv::new();
+
+    let monitors = env.dome.query_monitors_json();
+    assert!(monitors.contains("\"unique_name\":\"Test\""), "{monitors}");
+
+    let workspaces = env.dome.query_workspaces_json();
+    assert!(workspaces.contains("\"monitor\":\"Test\""), "{workspaces}");
+    assert!(!workspaces.contains("primary"), "{workspaces}");
+}
+
+#[test]
+fn primary_change_to_a_new_display_carries_the_workspaces() {
+    let mut env = TestEnv::new();
+
+    let mut demoted = default_monitor();
+    demoted.is_primary = false;
+    let mut promoted = second_monitor();
+    promoted.is_primary = true;
+    *env.monitors.lock().unwrap() = vec![demoted, promoted];
+    env.dome.handle_display_change();
+    env.dome.apply_layout();
+
+    let workspaces = env.dome.query_workspaces_json();
+    assert!(
+        workspaces.contains("\"monitor\":\"External\""),
+        "{workspaces}"
+    );
+}
+
+#[test]
+fn primary_change_to_a_tracked_display_parks_the_displaced_workspaces() {
+    let mut env = TestEnv::new();
+    env.add_monitor(second_monitor());
+
+    let mut demoted = default_monitor();
+    demoted.is_primary = false;
+    let mut promoted = second_monitor();
+    promoted.is_primary = true;
+    *env.monitors.lock().unwrap() = vec![demoted, promoted];
+    env.dome.handle_display_change();
+    env.dome.apply_layout();
+
+    let workspaces = env.dome.query_workspaces_json();
+    assert!(workspaces.contains("\"state\":\"Parked\""), "{workspaces}");
+    assert!(
+        workspaces.contains("\"monitor\":\"External\""),
+        "{workspaces}"
+    );
+}

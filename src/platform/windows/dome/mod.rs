@@ -155,12 +155,13 @@ impl Dome {
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(
+            primary.name.clone(),
             primary.work_area,
             primary.scale,
             GlobalLayoutConfig::from(&config),
             workspace_overrides.clone(),
         );
-        let primary_monitor_id = hub.focused_monitor();
+        let primary_monitor_id = hub.primary_monitor();
         // The primary bypasses `add_monitor`, so without its own stamp a
         // single-display box would publish no GDI device at all.
         hub.set_monitor_gdi_device(primary_monitor_id, primary.gdi_device.clone());

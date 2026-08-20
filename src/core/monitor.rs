@@ -222,15 +222,9 @@ impl Hub {
         }
     }
 
-    pub(crate) fn remove_monitor(&mut self, monitor_id: MonitorId, primary: MonitorId) {
-        // The monitor going away cannot also be the rental host the workspaces
-        // park onto. This is the sole guard here: a well-formed caller passes a
-        // primary that is a present surviving monitor, so this assert plus that
-        // contract guarantees a survivor remains to hold the always-live
-        // `monitor` field the parked workspaces rent to. The platform
-        // recomputes its primary before removing the old primary, so this holds
-        // in practice, but assert it so correctness fails fast rather than
-        // resting on that unasserted caller contract.
+    pub(crate) fn remove_monitor(&mut self, monitor_id: MonitorId) {
+        let primary = self.access.primary_monitor;
+
         assert!(
             monitor_id != primary,
             "removed monitor must not be the rental host primary"
@@ -264,26 +258,19 @@ impl Hub {
             .filter(|&ws_id| self.access.workspaces.get(ws_id).monitor == monitor_id)
             .collect();
 
-        // Park every workspace on this monitor, renting it to the primary so
-        // `monitor` stays a live present id. The origin each workspace remembers
-        // depends on its current variant. A newly parked Attached workspace
-        // uses the snapshot above (this monitor's own pre-delete name). An
-        // already Parked workspace was rented here from an earlier-removed
-        // monitor, so its true origin is recorded in its variant origin;
-        // overwriting it would make replug reattach it to the hosting primary
-        // rather than its true origin, so the frozen origin is kept.
+        // Every workspace here is Attached, because a parked one rents to the
+        // primary and the primary is never removed, so the origin is always
+        // this monitor's own pre-delete name.
         for ws_id in ws_on_this {
             let ws = self.access.workspaces.get_mut(ws_id);
-            let origin = match &ws.attachment {
-                Attachment::Attached => this_origin.clone(),
-                Attachment::Parked { origin } => origin.clone(),
-            };
             // Rent to the primary: a monitor is detached for a prolonged period
             // essentially only when undocking a laptop, so the primary is the
             // built-in display the user is actually looking at. Parked windows
             // therefore land on the screen in front of the user.
             ws.monitor = primary;
-            ws.attachment = Attachment::Parked { origin };
+            ws.attachment = Attachment::Parked {
+                origin: this_origin.clone(),
+            };
         }
 
         // Delete this one monitor. Safe now: no workspace's `monitor` field
@@ -323,6 +310,39 @@ impl Hub {
                 .compute_placement(&self.access, ws_id);
         }
         self.recompute_monitor_names();
+    }
+
+    /// Callers restamp unconditionally every reconcile, so an unchanged name
+    /// returns without rerunning the recompute.
+    pub(crate) fn rename_monitor(&mut self, monitor_id: MonitorId, device_name: String) {
+        let monitor = self.access.monitors.get_mut(monitor_id);
+        if monitor.device_name == device_name {
+            return;
+        }
+        monitor.device_name = device_name;
+        self.recompute_monitor_names();
+    }
+
+    /// `occupant` is the monitor already keyed to the incoming primary display,
+    /// which is displaced and removed.
+    pub(crate) fn apply_primary_display_change(
+        &mut self,
+        occupant: Option<MonitorId>,
+        device_name: String,
+    ) {
+        let primary = self.access.primary_monitor;
+        if occupant == Some(primary) {
+            return;
+        }
+
+        // Remove before renaming, so the occupant's origin freezes at its bare
+        // `unique_name` while it is still the only monitor holding that name.
+        // Renaming first would collide the two and freeze a position ranked
+        // suffix instead.
+        if let Some(displaced) = occupant {
+            self.remove_monitor(displaced);
+        }
+        self.rename_monitor(primary, device_name);
     }
 
     #[cfg_attr(

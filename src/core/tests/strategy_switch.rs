@@ -36,7 +36,13 @@ fn layout(
 }
 
 fn setup_hub_with_layout(layout: GlobalLayoutConfig, overrides: Vec<LayoutWorkspaceConfig>) -> Hub {
-    Hub::new(PixelRect::new(0, 0, 150, 30), 1.0, layout, overrides)
+    Hub::new(
+        "primary".to_string(),
+        PixelRect::new(0, 0, 150, 30),
+        1.0,
+        layout,
+        overrides,
+    )
 }
 
 #[test]

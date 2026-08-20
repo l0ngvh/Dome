@@ -93,14 +93,12 @@ pub(super) struct MonitorChange {
 
 pub(super) struct MonitorRegistry {
     monitors: HashMap<MonitorId, Monitor>,
-    primary: Option<MonitorId>,
 }
 
 impl MonitorRegistry {
     pub(super) fn new() -> Self {
         Self {
             monitors: HashMap::new(),
-            primary: None,
         }
     }
 
@@ -159,6 +157,36 @@ impl MonitorRegistry {
 
         let current_handles: HashSet<isize> = monitors.iter().map(|s| s.handle).collect();
 
+        // Ahead of the add loop, so the display the primary vacates is picked up
+        // as a new monitor below and the carried primary is not seen as departed.
+        if let Some(new_primary) = monitors.iter().find(|s| s.is_primary) {
+            let primary_id = hub.primary_monitor();
+            let carried = self.monitors.get(&primary_id).map(|m| m.handle);
+            if carried != Some(new_primary.handle) {
+                let occupant = self.id_for_handle(new_primary.handle);
+                if let Some(displaced) = occupant {
+                    self.monitors.remove(&displaced);
+                }
+                hub.apply_primary_display_change(occupant, new_primary.name.clone());
+                // Keyed by MonitorId with the handle in the value, so the carry
+                // is an in-place move onto the new panel.
+                if let Some(entry) = self.monitors.get_mut(&primary_id) {
+                    entry.handle = new_primary.handle;
+                    entry.name = new_primary.name.clone();
+                    entry.work_area = new_primary.work_area;
+                    entry.scale = new_primary.scale;
+                }
+                hub.update_monitor(primary_id, new_primary.work_area, new_primary.scale);
+                hub.set_monitor_gdi_device(primary_id, new_primary.gdi_device.clone());
+                tracing::info!(
+                    name = %new_primary.name,
+                    handle = ?new_primary.handle,
+                    ?occupant,
+                    "Primary display changed"
+                );
+            }
+        }
+
         for monitor in monitors {
             let already_tracked = self.monitors.values().any(|m| m.handle == monitor.handle);
             if !already_tracked {
@@ -187,23 +215,15 @@ impl MonitorRegistry {
             .map(|m| m.id)
             .collect();
 
-        let fallback = monitors
-            .iter()
-            .find(|s| s.is_primary)
-            .and_then(|s| self.id_for_handle(s.handle));
-        self.primary = fallback;
-
-        let primary = self
-            .primary
-            .expect("a primary monitor must exist after reconcile");
         for monitor_id in &to_remove {
             self.monitors.remove(monitor_id);
         }
         if !to_remove.is_empty() {
             for monitor_id in &to_remove {
-                hub.remove_monitor(*monitor_id, primary);
+                hub.remove_monitor(*monitor_id);
             }
             removed.extend(&to_remove);
+            let primary = hub.primary_monitor();
             tracing::info!(?to_remove, primary = %primary, "Monitors removed");
         }
 
@@ -214,6 +234,7 @@ impl MonitorRegistry {
             // Ahead of the change check, because Windows can move a szDevice to
             // another display without the work area or scale moving with it.
             hub.set_monitor_gdi_device(id, monitor.gdi_device.clone());
+            hub.rename_monitor(id, monitor.name.clone());
             if let Some(ms) = self.monitors.get(&id)
                 && (ms.work_area != monitor.work_area || ms.scale != monitor.scale)
             {
