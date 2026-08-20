@@ -549,7 +549,7 @@ impl Dome {
                     .monitor_registry
                     .find_closest_monitor(new_placement.to_dimension())
                     .map(|m| m.id())
-                    .unwrap_or_else(|| self.monitor_registry.primary_monitor_id());
+                    .unwrap_or_else(|| self.hub.primary_monitor());
                 self.hub
                     .update_float_rect(window_id, new_placement, monitor_id);
             }

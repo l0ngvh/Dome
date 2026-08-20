@@ -510,3 +510,61 @@ fn parked_monitor_windows_unhide_on_visit() {
         "visiting the parked workspace tiles its window on the primary"
     );
 }
+
+#[test]
+fn primary_monitor_answers_to_its_display_name() {
+    let macos = MacOS::new();
+    let dome = macos.setup_dome();
+
+    let monitors = dome.query_monitors_json();
+    assert!(monitors.contains("\"unique_name\":\"Test\""), "{monitors}");
+
+    let workspaces = dome.query_workspaces_json();
+    assert!(workspaces.contains("\"monitor\":\"Test\""), "{workspaces}");
+    assert!(!workspaces.contains("primary"), "{workspaces}");
+}
+
+#[test]
+fn primary_change_to_a_new_display_carries_the_workspaces() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    let mut incoming = default_monitor();
+    incoming.display_id = 3;
+    incoming.name = "Studio".to_string();
+    dome.monitors_changed(vec![incoming]);
+    macos.settle(&mut dome, 10);
+
+    let workspaces = dome.query_workspaces_json();
+    assert!(
+        workspaces.contains("\"monitor\":\"Studio\""),
+        "{workspaces}"
+    );
+    assert!(!workspaces.contains("Parked"), "{workspaces}");
+}
+
+#[test]
+fn primary_change_to_a_tracked_display_parks_the_displaced_workspaces() {
+    let macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    dome.monitors_changed(vec![default_monitor(), second_monitor()]);
+    macos.settle(&mut dome, 10);
+
+    let mut demoted = default_monitor();
+    demoted.is_primary = false;
+    let mut promoted = second_monitor();
+    promoted.is_primary = true;
+    dome.monitors_changed(vec![demoted, promoted]);
+    macos.settle(&mut dome, 10);
+
+    let workspaces = dome.query_workspaces_json();
+    assert!(workspaces.contains("\"state\":\"Parked\""), "{workspaces}");
+    assert!(
+        workspaces.contains("\"monitor\":\"External\""),
+        "{workspaces}"
+    );
+}

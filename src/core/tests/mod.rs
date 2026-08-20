@@ -689,6 +689,7 @@ impl TestHubBuilder {
 
     fn build(self) -> Hub {
         Hub::new(
+            "primary".to_string(),
             PixelRect::new(0, 0, ASCII_WIDTH as i32, ASCII_HEIGHT as i32),
             self.scale,
             self.layout,

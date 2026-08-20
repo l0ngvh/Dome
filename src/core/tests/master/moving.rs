@@ -877,7 +877,7 @@ fn move_window_into_workspace_whose_synced_layout_matches_it_to_secondary() {
         )
         .build();
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_window(
         titled_process("Term", "terminal.exe"),
         default_rect(),
@@ -894,8 +894,8 @@ fn move_window_into_workspace_whose_synced_layout_matches_it_to_secondary() {
             .build(),
     ]);
 
-    hub.move_focused_to_workspace("0");
-    hub.focus_workspace("0");
+    hub.move_focused_to_workspace("0", None);
+    hub.focus_workspace("0", None);
 
     hub.insert_window(
         titled_process("browser", "browser.exe"),

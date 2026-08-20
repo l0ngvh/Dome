@@ -117,7 +117,6 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    #[tracing::instrument(skip(self))]
     pub(crate) fn move_focused_to_workspace(&mut self, target: &str, monitor: Option<&str>) {
         if self.is_restricted(RestrictedAction::WorkspaceMove) {
             return;

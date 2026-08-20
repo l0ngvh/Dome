@@ -148,7 +148,7 @@ fn unplugging_unfocused_monitor_leaves_focus_unchanged() {
     hub.focus_workspace("1", None);
     hub.focus_monitor(&MonitorTarget::Name("primary".to_string()));
 
-    hub.remove_monitor(external, primary);
+    hub.remove_monitor(external);
 
     // Focus stays on primary because the removed monitor was not focused.
     assert_eq!(hub.focused_monitor(), primary);
@@ -157,7 +157,6 @@ fn unplugging_unfocused_monitor_leaves_focus_unchanged() {
 #[test]
 fn replugging_monitor_moves_workspaces_back_to_it() {
     let mut hub = setup();
-    let primary = hub.focused_monitor();
     let b = hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
 
     // Two sibling workspaces on B, each with a distinctly-titled window, so the
@@ -179,7 +178,7 @@ fn replugging_monitor_moves_workspaces_back_to_it() {
     "#);
 
     // Stage 2: unplug B. Its workspaces park and hide, so b1 and b2 are absent.
-    hub.remove_monitor(b, primary);
+    hub.remove_monitor(b);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
@@ -214,7 +213,6 @@ fn replugging_monitor_moves_workspaces_back_to_it() {
 #[test]
 fn replug_cycles_do_not_accumulate_default_workspaces() {
     let mut hub = setup();
-    let primary = hub.focused_monitor();
     let external = hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
 
     // A window on external's own workspace, so a returning workspace stays
@@ -222,12 +220,12 @@ fn replug_cycles_do_not_accumulate_default_workspaces() {
     hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
     hub.insert_window(titled("e1"), default_rect(), WindowRestrictions::None);
 
-    hub.remove_monitor(external, primary);
+    hub.remove_monitor(external);
     let external = hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
 
     // The second cycle is the one that matters. A default minted on the first
     // replug would park here and return alongside the next one.
-    hub.remove_monitor(external, primary);
+    hub.remove_monitor(external);
     hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
 
     let rows: Vec<_> = hub
@@ -244,7 +242,6 @@ fn replug_cycles_do_not_accumulate_default_workspaces() {
 #[test]
 fn replug_shows_a_returning_workspace_that_holds_windows() {
     let mut hub = setup();
-    let primary = hub.focused_monitor();
     let external = hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
 
     // external keeps its empty default "0" and puts its window on "2", so the
@@ -253,7 +250,7 @@ fn replug_shows_a_returning_workspace_that_holds_windows() {
     hub.focus_workspace("2", None);
     hub.insert_window(titled("e1"), default_rect(), WindowRestrictions::None);
 
-    hub.remove_monitor(external, primary);
+    hub.remove_monitor(external);
     hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
 
     // Landing on the empty "0" while the window sits on "2" reads as the replug
@@ -271,7 +268,6 @@ fn replug_shows_a_returning_workspace_that_holds_windows() {
 #[test]
 fn parked_workspace_is_not_reachable_by_name() {
     let mut hub = setup();
-    let primary = hub.focused_monitor();
 
     // Primary's own attached "1" with a distinctly-titled window. Its id is the
     // focused workspace right after creation, captured behaviorally.
@@ -288,7 +284,7 @@ fn parked_workspace_is_not_reachable_by_name() {
     hub.insert_window(titled("b1"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("b2"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("b3"), default_rect(), WindowRestrictions::None);
-    hub.remove_monitor(b, primary);
+    hub.remove_monitor(b);
 
     // Focus back to primary, then resolve "1" by name.
     hub.focus_monitor(&MonitorTarget::Name("primary".to_string()));
@@ -352,7 +348,7 @@ fn unplugging_focused_monitor_moves_focus_to_primary() {
     hub.focus_monitor(&MonitorTarget::Name("third".to_string()));
     assert_eq!(hub.focused_monitor(), third);
 
-    hub.remove_monitor(third, primary);
+    hub.remove_monitor(third);
 
     // Focus follows to the primary after its monitor is unplugged.
     assert_eq!(hub.focused_monitor(), primary);
@@ -361,7 +357,6 @@ fn unplugging_focused_monitor_moves_focus_to_primary() {
 #[test]
 fn visiting_parked_workspace_shows_its_windows() {
     let mut hub = setup();
-    let primary = hub.focused_monitor();
 
     // Primary's own attached "0" with a distinctly-titled window, captured for
     // the name-resolution check. Its presence in the placement tracks whether
@@ -373,7 +368,7 @@ fn visiting_parked_workspace_shows_its_windows() {
     hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
     hub.insert_window(titled("bwin"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("bwin1"), default_rect(), WindowRestrictions::None);
-    hub.remove_monitor(b, primary);
+    hub.remove_monitor(b);
 
     // Parked, so bwin drops out of the placement while the primary shows ownw.
     assert_snapshot!(snapshot(&hub), @"
@@ -502,7 +497,6 @@ fn visiting_parked_workspace_shows_its_windows() {
 #[test]
 fn focusing_another_monitor_leaves_visitor_in_place() {
     let mut hub = setup();
-    let primary = hub.focused_monitor();
     let b = hub.add_monitor("beta".to_string(), work_area_at(150, 0), 1.0);
     hub.add_monitor("gamma".to_string(), work_area_at(300, 0), 1.0);
 
@@ -514,7 +508,7 @@ fn focusing_another_monitor_leaves_visitor_in_place() {
     // Window on B, then unplug only B so its workspace parks onto primary.
     hub.focus_monitor(&MonitorTarget::Name("beta".to_string()));
     hub.insert_window(titled("bwin"), default_rect(), WindowRestrictions::None);
-    hub.remove_monitor(b, primary);
+    hub.remove_monitor(b);
 
     // Reach the parked workspace by name plus its origin monitor's name.
     hub.focus_workspace("0", Some("beta"));
@@ -612,112 +606,8 @@ fn focusing_another_monitor_leaves_visitor_in_place() {
 }
 
 #[test]
-fn parked_workspace_remembers_origin_when_rental_host_unplugged() {
-    let mut hub = setup();
-    let primary = hub.focused_monitor();
-    hub.insert_window(titled("win"), default_rect(), WindowRestrictions::None);
-
-    // B with a window on a distinctly named workspace so it is unambiguous
-    // after replug.
-    let b = hub.add_monitor("beta".to_string(), work_area_at(150, 0), 1.0);
-    hub.focus_monitor(&MonitorTarget::Name("beta".to_string()));
-    hub.focus_workspace("9", None);
-    hub.insert_window(titled("bwin"), default_rect(), WindowRestrictions::None);
-    hub.insert_window(titled("bwin"), default_rect(), WindowRestrictions::None);
-
-    // C survives the later primary removal.
-    let c = hub.add_monitor("gamma".to_string(), work_area_at(300, 0), 1.0);
-    hub.focus_monitor(&MonitorTarget::Name("gamma".to_string()));
-    hub.insert_window(titled("cwin"), default_rect(), WindowRestrictions::None);
-    hub.insert_window(titled("cwin"), default_rect(), WindowRestrictions::None);
-    hub.insert_window(titled("cwin"), default_rect(), WindowRestrictions::None);
-
-    // Park B onto primary: bwin drops out of the placement.
-    hub.remove_monitor(b, primary);
-    assert_snapshot!(snapshot(&hub), @r#"
-    Hub(focused=WindowId(5))
-      Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-      )
-      Monitor(id=MonitorId(2), name="gamma", screen=(x=300.00 y=0.00 w=100.00 h=30.00),
-        Window(id=WindowId(5), x=367.00, y=0.00, w=33.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(4), x=333.00, y=0.00, w=34.00, h=30.00)
-        Window(id=WindowId(3), x=300.00, y=0.00, w=33.00, h=30.00)
-        Container(id=ContainerId(1), x=300.00, y=0.00, w=100.00, h=30.00, titles=[cwin, cwin, cwin])
-      )
-
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                         W0                                                                         |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    "#);
-
-    // Unplug the primary itself while it hosts B's parked workspace. The parked
-    // workspace is re-rented to C, and bwin stays absent.
-    hub.remove_monitor(primary, c);
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(5))
-      Monitor(id=MonitorId(2), screen=(x=300.00 y=0.00 w=100.00 h=30.00),
-        Window(id=WindowId(5), x=367.00, y=0.00, w=33.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(4), x=333.00, y=0.00, w=34.00, h=30.00)
-        Window(id=WindowId(3), x=300.00, y=0.00, w=33.00, h=30.00)
-        Container(id=ContainerId(1), x=300.00, y=0.00, w=100.00, h=30.00, titles=[cwin, cwin, cwin])
-      )
-    ");
-
-    // Replug a monitor that recomputes to B's original name. If the parked
-    // workspace had lost B's origin when the primary was removed, it would not
-    // reattach here. bwin returning on the beta-named monitor proves the frozen
-    // origin survived the primary's own removal.
-    hub.add_monitor("beta".to_string(), work_area_at(150, 0), 1.0);
-    hub.focus_monitor(&MonitorTarget::Name("beta".to_string()));
-    hub.focus_workspace("9", None);
-    assert_snapshot!(snapshot(&hub), @r#"
-    Hub(focused=WindowId(2))
-      Monitor(id=MonitorId(2), name="gamma", screen=(x=300.00 y=0.00 w=100.00 h=30.00),
-        Window(id=WindowId(5), x=367.00, y=0.00, w=33.00, h=30.00)
-        Window(id=WindowId(4), x=333.00, y=0.00, w=34.00, h=30.00)
-        Window(id=WindowId(3), x=300.00, y=0.00, w=33.00, h=30.00)
-        Container(id=ContainerId(1), x=300.00, y=0.00, w=100.00, h=30.00, titles=[cwin, cwin, cwin])
-      )
-      Monitor(id=MonitorId(3), name="beta", screen=(x=150.00 y=0.00 w=100.00 h=30.00),
-        Window(id=WindowId(2), x=200.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(1), x=150.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(0), x=150.00, y=0.00, w=100.00, h=30.00, titles=[bwin, bwin])
-      )
-    "#);
-}
-
-#[test]
 fn workspace_returns_to_the_right_monitor_among_same_named() {
     let mut hub = setup();
-    let primary = hub.focused_monitor();
 
     // First same-named monitor, with a window on a distinctly named workspace
     // so it is unambiguous after replug.
@@ -753,7 +643,7 @@ fn workspace_returns_to_the_right_monitor_among_same_named() {
 
     // Unplug the first DELL. Its workspace parks onto primary so d1win drops
     // out, and the lone survivor is restamped back to the bare "DELL".
-    hub.remove_monitor(d1, primary);
+    hub.remove_monitor(d1);
     assert_snapshot!(snapshot_text(&hub), @r#"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00))
@@ -792,7 +682,6 @@ fn workspace_returns_to_the_right_monitor_among_same_named() {
 #[test]
 fn simultaneous_same_name_removal_single_replug_reattaches_last_removed() {
     let mut hub = setup();
-    let primary = hub.focused_monitor();
 
     // Two identically-named monitors at distinct positions, so they collide on
     // device name and disambiguate to "DELL #1" (leftmost) / "DELL #2". Each
@@ -817,8 +706,8 @@ fn simultaneous_same_name_removal_single_replug_reattaches_last_removed() {
     // first freezes its workspace's origin as "DELL #1", then the tail recompute
     // restamps the lone survivor from "DELL #2" down to bare "DELL", so the
     // second removal freezes that workspace's origin as bare "DELL".
-    hub.remove_monitor(d1, primary);
-    hub.remove_monitor(d2, primary);
+    hub.remove_monitor(d1);
+    hub.remove_monitor(d2);
 
     // A single DELL plugged back in recomputes to bare "DELL". Only the
     // second-removed monitor's workspace (frozen bare "DELL") matches and
@@ -1286,7 +1175,6 @@ fn move_focused_to_workspace_targets_named_monitor() {
 #[test]
 fn move_to_detached_monitor_deposits_into_parked_workspace() {
     let mut hub = setup();
-    let primary = hub.focused_monitor();
 
     // A "1" on B carrying its own window, parked onto the primary after B
     // unplugs. Its frozen origin is B's name, so the detached selector can find it.
@@ -1294,7 +1182,7 @@ fn move_to_detached_monitor_deposits_into_parked_workspace() {
     hub.focus_workspace("1", Some("external"));
     hub.insert_window(titled("bwin"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("bwin"), default_rect(), WindowRestrictions::None);
-    hub.remove_monitor(b, primary);
+    hub.remove_monitor(b);
 
     // A window on the primary moved to B's "1" via B's frozen name lands in the
     // hidden parked workspace. Visiting that workspace by B's name surfaces it,
@@ -1362,7 +1250,6 @@ fn move_to_detached_monitor_deposits_into_parked_workspace() {
 #[test]
 fn move_to_workspace_on_same_monitor() {
     let mut hub = setup();
-    let primary = hub.focused_monitor();
 
     // A "1" on B carrying a window, parked onto the primary after B unplugs.
     let b = hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
@@ -1370,7 +1257,7 @@ fn move_to_workspace_on_same_monitor() {
     hub.focus_workspace("1", None);
     hub.insert_window(titled("bwin"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("bwin"), default_rect(), WindowRestrictions::None);
-    hub.remove_monitor(b, primary);
+    hub.remove_monitor(b);
 
     // A move to "1" from the primary builds (or reuses) the primary's own
     // attached "1", never the hidden parked one, so the snapshot shows mover on
@@ -1424,10 +1311,9 @@ fn focus_detached_monitor_no_parked_match_is_noop() {
     // does nothing, because a workspace cannot be created on a monitor that is
     // gone.
     let mut hub = setup();
-    let primary = hub.focused_monitor();
     let dell = hub.add_monitor("DELL".to_string(), work_area_at(150, 0), 1.0);
     hub.focus_monitor(&MonitorTarget::Name("DELL".to_string()));
-    hub.remove_monitor(dell, primary);
+    hub.remove_monitor(dell);
 
     let before_focus = hub.focused_monitor();
     let before_current = hub.current_workspace();
@@ -1439,12 +1325,11 @@ fn focus_detached_monitor_no_parked_match_is_noop() {
     // A parked workspace under the detached origin monitor but with a different
     // name is still a miss, so the selector remains a no-op.
     let mut hub = setup();
-    let primary = hub.focused_monitor();
     let dell = hub.add_monitor("DELL".to_string(), work_area_at(150, 0), 1.0);
     hub.focus_monitor(&MonitorTarget::Name("DELL".to_string()));
     hub.focus_workspace("5", None);
     hub.insert_window(titled("dwin"), default_rect(), WindowRestrictions::None);
-    hub.remove_monitor(dell, primary);
+    hub.remove_monitor(dell);
 
     let before_focus = hub.focused_monitor();
     let before_current = hub.current_workspace();
@@ -1452,4 +1337,44 @@ fn focus_detached_monitor_no_parked_match_is_noop() {
     assert!(hub.query_workspaces().iter().all(|w| w.name != "3"));
     assert_eq!(hub.focused_monitor(), before_focus);
     assert_eq!(hub.current_workspace(), before_current);
+}
+
+#[test]
+fn renaming_into_a_taken_name_ranks_both_and_renaming_back_restores_them() {
+    let mut hub = setup();
+    let primary = hub.primary_monitor();
+    hub.add_monitor("DELL".to_string(), work_area_at(150, 0), 1.0);
+
+    hub.rename_monitor(primary, "DELL".to_string());
+    let mut ranked: Vec<String> = hub
+        .query_monitors()
+        .into_iter()
+        .map(|m| m.unique_name)
+        .collect();
+    ranked.sort();
+    assert_eq!(ranked, ["DELL #1", "DELL #2"]);
+
+    hub.rename_monitor(primary, "primary".to_string());
+    let mut restored: Vec<String> = hub
+        .query_monitors()
+        .into_iter()
+        .map(|m| m.unique_name)
+        .collect();
+    restored.sort();
+    assert_eq!(restored, ["DELL", "primary"]);
+}
+
+#[test]
+fn renaming_a_monitor_changes_which_name_resolves_it() {
+    let mut hub = setup();
+    let primary = hub.primary_monitor();
+    let external = hub.add_monitor("DELL".to_string(), work_area_at(150, 0), 1.0);
+
+    hub.rename_monitor(external, "Studio".to_string());
+
+    hub.focus_monitor(&MonitorTarget::Name("DELL".to_string()));
+    assert_eq!(hub.focused_monitor(), primary);
+
+    hub.focus_monitor(&MonitorTarget::Name("Studio".to_string()));
+    assert_eq!(hub.focused_monitor(), external);
 }
