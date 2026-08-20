@@ -866,3 +866,79 @@ fn top_to_bottom(hub: &Hub, ids: &[WindowId]) -> Vec<WindowId> {
     found.sort_by_key(|&(y, _)| y);
     found.into_iter().map(|(_, id)| id).collect()
 }
+
+#[test]
+fn move_window_into_workspace_whose_synced_layout_matches_it_to_secondary() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
+
+    hub.focus_workspace("1");
+    hub.insert_window(
+        titled_process("Term", "terminal.exe"),
+        default_rect(),
+        WindowRestrictions::None,
+    );
+
+    hub.sync_preferred_layout(vec![
+        LayoutWorkspaceConfigBuilder::new("0")
+            .with_strategy(Strategy::Master)
+            .with_secondary(vec![WindowMatcher {
+                process: Some("terminal.exe".into()),
+                ..Default::default()
+            }])
+            .build(),
+    ]);
+
+    hub.move_focused_to_workspace("0");
+    hub.focus_workspace("0");
+
+    hub.insert_window(
+        titled_process("browser", "browser.exe"),
+        default_rect(),
+        WindowRestrictions::None,
+    );
+
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00, highlighted)
+        Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+      )
+
+    ***************************************************************************+-------------------------------------------------------------------------+
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                    W1                                   *|                                    W0                                   |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    ***************************************************************************+-------------------------------------------------------------------------+
+    ");
+}

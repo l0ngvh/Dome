@@ -350,17 +350,13 @@ impl TilingStrategy for MasterStrategy {
     }
 
     fn reattach_child(&mut self, hub: &mut HubAccess, child: Child, ws_id: WorkspaceId) {
-        for id in hub.take_windows(child) {
+        let arrivals = hub.take_windows(child);
+        for &id in &arrivals {
             self.attach_window(hub, id, ws_id);
         }
-        // A later arrival can evict an earlier one out of the master pane, so the window
-        // attached last need not be the one in it.
-        let focus = self
-            .workspaces
-            .get(&ws_id)
-            .unwrap()
-            .last_focused_in(Pane::Master);
-        self.set_focus(hub, focus);
+        if let Some(&focus) = arrivals.first() {
+            self.set_focus(hub, focus);
+        }
     }
 
     fn migrate(
