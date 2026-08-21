@@ -271,6 +271,9 @@ impl Hub {
             ws.attachment = Attachment::Parked {
                 origin: this_origin.clone(),
             };
+            self.strategies
+                .for_workspace_mut(ws_id)
+                .compute_placement(&self.access, ws_id);
         }
 
         // Delete this one monitor. Safe now: no workspace's `monitor` field
@@ -293,6 +296,9 @@ impl Hub {
         scale: f32,
     ) {
         let monitor = self.access.monitors.get_mut(monitor_id);
+        if monitor.work_area == work_area && monitor.scale == scale {
+            return;
+        }
         monitor.work_area = work_area;
         monitor.scale = scale;
         // Collect IDs first to avoid borrowing self.access.workspaces while
