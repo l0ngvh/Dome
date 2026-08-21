@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
-use objc2_core_graphics::{CGDirectDisplayID, CGWindowID};
+use objc2_core_graphics::CGWindowID;
 
 use crate::action::{
     FocusTarget, MasterTarget, MinimizedWindow, MoveTarget, TabDirection, ToggleTarget,
@@ -133,31 +133,6 @@ pub(in crate::platform::macos) enum PendingAdd {
     },
 }
 
-/// Keyed by display id so a bar that moves between monitors or draws on
-/// several at once is handled uniformly.
-#[derive(Default)]
-struct StatusBarTracker {
-    rects: HashMap<CGDirectDisplayID, Dimension>,
-}
-
-impl StatusBarTracker {
-    fn record(&mut self, id: CGDirectDisplayID, rect: Dimension) {
-        self.rects.insert(id, rect);
-    }
-
-    fn rect_for(&self, id: CGDirectDisplayID) -> Option<Dimension> {
-        self.rects.get(&id).copied()
-    }
-
-    fn clear(&mut self) {
-        self.rects.clear();
-    }
-
-    fn is_empty(&self) -> bool {
-        self.rects.is_empty()
-    }
-}
-
 /// Timestamps of the first and last AX move/resize notifications in a
 /// coalesced debounce burst (equal when only one fired). The first is
 /// compared against the post-placement debounce window (was this burst
@@ -201,7 +176,8 @@ pub(in crate::platform::macos) struct Dome {
     recovery: Recovery,
     pending_created: Vec<WindowId>,
     pending_deleted: Vec<WindowId>,
-    status_bars: StatusBarTracker,
+    bar_geometry: Option<BarGeometry>,
+    // Unshrunk. `reconcile_monitors` insets from this, so a shrunk value compounds.
     monitors: Vec<MonitorInfo>,
     /// Detection is suppressed while the display settles after a monitor change.
     monitor_settling: bool,
@@ -253,7 +229,7 @@ impl Dome {
             pending_created: Vec::new(),
             pending_deleted: Vec::new(),
             displayed_windows: HashSet::new(),
-            status_bars: StatusBarTracker::default(),
+            bar_geometry: None,
             monitors: monitors.to_vec(),
             monitor_settling: false,
         }
@@ -365,21 +341,26 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn set_reserved_bar(&mut self, geo: Option<BarGeometry>) {
-        let rects = match &geo {
-            Some(g) => {
-                let rects = external_bar::reserved_rects(g, &self.monitors);
-                tracing::info!(?g, displays = rects.len(), "Bar reservation applied");
-                rects
+    pub(in crate::platform::macos) fn set_reserved_bar(
+        &mut self,
+        probed: anyhow::Result<BarGeometry>,
+    ) {
+        let geo = match probed {
+            Ok(geo) => geo,
+            Err(e) => {
+                crate::log_dedup::warn_once!(
+                    key: "sketchybar-probe",
+                    "Bar probe failed, keeping the last known reservation: {e:#}"
+                );
+                return;
             }
-            None => HashMap::new(),
         };
-        self.status_bars.clear();
-        for (display_id, rect) in &rects {
-            self.status_bars.record(*display_id, *rect);
+        if self.bar_geometry.as_ref() == Some(&geo) {
+            return;
         }
-        let cached = self.monitors.clone();
-        self.update_monitors(&cached);
+        tracing::info!(?geo, "Bar geometry changed");
+        self.bar_geometry = Some(geo);
+        self.reconcile_monitors();
         self.flush_layout();
     }
 
@@ -455,7 +436,8 @@ impl Dome {
 
     pub(in crate::platform::macos) fn monitors_changed(&mut self, monitors: Vec<MonitorInfo>) {
         self.rehide_offscreen_windows(&monitors);
-        self.update_monitors(&monitors);
+        self.monitors = monitors;
+        self.reconcile_monitors();
         self.monitor_settling = true;
         self.flush_layout();
     }
