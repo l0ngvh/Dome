@@ -8,7 +8,7 @@ use objc2_foundation::{NSNumber, NSString};
 use crate::core::{Dimension, Hub, Length, MonitorId, PixelRect, Pixels};
 use crate::platform::reserve_for_bar;
 
-use super::Dome;
+use super::{Dome, external_bar};
 
 #[derive(Clone, Debug)]
 pub(in crate::platform::macos) struct MonitorInfo {
@@ -336,33 +336,34 @@ impl MonitorRegistry {
 }
 
 impl Dome {
-    pub(super) fn update_monitors(&mut self, monitors: &[MonitorInfo]) {
-        // Cache the unshrunk list. Re-shrinking an already-shrunk cache would
-        // compound the reservation on each call.
-        self.monitors = monitors.to_vec();
-        if self.status_bars.is_empty() {
-            self.monitor_registry.reconcile(&mut self.hub, monitors);
-        } else {
-            let shrunk: Vec<MonitorInfo> = monitors
-                .iter()
-                .map(|m| {
-                    // Bar-edge math is f32 and shared with Windows, so the work area
-                    // leaves pixel space and comes back.
-                    let work_area = match self.status_bars.rect_for(m.display_id) {
-                        Some(bar) => PixelRect::from_dimension_inward(reserve_for_bar(
-                            m.bounds,
-                            m.work_area.to_dimension(),
-                            bar,
-                        )),
-                        None => m.work_area,
-                    };
-                    MonitorInfo {
-                        work_area,
-                        ..m.clone()
-                    }
-                })
-                .collect();
-            self.monitor_registry.reconcile(&mut self.hub, &shrunk);
+    pub(super) fn reconcile_monitors(&mut self) {
+        match &self.bar_geometry {
+            None => self
+                .monitor_registry
+                .reconcile(&mut self.hub, &self.monitors),
+            Some(geo) => {
+                let rects = external_bar::reserved_rects(geo, &self.monitors);
+                let shrunk: Vec<MonitorInfo> = self
+                    .monitors
+                    .iter()
+                    .map(|m| {
+                        // Bar-edge math is f32 and shared with Windows.
+                        let work_area = match rects.get(&m.display_id) {
+                            Some(bar) => PixelRect::from_dimension_inward(reserve_for_bar(
+                                m.bounds,
+                                m.work_area.to_dimension(),
+                                *bar,
+                            )),
+                            None => m.work_area,
+                        };
+                        MonitorInfo {
+                            work_area,
+                            ..m.clone()
+                        }
+                    })
+                    .collect();
+                self.monitor_registry.reconcile(&mut self.hub, &shrunk);
+            }
         }
         self.primary_full_height = self.monitor_registry.primary_full_height();
     }
