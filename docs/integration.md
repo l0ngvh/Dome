@@ -1,67 +1,16 @@
 # Integration
 
-Dome ships no status bar. These snippets read live state from `dome query workspaces`
-(see [cli.md](cli.md#dome-query-workspaces)). They are built from the public APIs of
-the status bars and of Dome, and they have not been tested against a live install yet,
-so you may need to adjust them for your setup.
+Dome currently ships no status bar. It provides basic integration with popular status bars
+through its [query interface](cli.md#dome-query-workspaces). You can adjust these to suit
+your setup.
 
 ## SketchyBar (macOS)
 
-```bash
-#!/usr/bin/env bash
-# Save to ~/.config/sketchybar/plugins/dome.sh and chmod +x
-set -euo pipefail
-
-# A query timeout prints {"error":"query timed out"}, not the array, so bail
-# when the output is not an array.
-
-json="$(dome query workspaces 2>/dev/null || echo '{"error":"unavailable"}')"
-
-if ! echo "$json" | jq -e 'type == "array"' >/dev/null 2>&1; then
-  exit 0
-fi
-
-echo "$json" | jq -r '.[] | "\(.name) \(.is_focused) \(.is_visible) \(.window_count)"' \
-  | while read -r name focused visible count; do
-      item="dome.ws.${name}"
-
-      if [ "$visible" = "false" ] && [ "$count" = "0" ]; then
-        sketchybar --set "$item" drawing=off 2>/dev/null || true
-        continue
-      fi
-
-      if [ "$focused" = "true" ]; then
-        sketchybar --set "$item" drawing=on label="$name" \
-          background.color=0xffffffff label.color=0xff000000 2>/dev/null || true
-      else
-        sketchybar --set "$item" drawing=on label="$name" \
-          background.color=0x44ffffff label.color=0xffffffff 2>/dev/null || true
-      fi
-    done
-```
+Copy `integrations/sketchybar/` to `~/.config/sketchybar/dome/` and add this to your
+`sketchybarrc`:
 
 ```bash
-# Add to your sketchybarrc, then: sketchybar --reload
-PLUGIN_DIR="$HOME/.config/sketchybar/plugins"
-
-sketchybar --add event dome_update
-
-# Range 0-9 = default workspaces, change to match yours
-for i in 0 1 2 3 4 5 6 7 8 9; do
-  sketchybar --add item "dome.ws.$i" left \
-    --set "dome.ws.$i" drawing=off \
-      background.drawing=on background.corner_radius=5 background.height=22 \
-      background.border_width=1 background.border_color=0x66ffffff \
-      label.padding_left=8 label.padding_right=8 \
-      padding_left=4 padding_right=4 \
-    --subscribe "dome.ws.$i" dome_update
-done
-
-# hidden driver: runs the plugin once a second
-sketchybar --add item dome.driver left \
-  --set dome.driver drawing=off \
-    script="$PLUGIN_DIR/dome.sh" \
-    update_freq=1
+eval "$("$CONFIG_DIR/dome/generate.py")"
 ```
 
 ## YASB (Windows)
@@ -69,10 +18,6 @@ sketchybar --add item dome.driver left \
 The formatter below turns the query into styled HTML, run by
 a `yasb.custom.CustomWidget` once a second. Save it to
 `%USERPROFILE%\.config\yasb\dome_workspaces.ps1`.
-
-The script renders a single-row `<table>` so each workspace pill gets
-proper padding and vertical centering. Adjust the hex values at the
-top of the script to match your YASB theme.
 
 ```powershell
 $focused_bg  = '#cba6f7'

@@ -258,7 +258,7 @@ fn detach_focused_child_refills_master() {
     hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
 
     hub.focus_left();
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))

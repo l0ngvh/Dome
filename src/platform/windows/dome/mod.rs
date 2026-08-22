@@ -17,13 +17,14 @@ use std::time::Instant;
 use crate::action::Query;
 use crate::action::{
     Actions, FocusTarget, MasterTarget, MinimizedWindow, MoveTarget, TabDirection, ToggleTarget,
+    WorkspaceInfo,
 };
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
     ContainerId, ContainerPlacement, Direction, FloatWindowPlacement, Hub, LimitObservation,
     MonitorId, MonitorLayout, Physical, PixelRect, Pixels, TilingAction, TilingWindowPlacement,
-    WindowId, WindowRestrictions, WorkspaceInfo,
+    WindowId, WindowRestrictions,
 };
 
 use self::app_window::AppWindowApi;
@@ -113,6 +114,9 @@ pub(super) struct Dome {
     hub: Hub,
     registry: WindowRegistry,
     monitors: MonitorRegistry,
+    /// The windows Dome currently has on screen. Owned here rather than per monitor entry
+    /// so it survives a monitor removal, which is what lets a departed monitor's windows hide.
+    displayed_windows: HashSet<WindowId>,
     config: Config,
     taskbar: Rc<dyn ManageTaskbar>,
     overlay_factory: Box<dyn CreateOverlay>,
@@ -151,17 +155,18 @@ impl Dome {
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(
-            primary.work_area,
-            primary.scale,
+            primary.into(),
             GlobalLayoutConfig::from(&config),
             workspace_overrides.clone(),
         );
-        let primary_monitor_id = hub.focused_monitor();
+        let primary_monitor_id = hub.primary_monitor();
         let mut monitors_reg = MonitorRegistry::new();
         let mut tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>> = HashMap::new();
         monitors_reg.insert(
             primary.handle,
             primary_monitor_id,
+            primary.name.clone(),
+            primary.gdi_device.clone(),
             primary.work_area,
             primary.scale,
         );
@@ -179,8 +184,15 @@ impl Dome {
 
         for monitor in &monitors {
             if monitor.handle != primary.handle {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, monitor.scale);
-                monitors_reg.insert(monitor.handle, id, monitor.work_area, monitor.scale);
+                let id = hub.add_monitor(monitor.into());
+                monitors_reg.insert(
+                    monitor.handle,
+                    id,
+                    monitor.name.clone(),
+                    monitor.gdi_device.clone(),
+                    monitor.work_area,
+                    monitor.scale,
+                );
                 if let Ok(overlay) = overlay_factory.create_tiling_overlay(
                     config.clone(),
                     monitor.work_area,
@@ -212,6 +224,7 @@ impl Dome {
             last_focused_monitor: None,
             pending_created: Vec::new(),
             placement_tracker: PlacementTracker::new(),
+            displayed_windows: HashSet::new(),
             recovery: Recovery::new(taskbar),
             app_window,
             status_bars: StatusBars::default(),
@@ -256,7 +269,7 @@ impl Dome {
         if let Some(id) = self.registry.remove_by_hwnd(id_key) {
             tracing::info!(%id, "Window removed");
             self.float_overlays.remove(&id);
-            self.monitors.remove_window_from_displayed(id);
+            self.displayed_windows.remove(&id);
             self.hub.delete_window(id);
             self.apply_layout();
         }
@@ -434,6 +447,11 @@ impl Dome {
             .expect("WorkspaceInfo is infallibly serializable")
     }
 
+    pub(super) fn query_monitors_json(&self) -> String {
+        serde_json::to_string(&self.hub.query_monitors())
+            .expect("MonitorDetails is infallibly serializable")
+    }
+
     pub(super) fn query_minimized_windows_json(&self) -> String {
         let entries: Vec<MinimizedWindow> = self
             .hub
@@ -474,7 +492,9 @@ impl Dome {
                     forward: matches!(direction, TabDirection::Next),
                 })
             }
-            FocusTarget::Workspace { name } => self.hub.focus_workspace(name),
+            FocusTarget::Workspace { name, monitor } => {
+                self.hub.focus_workspace(name, monitor.as_deref())
+            }
             FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
         }
     }
@@ -497,7 +517,9 @@ impl Dome {
                 direction: Direction::Horizontal,
                 forward: true,
             }),
-            MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
+            MoveTarget::Workspace { name, monitor } => {
+                self.hub.move_focused_to_workspace(name, monitor.as_deref())
+            }
             MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
         }
     }
@@ -560,7 +582,7 @@ impl Dome {
         let focused = focused_window;
 
         let mut per_monitor: Vec<MonitorPositionData> = Vec::new();
-        let mut new_displayed: HashMap<MonitorId, HashSet<WindowId>> = HashMap::new();
+        let mut new_window_ids: HashSet<WindowId> = HashSet::new();
 
         for mp in result.monitors {
             let work_area = self.monitors.monitor(mp.monitor_id).work_area();
@@ -634,29 +656,20 @@ impl Dome {
                 }
             }
 
-            new_displayed.insert(mp.monitor_id, window_ids);
+            new_window_ids.extend(window_ids);
         }
 
-        let old_window_ids: HashSet<WindowId> = self
-            .monitors
-            .monitors()
-            .flat_map(|m| m.displayed().iter())
-            .copied()
-            .collect();
-        let new_window_ids: HashSet<WindowId> = new_displayed.values().flatten().copied().collect();
-        let to_hide: Vec<WindowId> = old_window_ids
+        let to_hide: Vec<WindowId> = self
+            .displayed_windows
             .difference(&new_window_ids)
             .copied()
             .collect();
         let tabs_to_add: Vec<WindowId> = new_window_ids
-            .difference(&old_window_ids)
+            .difference(&self.displayed_windows)
             .copied()
             .collect();
 
-        self.monitors.clear_all_displayed();
-        for (mid, dm) in new_displayed {
-            self.monitors.set_displayed_windows(mid, dm);
-        }
+        self.displayed_windows = new_window_ids;
 
         for &id in &to_hide {
             // Keep taskbar tab for user-minimized windows so the user can
@@ -670,7 +683,7 @@ impl Dome {
         }
 
         for &id in &created {
-            if !new_window_ids.contains(&id) {
+            if !self.displayed_windows.contains(&id) {
                 self.hide_window(id);
             }
         }

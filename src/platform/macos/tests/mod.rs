@@ -73,6 +73,23 @@ fn default_monitor() -> MonitorInfo {
     }
 }
 
+fn second_monitor() -> MonitorInfo {
+    MonitorInfo {
+        display_id: 2,
+        name: "External".to_string(),
+        work_area: PixelRect::new(1920, 0, 2560, 1440),
+        bounds: Dimension::new(
+            Length::new(1920.0),
+            Length::ZERO,
+            Length::new(2560.0),
+            Length::new(1440.0),
+        ),
+        full_height: 1440.0,
+        is_primary: false,
+        scale: 2.0,
+    }
+}
+
 type MoveLog = Rc<RefCell<Vec<(CGWindowID, i32, i32, i32, i32)>>>;
 
 type OverrideFrame = Rc<Cell<Option<(i32, i32, i32, i32)>>>;

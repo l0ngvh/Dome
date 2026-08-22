@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
-use objc2_core_graphics::{CGDirectDisplayID, CGWindowID};
+use objc2_core_graphics::CGWindowID;
 
 use crate::action::{
     FocusTarget, MasterTarget, MinimizedWindow, MoveTarget, TabDirection, ToggleTarget,
@@ -133,31 +133,6 @@ pub(in crate::platform::macos) enum PendingAdd {
     },
 }
 
-/// Keyed by display id so a bar that moves between monitors or draws on
-/// several at once is handled uniformly.
-#[derive(Default)]
-struct StatusBarTracker {
-    rects: HashMap<CGDirectDisplayID, Dimension>,
-}
-
-impl StatusBarTracker {
-    fn record(&mut self, id: CGDirectDisplayID, rect: Dimension) {
-        self.rects.insert(id, rect);
-    }
-
-    fn rect_for(&self, id: CGDirectDisplayID) -> Option<Dimension> {
-        self.rects.get(&id).copied()
-    }
-
-    fn clear(&mut self) {
-        self.rects.clear();
-    }
-
-    fn is_empty(&self) -> bool {
-        self.rects.is_empty()
-    }
-}
-
 /// Timestamps of the first and last AX move/resize notifications in a
 /// coalesced debounce burst (equal when only one fired). The first is
 /// compared against the post-placement debounce window (was this burst
@@ -188,6 +163,9 @@ pub(in crate::platform::macos) struct Dome {
     hub: Hub,
     registry: WindowRegistry,
     monitor_registry: MonitorRegistry,
+    /// The windows Dome currently has on screen. Owned here rather than per monitor entry
+    /// so it survives a monitor removal, which is what lets a departed monitor's windows hide.
+    displayed_windows: HashSet<WindowId>,
     config: Config,
     /// Full height of the primary display (including menu bar/dock), used for Quartz→Cocoa
     /// coordinate conversion in overlay rendering.
@@ -198,7 +176,8 @@ pub(in crate::platform::macos) struct Dome {
     recovery: Recovery,
     pending_created: Vec<WindowId>,
     pending_deleted: Vec<WindowId>,
-    status_bars: StatusBarTracker,
+    bar_geometry: Option<BarGeometry>,
+    // Unshrunk. `reconcile_monitors` insets from this, so a shrunk value compounds.
     monitors: Vec<MonitorInfo>,
 }
 
@@ -214,16 +193,15 @@ impl Dome {
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(
-            primary.work_area,
-            1.0,
+            primary.into(),
             GlobalLayoutConfig::from(&config),
             workspace_overrides.clone(),
         );
-        let primary_monitor_id = hub.focused_monitor();
+        let primary_monitor_id = hub.primary_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         for monitor in monitors {
             if monitor.display_id != primary.display_id {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, 1.0);
+                let id = hub.add_monitor(monitor.into());
                 monitor_registry.insert(monitor, id);
             }
         }
@@ -239,7 +217,8 @@ impl Dome {
             recovery: Recovery::new(),
             pending_created: Vec::new(),
             pending_deleted: Vec::new(),
-            status_bars: StatusBarTracker::default(),
+            displayed_windows: HashSet::new(),
+            bar_geometry: None,
             monitors: monitors.to_vec(),
         }
     }
@@ -350,21 +329,26 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn set_reserved_bar(&mut self, geo: Option<BarGeometry>) {
-        let rects = match &geo {
-            Some(g) => {
-                let rects = external_bar::reserved_rects(g, &self.monitors);
-                tracing::info!(?g, displays = rects.len(), "Bar reservation applied");
-                rects
+    pub(in crate::platform::macos) fn set_reserved_bar(
+        &mut self,
+        probed: anyhow::Result<BarGeometry>,
+    ) {
+        let geo = match probed {
+            Ok(geo) => geo,
+            Err(e) => {
+                crate::log_dedup::warn_once!(
+                    key: "sketchybar-probe",
+                    "Bar probe failed, keeping the last known reservation: {e:#}"
+                );
+                return;
             }
-            None => HashMap::new(),
         };
-        self.status_bars.clear();
-        for (display_id, rect) in &rects {
-            self.status_bars.record(*display_id, *rect);
+        if self.bar_geometry.as_ref() == Some(&geo) {
+            return;
         }
-        let cached = self.monitors.clone();
-        self.update_monitors(&cached);
+        tracing::info!(?geo, "Bar geometry changed");
+        self.bar_geometry = Some(geo);
+        self.reconcile_monitors();
         self.flush_layout();
     }
 
@@ -444,7 +428,8 @@ impl Dome {
             return;
         }
         self.rehide_offscreen_windows(&monitors);
-        self.update_monitors(&monitors);
+        self.monitors = monitors;
+        self.reconcile_monitors();
         self.flush_layout();
     }
 
@@ -588,6 +573,11 @@ impl Dome {
             .expect("WorkspaceInfo is infallibly serializable")
     }
 
+    pub(in crate::platform::macos) fn query_monitors_json(&self) -> String {
+        serde_json::to_string(&self.hub.query_monitors())
+            .expect("MonitorDetails is infallibly serializable")
+    }
+
     pub(in crate::platform::macos) fn query_minimized_windows_json(&self) -> String {
         let entries: Vec<MinimizedWindow> = self
             .hub
@@ -657,7 +647,9 @@ impl Dome {
                     forward: matches!(direction, TabDirection::Next),
                 })
             }
-            FocusTarget::Workspace { name } => self.hub.focus_workspace(name),
+            FocusTarget::Workspace { name, monitor } => {
+                self.hub.focus_workspace(name, monitor.as_deref())
+            }
             FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
         }
     }
@@ -681,7 +673,9 @@ impl Dome {
                 direction: Direction::Horizontal,
                 forward: true,
             }),
-            MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
+            MoveTarget::Workspace { name, monitor } => {
+                self.hub.move_focused_to_workspace(name, monitor.as_deref())
+            }
             MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
         }
     }

@@ -1,6 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
-use windows::Win32::Foundation::{LPARAM, RECT};
+use windows::Win32::Devices::Display::{
+    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+    DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, DisplayConfigGetDeviceInfo,
+    GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
+};
+use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, LPARAM, RECT};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW,
 };
@@ -9,21 +15,39 @@ use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotific
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, MONITORINFOF_PRIMARY};
 use windows::core::BOOL;
 
-use crate::core::{Dimension, Hub, MonitorId, Physical, PixelRect, WindowId};
+use crate::core::{Dimension, Hub, MonitorId, Physical, PixelRect, ReportedMonitor};
 use crate::platform::windows::external::HwndId;
 use crate::platform::windows::handle;
 
 #[derive(Clone)]
 pub(in crate::platform::windows) struct MonitorInfo {
-    pub handle: isize,
-    pub name: String,
-    pub work_area: PixelRect,
+    pub(in crate::platform::windows) handle: isize,
+    /// EDID friendly name (e.g. "DELL U2720Q") when one is available, else the
+    /// GDI device string (`\\.\DISPLAY1`) as a last-resort human-usable label.
+    pub(in crate::platform::windows) name: String,
+    /// GDI device string (`\\.\DISPLAY1`). Join key for the EDID friendly name
+    /// lookup after enumeration, and published on `dome query monitors`. Not a
+    /// display label.
+    pub(in crate::platform::windows) gdi_device: String,
+    pub(in crate::platform::windows) work_area: PixelRect,
     /// Stays fractional because its only consumer is `reserve_for_bar`, whose
     /// f32 edge math is shared with macOS.
-    pub bounds: Dimension,
-    pub is_primary: bool,
+    pub(in crate::platform::windows) bounds: Dimension,
+    pub(in crate::platform::windows) is_primary: bool,
     /// Always > 0.
-    pub scale: f32,
+    pub(in crate::platform::windows) scale: f32,
+}
+
+impl From<&MonitorInfo> for ReportedMonitor {
+    fn from(info: &MonitorInfo) -> Self {
+        ReportedMonitor {
+            device_name: info.name.clone(),
+            work_area: info.work_area,
+            scale: info.scale,
+            cg_display_id: None,
+            gdi_device: Some(info.gdi_device.clone()),
+        }
+    }
 }
 
 pub(in crate::platform::windows) trait QueryDisplay {
@@ -48,16 +72,24 @@ impl QueryDisplay for Win32Display {
     }
 }
 
-/// Per-monitor state. `displayed` is rebuilt each `apply_layout` pass.
 pub(super) struct Monitor {
     id: MonitorId,
     handle: isize,
+    name: String,
+    gdi_device: String,
     work_area: PixelRect,
     scale: f32,
-    displayed: HashSet<WindowId>,
 }
 
 impl Monitor {
+    #[expect(
+        dead_code,
+        reason = "read by the monitor-name selector filter for --monitor targeting"
+    )]
+    pub(super) fn name(&self) -> &str {
+        &self.name
+    }
+
     pub(super) fn work_area(&self) -> PixelRect {
         self.work_area
     }
@@ -65,9 +97,17 @@ impl Monitor {
     pub(super) fn scale(&self) -> f32 {
         self.scale
     }
+}
 
-    pub(super) fn displayed(&self) -> &HashSet<WindowId> {
-        &self.displayed
+impl From<&Monitor> for ReportedMonitor {
+    fn from(m: &Monitor) -> Self {
+        ReportedMonitor {
+            device_name: m.name.clone(),
+            work_area: m.work_area,
+            scale: m.scale,
+            cg_display_id: None,
+            gdi_device: Some(m.gdi_device.clone()),
+        }
     }
 }
 
@@ -78,14 +118,12 @@ pub(super) struct MonitorChange {
 
 pub(super) struct MonitorRegistry {
     monitors: HashMap<MonitorId, Monitor>,
-    primary: Option<MonitorId>,
 }
 
 impl MonitorRegistry {
     pub(super) fn new() -> Self {
         Self {
             monitors: HashMap::new(),
-            primary: None,
         }
     }
 
@@ -93,14 +131,12 @@ impl MonitorRegistry {
         &self.monitors[&id]
     }
 
-    pub(super) fn monitors(&self) -> impl Iterator<Item = &Monitor> + '_ {
-        self.monitors.values()
-    }
-
     pub(super) fn insert(
         &mut self,
         handle: isize,
         id: MonitorId,
+        name: String,
+        gdi_device: String,
         work_area: PixelRect,
         scale: f32,
     ) {
@@ -109,9 +145,10 @@ impl MonitorRegistry {
             Monitor {
                 id,
                 handle,
+                name,
+                gdi_device,
                 work_area,
                 scale,
-                displayed: HashSet::new(),
             },
         );
     }
@@ -121,29 +158,6 @@ impl MonitorRegistry {
             .values()
             .find(|m| m.handle == handle)
             .map(|m| m.id)
-    }
-
-    pub(super) fn remove_window_from_displayed(&mut self, window_id: WindowId) {
-        for m in self.monitors.values_mut() {
-            m.displayed.remove(&window_id);
-        }
-    }
-
-    pub(super) fn clear_all_displayed(&mut self) {
-        for m in self.monitors.values_mut() {
-            m.displayed.clear();
-        }
-    }
-
-    pub(super) fn set_displayed_windows(
-        &mut self,
-        monitor_id: MonitorId,
-        displayed: HashSet<WindowId>,
-    ) {
-        self.monitors
-            .get_mut(&monitor_id)
-            .expect("monitor present")
-            .displayed = displayed;
     }
 
     pub(super) fn is_borderless_fullscreen_at(
@@ -164,17 +178,82 @@ impl MonitorRegistry {
             .unwrap_or(false)
     }
 
+    /// Re-keys the primary entry onto the incoming primary display's handle.
+    /// Returns the monitor displaced from that handle, if the registry already
+    /// tracked one there.
+    fn replace_primary(
+        &mut self,
+        primary_id: MonitorId,
+        new_primary: &MonitorInfo,
+    ) -> Option<MonitorId> {
+        let occupant = self.id_for_handle(new_primary.handle);
+        if let Some(displaced) = occupant {
+            self.monitors.remove(&displaced);
+        }
+        // Keyed by MonitorId with the handle in the value, so the carry is an
+        // in-place move onto the new panel.
+        if let Some(entry) = self.monitors.get_mut(&primary_id) {
+            entry.handle = new_primary.handle;
+            entry.name = new_primary.name.clone();
+            entry.gdi_device = new_primary.gdi_device.clone();
+            entry.work_area = new_primary.work_area;
+            entry.scale = new_primary.scale;
+        }
+        tracing::info!(
+            name = %new_primary.name,
+            handle = ?new_primary.handle,
+            ?occupant,
+            "Primary display changed"
+        );
+        occupant
+    }
+
+    /// Mirrors `monitor` into the tracked entry and returns its id with the
+    /// previous work area and scale. Windows can move a szDevice or rename a
+    /// display with no geometry change, so the mirror is unconditional and
+    /// `apply_dpi_change`, which has no `MonitorInfo`, reads current values.
+    fn update_monitor(&mut self, monitor: &MonitorInfo) -> Option<(MonitorId, PixelRect, f32)> {
+        let entry = self
+            .monitors
+            .values_mut()
+            .find(|m| m.handle == monitor.handle)?;
+        let previous = (entry.id, entry.work_area, entry.scale);
+        entry.name = monitor.name.clone();
+        entry.gdi_device = monitor.gdi_device.clone();
+        entry.work_area = monitor.work_area;
+        entry.scale = monitor.scale;
+        Some(previous)
+    }
+
     pub(super) fn reconcile(&mut self, hub: &mut Hub, monitors: &[MonitorInfo]) -> MonitorChange {
         let mut added = Vec::new();
         let mut removed = Vec::new();
 
         let current_handles: HashSet<isize> = monitors.iter().map(|s| s.handle).collect();
 
+        // Ahead of the add loop, so the display the primary vacates is picked up
+        // as a new monitor below and the carried primary is not seen as departed.
+        if let Some(new_primary) = monitors.iter().find(|s| s.is_primary) {
+            let primary_id = hub.primary_monitor();
+            let carried = self.monitors.get(&primary_id).map(|m| m.handle);
+            if carried != Some(new_primary.handle) {
+                let occupant = self.replace_primary(primary_id, new_primary);
+                hub.update_monitor(primary_id, new_primary.into(), occupant);
+            }
+        }
+
         for monitor in monitors {
             let already_tracked = self.monitors.values().any(|m| m.handle == monitor.handle);
             if !already_tracked {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, monitor.scale);
-                self.insert(monitor.handle, id, monitor.work_area, monitor.scale);
+                let id = hub.add_monitor(monitor.into());
+                self.insert(
+                    monitor.handle,
+                    id,
+                    monitor.name.clone(),
+                    monitor.gdi_device.clone(),
+                    monitor.work_area,
+                    monitor.scale,
+                );
                 added.push(id);
                 tracing::info!(
                     name = %monitor.name,
@@ -192,30 +271,23 @@ impl MonitorRegistry {
             .map(|m| m.id)
             .collect();
 
-        let fallback = monitors
-            .iter()
-            .find(|s| s.is_primary)
-            .and_then(|s| self.id_for_handle(s.handle));
-        self.primary = fallback;
-
-        for monitor_id in to_remove {
-            if let Some(fallback_id) = fallback
-                && fallback_id != monitor_id
-            {
-                hub.remove_monitor(monitor_id, fallback_id);
-                self.monitors.remove(&monitor_id);
-                removed.push(monitor_id);
-                tracing::info!(%monitor_id, fallback = %fallback_id, "Monitor removed");
+        for monitor_id in &to_remove {
+            self.monitors.remove(monitor_id);
+        }
+        if !to_remove.is_empty() {
+            for monitor_id in &to_remove {
+                hub.remove_monitor(*monitor_id);
             }
+            removed.extend(&to_remove);
+            let primary = hub.primary_monitor();
+            tracing::info!(?to_remove, primary = %primary, "Monitors removed");
         }
 
         for monitor in monitors {
-            if let Some(id) = self.id_for_handle(monitor.handle)
-                && let Some(ms) = self.monitors.get(&id)
-                && (ms.work_area != monitor.work_area || ms.scale != monitor.scale)
-            {
-                let old_work_area = Some(ms.work_area);
-                let old_scale = Some(ms.scale);
+            let Some((id, old_work_area, old_scale)) = self.update_monitor(monitor) else {
+                continue;
+            };
+            if old_work_area != monitor.work_area || old_scale != monitor.scale {
                 tracing::info!(
                     name = %monitor.name,
                     ?old_work_area,
@@ -224,11 +296,8 @@ impl MonitorRegistry {
                     new_scale = ?monitor.scale,
                     "Monitor work area changed"
                 );
-                let ms = self.monitors.get_mut(&id).expect("just checked");
-                ms.work_area = monitor.work_area;
-                ms.scale = monitor.scale;
-                hub.update_monitor(id, monitor.work_area, monitor.scale);
             }
+            hub.update_monitor(id, monitor.into(), None);
         }
 
         MonitorChange { added, removed }
@@ -248,8 +317,7 @@ impl MonitorRegistry {
             ms.scale = scale;
             prev
         });
-        let dim = self.monitors[&id].work_area;
-        hub.update_monitor(id, dim, scale);
+        hub.update_monitor(id, ReportedMonitor::from(&self.monitors[&id]), None);
         tracing::info!(%id, dpi, scale, ?previous, "Monitor scale updated via DPI change");
     }
 }
@@ -276,7 +344,7 @@ fn scale_for_monitor(hmonitor: HMONITOR) -> f32 {
 }
 
 fn get_all_monitors() -> anyhow::Result<Vec<MonitorInfo>> {
-    let mut monitors = Vec::new();
+    let mut monitors: Vec<MonitorInfo> = Vec::new();
 
     unsafe extern "system" fn enum_proc(
         hmonitor: HMONITOR,
@@ -296,20 +364,17 @@ fn get_all_monitors() -> anyhow::Result<Vec<MonitorInfo>> {
         if unsafe { GetMonitorInfoW(hmonitor, &mut info.monitorInfo) }.as_bool() {
             let rc = info.monitorInfo.rcWork;
             let rc_monitor = info.monitorInfo.rcMonitor;
-            let name = String::from_utf16_lossy(
-                &info
-                    .szDevice
-                    .iter()
-                    .take_while(|&&c| c != 0)
-                    .copied()
-                    .collect::<Vec<_>>(),
-            );
+            let gdi_device = utf16_to_string(&info.szDevice);
 
             let scale = scale_for_monitor(hmonitor);
 
+            // name is resolved once, after enumeration, from the friendly-name
+            // map keyed on gdi_device. It is left empty here so it never
+            // transiently holds the GDI device string.
             monitors.push(MonitorInfo {
                 handle: hmonitor.0 as isize,
-                name,
+                name: String::new(),
+                gdi_device,
                 work_area: handle::rect_to_pixel_rect(rc),
                 bounds: handle::rect_to_dimension(rc_monitor),
                 is_primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
@@ -328,10 +393,145 @@ fn get_all_monitors() -> anyhow::Result<Vec<MonitorInfo>> {
         )
     };
     anyhow::ensure!(success.as_bool(), "EnumDisplayMonitors failed");
+
+    // Resolve each monitor's name exactly once, now that enumeration is done.
+    // The DisplayConfig API is path-keyed rather than per-HMONITOR, so the
+    // friendly-name map can only be built after enumeration and correlated
+    // back via the GDI device string. Use the EDID friendly name when present,
+    // else fall back to the GDI device string (`\\.\DISPLAY1`). The fallback is
+    // required: an empty monitorFriendlyDeviceName is a documented case for
+    // headless/forced targets, virtual/RDP displays, and pass-through panels
+    // with no readable EDID, so name must always carry something human-usable.
+    let friendly = friendly_names_by_gdi_device();
+    for monitor in &mut monitors {
+        monitor.name = friendly
+            .get(&monitor.gdi_device)
+            .cloned()
+            .unwrap_or_else(|| monitor.gdi_device.clone());
+    }
+
     Ok(monitors)
+}
+
+/// Maps each active monitor's GDI device name (`\\.\DISPLAY1`) to its EDID
+/// friendly name (e.g. "DELL U2720Q") via one QueryDisplayConfig pass. Monitors
+/// with an empty friendly name or a failed path lookup are omitted, so callers
+/// fall back to the GDI device name.
+fn friendly_names_by_gdi_device() -> HashMap<String, String> {
+    let mut map = HashMap::new();
+
+    // Display config can change between GetDisplayConfigBufferSizes and
+    // QueryDisplayConfig, which then returns ERROR_INSUFFICIENT_BUFFER. Retry a
+    // bounded number of times rather than risk an unbounded loop.
+    // See https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-querydisplayconfig
+    const MAX_RETRIES: u32 = 5;
+    for _ in 0..MAX_RETRIES {
+        let mut path_count: u32 = 0;
+        let mut mode_count: u32 = 0;
+        let sizes = unsafe {
+            GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut path_count, &mut mode_count)
+        };
+        if sizes != ERROR_SUCCESS {
+            tracing::warn!(
+                error = ?sizes,
+                "GetDisplayConfigBufferSizes failed, falling back to GDI device names"
+            );
+            return map;
+        }
+
+        let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); path_count as usize];
+        let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); mode_count as usize];
+        let query = unsafe {
+            QueryDisplayConfig(
+                QDC_ONLY_ACTIVE_PATHS,
+                &mut path_count,
+                paths.as_mut_ptr(),
+                &mut mode_count,
+                modes.as_mut_ptr(),
+                None,
+            )
+        };
+        if query == ERROR_INSUFFICIENT_BUFFER {
+            continue;
+        }
+        if query != ERROR_SUCCESS {
+            tracing::warn!(
+                error = ?query,
+                "QueryDisplayConfig failed, falling back to GDI device names"
+            );
+            return map;
+        }
+
+        paths.truncate(path_count as usize);
+        for path in &paths {
+            let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+                header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                    r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                    size: size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
+                    adapterId: path.sourceInfo.adapterId,
+                    id: path.sourceInfo.id,
+                },
+                ..Default::default()
+            };
+            if unsafe { DisplayConfigGetDeviceInfo(&mut source.header) } != ERROR_SUCCESS.0 as i32 {
+                continue;
+            }
+            let gdi_device = utf16_to_string(&source.viewGdiDeviceName);
+            if gdi_device.is_empty() {
+                continue;
+            }
+
+            let mut target = DISPLAYCONFIG_TARGET_DEVICE_NAME {
+                header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                    r#type: DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+                    size: size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>() as u32,
+                    adapterId: path.targetInfo.adapterId,
+                    id: path.targetInfo.id,
+                },
+                ..Default::default()
+            };
+            if unsafe { DisplayConfigGetDeviceInfo(&mut target.header) } != ERROR_SUCCESS.0 as i32 {
+                continue;
+            }
+            let friendly = utf16_to_string(&target.monitorFriendlyDeviceName);
+            if !friendly.is_empty() {
+                map.insert(gdi_device, friendly);
+            }
+        }
+        return map;
+    }
+
+    map
+}
+
+fn utf16_to_string(units: &[u16]) -> String {
+    let end = units.iter().take_while(|&&c| c != 0).count();
+    String::from_utf16_lossy(&units[..end])
 }
 
 fn is_d3d_exclusive_fullscreen_active() -> bool {
     unsafe { SHQueryUserNotificationState() }
         .is_ok_and(|state| state == QUNS_RUNNING_D3D_FULL_SCREEN)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf16_to_string_stops_at_nul() {
+        let units: Vec<u16> = "AB\0CD".encode_utf16().collect();
+        assert_eq!(utf16_to_string(&units), "AB");
+    }
+
+    #[test]
+    fn utf16_to_string_empty_input() {
+        assert_eq!(utf16_to_string(&[]), "");
+    }
+
+    #[test]
+    fn utf16_to_string_no_nul_decodes_whole_slice() {
+        let units: Vec<u16> = "ABCD".encode_utf16().collect();
+        assert_eq!(utf16_to_string(&units), "ABCD");
+    }
 }

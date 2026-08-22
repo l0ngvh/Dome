@@ -69,6 +69,8 @@ enum CliFocus {
     },
     Workspace {
         name: String,
+        #[arg(long)]
+        monitor: Option<String>,
     },
     Monitor {
         #[arg(value_parser = parse_monitor_target)]
@@ -84,6 +86,8 @@ enum CliMove {
     Right,
     Workspace {
         name: String,
+        #[arg(long)]
+        monitor: Option<String>,
     },
     Monitor {
         #[arg(value_parser = parse_monitor_target)]
@@ -119,6 +123,7 @@ enum CliQuery {
     Workspaces,
     #[command(name = "minimized")]
     MinimizedWindows,
+    Monitors,
 }
 
 #[derive(Debug)]
@@ -143,7 +148,7 @@ impl From<CliFocus> for FocusTarget {
             CliFocus::Tab { direction } => FocusTarget::Tab {
                 direction: direction.into(),
             },
-            CliFocus::Workspace { name } => FocusTarget::Workspace { name },
+            CliFocus::Workspace { name, monitor } => FocusTarget::Workspace { name, monitor },
             CliFocus::Monitor { target } => FocusTarget::Monitor { target },
         }
     }
@@ -156,7 +161,7 @@ impl From<CliMove> for MoveTarget {
             CliMove::Down => MoveTarget::Down,
             CliMove::Left => MoveTarget::Left,
             CliMove::Right => MoveTarget::Right,
-            CliMove::Workspace { name } => MoveTarget::Workspace { name },
+            CliMove::Workspace { name, monitor } => MoveTarget::Workspace { name, monitor },
             CliMove::Monitor { target } => MoveTarget::Monitor { target },
         }
     }
@@ -187,6 +192,7 @@ impl From<CliQuery> for Query {
         match cq {
             CliQuery::Workspaces => Query::Workspaces,
             CliQuery::MinimizedWindows => Query::MinimizedWindows,
+            CliQuery::Monitors => Query::Monitors,
         }
     }
 }
@@ -275,6 +281,20 @@ mod tests {
         }
     }
 
+    fn focus_target(argv: &[&str]) -> FocusTarget {
+        match dispatch_from_argv(argv) {
+            Dispatch::Action(Action::Focus(t)) => t,
+            other => panic!("{argv:?} produced {other:?}, expected Focus"),
+        }
+    }
+
+    fn move_target(argv: &[&str]) -> MoveTarget {
+        match dispatch_from_argv(argv) {
+            Dispatch::Action(Action::Move(t)) => t,
+            other => panic!("{argv:?} produced {other:?}, expected Move"),
+        }
+    }
+
     #[test]
     fn cli_focus_subcommands() {
         assert_action(&["dome", "focus", "up"], "focus up");
@@ -297,6 +317,57 @@ mod tests {
         assert_action(&["dome", "move", "right"], "move right");
         assert_action(&["dome", "move", "workspace", "3"], "move workspace 3");
         assert_action(&["dome", "move", "monitor", "left"], "move monitor left");
+    }
+
+    #[test]
+    fn cli_focus_workspace_without_monitor() {
+        match focus_target(&["dome", "focus", "workspace", "3"]) {
+            FocusTarget::Workspace { name, monitor } => {
+                assert_eq!(name, "3");
+                assert_eq!(monitor, None);
+            }
+            other => panic!("expected Workspace, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_focus_workspace_with_monitor() {
+        match focus_target(&[
+            "dome",
+            "focus",
+            "workspace",
+            "3",
+            "--monitor",
+            "DELL U2720Q #1",
+        ]) {
+            FocusTarget::Workspace { name, monitor } => {
+                assert_eq!(name, "3");
+                assert_eq!(monitor.as_deref(), Some("DELL U2720Q #1"));
+            }
+            other => panic!("expected Workspace, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_move_workspace_without_monitor() {
+        match move_target(&["dome", "move", "workspace", "3"]) {
+            MoveTarget::Workspace { name, monitor } => {
+                assert_eq!(name, "3");
+                assert_eq!(monitor, None);
+            }
+            other => panic!("expected Workspace, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_move_workspace_with_monitor() {
+        match move_target(&["dome", "move", "workspace", "2", "--monitor", "B"]) {
+            MoveTarget::Workspace { name, monitor } => {
+                assert_eq!(name, "2");
+                assert_eq!(monitor.as_deref(), Some("B"));
+            }
+            other => panic!("expected Workspace, got {other:?}"),
+        }
     }
 
     #[test]
@@ -345,6 +416,15 @@ mod tests {
         match d {
             Dispatch::Query(Query::Workspaces) => {}
             other => panic!("expected Query(Workspaces), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_query_monitors() {
+        let d = dispatch_from_argv(&["dome", "query", "monitors"]);
+        match d {
+            Dispatch::Query(Query::Monitors) => {}
+            other => panic!("expected Query(Monitors), got {other:?}"),
         }
     }
 

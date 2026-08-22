@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect,
-    setup_logger_with_level, titled, titled_matcher, validate_hub,
+    reported_monitor, setup_logger_with_level, titled, titled_matcher, validate_hub,
 };
 use crate::action::MonitorTarget;
 use crate::config::{
@@ -284,7 +284,6 @@ enum RecordedOp {
     },
     RemoveMonitor {
         monitor: RecordedMonitor,
-        fallback: RecordedMonitor,
     },
     SetFullscreen {
         window: RecordedWindow,
@@ -420,7 +419,7 @@ fn run_iteration<F>(
     let mut windows: Vec<WindowId> = Vec::new();
     let mut window_origin: Vec<usize> = Vec::new();
     let mut window_minimized: Vec<bool> = Vec::new();
-    let mut monitors: Vec<MonitorId> = vec![hub.focused_monitor()];
+    let mut monitors: Vec<MonitorId> = vec![hub.primary_monitor()];
     let mut monitor_origin: Vec<usize> = vec![usize::MAX];
     let mut next_op_index: usize = 0;
     let mut workspace_names: Vec<String> = vec!["0".to_string()];
@@ -598,11 +597,11 @@ fn build_op(
             if monitors.len() <= 1 {
                 return None;
             }
-            let idx = rng.random_range(0..monitors.len());
-            let fallback_idx = if idx == 0 { 1 } else { 0 };
+            // Index 0 is the primary, which the real system re-keys onto a new
+            // display rather than removing, so never generate its removal.
+            let idx = rng.random_range(1..monitors.len());
             Some(RecordedOp::RemoveMonitor {
                 monitor: RecordedMonitor(monitor_origin[idx]),
-                fallback: RecordedMonitor(monitor_origin[fallback_idx]),
             })
         }
         OpKind::FocusMonitor => {
@@ -820,7 +819,7 @@ fn apply_op(
             rect,
             scale,
         } => {
-            let id = hub.add_monitor(name.clone(), *rect, *scale);
+            let id = hub.add_monitor(reported_monitor(name.clone(), *rect, *scale));
             monitors.push(id);
             monitor_origin.push(*producer_id);
         }
@@ -834,19 +833,14 @@ fn apply_op(
             window_minimized.remove(pos);
             hub.delete_window(id);
         }
-        RecordedOp::RemoveMonitor { monitor, fallback } => {
+        RecordedOp::RemoveMonitor { monitor } => {
             let pos = monitor_origin
                 .iter()
                 .position(|&o| o == monitor.0)
                 .expect("apply_op: monitor producer_id not found");
             let id = monitors.remove(pos);
             monitor_origin.remove(pos);
-            let fb_pos = monitor_origin
-                .iter()
-                .position(|&o| o == fallback.0)
-                .expect("apply_op: fallback producer_id not found");
-            let fb_id = monitors[fb_pos];
-            hub.remove_monitor(id, fb_id);
+            hub.remove_monitor(id);
         }
         RecordedOp::SetFullscreen {
             window,
@@ -917,10 +911,10 @@ fn apply_op(
             hub.unminimize_window(windows[pos]);
         }
         RecordedOp::MoveToWorkspace { name } => {
-            hub.move_focused_to_workspace(name);
+            hub.move_focused_to_workspace(name, None);
         }
         RecordedOp::FocusWorkspace { name } => {
-            hub.focus_workspace(name);
+            hub.focus_workspace(name, None);
         }
         RecordedOp::FocusMonitor { target } => {
             hub.focus_monitor(target);
@@ -1155,7 +1149,7 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
     let table_size = max_producer_id(ops).map(|m| m + 1).unwrap_or(0);
     let mut live_window: Vec<Option<WindowId>> = vec![None; table_size];
     let mut live_monitor: Vec<Option<MonitorId>> = vec![None; table_size];
-    let primary = hub.focused_monitor();
+    let primary = hub.primary_monitor();
 
     for op in ops {
         match op {
@@ -1185,7 +1179,7 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 rect,
                 scale,
             } => {
-                let id = hub.add_monitor(name.clone(), *rect, *scale);
+                let id = hub.add_monitor(reported_monitor(name.clone(), *rect, *scale));
                 live_monitor[*producer_id] = Some(id);
             }
             RecordedOp::DeleteWindow { window } => {
@@ -1195,17 +1189,14 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 hub.delete_window(id);
                 live_window[window.0] = None;
             }
-            RecordedOp::RemoveMonitor { monitor, fallback } => {
+            RecordedOp::RemoveMonitor { monitor } => {
                 let Some(mon_id) = resolve_monitor(monitor, &live_monitor, primary) else {
-                    continue;
-                };
-                let Some(fb_id) = resolve_monitor(fallback, &live_monitor, primary) else {
                     continue;
                 };
                 if let Some(pos) = live_monitor.iter().position(|m| *m == Some(mon_id)) {
                     live_monitor[pos] = None;
                 }
-                hub.remove_monitor(mon_id, fb_id);
+                hub.remove_monitor(mon_id);
             }
             RecordedOp::SetFullscreen {
                 window,
@@ -1267,10 +1258,10 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 hub.unminimize_window(id);
             }
             RecordedOp::MoveToWorkspace { name } => {
-                hub.move_focused_to_workspace(name);
+                hub.move_focused_to_workspace(name, None);
             }
             RecordedOp::FocusWorkspace { name } => {
-                hub.focus_workspace(name);
+                hub.focus_workspace(name, None);
             }
             RecordedOp::FocusMonitor { target } => {
                 hub.focus_monitor(target);
@@ -1707,14 +1698,13 @@ mod tests {
             .build()
     }
 
-    /// `Hub::remove_monitor` asserts the fallback differs from the removed
-    /// monitor, and `resolve_monitor` maps `usize::MAX` to the primary, so both
-    /// fields resolve to the same id and the assert fires on every replay. This
-    /// gives the reducer tests a panic that does not depend on a real bug.
+    /// `resolve_monitor` maps `usize::MAX` to the primary, and
+    /// `Hub::remove_monitor` asserts the removed monitor is not the primary, so
+    /// this fires on every replay. That gives the reducer tests a panic that does
+    /// not depend on a real bug.
     fn panicking_op() -> RecordedOp {
         RecordedOp::RemoveMonitor {
             monitor: RecordedMonitor(usize::MAX),
-            fallback: RecordedMonitor(usize::MAX),
         }
     }
 
