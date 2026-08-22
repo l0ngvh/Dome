@@ -33,7 +33,7 @@ use crate::core::{
 };
 use crate::platform::macos::accessibility::ExternalWindow;
 
-use monitor::{MonitorRegistry, publishable_display_id};
+use monitor::MonitorRegistry;
 use recovery::Recovery;
 use registry::{ManagedWindow, WindowRegistry};
 
@@ -195,24 +195,15 @@ impl Dome {
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(
-            primary.name.clone(),
-            primary.work_area,
-            1.0,
+            primary.into(),
             GlobalLayoutConfig::from(&config),
             workspace_overrides.clone(),
         );
         let primary_monitor_id = hub.primary_monitor();
-        // The primary bypasses `add_monitor`, so without its own stamp a
-        // single-display Mac would publish no display id at all.
-        hub.set_monitor_cg_display_id(
-            primary_monitor_id,
-            publishable_display_id(primary.display_id),
-        );
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         for monitor in monitors {
             if monitor.display_id != primary.display_id {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, 1.0);
-                hub.set_monitor_cg_display_id(id, publishable_display_id(monitor.display_id));
+                let id = hub.add_monitor(monitor.into());
                 monitor_registry.insert(monitor, id);
             }
         }

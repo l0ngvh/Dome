@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
+use anyhow::Context;
 use objc2::MainThreadMarker;
 use objc2_app_kit::NSScreen;
 use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
 use objc2_foundation::{NSNumber, NSString};
 
-use crate::core::{Dimension, Hub, Length, MonitorId, PixelRect, Pixels};
+use crate::core::{Dimension, Hub, Length, MonitorId, PixelRect, Pixels, ReportedMonitor};
 use crate::platform::reserve_for_bar;
 
 use super::{Dome, external_bar};
@@ -29,6 +30,19 @@ pub(in crate::platform::macos) struct MonitorInfo {
     pub(in crate::platform::macos) scale: f64,
 }
 
+impl From<&MonitorInfo> for ReportedMonitor {
+    /// Core scale is always `1.0` on macOS, never the backing factor in `scale`.
+    fn from(info: &MonitorInfo) -> Self {
+        ReportedMonitor {
+            device_name: info.name.clone(),
+            work_area: info.work_area,
+            scale: 1.0,
+            cg_display_id: Some(info.display_id),
+            gdi_device: None,
+        }
+    }
+}
+
 impl std::fmt::Display for MonitorInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -39,13 +53,15 @@ impl std::fmt::Display for MonitorInfo {
     }
 }
 
-pub(in crate::platform::macos) fn get_all_monitors(mtm: MainThreadMarker) -> Vec<MonitorInfo> {
+pub(in crate::platform::macos) fn get_all_monitors(
+    mtm: MainThreadMarker,
+) -> anyhow::Result<Vec<MonitorInfo>> {
     let primary_id = CGMainDisplayID();
 
     NSScreen::screens(mtm)
         .iter()
         .map(|screen| {
-            let display_id = get_display_id(&screen);
+            let display_id = get_display_id(&screen)?;
             let name = screen.localizedName().to_string();
             let bounds = CGDisplayBounds(display_id);
             let frame = screen.frame();
@@ -55,7 +71,7 @@ pub(in crate::platform::macos) fn get_all_monitors(mtm: MainThreadMarker) -> Vec
                 (frame.origin.y + frame.size.height) - (visible.origin.y + visible.size.height);
             let bottom_inset = visible.origin.y - frame.origin.y;
 
-            MonitorInfo {
+            Ok(MonitorInfo {
                 display_id,
                 name,
                 work_area: PixelRect::from_dimension_inward(Dimension::new(
@@ -73,28 +89,21 @@ pub(in crate::platform::macos) fn get_all_monitors(mtm: MainThreadMarker) -> Vec
                 full_height: bounds.size.height as f32,
                 is_primary: display_id == primary_id,
                 scale: screen.backingScaleFactor(),
-            }
+            })
         })
         .collect()
 }
 
-fn get_display_id(screen: &NSScreen) -> CGDirectDisplayID {
+fn get_display_id(screen: &NSScreen) -> anyhow::Result<CGDirectDisplayID> {
     let desc = screen.deviceDescription();
     let key = NSString::from_str("NSScreenNumber");
-    desc.objectForKey(&key)
-        .and_then(|obj| {
-            let num: Option<&NSNumber> = obj.downcast_ref();
-            num.map(|n| n.unsignedIntValue())
-        })
-        .unwrap_or(0)
-}
-
-/// Maps the `kCGNullDirectDisplay` sentinel `get_display_id` falls back to onto
-/// an absent id, so core never stores a zero that looks real.
-pub(in crate::platform::macos) fn publishable_display_id(
-    display_id: CGDirectDisplayID,
-) -> Option<u32> {
-    (display_id != 0).then_some(display_id)
+    let object = desc
+        .objectForKey(&key)
+        .context("NSScreen deviceDescription is missing NSScreenNumber")?;
+    let number: &NSNumber = object
+        .downcast_ref()
+        .context("NSScreenNumber is not an NSNumber")?;
+    Ok(number.unsignedIntValue())
 }
 
 type DisplayId = u32;
@@ -303,22 +312,14 @@ impl MonitorRegistry {
             && new_primary.display_id != self.primary_display_id
         {
             let occupant = self.replace_primary(new_primary);
-            hub.apply_primary_display_change(occupant, new_primary.name.clone());
             let primary_monitor_id = hub.primary_monitor();
-            hub.update_monitor(primary_monitor_id, new_primary.work_area, 1.0);
-            // `replace_primary` rebinds this MonitorId onto a different
-            // panel, so the previous stamp is now wrong.
-            hub.set_monitor_cg_display_id(
-                primary_monitor_id,
-                publishable_display_id(new_primary.display_id),
-            );
+            hub.update_monitor(primary_monitor_id, new_primary.into(), occupant);
         }
 
         // Add new monitors first to prevent exhausting all monitors
         for monitor in monitors {
             if !self.contains(monitor.display_id) {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, 1.0);
-                hub.set_monitor_cg_display_id(id, publishable_display_id(monitor.display_id));
+                let id = hub.add_monitor(monitor.into());
                 self.insert(monitor, id);
                 tracing::info!(%monitor, "Monitor added");
             }
@@ -343,8 +344,7 @@ impl MonitorRegistry {
                         "Monitor work area changed"
                     );
                 }
-                hub.rename_monitor(monitor_id, monitor.name.clone());
-                hub.update_monitor(monitor_id, monitor.work_area, 1.0);
+                hub.update_monitor(monitor_id, monitor.into(), None);
             }
         }
     }

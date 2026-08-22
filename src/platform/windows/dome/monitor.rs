@@ -15,7 +15,7 @@ use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotific
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, MONITORINFOF_PRIMARY};
 use windows::core::BOOL;
 
-use crate::core::{Dimension, Hub, MonitorId, Physical, PixelRect};
+use crate::core::{Dimension, Hub, MonitorId, Physical, PixelRect, ReportedMonitor};
 use crate::platform::windows::external::HwndId;
 use crate::platform::windows::handle;
 
@@ -36,6 +36,18 @@ pub(in crate::platform::windows) struct MonitorInfo {
     pub(in crate::platform::windows) is_primary: bool,
     /// Always > 0.
     pub(in crate::platform::windows) scale: f32,
+}
+
+impl From<&MonitorInfo> for ReportedMonitor {
+    fn from(info: &MonitorInfo) -> Self {
+        ReportedMonitor {
+            device_name: info.name.clone(),
+            work_area: info.work_area,
+            scale: info.scale,
+            cg_display_id: None,
+            gdi_device: Some(info.gdi_device.clone()),
+        }
+    }
 }
 
 pub(in crate::platform::windows) trait QueryDisplay {
@@ -64,6 +76,7 @@ pub(super) struct Monitor {
     id: MonitorId,
     handle: isize,
     name: String,
+    gdi_device: String,
     work_area: PixelRect,
     scale: f32,
 }
@@ -83,6 +96,18 @@ impl Monitor {
 
     pub(super) fn scale(&self) -> f32 {
         self.scale
+    }
+}
+
+impl From<&Monitor> for ReportedMonitor {
+    fn from(m: &Monitor) -> Self {
+        ReportedMonitor {
+            device_name: m.name.clone(),
+            work_area: m.work_area,
+            scale: m.scale,
+            cg_display_id: None,
+            gdi_device: Some(m.gdi_device.clone()),
+        }
     }
 }
 
@@ -111,6 +136,7 @@ impl MonitorRegistry {
         handle: isize,
         id: MonitorId,
         name: String,
+        gdi_device: String,
         work_area: PixelRect,
         scale: f32,
     ) {
@@ -120,6 +146,7 @@ impl MonitorRegistry {
                 id,
                 handle,
                 name,
+                gdi_device,
                 work_area,
                 scale,
             },
@@ -151,6 +178,53 @@ impl MonitorRegistry {
             .unwrap_or(false)
     }
 
+    /// Re-keys the primary entry onto the incoming primary display's handle.
+    /// Returns the monitor displaced from that handle, if the registry already
+    /// tracked one there.
+    fn replace_primary(
+        &mut self,
+        primary_id: MonitorId,
+        new_primary: &MonitorInfo,
+    ) -> Option<MonitorId> {
+        let occupant = self.id_for_handle(new_primary.handle);
+        if let Some(displaced) = occupant {
+            self.monitors.remove(&displaced);
+        }
+        // Keyed by MonitorId with the handle in the value, so the carry is an
+        // in-place move onto the new panel.
+        if let Some(entry) = self.monitors.get_mut(&primary_id) {
+            entry.handle = new_primary.handle;
+            entry.name = new_primary.name.clone();
+            entry.gdi_device = new_primary.gdi_device.clone();
+            entry.work_area = new_primary.work_area;
+            entry.scale = new_primary.scale;
+        }
+        tracing::info!(
+            name = %new_primary.name,
+            handle = ?new_primary.handle,
+            ?occupant,
+            "Primary display changed"
+        );
+        occupant
+    }
+
+    /// Mirrors `monitor` into the tracked entry and returns its id with the
+    /// previous work area and scale. Windows can move a szDevice or rename a
+    /// display with no geometry change, so the mirror is unconditional and
+    /// `apply_dpi_change`, which has no `MonitorInfo`, reads current values.
+    fn update_monitor(&mut self, monitor: &MonitorInfo) -> Option<(MonitorId, PixelRect, f32)> {
+        let entry = self
+            .monitors
+            .values_mut()
+            .find(|m| m.handle == monitor.handle)?;
+        let previous = (entry.id, entry.work_area, entry.scale);
+        entry.name = monitor.name.clone();
+        entry.gdi_device = monitor.gdi_device.clone();
+        entry.work_area = monitor.work_area;
+        entry.scale = monitor.scale;
+        Some(previous)
+    }
+
     pub(super) fn reconcile(&mut self, hub: &mut Hub, monitors: &[MonitorInfo]) -> MonitorChange {
         let mut added = Vec::new();
         let mut removed = Vec::new();
@@ -163,38 +237,20 @@ impl MonitorRegistry {
             let primary_id = hub.primary_monitor();
             let carried = self.monitors.get(&primary_id).map(|m| m.handle);
             if carried != Some(new_primary.handle) {
-                let occupant = self.id_for_handle(new_primary.handle);
-                if let Some(displaced) = occupant {
-                    self.monitors.remove(&displaced);
-                }
-                hub.apply_primary_display_change(occupant, new_primary.name.clone());
-                // Keyed by MonitorId with the handle in the value, so the carry
-                // is an in-place move onto the new panel.
-                if let Some(entry) = self.monitors.get_mut(&primary_id) {
-                    entry.handle = new_primary.handle;
-                    entry.name = new_primary.name.clone();
-                    entry.work_area = new_primary.work_area;
-                    entry.scale = new_primary.scale;
-                }
-                hub.update_monitor(primary_id, new_primary.work_area, new_primary.scale);
-                hub.set_monitor_gdi_device(primary_id, new_primary.gdi_device.clone());
-                tracing::info!(
-                    name = %new_primary.name,
-                    handle = ?new_primary.handle,
-                    ?occupant,
-                    "Primary display changed"
-                );
+                let occupant = self.replace_primary(primary_id, new_primary);
+                hub.update_monitor(primary_id, new_primary.into(), occupant);
             }
         }
 
         for monitor in monitors {
             let already_tracked = self.monitors.values().any(|m| m.handle == monitor.handle);
             if !already_tracked {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, monitor.scale);
+                let id = hub.add_monitor(monitor.into());
                 self.insert(
                     monitor.handle,
                     id,
                     monitor.name.clone(),
+                    monitor.gdi_device.clone(),
                     monitor.work_area,
                     monitor.scale,
                 );
@@ -228,18 +284,10 @@ impl MonitorRegistry {
         }
 
         for monitor in monitors {
-            let Some(id) = self.id_for_handle(monitor.handle) else {
+            let Some((id, old_work_area, old_scale)) = self.update_monitor(monitor) else {
                 continue;
             };
-            // Ahead of the change check, because Windows can move a szDevice to
-            // another display without the work area or scale moving with it.
-            hub.set_monitor_gdi_device(id, monitor.gdi_device.clone());
-            hub.rename_monitor(id, monitor.name.clone());
-            if let Some(ms) = self.monitors.get(&id)
-                && (ms.work_area != monitor.work_area || ms.scale != monitor.scale)
-            {
-                let old_work_area = Some(ms.work_area);
-                let old_scale = Some(ms.scale);
+            if old_work_area != monitor.work_area || old_scale != monitor.scale {
                 tracing::info!(
                     name = %monitor.name,
                     ?old_work_area,
@@ -248,11 +296,8 @@ impl MonitorRegistry {
                     new_scale = ?monitor.scale,
                     "Monitor work area changed"
                 );
-                let ms = self.monitors.get_mut(&id).expect("just checked");
-                ms.work_area = monitor.work_area;
-                ms.scale = monitor.scale;
-                hub.update_monitor(id, monitor.work_area, monitor.scale);
             }
+            hub.update_monitor(id, monitor.into(), None);
         }
 
         MonitorChange { added, removed }
@@ -273,8 +318,7 @@ impl MonitorRegistry {
             ms.scale = scale;
             prev
         });
-        let dim = self.monitors[&id].work_area;
-        hub.update_monitor(id, dim, scale);
+        hub.update_monitor(id, ReportedMonitor::from(&self.monitors[&id]), None);
         tracing::info!(%id, dpi, scale, ?previous, "Monitor scale updated via DPI change");
         true
     }

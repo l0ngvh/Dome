@@ -1,10 +1,11 @@
 use crate::action::MonitorTarget;
 use crate::action::{WorkspaceInfo, WorkspaceState};
 use crate::core::GlobalLayoutConfig;
+use crate::core::ReportedMonitor;
 use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_rect, setup, setup_with_layout, titled, titled_matcher,
-    work_area_at,
+    LayoutConfigBuilder, default_rect, reported_monitor, setup, setup_with_layout, titled,
+    titled_matcher, work_area_at,
 };
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
@@ -83,11 +84,11 @@ fn workspace_with_floats_and_fullscreen() {
 fn focused_vs_visible_multi_monitor() {
     let mut hub = setup();
     hub.insert_window(titled("w9"), default_rect(), WindowRestrictions::None);
-    hub.add_monitor(
+    hub.add_monitor(reported_monitor(
         "secondary".to_string(),
         PixelRect::new(200, 0, 100, 30),
         1.0,
-    );
+    ));
     hub.focus_monitor(&MonitorTarget::Name("secondary".into()));
     hub.insert_window(titled("w10"), default_rect(), WindowRestrictions::None);
     let ws = hub.query_workspaces();
@@ -178,11 +179,11 @@ fn workspace_with_only_fullscreen() {
 #[test]
 fn multi_monitor_no_windows() {
     let mut hub = setup();
-    hub.add_monitor(
+    hub.add_monitor(reported_monitor(
         "secondary".to_string(),
         PixelRect::new(200, 0, 100, 30),
         1.0,
-    );
+    ));
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);
 
@@ -199,10 +200,26 @@ fn multi_monitor_no_windows() {
 #[test]
 fn monitors_report_stamped_cg_display_id() {
     let mut hub = setup();
-    let primary = hub.focused_monitor();
-    let external = hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
-    hub.set_monitor_cg_display_id(primary, Some(1));
-    hub.set_monitor_cg_display_id(external, Some(7));
+    let primary = hub.primary_monitor();
+    hub.add_monitor(ReportedMonitor {
+        device_name: "external".to_string(),
+        work_area: work_area_at(150, 0),
+        scale: 1.0,
+        cg_display_id: Some(7),
+        gdi_device: None,
+    });
+    // Stamp the primary in place, with its geometry unchanged.
+    hub.update_monitor(
+        primary,
+        ReportedMonitor {
+            device_name: "primary".to_string(),
+            work_area: PixelRect::new(0, 0, 150, 30),
+            scale: 1.0,
+            cg_display_id: Some(1),
+            gdi_device: None,
+        },
+        None,
+    );
 
     let monitors = hub.query_monitors();
     assert_eq!(monitors.len(), 2);
@@ -220,23 +237,31 @@ fn monitors_report_stamped_cg_display_id() {
 }
 
 #[test]
-fn monitors_report_no_identifiers_before_stamping() {
-    let mut hub = setup();
-    hub.add_monitor("external".to_string(), work_area_at(150, 0), 1.0);
-
-    // Every monitor passes through this state between add_monitor and its stamp.
-    for m in hub.query_monitors() {
-        assert_eq!(m.cg_display_id, None);
-        assert_eq!(m.gdi_device, None);
-    }
-}
-
-#[test]
 fn restamping_gdi_device_replaces_the_previous_value() {
     let mut hub = setup();
-    let primary = hub.focused_monitor();
-    hub.set_monitor_gdi_device(primary, "\\\\.\\DISPLAY1".to_string());
-    hub.set_monitor_gdi_device(primary, "\\\\.\\DISPLAY2".to_string());
+    let primary = hub.primary_monitor();
+    hub.update_monitor(
+        primary,
+        ReportedMonitor {
+            device_name: "primary".to_string(),
+            work_area: PixelRect::new(0, 0, 150, 30),
+            scale: 1.0,
+            cg_display_id: None,
+            gdi_device: Some("\\\\.\\DISPLAY1".to_string()),
+        },
+        None,
+    );
+    hub.update_monitor(
+        primary,
+        ReportedMonitor {
+            device_name: "primary".to_string(),
+            work_area: PixelRect::new(0, 0, 150, 30),
+            scale: 1.0,
+            cg_display_id: None,
+            gdi_device: Some("\\\\.\\DISPLAY2".to_string()),
+        },
+        None,
+    );
 
     // Windows can move a device string between displays, so the newest wins.
     let monitors = hub.query_monitors();
@@ -246,15 +271,30 @@ fn restamping_gdi_device_replaces_the_previous_value() {
 #[test]
 fn recomputing_monitor_names_preserves_identifiers() {
     let mut hub = setup();
-    let a = hub.add_monitor("twin".to_string(), work_area_at(150, 0), 1.0);
-    let b = hub.add_monitor("twin".to_string(), work_area_at(300, 0), 1.0);
-    hub.set_monitor_cg_display_id(a, Some(11));
-    hub.set_monitor_cg_display_id(b, Some(22));
+    hub.add_monitor(ReportedMonitor {
+        device_name: "twin".to_string(),
+        work_area: work_area_at(150, 0),
+        scale: 1.0,
+        cg_display_id: Some(11),
+        gdi_device: None,
+    });
+    hub.add_monitor(ReportedMonitor {
+        device_name: "twin".to_string(),
+        work_area: work_area_at(300, 0),
+        scale: 1.0,
+        cg_display_id: Some(22),
+        gdi_device: None,
+    });
 
     // A third twin lands between them and reranks every suffix. The stamps must
     // not travel with the names.
-    let c = hub.add_monitor("twin".to_string(), work_area_at(225, 0), 1.0);
-    hub.set_monitor_cg_display_id(c, Some(33));
+    hub.add_monitor(ReportedMonitor {
+        device_name: "twin".to_string(),
+        work_area: work_area_at(225, 0),
+        scale: 1.0,
+        cg_display_id: Some(33),
+        gdi_device: None,
+    });
 
     let monitors = hub.query_monitors();
     let stamped = |name: &str| {
@@ -272,8 +312,16 @@ fn recomputing_monitor_names_preserves_identifiers() {
 #[test]
 fn monitors_are_ordered_by_screen_position() {
     let mut hub = setup();
-    hub.add_monitor("right".to_string(), work_area_at(300, 0), 1.0);
-    hub.add_monitor("middle".to_string(), work_area_at(150, 0), 1.0);
+    hub.add_monitor(reported_monitor(
+        "right".to_string(),
+        work_area_at(300, 0),
+        1.0,
+    ));
+    hub.add_monitor(reported_monitor(
+        "middle".to_string(),
+        work_area_at(150, 0),
+        1.0,
+    ));
 
     let monitors = hub.query_monitors();
     let names: Vec<&str> = monitors.iter().map(|m| m.unique_name.as_str()).collect();

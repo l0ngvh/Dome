@@ -1,9 +1,17 @@
 use std::sync::Arc;
 
 use crate::action::{Action, Actions};
+use crate::core::ReportedMonitor;
 use crate::platform::macos::dome::{ExtRefresh, MacOSMetadata, NewWindow, PendingAdd};
 
 use super::*;
+
+#[test]
+fn core_scale_is_one_despite_the_backing_factor() {
+    // `MonitorInfo.scale` is the NSScreen backing factor, 2.0 in the harness.
+    // Core scale is always 1.0 on macOS, so the conversion must not carry it.
+    assert_eq!(ReportedMonitor::from(&default_monitor()).scale, 1.0);
+}
 
 #[test]
 fn discover_native_fullscreen_window() {

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect,
-    setup_logger_with_level, titled, titled_matcher, validate_hub,
+    reported_monitor, setup_logger_with_level, titled, titled_matcher, validate_hub,
 };
 use crate::action::MonitorTarget;
 use crate::config::{
@@ -419,7 +419,7 @@ fn run_iteration<F>(
     let mut windows: Vec<WindowId> = Vec::new();
     let mut window_origin: Vec<usize> = Vec::new();
     let mut window_minimized: Vec<bool> = Vec::new();
-    let mut monitors: Vec<MonitorId> = vec![hub.focused_monitor()];
+    let mut monitors: Vec<MonitorId> = vec![hub.primary_monitor()];
     let mut monitor_origin: Vec<usize> = vec![usize::MAX];
     let mut next_op_index: usize = 0;
     let mut workspace_names: Vec<String> = vec!["0".to_string()];
@@ -819,7 +819,7 @@ fn apply_op(
             rect,
             scale,
         } => {
-            let id = hub.add_monitor(name.clone(), *rect, *scale);
+            let id = hub.add_monitor(reported_monitor(name.clone(), *rect, *scale));
             monitors.push(id);
             monitor_origin.push(*producer_id);
         }
@@ -1149,7 +1149,7 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
     let table_size = max_producer_id(ops).map(|m| m + 1).unwrap_or(0);
     let mut live_window: Vec<Option<WindowId>> = vec![None; table_size];
     let mut live_monitor: Vec<Option<MonitorId>> = vec![None; table_size];
-    let primary = hub.focused_monitor();
+    let primary = hub.primary_monitor();
 
     for op in ops {
         match op {
@@ -1179,7 +1179,7 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 rect,
                 scale,
             } => {
-                let id = hub.add_monitor(name.clone(), *rect, *scale);
+                let id = hub.add_monitor(reported_monitor(name.clone(), *rect, *scale));
                 live_monitor[*producer_id] = Some(id);
             }
             RecordedOp::DeleteWindow { window } => {

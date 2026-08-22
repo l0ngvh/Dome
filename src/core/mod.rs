@@ -21,6 +21,7 @@ pub(crate) use hub::{
     ContainerPlacement, FloatWindowPlacement, GlobalLayoutConfig, MonitorLayout, SpawnIndicator,
     TilingWindowPlacement,
 };
+pub(crate) use monitor::ReportedMonitor;
 pub(crate) use node::Direction;
 #[cfg(target_os = "windows")]
 pub(crate) use node::Physical;

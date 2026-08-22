@@ -302,7 +302,13 @@ fn setup_screen_observer(ctx: &ListenerCtx) -> ScreenObserver {
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 let mtm = MainThreadMarker::new().unwrap();
-                let monitors = get_all_monitors(mtm);
+                let monitors = match get_all_monitors(mtm) {
+                    Ok(monitors) => monitors,
+                    Err(e) => {
+                        tracing::error!(%e, "Failed to enumerate monitors on screen change");
+                        return;
+                    }
+                };
                 send_hub_event(&(*ctx_ptr).hub_sender, HubEvent::MonitorsChanged(monitors));
             }),
         )
