@@ -3,7 +3,8 @@ use crate::core::GlobalLayoutConfig;
 use crate::core::node::PixelRect;
 use crate::core::node::WindowRestrictions;
 use crate::core::tests::{
-    LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
+    LayoutConfigBuilder, default_rect, reported_monitor, setup, setup_with_layout, snapshot,
+    titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
@@ -970,7 +971,11 @@ fn block_all_does_not_persist_after_delete() {
 #[test]
 fn block_all_on_unfocused_window_does_not_block() {
     let mut hub = setup();
-    hub.add_monitor("second".into(), PixelRect::new(150, 0, 150, 30), 1.0);
+    hub.add_monitor(reported_monitor(
+        "second".into(),
+        PixelRect::new(150, 0, 150, 30),
+        1.0,
+    ));
     // Put a tiling window on the second monitor's workspace.
     hub.focus_monitor(&MonitorTarget::Right);
     let w0 = hub
@@ -1071,7 +1076,11 @@ fn block_all_on_unfocused_window_does_not_block() {
 #[test]
 fn protect_fullscreen_blocks_display_mode_and_monitor_move() {
     let mut hub = setup();
-    hub.add_monitor("second".into(), PixelRect::new(150, 0, 150, 30), 1.0);
+    hub.add_monitor(reported_monitor(
+        "second".into(),
+        PixelRect::new(150, 0, 150, 30),
+        1.0,
+    ));
     let w0 = hub
         .insert_window(titled("w32"), default_rect(), WindowRestrictions::None)
         .unwrap();

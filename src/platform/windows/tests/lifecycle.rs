@@ -487,6 +487,40 @@ fn monitor_dpi_changed_same_scale_is_noop() {
 }
 
 #[test]
+fn dpi_change_after_a_rename_keeps_the_new_name() {
+    let mut env = TestEnv::new();
+
+    // Rename the display in place through a reconcile, then change its DPI. The
+    // DPI path has no MonitorInfo, so it reads the current name from the
+    // registry mirror. A stale mirror would revert the rename.
+    let mut renamed = default_monitor();
+    renamed.name = "Renamed".to_string();
+    *env.monitors.lock().unwrap() = vec![renamed];
+    env.dome.handle_display_change();
+
+    // 144 DPI is scale 1.5, different from the fixture default.
+    env.dome.monitor_dpi_changed(1, 144);
+
+    let monitors = env.dome.query_monitors_json();
+    assert!(
+        monitors.contains("\"unique_name\":\"Renamed\""),
+        "{monitors}"
+    );
+}
+
+#[test]
+fn dpi_change_keeps_the_gdi_device() {
+    let mut env = TestEnv::new();
+
+    // The DPI path must carry the stamped gdi_device rather than clear the
+    // published value.
+    env.dome.monitor_dpi_changed(1, 144);
+
+    let monitors = env.dome.query_monitors_json();
+    assert!(monitors.contains("DISPLAY1"), "{monitors}");
+}
+
+#[test]
 fn dpi_change_then_apply_layout_places_at_new_scale() {
     let mut env = TestEnv::new();
     let w = env.open(1, "App", "app.exe", SPAWN_DIM);

@@ -139,7 +139,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
         }
     })?;
 
-    let monitors = get_all_monitors(mtm);
+    let monitors = get_all_monitors(mtm)?;
     if monitors.is_empty() {
         return Err(anyhow::anyhow!("No monitors detected"));
     }

@@ -1,5 +1,6 @@
 use crate::config::{LayoutWorkspaceConfig, MasterConfig, SplitMode, Strategy, TreeLayoutNode};
 use crate::core::GlobalLayoutConfig;
+use crate::core::ReportedMonitor;
 use crate::core::hub::Hub;
 use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::setup_logger_with_level;
@@ -35,9 +36,13 @@ fn layout(
 
 fn setup_hub_with_layout(layout: GlobalLayoutConfig, overrides: Vec<LayoutWorkspaceConfig>) -> Hub {
     Hub::new(
-        "primary".to_string(),
-        PixelRect::new(0, 0, 150, 30),
-        1.0,
+        ReportedMonitor {
+            device_name: "primary".to_string(),
+            work_area: PixelRect::new(0, 0, 150, 30),
+            scale: 1.0,
+            cg_display_id: None,
+            gdi_device: None,
+        },
         layout,
         overrides,
     )

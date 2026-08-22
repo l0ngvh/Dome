@@ -5,47 +5,44 @@ use super::hub::{Hub, RestrictedAction};
 use super::node::{MonitorId, PixelRect, Pixels, WorkspaceId};
 use super::workspace::{Attachment, Workspace};
 
-/// Core is coordinate-system-agnostic: `work_area` holds whatever rect
-/// the platform supplies in its own native frame (logical on macOS,
-/// physical on Windows). Core never characterises or converts the
-/// unit -- all layout math is unit-agnostic.
 #[derive(Debug, Clone)]
 pub(super) struct Monitor {
-    /// Raw name the platform reports for this monitor, never modified or
-    /// suffixed. Two monitors of the same model can report the same name, so
-    /// `unique_name` appends a `#N` suffix to tell them apart.
+    /// Raw name the platform reports, never suffixed.
     pub(super) device_name: String,
-    /// Stable, human-readable name Dome derives for this monitor. No monitor
-    /// identifier is consistent across platforms, so rather than rely on an
-    /// opaque platform handle Dome names each monitor by its `device_name`
-    /// alone when that is unique among the active monitors. When several active
-    /// monitors report the same `device_name`, Dome appends a `#N` suffix
-    /// assigned consistently by screen position from left to right, so the same
-    /// set of monitors in the same arrangement always yields the same names.
+    /// Stable name Dome derives for this monitor. No platform handle is stable
+    /// across platforms, so Dome uses `device_name` when it is unique among
+    /// active monitors. On a collision it appends `#N` by screen position, left
+    /// to right. The same arrangement always yields the same names.
     pub(super) unique_name: String,
-    // Stamped by the owning platform, not derived from the monitor set, so
-    // `recompute_monitor_names` leaves them alone.
     /// `CGDirectDisplayID`. Windows has no stable counterpart, so `None` there.
     pub(super) cg_display_id: Option<u32>,
     /// Win32 szDevice (`\\.\DISPLAY1`). `None` on macOS. Restamped every
     /// reconcile because Windows can move it to another display.
     pub(super) gdi_device: Option<String>,
     pub(super) work_area: PixelRect,
-    /// Multiplier applied to config-denominated lengths before use in
-    /// layout math on this monitor. Stored here so `SizeConstraint::resolve`
-    /// can convert logical config values without re-reading platform state.
+    /// Multiplier applied to config-denominated lengths before layout math on
+    /// this monitor.
     ///
-    /// - macOS: always `1.0`. AppKit, AX, and Core Graphics all express
-    ///   window geometry in logical points, which is also the config unit.
-    /// - Windows: the monitor's DPI scale (e.g. `1.5` at 150%). PMv2
-    ///   reports rects in physical pixels, but config values are logical
-    ///   pixels, so they must be multiplied to reach the frame unit.
+    /// - macOS: always `1.0`. AppKit, AX, and Core Graphics all express window
+    ///   geometry in logical points, which is also the config unit.
+    /// - Windows: the monitor's DPI scale (e.g. `1.5` at 150%). PMv2 reports
+    ///   rects in physical pixels, but config values are logical, so core
+    ///   multiplies them into the frame unit.
     pub(super) scale: f32,
     pub(super) active_workspace: WorkspaceId,
 }
 
 impl Node for Monitor {
     type Id = MonitorId;
+}
+
+/// What a platform reconcile reports for one monitor.
+pub(crate) struct ReportedMonitor {
+    pub(crate) device_name: String,
+    pub(crate) work_area: PixelRect,
+    pub(crate) scale: f32,
+    pub(crate) cg_display_id: Option<u32>,
+    pub(crate) gdi_device: Option<String>,
 }
 
 impl Hub {
@@ -86,31 +83,22 @@ impl Hub {
         }
     }
 
-    pub(crate) fn add_monitor(
-        &mut self,
-        name: String,
-        work_area: PixelRect,
-        scale: f32,
-    ) -> MonitorId {
+    pub(crate) fn add_monitor(&mut self, reported: ReportedMonitor) -> MonitorId {
         let monitor_id = self.access.monitors.allocate(Monitor {
-            device_name: name.clone(),
-            unique_name: name.clone(),
-            cg_display_id: None,
-            gdi_device: None,
-            work_area,
-            scale,
-            // Set at the end, once it is known whether a parked workspace
-            // returns or a default has to be minted. Workspace::new needs the
-            // monitor id, so neither can be built first.
+            device_name: reported.device_name.clone(),
+            unique_name: reported.device_name,
+            cg_display_id: reported.cg_display_id,
+            gdi_device: reported.gdi_device,
+            work_area: reported.work_area,
+            scale: reported.scale,
+            // Placeholder. A workspace needs this monitor's id, so the real
+            // active one is chosen at the end.
             active_workspace: WorkspaceId::new(0),
         });
         self.recompute_monitor_names();
 
-        // The name recompute above restamped `unique_name` across the now-larger
-        // set, so the returning monitor's stored `unique_name` is fresh here. Any
-        // parked workspace whose frozen origin matches it re-homes onto this
-        // monitor. The match must read the stored name post-recompute: a
-        // pre-recompute read could carry a stale suffix and miss a real origin.
+        // Read `unique_name` after the recompute above, never before. A stale
+        // pre-recompute suffix would miss a parked workspace's frozen origin.
         let origin_name = self.access.monitors.get(monitor_id).unique_name.clone();
         let mut returning: Vec<WorkspaceId> = self
             .access
@@ -120,8 +108,7 @@ impl Hub {
             .filter(|(_, ws)| ws.origin() == Some(origin_name.as_str()))
             .map(|(ws_id, _)| *ws_id)
             .collect();
-        // Ordered by name so the choice below breaks ties deterministically
-        // rather than by allocator order.
+        // Ordered by name so the choice below is deterministic, not allocator order.
         returning.sort_by_key(|ws_id| self.access.workspaces.get(*ws_id).name.clone());
 
         for &ws_id in &returning {
@@ -129,15 +116,13 @@ impl Hub {
             // While parked, `monitor` still points at the rental host. The
             // re-home writes below overwrite it, so capture the old host now.
             let previous_host = ws.monitor;
-            // Re-home: flip to Attached and repoint `monitor` off the old host
-            // onto the returning origin. Two writes because the enum carries no id.
             ws.attachment = Attachment::Attached;
             ws.monitor = monitor_id;
             self.strategies
                 .for_workspace_mut(ws_id)
                 .compute_placement(&self.access, ws_id);
-            // If the old host was showing this workspace, its active pointer now
-            // dangles on a workspace that left. Fall it back to one it still owns.
+            // If the old host's active pointer named this workspace, it now
+            // dangles. Fall it back to a workspace the host still owns.
             if self.access.monitors.get(previous_host).active_workspace == ws_id {
                 let own = self
                     .access
@@ -152,15 +137,13 @@ impl Hub {
             }
         }
 
-        // A monitor that brought workspaces back needs no default. Minting one
-        // regardless would leave two workspaces named "0" after every replug,
-        // because the previous default parks and returns alongside the new one,
-        // and only one of two same-named workspaces is reachable by name.
+        // A monitor that brought workspaces back needs no default. A default
+        // minted regardless would leave two workspaces named "0" after a replug,
+        // and only one is reachable by name.
         //
-        // Among the returning ones the first holding windows wins. The monitor's
-        // own active pointer died with it, so no stored answer survives to
-        // restore, and showing an empty workspace while the windows sit on a
-        // sibling reads as the replug having lost them.
+        // Prefer a returning workspace that holds windows. The monitor's active
+        // pointer died with it, so an empty active workspace would read as lost
+        // windows.
         let returning_active = returning
             .iter()
             .find(|&&ws_id| {
@@ -192,11 +175,10 @@ impl Hub {
         monitor_id
     }
 
-    /// Restamps every active monitor's `unique_name`.
+    /// Re-derives every active monitor's `unique_name`.
     ///
-    /// A monitor that shares its `device_name` with others gets a `#N` position
-    /// rank, so the label depends on the whole active set and must be re-derived
-    /// whenever monitors are added, removed, or moved.
+    /// A `#N` rank depends on the whole active set. Call this on every add,
+    /// remove, or move.
     fn recompute_monitor_names(&mut self) {
         let all: Vec<(MonitorId, String, PixelRect)> = self
             .access
@@ -230,25 +212,16 @@ impl Hub {
             "removed monitor must not be the rental host primary"
         );
 
-        // If the focused monitor is the one going away, focus follows to the
-        // primary before any parking. A monitor is detached essentially only
-        // when a laptop is undocked, so the primary built-in display is the one
-        // still in front of the user. The primary is a guaranteed surviving
-        // present monitor, and its active workspace becomes current because
-        // current tracks the focused monitor.
+        // If focus sits on the departing monitor, it moves to the primary, a
+        // guaranteed survivor. The primary's active workspace becomes current,
+        // because current tracks focus.
         if self.access.focused_monitor == monitor_id {
             self.access.focused_monitor = primary;
         }
 
-        // Snapshot this monitor's current stored `unique_name` before its
-        // delete. An Attached workspace on this monitor has no origin in its
-        // variant yet, so the origin it should remember is this monitor's own
-        // `unique_name`. Reading the stored field here reflects the set present
-        // when this specific monitor is removed: the name recompute last ran
-        // when the current set was live (the initial state for the first
-        // removal, then the tail recompute of the previous call for each later
-        // one), and nothing above mutated any monitor's geometry, so the stored
-        // field still holds the pre-delete value.
+        // Snapshot this monitor's `unique_name` before the delete. An Attached
+        // workspace here has no origin yet, so it should freeze this monitor's
+        // name.
         let this_origin = self.access.monitors.get(monitor_id).unique_name.clone();
         let ws_on_this: Vec<WorkspaceId> = self
             .access
@@ -259,15 +232,14 @@ impl Hub {
             .map(|(ws_id, _)| *ws_id)
             .collect();
 
-        // Every workspace here is Attached, because a parked one rents to the
-        // primary and the primary is never removed, so the origin is always
-        // this monitor's own pre-delete name.
+        // Every workspace here is Attached. A parked one rents to the primary,
+        // which is never removed, so the frozen origin is always this monitor's
+        // own name.
         for ws_id in ws_on_this {
             let ws = self.access.workspaces.get_mut(ws_id);
-            // Rent to the primary: a monitor is detached for a prolonged period
-            // essentially only when undocking a laptop, so the primary is the
-            // built-in display the user is actually looking at. Parked windows
-            // therefore land on the screen in front of the user.
+            // Rent to the primary. A monitor stays detached for long essentially
+            // only on a laptop undock, so the primary is the display in front of
+            // the user.
             ws.monitor = primary;
             ws.attachment = Attachment::Parked {
                 origin: this_origin.clone(),
@@ -277,100 +249,68 @@ impl Hub {
                 .compute_placement(&self.access, ws_id);
         }
 
-        // Delete this one monitor. Safe now: no workspace's `monitor` field
-        // still points at it.
+        // Safe to delete now, because no workspace's `monitor` field points at it.
         self.access.monitors.delete(monitor_id);
 
-        // Restamp `unique_name` across the now-smaller surviving set. This must
-        // come after the snapshot so the frozen origin reflects the pre-removal
-        // set, and after the delete so the recompute sees only survivors.
-        // Removing a same-named sibling flips the survivor's suffix, so every
-        // survivor is restamped, not just one. A later `remove_monitor` call
-        // reads these fresh names.
+        // Restamp `unique_name` across the survivors. After the snapshot, so the
+        // frozen origin reflects the pre-removal set. After the delete, so the
+        // recompute sees only survivors.
         self.recompute_monitor_names();
     }
 
+    /// Apply the latest reported description to an existing monitor.
+    ///
+    /// `displaced` is set when another monitor is replaced by this one, for
+    /// example when display mirroring turns on.
     pub(crate) fn update_monitor(
         &mut self,
         monitor_id: MonitorId,
-        work_area: PixelRect,
-        scale: f32,
+        reported: ReportedMonitor,
+        displaced: Option<MonitorId>,
     ) {
-        let monitor = self.access.monitors.get_mut(monitor_id);
-        if monitor.work_area == work_area && monitor.scale == scale {
-            return;
-        }
-        monitor.work_area = work_area;
-        monitor.scale = scale;
-        // Collect IDs first to avoid borrowing self.access.workspaces while
-        // passing &mut self.access to the strategy.
-        let ws_ids: Vec<WorkspaceId> = self
-            .access
-            .workspaces
-            .all_active()
-            .iter()
-            .filter(|(_, ws)| ws.monitor == monitor_id)
-            .map(|(id, _)| *id)
-            .collect();
-        for ws_id in ws_ids {
-            self.strategies
-                .for_workspace_mut(ws_id)
-                .compute_placement(&self.access, ws_id);
-        }
-        self.recompute_monitor_names();
-    }
-
-    /// Callers restamp unconditionally every reconcile, so an unchanged name
-    /// returns without rerunning the recompute.
-    pub(crate) fn rename_monitor(&mut self, monitor_id: MonitorId, device_name: String) {
-        let monitor = self.access.monitors.get_mut(monitor_id);
-        if monitor.device_name == device_name {
-            return;
-        }
-        monitor.device_name = device_name;
-        self.recompute_monitor_names();
-    }
-
-    /// `occupant` is the monitor already keyed to the incoming primary display,
-    /// which is displaced and removed.
-    pub(crate) fn apply_primary_display_change(
-        &mut self,
-        occupant: Option<MonitorId>,
-        device_name: String,
-    ) {
-        let primary = self.access.primary_monitor;
-        if occupant == Some(primary) {
-            return;
-        }
-
-        // Remove before renaming, so the occupant's origin freezes at its bare
-        // `unique_name` while it is still the only monitor holding that name.
-        // Renaming first would collide the two and freeze a position ranked
-        // suffix instead.
-        if let Some(displaced) = occupant {
+        // Remove displaced before the rename below, while it still owns its name.
+        // Its workspaces park and freeze that name so they return on replug. If
+        // the rename ran first, both monitors would share the name, each would
+        // take a numbered suffix, and the parked name would never match.
+        if let Some(displaced) = displaced {
             self.remove_monitor(displaced);
         }
-        self.rename_monitor(primary, device_name);
-    }
 
-    #[cfg_attr(
-        all(not(target_os = "macos"), not(test)),
-        expect(dead_code, reason = "stamped only by the macOS display list")
-    )]
-    pub(crate) fn set_monitor_cg_display_id(
-        &mut self,
-        monitor_id: MonitorId,
-        cg_display_id: Option<u32>,
-    ) {
-        self.access.monitors.get_mut(monitor_id).cg_display_id = cg_display_id;
-    }
+        let monitor = self.access.monitors.get_mut(monitor_id);
+        let geometry_changed =
+            monitor.work_area != reported.work_area || monitor.scale != reported.scale;
+        if !geometry_changed
+            && monitor.device_name == reported.device_name
+            && monitor.cg_display_id == reported.cg_display_id
+            && monitor.gdi_device == reported.gdi_device
+        {
+            return;
+        }
+        monitor.device_name = reported.device_name;
+        monitor.work_area = reported.work_area;
+        monitor.scale = reported.scale;
+        monitor.cg_display_id = reported.cg_display_id;
+        monitor.gdi_device = reported.gdi_device;
 
-    #[cfg_attr(
-        all(not(target_os = "windows"), not(test)),
-        expect(dead_code, reason = "stamped only by the Windows monitor reconcile")
-    )]
-    pub(crate) fn set_monitor_gdi_device(&mut self, monitor_id: MonitorId, gdi_device: String) {
-        self.access.monitors.get_mut(monitor_id).gdi_device = Some(gdi_device);
+        if geometry_changed {
+            // Collect IDs first, so the strategy call can take `&mut self.access`
+            // without a live borrow of `self.access.workspaces`.
+            let ws_ids: Vec<WorkspaceId> = self
+                .access
+                .workspaces
+                .all_active()
+                .iter()
+                .filter(|(_, ws)| ws.monitor == monitor_id)
+                .map(|(id, _)| *id)
+                .collect();
+            for ws_id in ws_ids {
+                self.strategies
+                    .for_workspace_mut(ws_id)
+                    .compute_placement(&self.access, ws_id);
+            }
+        }
+
+        self.recompute_monitor_names();
     }
 
     pub(super) fn monitor_id_by_disambiguated_name(&self, name: &str) -> Option<MonitorId> {

@@ -155,22 +155,18 @@ impl Dome {
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(
-            primary.name.clone(),
-            primary.work_area,
-            primary.scale,
+            primary.into(),
             GlobalLayoutConfig::from(&config),
             workspace_overrides.clone(),
         );
         let primary_monitor_id = hub.primary_monitor();
-        // The primary bypasses `add_monitor`, so without its own stamp a
-        // single-display box would publish no GDI device at all.
-        hub.set_monitor_gdi_device(primary_monitor_id, primary.gdi_device.clone());
         let mut monitors_reg = MonitorRegistry::new();
         let mut tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>> = HashMap::new();
         monitors_reg.insert(
             primary.handle,
             primary_monitor_id,
             primary.name.clone(),
+            primary.gdi_device.clone(),
             primary.work_area,
             primary.scale,
         );
@@ -188,12 +184,12 @@ impl Dome {
 
         for monitor in &monitors {
             if monitor.handle != primary.handle {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, monitor.scale);
-                hub.set_monitor_gdi_device(id, monitor.gdi_device.clone());
+                let id = hub.add_monitor(monitor.into());
                 monitors_reg.insert(
                     monitor.handle,
                     id,
                     monitor.name.clone(),
+                    monitor.gdi_device.clone(),
                     monitor.work_area,
                     monitor.scale,
                 );

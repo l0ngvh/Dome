@@ -6,7 +6,7 @@ use crate::config::{
 
 use super::allocator::{Allocator, NodeId};
 use super::matcher::{FloatFullscreenMatcherId, MatcherHit};
-use super::monitor::Monitor;
+use super::monitor::{Monitor, ReportedMonitor};
 use super::node::{
     Container, ContainerId, DisplayMode, Length, LimitObservation, LimitUpdate, Logical, MonitorId,
     PixelRect, Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions, WorkspaceId,
@@ -247,9 +247,7 @@ pub(crate) struct Hub {
 
 impl Hub {
     pub(crate) fn new(
-        primary_name: String,
-        primary_screen: PixelRect,
-        primary_scale: f32,
+        primary: ReportedMonitor,
         layout: GlobalLayoutConfig,
         preferred_layouts: Vec<LayoutWorkspaceConfig>,
     ) -> Self {
@@ -274,7 +272,7 @@ impl Hub {
             global_fullscreen_matchers: Vec::new(),
         };
 
-        let primary_id = hub.add_monitor(primary_name, primary_screen, primary_scale);
+        let primary_id = hub.add_monitor(primary);
         hub.access.focused_monitor = primary_id;
         hub.access.primary_monitor = primary_id;
         let preferred = hub.access.preferred_layouts.clone();
@@ -381,17 +379,6 @@ impl Hub {
                     .set_focus(&mut self.access, window_id);
             }
         }
-    }
-
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "read by the core tests, which assert where focus lands"
-        )
-    )]
-    pub(crate) fn focused_monitor(&self) -> MonitorId {
-        self.access.focused_monitor
     }
 
     pub(crate) fn primary_monitor(&self) -> MonitorId {
