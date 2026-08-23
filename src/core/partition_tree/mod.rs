@@ -13,7 +13,7 @@ pub(crate) use crate::core::node::Child;
 pub(crate) use crate::core::node::Container;
 pub(crate) use types::*;
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::config::LayoutWorkspaceConfig;
 use crate::config::SizeConstraints;
@@ -33,9 +33,9 @@ use crate::core::strategy::{
 /// layout. This is the default (and currently only) tiling strategy.
 #[derive(Debug)]
 pub(crate) struct PartitionTreeStrategy {
-    tiling_containers: HashMap<ContainerId, TilingContainerData>,
-    tiling_windows: HashMap<WindowId, TilingWindowData>,
-    workspaces: HashMap<WorkspaceId, WorkspaceTilingState>,
+    tiling_containers: FxHashMap<ContainerId, TilingContainerData>,
+    tiling_windows: FxHashMap<WindowId, TilingWindowData>,
+    workspaces: FxHashMap<WorkspaceId, WorkspaceTilingState>,
     window_slots: Allocator<PreferredWindowSlot>,
     container_slots: Allocator<PreferredContainerSlot>,
     tab_bar_height: Pixels<Logical>,
@@ -328,9 +328,9 @@ impl PartitionTreeStrategy {
         size_constraints: SizeConstraints,
     ) -> Self {
         Self {
-            tiling_containers: HashMap::new(),
-            tiling_windows: HashMap::new(),
-            workspaces: HashMap::new(),
+            tiling_containers: FxHashMap::default(),
+            tiling_windows: FxHashMap::default(),
+            workspaces: FxHashMap::default(),
             window_slots: Allocator::new(),
             container_slots: Allocator::new(),
             tab_bar_height,

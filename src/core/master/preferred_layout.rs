@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::config::{LayoutWorkspaceConfig, WindowMatcher};
 use crate::core::WindowMetadata;
@@ -262,7 +262,7 @@ impl Node for Slot {
 
 fn join_slot_and_place(
     slots: &mut Allocator<Slot>,
-    window_states: &HashMap<WindowId, WindowState>,
+    window_states: &FxHashMap<WindowId, WindowState>,
     pane: &mut Vec<WindowId>,
     pane_matchers: &[SlotId],
     window_id: WindowId,

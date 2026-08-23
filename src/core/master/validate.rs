@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use crate::core::{
     Length, WindowId,
@@ -10,7 +10,7 @@ use crate::core::{
 impl ValidateStrategy for MasterStrategy {
     fn validate(&self, hub: &HubAccess) {
         for (&ws_id, state) in &self.workspaces {
-            let mut seen = HashSet::new();
+            let mut seen = FxHashSet::default();
             for &wid in state.master.iter().chain(state.secondary.iter()) {
                 hub.windows.get(wid);
                 assert!(
@@ -33,7 +33,7 @@ impl ValidateStrategy for MasterStrategy {
                 state.focus_history.len(),
                 seen.len()
             );
-            let history_seen: HashSet<WindowId> = state.focus_history.iter().copied().collect();
+            let history_seen: FxHashSet<WindowId> = state.focus_history.iter().copied().collect();
             assert_eq!(
                 history_seen, seen,
                 "master-stack workspace {ws_id}: focus_history does not match master plus secondary \

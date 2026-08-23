@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::config::{
     LayoutWorkspaceConfig, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
@@ -191,11 +191,8 @@ pub(crate) fn window_constraints(
     size_constraints: &SizeConstraints,
     wid: WindowId,
 ) -> Constraints {
-    let ws_id = hub
-        .windows
-        .get(wid)
-        .workspace()
-        .expect("tiling window has a workspace");
+    let window = hub.windows.get(wid);
+    let ws_id = window.workspace().expect("tiling window has a workspace");
     let monitor_id = hub.workspaces.get(ws_id).monitor;
     let monitor = hub.monitors.get(monitor_id);
     let scale = monitor.scale;
@@ -212,8 +209,8 @@ pub(crate) fn window_constraints(
         .maximum_height
         .resolve(screen_height, scale);
 
-    let outset = Length::from_pixels(hub.border(monitor_id) * 2);
-    let limits = hub.windows.get(wid).limits();
+    let outset = Length::from_pixels(hub.border_for_scale(scale) * 2);
+    let limits = window.limits();
     // Filter before the outset: a non-positive stored limit is not a limit at all, and outsetting
     // it first would turn it into a spurious `2 * border` cap that collapses the slot.
     let outset_limit = |v: Option<Length<Unit>>| {
@@ -359,7 +356,7 @@ pub(crate) fn distribute_space(
 pub(super) struct StrategySet {
     partition_tree: PartitionTreeStrategy,
     master: MasterStrategy,
-    kinds: HashMap<WorkspaceId, Strategy>,
+    kinds: FxHashMap<WorkspaceId, Strategy>,
 }
 
 impl StrategySet {
@@ -377,7 +374,7 @@ impl StrategySet {
         Self {
             partition_tree,
             master,
-            kinds: HashMap::new(),
+            kinds: FxHashMap::default(),
         }
     }
 
@@ -437,14 +434,15 @@ impl StrategySet {
         preferred_layouts: &[LayoutWorkspaceConfig],
         default_strategy: Strategy,
     ) {
-        for (ws_id, ws) in hub.workspaces.all_active() {
+        for ws_id in hub.workspaces.sorted_ids() {
             let old = *self
                 .kinds
                 .get(&ws_id)
                 .unwrap_or_else(|| panic!("workspace {ws_id:?} not registered with StrategySet"));
+            let ws_name = hub.workspaces.get(ws_id).name.clone();
             let new = preferred_layouts
                 .iter()
-                .find(|w| w.name() == ws.name)
+                .find(|w| w.name() == ws_name)
                 .map(|w| match w {
                     LayoutWorkspaceConfig::PartitionTree { .. } => Strategy::PartitionTree,
                     LayoutWorkspaceConfig::Master { .. } => Strategy::Master,
@@ -453,7 +451,7 @@ impl StrategySet {
             self.kinds.insert(ws_id, new);
             let incoming = preferred_layouts
                 .iter()
-                .find(|o| o.name() == ws.name.as_str());
+                .find(|o| o.name() == ws_name.as_str());
             if old != new {
                 tracing::debug!(
                     ws_id = %ws_id,

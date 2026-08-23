@@ -137,9 +137,9 @@ impl Hub {
         let ws_ids: Vec<(WorkspaceId, String)> = self
             .access
             .workspaces
-            .all_active()
+            .sorted_ids()
             .into_iter()
-            .map(|(ws_id, ws)| (ws_id, ws.name.clone()))
+            .map(|ws_id| (ws_id, self.access.workspaces.get(ws_id).name.clone()))
             .collect();
 
         let workspaces: Vec<(String, WorkspaceExport)> = ws_ids

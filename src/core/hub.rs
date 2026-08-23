@@ -226,9 +226,12 @@ impl HubAccess {
     /// thickness ending in `.5` would otherwise round the two opposite edges
     /// apart by a pixel.
     pub(super) fn border(&self, monitor: MonitorId) -> Pixels<Unit> {
-        Pixels::round(
-            Length::from_pixels(self.layout.border_size).to_unit(self.monitors.get(monitor).scale),
-        )
+        self.border_for_scale(self.monitors.get(monitor).scale)
+    }
+
+    /// Lets a caller that already holds the scale skip the monitor lookup `border` does.
+    pub(super) fn border_for_scale(&self, scale: f32) -> Pixels<Unit> {
+        Pixels::round(Length::from_pixels(self.layout.border_size).to_unit(scale))
     }
 }
 
@@ -421,9 +424,9 @@ impl Hub {
     pub(crate) fn visible_workspaces(&self) -> Vec<WorkspaceId> {
         self.access
             .monitors
-            .all_active()
+            .sorted_ids()
             .into_iter()
-            .map(|(_, m)| m.active_workspace)
+            .map(|id| self.access.monitors.get(id).active_workspace)
             .collect()
     }
 
@@ -435,13 +438,16 @@ impl Hub {
         let visible: Vec<WorkspaceId> = self.visible_workspaces();
         self.access
             .workspaces
-            .all_active()
+            .sorted_ids()
             .into_iter()
-            .map(|(ws_id, ws)| super::WorkspaceInfo {
-                name: ws.name.clone(),
-                is_focused: ws_id == focused_ws,
-                is_visible: visible.contains(&ws_id),
-                window_count: self.count_workspace_windows(ws_id, &ws),
+            .map(|ws_id| {
+                let ws = self.access.workspaces.get(ws_id);
+                super::WorkspaceInfo {
+                    name: ws.name.clone(),
+                    is_focused: ws_id == focused_ws,
+                    is_visible: visible.contains(&ws_id),
+                    window_count: self.count_workspace_windows(ws_id, ws),
+                }
             })
             .collect()
     }
@@ -528,10 +534,9 @@ impl Hub {
         let workspaces_to_migrate: Vec<WorkspaceId> = self
             .access
             .workspaces
-            .all_active()
-            .iter()
-            .filter(|(_, ws)| ws.monitor == monitor_id)
-            .map(|(id, _)| *id)
+            .sorted_ids()
+            .into_iter()
+            .filter(|&id| self.access.workspaces.get(id).monitor == monitor_id)
             .collect();
 
         for ws_id in workspaces_to_migrate {
@@ -561,10 +566,9 @@ impl Hub {
         let ws_ids: Vec<WorkspaceId> = self
             .access
             .workspaces
-            .all_active()
-            .iter()
-            .filter(|(_, ws)| ws.monitor == monitor_id)
-            .map(|(id, _)| *id)
+            .sorted_ids()
+            .into_iter()
+            .filter(|&id| self.access.workspaces.get(id).monitor == monitor_id)
             .collect();
         for ws_id in ws_ids {
             self.strategies
@@ -575,7 +579,7 @@ impl Hub {
 
     pub(crate) fn sync_configuration(&mut self, layout: GlobalLayoutConfig) {
         self.access.layout = layout.clone();
-        for (ws_id, _) in self.access.workspaces.all_active() {
+        for ws_id in self.access.workspaces.sorted_ids() {
             self.strategies
                 .for_workspace_mut(ws_id)
                 .apply_config(&mut self.access, layout.clone());
@@ -917,10 +921,9 @@ impl Hub {
             MonitorTarget::Name(name) => self
                 .access
                 .monitors
-                .all_active()
-                .iter()
-                .find(|(_, m)| m.name == *name)
-                .map(|(id, _)| *id),
+                .sorted_ids()
+                .into_iter()
+                .find(|&id| self.access.monitors.get(id).name == *name),
             direction => {
                 let current = self
                     .access
@@ -934,11 +937,11 @@ impl Hub {
 
                 self.access
                     .monitors
-                    .all_active()
-                    .iter()
-                    .filter(|(id, _)| *id != self.access.focused_monitor)
-                    .filter_map(|(id, m)| {
-                        let m = m.work_area;
+                    .sorted_ids()
+                    .into_iter()
+                    .filter(|&id| id != self.access.focused_monitor)
+                    .filter_map(|id| {
+                        let m = self.access.monitors.get(id).work_area;
                         let dx = 2 * m.x() + m.width() - cx2;
                         let dy = 2 * m.y() + m.height() - cy2;
 
@@ -951,7 +954,7 @@ impl Hub {
                         };
                         let dx = i64::from(dx.value());
                         let dy = i64::from(dy.value());
-                        valid.then_some((*id, dx * dx + dy * dy))
+                        valid.then_some((id, dx * dx + dy * dy))
                     })
                     .min_by_key(|(_, dist_sq)| *dist_sq)
                     .map(|(id, _)| id)

@@ -4,15 +4,15 @@ use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
 use crate::core::partition_tree::{Child, Parent};
 use crate::core::strategy::{VALIDATION_TOLERANCE, ValidateStrategy, window_constraints};
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use super::PartitionTreeStrategy;
 
 impl ValidateStrategy for PartitionTreeStrategy {
     fn validate(&self, hub: &HubAccess) {
-        let mut reachable: HashSet<ContainerId> = HashSet::new();
-        for (workspace_id, workspace) in hub.workspaces.all_active() {
-            self.validate_workspace_focus(hub, workspace_id, &workspace);
+        let mut reachable: FxHashSet<ContainerId> = FxHashSet::default();
+        for workspace_id in hub.workspaces.sorted_ids() {
+            self.validate_workspace_focus(hub, workspace_id, hub.workspaces.get(workspace_id));
 
             let Some(root) = self.workspaces.get(&workspace_id).and_then(|s| s.root) else {
                 continue;
@@ -127,7 +127,7 @@ impl PartitionTreeStrategy {
         let Some(state) = self.workspaces.get(&workspace_id) else {
             return;
         };
-        let tree_windows: HashSet<crate::core::node::WindowId> = root
+        let tree_windows: FxHashSet<crate::core::node::WindowId> = root
             .map(|r| {
                 hub.children_dfs(r)
                     .into_iter()
@@ -147,7 +147,7 @@ impl PartitionTreeStrategy {
             state.focus_history.len(),
             tree_windows.len()
         );
-        let history_seen: HashSet<crate::core::node::WindowId> =
+        let history_seen: FxHashSet<crate::core::node::WindowId> =
             state.focus_history.iter().copied().collect();
         assert_eq!(
             history_seen, tree_windows,
@@ -158,13 +158,8 @@ impl PartitionTreeStrategy {
     /// The arena is shared, so a container the tree no longer references is a leak that
     /// only an arena-wide sweep can see. `StrategySet` holds one `PartitionTreeStrategy`
     /// across every tree workspace, so `reachable` covers every root and this is exact.
-    fn validate_container_arena(&self, hub: &HubAccess, reachable: &HashSet<ContainerId>) {
-        let allocated: HashSet<ContainerId> = hub
-            .containers
-            .all_active()
-            .into_iter()
-            .map(|(id, _)| id)
-            .collect();
+    fn validate_container_arena(&self, hub: &HubAccess, reachable: &FxHashSet<ContainerId>) {
+        let allocated: FxHashSet<ContainerId> = hub.containers.sorted_ids().into_iter().collect();
         assert_eq!(
             sorted_difference(&allocated, reachable),
             Vec::new(),
@@ -176,7 +171,7 @@ impl PartitionTreeStrategy {
             "Containers reachable from a workspace root but not allocated"
         );
 
-        let with_state: HashSet<ContainerId> = self.tiling_containers.keys().copied().collect();
+        let with_state: FxHashSet<ContainerId> = self.tiling_containers.keys().copied().collect();
         assert_eq!(
             sorted_difference(&with_state, reachable),
             Vec::new(),
@@ -439,8 +434,8 @@ impl PartitionTreeStrategy {
 }
 
 fn sorted_difference(
-    from: &HashSet<ContainerId>,
-    minus: &HashSet<ContainerId>,
+    from: &FxHashSet<ContainerId>,
+    minus: &FxHashSet<ContainerId>,
 ) -> Vec<ContainerId> {
     let mut extra: Vec<ContainerId> = from.difference(minus).copied().collect();
     extra.sort_unstable();

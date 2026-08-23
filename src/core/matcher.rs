@@ -38,15 +38,7 @@ impl Hub {
     /// visited before any workspace's float matcher, so a workspace-A float
     /// matcher can never beat a workspace-B fullscreen matcher.
     pub(super) fn resolve_matcher(&self, metadata: &dyn WindowMetadata) -> Option<MatcherHit> {
-        // Collect ids once: all_active() clones each Workspace (allocator.rs),
-        // so calling it per mode pass doubles the clone on the hot insert path.
-        let ws_ids: Vec<WorkspaceId> = self
-            .access
-            .workspaces
-            .all_active()
-            .into_iter()
-            .map(|(id, _)| id)
-            .collect();
+        let ws_ids: Vec<WorkspaceId> = self.access.workspaces.sorted_ids();
 
         for ws_id in &ws_ids {
             let ws = self.access.workspaces.get(*ws_id);
@@ -111,22 +103,20 @@ impl Hub {
     /// neither per-workspace matchers (via the arg) nor global matchers (via
     /// `self.access.layout`) go stale.
     pub(super) fn index_matchers(&mut self, preferred_layouts: &[LayoutWorkspaceConfig]) {
-        // Clear the pool so every id is reallocated fresh from the new config.
-        for (id, _) in self.float_fullscreen_matchers.all_active() {
+        for id in self.float_fullscreen_matchers.sorted_ids() {
             self.float_fullscreen_matchers.delete(id);
         }
 
         self.global_float_matchers.clear();
         self.global_fullscreen_matchers.clear();
-        for (ws_id, _) in self.access.workspaces.all_active() {
+        for ws_id in self.access.workspaces.sorted_ids() {
             let w = self.access.workspaces.get_mut(ws_id);
             w.float_matchers.clear();
             w.fullscreen_matchers.clear();
         }
 
-        // Clone globals up front. The allocation loop needs `&mut
-        // self.float_fullscreen_matchers` while these read `&self.access.layout`,
-        // which would otherwise conflict.
+        // Clone globals up front: the allocation loop needs `&mut
+        // self.float_fullscreen_matchers` while these borrow `&self.access.layout`.
         let global_fullscreen = self.access.layout.fullscreen.clone();
         let global_float = self.access.layout.float.clone();
 
@@ -160,17 +150,16 @@ impl Hub {
             self.global_float_matchers.push(id);
         }
 
-        // Re-derive each float/fullscreen window's occupy link by re-matching
-        // its live metadata against only the new same-mode matchers on its own
-        // workspace. A per-workspace hit relinks to that matcher id; a
-        // global-only hit and a no-match both leave occupy None, so the export
-        // path synthesises a matcher from live metadata.
+        // Re-match each float/fullscreen window against only its own workspace's
+        // same-mode matchers. A global-only hit or a no-match leaves occupy None,
+        // so the export path synthesises a matcher from live metadata.
         let new_occupies: Vec<(WindowId, Option<FloatFullscreenMatcherId>)> = self
             .access
             .windows
-            .all_active()
+            .sorted_ids()
             .into_iter()
-            .filter_map(|(win_id, window)| {
+            .filter_map(|win_id| {
+                let window = self.access.windows.get(win_id);
                 let is_float = match window.mode {
                     DisplayMode::Float { .. } => true,
                     DisplayMode::Fullscreen { .. } => false,
