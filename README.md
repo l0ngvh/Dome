@@ -81,8 +81,8 @@ launch to `~/Library/Logs/dome/dome.log` on macOS, or
 ## Status bar
 
 Dome doesn't ship with a status bar, but it provides basic integration for
-SketchyBar on macOS and for YASB and Zebar on Windows. See the
-[Integration](docs/integration.md) guide for setup and examples.
+SketchyBar on macOS and for YASB and Zebar on Windows. Each has its own setup
+guide under [integrations/](integrations/).
 
 ## Configuring Dome
 
@@ -99,7 +99,6 @@ Dome is configured by editing two TOML files. The default locations are:
 - [Layout](docs/layout.md): layout strategy, window-size constraints, and per-strategy parameters
 - [Commands](docs/commands.md): full command reference
 - [CLI](docs/cli.md): command-line interface usage
-- [Integration](docs/integration.md): status bar integration examples for SketchyBar, YASB, and Zebar
 - [FAQ](docs/faq.md): answers to common questions and gotchas
 
 ## Credits
