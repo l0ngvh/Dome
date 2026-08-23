@@ -5,7 +5,7 @@ mod scroll;
 #[cfg(test)]
 mod validate;
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::config::{LayoutWorkspaceConfig, SizeConstraints};
 use crate::core::GlobalLayoutConfig;
@@ -26,8 +26,8 @@ use crate::core::strategy::{
 /// Horizontal scroll does not exist in master.
 #[derive(Debug)]
 pub(crate) struct MasterStrategy {
-    workspaces: HashMap<WorkspaceId, WorkspaceState>,
-    window_states: HashMap<WindowId, WindowState>,
+    workspaces: FxHashMap<WorkspaceId, WorkspaceState>,
+    window_states: FxHashMap<WindowId, WindowState>,
     slots: Allocator<Slot>,
     master_count: usize,
     master_ratio: f32,
@@ -427,8 +427,8 @@ impl MasterStrategy {
             master_count,
             master_ratio,
             size_constraints,
-            workspaces: HashMap::new(),
-            window_states: HashMap::new(),
+            workspaces: FxHashMap::default(),
+            window_states: FxHashMap::default(),
             slots: Allocator::new(),
         }
     }

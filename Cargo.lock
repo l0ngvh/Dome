@@ -448,6 +448,7 @@ dependencies = [
  "rand_chacha",
  "rayon",
  "regex",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "toml",

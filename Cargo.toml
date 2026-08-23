@@ -24,6 +24,7 @@ egui-wgpu = "0.34"
 wgpu = { version = "29", features = ["dx12"] }
 pollster = "0.4"
 calloop = { version = "0.14", features = ["executor"] }
+rustc-hash = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"

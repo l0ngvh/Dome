@@ -1,22 +1,17 @@
-//! Backing store for all tree nodes. Uses HashMap with monotonically increasing
-//! typed IDs rather than Vec — nodes are frequently deleted (windows close,
-//! containers merge) and IDs must remain stable without index remapping or
-//! tombstones. Typed IDs (WindowId, ContainerId, etc.) prevent mixing up ID
-//! types at compile time. IDs are never reused (monotonic counter) so a stale
-//! ID can't accidentally refer to a new node.
-
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 #[derive(Debug)]
 pub(super) struct Allocator<T: Node> {
-    storage: HashMap<T::Id, T>,
+    /// Keyed by ID, not positional like a Vec, so IDs stay stable across deletions.
+    /// Keys are internal, so it uses FxHash rather than the default SipHash.
+    storage: FxHashMap<T::Id, T>,
     next_id: usize,
 }
 
 impl<T: std::fmt::Debug + Node> Allocator<T> {
     pub(super) fn new() -> Self {
         Self {
-            storage: HashMap::new(),
+            storage: FxHashMap::default(),
             next_id: 0,
         }
     }
@@ -46,6 +41,14 @@ impl<T: std::fmt::Debug + Node> Allocator<T> {
             .unwrap_or_else(|| panic!("Node {id:?} not found or was deleted"))
     }
 
+    /// Sorted so iteration order stays deterministic regardless of the map's hasher.
+    pub(super) fn sorted_ids(&self) -> Vec<T::Id> {
+        let mut ids: Vec<T::Id> = self.storage.keys().copied().collect();
+        ids.sort_by_key(|id| id.get());
+        ids
+    }
+
+    #[cfg(test)]
     pub(super) fn all_active(&self) -> Vec<(T::Id, T)> {
         let mut entries: Vec<_> = self
             .storage
