@@ -80,6 +80,11 @@ body,
   background: #cba6f7;
 }
 
+.ws.parked {
+  color: #f9e2af;
+  background: transparent;
+}
+
 .cpu .high-usage {
   color: #f38ba8;
 }

@@ -14,7 +14,7 @@
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
-      import React, { useState, useEffect } from 'https://esm.sh/react@18?dev';
+      import React, { useState, useEffect, useRef } from 'https://esm.sh/react@18?dev';
       import { createRoot } from 'https://esm.sh/react-dom@18/client?dev';
       import * as zebar from 'https://esm.sh/zebar@3.0';
 
@@ -32,20 +32,51 @@
       function App() {
         const [output, setOutput] = useState(providers.outputMap);
         const [workspaces, setWorkspaces] = useState([]);
+        const [hasParked, setHasParked] = useState(false);
+        // This widget's monitor as Dome's unique_name, or null until resolved.
+        const monitorName = useRef(null);
 
         useEffect(() => {
           providers.onOutput(() => setOutput(providers.outputMap));
         }, []);
 
         useEffect(() => {
+          async function resolveMonitor() {
+            try {
+              // The OS device name is volatile, so resolve it fresh rather than caching it.
+              const monitor = await zebar.currentWidget().tauriWindow.currentMonitor();
+              const device = monitor?.name;
+              if (!device) return;
+              const res = await zebar.shellExec('dome', ['query', 'monitors']);
+              const rows = JSON.parse(res.stdout.trim());
+              if (Array.isArray(rows)) {
+                const match = rows.find(m => m.gdi_device === device);
+                monitorName.current = match ? match.unique_name : null;
+              }
+            } catch {}
+          }
+
+          function mine(data) {
+            return data
+              .filter(w => w.monitor === monitorName.current && w.state === 'Attached')
+              .sort((a, b) => parseInt(a.name) - parseInt(b.name));
+          }
+
           async function refresh() {
+            if (monitorName.current === null) await resolveMonitor();
             try {
               const res = await zebar.shellExec('dome', ['query', 'workspaces']);
               const data = JSON.parse(res.stdout.trim());
-              if (Array.isArray(data)) {
-                data.sort((a, b) => parseInt(a.name) - parseInt(b.name));
-                setWorkspaces(data);
+              if (!Array.isArray(data)) return;
+              let rows = mine(data);
+              // An attached monitor always owns a workspace, so an empty result for a
+              // resolved name means the name changed. Re-resolve and re-filter.
+              if (monitorName.current !== null && rows.length === 0) {
+                await resolveMonitor();
+                rows = mine(data);
               }
+              setWorkspaces(rows);
+              setHasParked(data.some(w => w.state === 'Parked' && w.window_count > 0));
             } catch {}
           }
           refresh();
@@ -129,6 +160,7 @@
                     </span>
                   );
                 })}
+                {hasParked && <span className="ws parked">parked</span>}
               </div>
             </div>
 
