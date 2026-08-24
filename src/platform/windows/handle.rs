@@ -11,21 +11,19 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
 };
+use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::HiDpi::{
     AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow,
     GetWindowDpiAwarenessContext,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU,
-};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GW_OWNER, GWL_EXSTYLE, GWL_STYLE,
-    GetAncestor, GetClassNameW, GetForegroundWindow, GetWindow, GetWindowLongW, GetWindowRect,
-    GetWindowThreadProcessId, HWND_BOTTOM, IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO,
-    PostMessageW, SMTO_ABORTIFHUNG, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS,
-    SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, SetForegroundWindow,
-    SetWindowPos, ShowWindow, ShowWindowAsync, WM_CLOSE, WM_GETMINMAXINFO, WM_GETTEXT,
-    WM_GETTEXTLENGTH, WS_CHILD, WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE,
+    BringWindowToTop, EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GW_OWNER, GWL_EXSTYLE,
+    GWL_STYLE, GetAncestor, GetClassNameW, GetForegroundWindow, GetWindow, GetWindowLongW,
+    GetWindowRect, GetWindowThreadProcessId, HWND_BOTTOM, IsIconic, IsWindowVisible, IsZoomed,
+    MINMAXINFO, PostMessageW, SMTO_ABORTIFHUNG, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
+    SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW,
+    SetForegroundWindow, SetWindowPos, ShowWindow, ShowWindowAsync, WM_CLOSE, WM_GETMINMAXINFO,
+    WM_GETTEXT, WM_GETTEXTLENGTH, WS_CHILD, WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE,
     WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PCWSTR, w};
@@ -236,41 +234,60 @@ impl ExternalHwnd {
     }
 }
 
-/// Activate `hwnd` as the foreground window. The leading Alt key-down/up via
-/// SendInput clears the foreground lock so SetForegroundWindow succeeds even
-/// when the calling thread does not own the foreground window. No-op when
-/// `hwnd` is already in the foreground.
+/// Activate `hwnd` as the foreground window. No-op when it is already
+/// foreground.
+///
+/// Windows blocks SetForegroundWindow unless the caller owns the foreground.
+/// Attaching our input queue to the foreground thread lifts the lock for the
+/// call. This replaces a synthetic Alt keypress, whose keyup flowed through our
+/// own keyboard hook and cleared held-modifier state, and which was fragile
+/// across resume from sleep. Attaching cannot cross an integrity boundary, so a
+/// grab from an elevated window still fails and is logged.
 pub(super) fn force_set_foreground(hwnd: HWND) {
-    if unsafe { GetForegroundWindow() } == hwnd {
+    let foreground = unsafe { GetForegroundWindow() };
+    if foreground == hwnd {
         return;
     }
-    let inputs = [
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: VK_MENU,
-                    // wScan, time, dwExtraInfo zeroed: documented no-op values
-                    // for a synthetic VK_MENU keypress. dwFlags 0 = keydown.
-                    ..Default::default()
-                },
-            },
-        },
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: VK_MENU,
-                    dwFlags: KEYEVENTF_KEYUP,
-                    // wScan, time, dwExtraInfo zeroed: same no-op defaults.
-                    ..Default::default()
-                },
-            },
-        },
-    ];
-    unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
-    if !unsafe { SetForegroundWindow(hwnd) }.as_bool() {
-        tracing::warn!("SetForegroundWindow failed, another app may have focus lock");
+
+    let this_thread = unsafe { GetCurrentThreadId() };
+    let foreground_thread = unsafe { GetWindowThreadProcessId(foreground, None) };
+
+    let _attach = InputAttach::new(this_thread, foreground_thread);
+    unsafe {
+        let _ = BringWindowToTop(hwnd);
+        if !SetForegroundWindow(hwnd).as_bool() {
+            tracing::warn!("SetForegroundWindow failed, another app may have focus lock");
+        }
+    }
+}
+
+/// Attaches `owner`'s input queue to `other` for the guard's lifetime and
+/// detaches on drop, so the queues never stay coupled. Skips attach when the
+/// threads match or `other` is zero, which AttachThreadInput rejects.
+struct InputAttach {
+    owner: u32,
+    other: u32,
+    attached: bool,
+}
+
+impl InputAttach {
+    fn new(owner: u32, other: u32) -> Self {
+        let attached = other != 0
+            && other != owner
+            && unsafe { AttachThreadInput(owner, other, true) }.as_bool();
+        Self {
+            owner,
+            other,
+            attached,
+        }
+    }
+}
+
+impl Drop for InputAttach {
+    fn drop(&mut self) {
+        if self.attached {
+            let _ = unsafe { AttachThreadInput(self.owner, self.other, false) };
+        }
     }
 }
 
