@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::thread::{self, JoinHandle};
@@ -5,14 +6,14 @@ use std::thread::{self, JoinHandle};
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_DOWN, VK_ESCAPE, VK_LEFT, VK_LMENU,
-    VK_LWIN, VK_MENU, VK_OEM_4, VK_OEM_6, VK_RETURN, VK_RIGHT, VK_RMENU, VK_RWIN, VK_SHIFT,
-    VK_SPACE, VK_TAB, VK_UP,
+    VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_DOWN, VK_ESCAPE, VK_LCONTROL, VK_LEFT, VK_LMENU,
+    VK_LSHIFT, VK_LWIN, VK_MENU, VK_OEM_4, VK_OEM_6, VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RMENU,
+    VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW,
-    SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_QUIT,
-    WM_SYSKEYDOWN,
+    SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP,
+    WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use super::HubSender;
@@ -32,6 +33,19 @@ struct KeyboardState {
 }
 
 static STATE: OnceLock<KeyboardState> = OnceLock::new();
+
+/// Modifier set built from the keydown/keyup transitions the hook observes.
+/// No poll reads the current keystroke reliably inside a low-level keyboard
+/// hook: GetAsyncKeyState updates only after Raw Input, which runs after the
+/// hook, and GetKeyState/GetKeyboardState advance only as the thread pumps its
+/// message queue, which the hook has not done. So a modifier still held can
+/// read as released at hotkey time and the binding misses its modifier. Only
+/// the hook thread touches this, so Relaxed ordering is enough.
+///
+/// Refs: https://github.com/input-leap/input-leap/discussions/1458;
+/// https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc
+/// (advises monitoring raw input over in-hook polling).
+static MODIFIERS: AtomicU8 = AtomicU8::new(0);
 
 pub(super) fn install_keyboard_hook(
     sender: HubSender,
@@ -88,11 +102,19 @@ pub(super) fn uninstall_keyboard_hook(mut handle: KeyboardHookHandle) {
 unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code >= 0 {
         let msg = wparam.0 as u32;
-        if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
-            let kb_struct = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
-            let vk = VIRTUAL_KEY(kb_struct.vkCode as u16);
+        let kb_struct = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
+        let vk = VIRTUAL_KEY(kb_struct.vkCode as u16);
+        let is_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
 
-            if let Some(actions) = get_actions(vk) {
+        if let Some(modifier) = modifier_of(vk) {
+            if is_down {
+                MODIFIERS.fetch_or(modifier.bits(), Ordering::Relaxed);
+            } else if msg == WM_KEYUP || msg == WM_SYSKEYUP {
+                MODIFIERS.fetch_and(!modifier.bits(), Ordering::Relaxed);
+            }
+        } else if is_down {
+            let modifiers = Modifiers::from_bits_truncate(MODIFIERS.load(Ordering::Relaxed));
+            if let Some(actions) = get_actions(vk, modifiers) {
                 if let Some(state) = STATE.get() {
                     state.sender.send(HubEvent::Action(actions));
                 }
@@ -103,28 +125,20 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
-fn get_actions(vk: VIRTUAL_KEY) -> Option<Actions> {
-    if matches!(
-        vk,
-        VK_SHIFT | VK_CONTROL | VK_MENU | VK_LWIN | VK_RWIN | VK_LMENU | VK_RMENU
-    ) {
-        return None;
+/// A low-level hook reports the side-specific virtual key (VK_LSHIFT, not
+/// VK_SHIFT). Map both the generic and the left/right codes so the tracked set
+/// stays correct whichever the driver sends.
+fn modifier_of(vk: VIRTUAL_KEY) -> Option<Modifiers> {
+    match vk {
+        VK_LWIN | VK_RWIN => Some(Modifiers::META),
+        VK_SHIFT | VK_LSHIFT | VK_RSHIFT => Some(Modifiers::SHIFT),
+        VK_MENU | VK_LMENU | VK_RMENU => Some(Modifiers::ALT),
+        VK_CONTROL | VK_LCONTROL | VK_RCONTROL => Some(Modifiers::CTRL),
+        _ => None,
     }
+}
 
-    let mut modifiers = Modifiers::empty();
-    if is_key_pressed(VK_LWIN) || is_key_pressed(VK_RWIN) {
-        modifiers |= Modifiers::META;
-    }
-    if is_key_pressed(VK_SHIFT) {
-        modifiers |= Modifiers::SHIFT;
-    }
-    if is_key_pressed(VK_MENU) {
-        modifiers |= Modifiers::ALT;
-    }
-    if is_key_pressed(VK_CONTROL) {
-        modifiers |= Modifiers::CTRL;
-    }
-
+fn get_actions(vk: VIRTUAL_KEY, modifiers: Modifiers) -> Option<Actions> {
     let key = vk_to_string(vk)?;
     let keymap = Keymap { key, modifiers };
 
@@ -134,10 +148,6 @@ fn get_actions(vk: VIRTUAL_KEY) -> Option<Actions> {
     drop(ks);
     tracing::trace!(?keymap, %actions, "Keymap matched");
     Some(actions)
-}
-
-fn is_key_pressed(vk: VIRTUAL_KEY) -> bool {
-    unsafe { GetAsyncKeyState(vk.0 as i32) < 0 }
 }
 
 fn vk_to_string(vk: VIRTUAL_KEY) -> Option<String> {
