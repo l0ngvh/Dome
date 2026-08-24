@@ -185,7 +185,7 @@ impl Clone for Window {
 }
 
 impl Window {
-    /// None iff the window is minimized (is_minimized <=> workspace().is_none()).
+    /// None if the window is minimized (is_minimized <=> workspace().is_none()).
     pub(crate) fn workspace(&self) -> Option<WorkspaceId> {
         self.workspace
     }

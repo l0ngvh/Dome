@@ -32,46 +32,51 @@ pub(super) struct MatcherHit {
 }
 
 impl Hub {
-    /// Routes a window's metadata through the matcher lists and returns where to
-    /// place it and in what mode, or `None` if nothing matches. Precedence is
-    /// mode-outer, workspace-inner: every workspace's fullscreen matchers are
-    /// visited before any workspace's float matcher, so a workspace-A float
-    /// matcher can never beat a workspace-B fullscreen matcher.
+    /// Routes a window's metadata to a placement, or `None` if nothing matches.
     pub(super) fn resolve_matcher(&self, metadata: &dyn WindowMetadata) -> Option<MatcherHit> {
-        let ws_ids: Vec<WorkspaceId> = self.access.workspaces.sorted_ids();
+        let current_ws = self.current_workspace();
+        let search_order: Vec<WorkspaceId> = std::iter::once(current_ws)
+            .chain(
+                self.access
+                    .workspaces
+                    .sorted_ids()
+                    .into_iter()
+                    .filter(|&id| id != current_ws),
+            )
+            .collect();
 
-        for ws_id in &ws_ids {
-            let ws = self.access.workspaces.get(*ws_id);
+        for &ws_id in &search_order {
+            let ws = self.access.workspaces.get(ws_id);
             for id in &ws.fullscreen_matchers {
                 if metadata.matches_window_matcher(self.float_fullscreen_matchers.get(*id)) {
                     return Some(MatcherHit {
-                        ws_id: Some(*ws_id),
+                        ws_id: Some(ws_id),
                         mode: WindowMode::Fullscreen,
                         matcher_id: Some(*id),
                     });
                 }
             }
         }
-        for ws_id in &ws_ids {
-            let ws = self.access.workspaces.get(*ws_id);
+        for &ws_id in &search_order {
+            let ws = self.access.workspaces.get(ws_id);
             for id in &ws.float_matchers {
                 if metadata.matches_window_matcher(self.float_fullscreen_matchers.get(*id)) {
                     return Some(MatcherHit {
-                        ws_id: Some(*ws_id),
+                        ws_id: Some(ws_id),
                         mode: WindowMode::Float,
                         matcher_id: Some(*id),
                     });
                 }
             }
         }
-        for ws_id in &ws_ids {
+        for &ws_id in &search_order {
             if self
                 .strategies
-                .for_workspace(*ws_id)
-                .matches_tiling(*ws_id, metadata)
+                .for_workspace(ws_id)
+                .matches_tiling(ws_id, metadata)
             {
                 return Some(MatcherHit {
-                    ws_id: Some(*ws_id),
+                    ws_id: Some(ws_id),
                     mode: WindowMode::Tiling,
                     matcher_id: None,
                 });
