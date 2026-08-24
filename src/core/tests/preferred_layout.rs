@@ -1040,3 +1040,214 @@ fn tiling_insert_routes_against_post_export_state() {
 
     assert_eq!(hub.access.windows.get(new_window).workspace(), Some(dev));
 }
+
+#[test]
+fn tiling_routes_to_current_workspace_when_it_can_house() {
+    let editor = || WindowMatcher {
+        process: Some("editor.exe".into()),
+        ..Default::default()
+    };
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("a")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![editor()])
+                .build(),
+            LayoutWorkspaceConfigBuilder::new("b")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![editor()])
+                .build(),
+        ])
+        .build();
+
+    // "a" has the smaller id, so sorted order alone would pick it. Visit it,
+    // then move to "b": the current workspace must win.
+    hub.focus_workspace("a");
+    hub.focus_workspace("b");
+
+    hub.insert_window(
+        process_meta("editor.exe"),
+        PixelRect::new(10, 5, 30, 20),
+        WindowRestrictions::None,
+    )
+    .expect("routed window inserted");
+
+    // The snapshot renders the current workspace "b", where the tiled window
+    // now shows, so it routed to the current workspace rather than "a".
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted)
+      )
+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W0                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    ");
+}
+
+#[test]
+fn tiling_falls_back_to_first_workspace_when_current_cannot_house() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("a")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![WindowMatcher {
+                    process: Some("editor.exe".into()),
+                    ..Default::default()
+                }])
+                .build(),
+        ])
+        .build();
+
+    // The current workspace "0" has no preferred layout, so routing falls back
+    // to "a". Focus "a" to observe: the window shows there, not on "0".
+    hub.insert_window(
+        process_meta("editor.exe"),
+        PixelRect::new(10, 5, 30, 20),
+        WindowRestrictions::None,
+    )
+    .expect("routed window inserted");
+
+    hub.focus_workspace("a");
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted)
+      )
+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W0                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    ");
+}
+
+#[test]
+fn float_routes_to_current_workspace_when_it_can_house() {
+    let chat = || WindowMatcher {
+        process: Some("chat.exe".into()),
+        ..Default::default()
+    };
+    let mut hub = TestHubBuilder::new()
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("a")
+                .with_float(vec![chat()])
+                .build(),
+            LayoutWorkspaceConfigBuilder::new("b")
+                .with_float(vec![chat()])
+                .build(),
+        ])
+        .build();
+
+    // "a" has the smaller id, so sorted order alone would pick it. Visit it,
+    // then move to "b": the current workspace must win.
+    hub.focus_workspace("a");
+    hub.focus_workspace("b");
+
+    hub.insert_window(
+        process_meta("chat.exe"),
+        PixelRect::new(10, 5, 30, 20),
+        WindowRestrictions::None,
+    )
+    .expect("routed window inserted");
+
+    // The snapshot renders the current workspace "b". The float window shows
+    // there, so it both routed to the current workspace and stayed a float.
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00, float, highlighted)
+      )
+
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+              ******************************                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *             F0             *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              ******************************
+    ");
+}
