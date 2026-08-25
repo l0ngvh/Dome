@@ -1,10 +1,27 @@
-use crate::core::{Length, hub::HubAccess, master::MasterStrategy, node::WorkspaceId};
+use crate::core::{
+    Length,
+    hub::HubAccess,
+    master::{MasterStrategy, PaneDisplay},
+    node::WorkspaceId,
+};
 
 impl MasterStrategy {
     pub(super) fn scroll_into_view(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
         let Some((kind, idx)) = self.focused_position(hub, ws_id) else {
             return;
         };
+        let tabbed = {
+            let pane = self.workspaces.get(&ws_id).unwrap().pane(kind);
+            pane.display == PaneDisplay::Tabbed && Self::pane_len(hub, pane.container) >= 2
+        };
+        if tabbed {
+            self.workspaces
+                .get_mut(&ws_id)
+                .unwrap()
+                .pane_mut(kind)
+                .y_offset = Length::ZERO;
+            return;
+        }
         let state = self.workspaces.get(&ws_id).unwrap();
         let pane_height = Length::from_pixels(
             hub.monitors

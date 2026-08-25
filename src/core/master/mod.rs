@@ -13,8 +13,8 @@ use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
 use crate::core::master::preferred_layout::{Slot, SlotId};
 use crate::core::node::{
-    Child, Container, ContainerId, Dimension, Direction, Length, PixelRect, WindowId,
-    WindowMetadata, WorkspaceId,
+    Child, Container, ContainerId, Dimension, Direction, Length, Logical, PixelRect, Pixels,
+    WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::strategy::{
     TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, distribute_space, translate,
@@ -34,6 +34,7 @@ pub(crate) struct MasterStrategy {
     master_count: usize,
     master_ratio: f32,
     size_constraints: SizeConstraints,
+    tab_bar_height: Pixels<Logical>,
 }
 
 impl TilingStrategy for MasterStrategy {
@@ -319,6 +320,64 @@ impl TilingStrategy for MasterStrategy {
                 self.reconcile_master_count(hub, ws_id);
                 self.compute_placement(hub, ws_id);
             }
+            TilingAction::ToggleContainerLayout => {
+                let pane = self.workspaces.get_mut(&ws_id).unwrap().pane_mut(kind);
+                pane.display = match pane.display {
+                    PaneDisplay::Tiled => PaneDisplay::Tabbed,
+                    PaneDisplay::Tabbed => PaneDisplay::Tiled,
+                };
+                self.compute_placement(hub, ws_id);
+            }
+            TilingAction::FocusTab { forward } => {
+                let cid = if kind == PaneKind::Master {
+                    master_cid
+                } else {
+                    secondary_cid
+                };
+                let is_tabbed =
+                    self.workspaces.get(&ws_id).unwrap().pane(kind).display == PaneDisplay::Tabbed;
+                let members = Self::pane_windows(hub, cid);
+                if !is_tabbed || members.len() < 2 {
+                    return;
+                }
+                let target = members[wrap_index(idx, members.len(), forward)];
+                self.workspaces
+                    .get_mut(&ws_id)
+                    .unwrap()
+                    .record_focus(target);
+                self.compute_placement(hub, ws_id);
+            }
+            TilingAction::TabClicked {
+                container_id,
+                index,
+            } => {
+                let clicked_kind = if container_id == master_cid {
+                    PaneKind::Master
+                } else if container_id == secondary_cid {
+                    PaneKind::Secondary
+                } else {
+                    return;
+                };
+                let is_tabbed = self
+                    .workspaces
+                    .get(&ws_id)
+                    .unwrap()
+                    .pane(clicked_kind)
+                    .display
+                    == PaneDisplay::Tabbed;
+                let members = Self::pane_windows(hub, container_id);
+                if !is_tabbed || members.len() < 2 {
+                    return;
+                }
+                let Some(&target) = members.get(index) else {
+                    return;
+                };
+                self.workspaces
+                    .get_mut(&ws_id)
+                    .unwrap()
+                    .record_focus(target);
+                self.compute_placement(hub, ws_id);
+            }
             _ => {}
         }
     }
@@ -410,6 +469,7 @@ impl TilingStrategy for MasterStrategy {
         self.master_ratio = layout.master.master_ratio;
         self.master_count = layout.master.master_count;
         self.size_constraints = layout.size_constraints;
+        self.tab_bar_height = layout.partition_tree.tab_bar_height;
         for ws_id in self.workspaces.keys().copied().collect::<Vec<_>>() {
             let needs_reconcile = self
                 .workspaces
@@ -433,15 +493,21 @@ impl MasterStrategy {
         master_count: usize,
         master_ratio: f32,
         size_constraints: SizeConstraints,
+        tab_bar_height: Pixels<Logical>,
     ) -> Self {
         Self {
             master_count,
             master_ratio,
             size_constraints,
+            tab_bar_height,
             workspaces: FxHashMap::default(),
             window_states: FxHashMap::default(),
             slots: Allocator::new(),
         }
+    }
+
+    fn tab_bar_length(&self, scale: f32) -> Length {
+        Length::from_pixels(self.tab_bar_height).to_unit(scale)
     }
 
     fn pane_windows(hub: &HubAccess, container: ContainerId) -> Vec<WindowId> {
@@ -710,11 +776,18 @@ impl WorkspaceState {
 
 /// One side of the master-stack split. Windows live in `container`, a flat `Container`
 /// of `Child::Window` that never nests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PaneDisplay {
+    Tiled,
+    Tabbed,
+}
+
 #[derive(Debug)]
 struct Pane {
     container: ContainerId,
     matchers: Vec<SlotId>,
     y_offset: Length,
+    display: PaneDisplay,
 }
 
 impl Pane {
@@ -723,6 +796,7 @@ impl Pane {
             container,
             matchers,
             y_offset: Length::ZERO,
+            display: PaneDisplay::Tiled,
         }
     }
 }

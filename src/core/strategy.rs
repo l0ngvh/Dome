@@ -295,6 +295,43 @@ pub(crate) fn clip<U>(dim: Dimension<U>, bounds: Dimension<U>) -> Option<Dimensi
     Some(Dimension::new(x1, y1, x2 - x1, y2 - y1))
 }
 
+/// Zero-height when the container is not tabbed. The band top comes from the container's own
+/// dimension, not a separately rounded height, so round(y) + round(band) cannot drift a unit from
+/// the round(y + band) the content box uses.
+pub(crate) fn tab_bar_band(
+    border_box: PixelRect,
+    dim: Dimension,
+    offset_y: Length,
+    screen: PixelRect,
+    tab_bar_length: Length,
+    is_tabbed: bool,
+) -> PixelRect {
+    let band_height = if is_tabbed {
+        let content_top = Pixels::round(dim.y + tab_bar_length - offset_y) + screen.y();
+        content_top - border_box.y()
+    } else {
+        Pixels::ZERO
+    };
+    PixelRect::from_pixels(
+        border_box.x(),
+        border_box.y(),
+        border_box.width(),
+        band_height,
+    )
+}
+
+pub(crate) fn container_titles(hub: &HubAccess, id: ContainerId) -> Vec<String> {
+    hub.containers
+        .get(id)
+        .children()
+        .iter()
+        .map(|c| match c {
+            Child::Window(wid) => hub.windows.get(*wid).title().to_owned(),
+            Child::Container(_) => "Container".to_string(),
+        })
+        .collect()
+}
+
 /// Distribute `container_size` across `constraints` so every child whose
 /// (min, max) range straddles the result receives the same uniform size.
 pub(crate) fn distribute_space(
@@ -376,6 +413,7 @@ impl StrategySet {
             layout.master.master_count,
             layout.master.master_ratio,
             layout.size_constraints,
+            layout.partition_tree.tab_bar_height,
         );
         Self {
             partition_tree,

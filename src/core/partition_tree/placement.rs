@@ -1,11 +1,10 @@
 use crate::core::hub::HubAccess;
 use crate::core::node::Constraints;
-use crate::core::node::{
-    ContainerId, Dimension, Direction, Length, PixelRect, Pixels, WorkspaceId,
-};
+use crate::core::node::{ContainerId, Dimension, Direction, Length, PixelRect, WorkspaceId};
 use crate::core::partition_tree::{Child, SpawnMode};
 use crate::core::strategy::{
-    TilingPlacements, clip, distribute_space, translate, window_constraints,
+    TilingPlacements, clip, container_titles, distribute_space, tab_bar_band, translate,
+    window_constraints,
 };
 use crate::core::{ContainerPlacement, SpawnIndicator, TilingWindowPlacement};
 
@@ -145,28 +144,18 @@ impl PartitionTreeStrategy {
                     let Some(visible_border_box) = border_box.clip(screen) else {
                         continue;
                     };
-                    // Rounding the band height on its own would let round(y) + round(h) drift
-                    // a unit from the round(y + h) the content box uses. The content top comes
-                    // from the container's own dimension, not the active tab's, since a
-                    // max-constrained tab is centred within the content.
-                    let band_height = if data.is_tabbed() {
-                        let content_top =
-                            Pixels::round(dim.y + self.tab_bar_length(scale) - offset_y)
-                                + screen.y();
-                        content_top - border_box.y()
-                    } else {
-                        Pixels::ZERO
-                    };
                     let is_highlighted = focused == Some(Child::Container(id));
                     containers.push(ContainerPlacement {
                         id,
                         border_box,
                         visible_border_box,
-                        tab_bar_band: PixelRect::from_pixels(
-                            border_box.x(),
-                            border_box.y(),
-                            border_box.width(),
-                            band_height,
+                        tab_bar_band: tab_bar_band(
+                            border_box,
+                            dim,
+                            offset_y,
+                            screen,
+                            self.tab_bar_length(scale),
+                            data.is_tabbed(),
                         ),
                         is_highlighted,
                         spawn_indicator: if is_highlighted {
@@ -176,14 +165,7 @@ impl PartitionTreeStrategy {
                         },
                         is_tabbed: data.is_tabbed(),
                         active_tab_index: data.active_tab_index(),
-                        titles: container
-                            .children()
-                            .iter()
-                            .map(|c| match c {
-                                Child::Window(wid) => hub.windows.get(*wid).title().to_owned(),
-                                Child::Container(_) => "Container".to_string(),
-                            })
-                            .collect(),
+                        titles: container_titles(hub, id),
                     });
                     if let Some(active) = self.active_tab(hub, id) {
                         stack.push(active);
