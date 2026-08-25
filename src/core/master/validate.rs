@@ -95,12 +95,6 @@ impl ValidateStrategy for MasterStrategy {
                 );
                 let c = window_constraints(hub, &self.size_constraints, wid);
                 assert!(
-                    dim.width >= c.min_width - VALIDATION_TOLERANCE,
-                    "master-stack workspace {ws_id}: window {wid:?} width {} < effective min_width {}",
-                    dim.width,
-                    c.min_width
-                );
-                assert!(
                     dim.height >= c.min_height - VALIDATION_TOLERANCE,
                     "master-stack workspace {ws_id}: window {wid:?} height {} < effective min_height {}",
                     dim.height,
@@ -137,12 +131,6 @@ impl ValidateStrategy for MasterStrategy {
                     dim.height
                 );
                 let c = window_constraints(hub, &self.size_constraints, wid);
-                assert!(
-                    dim.width >= c.min_width - VALIDATION_TOLERANCE,
-                    "master-stack workspace {ws_id}: window {wid:?} width {} < effective min_width {}",
-                    dim.width,
-                    c.min_width
-                );
                 assert!(
                     dim.height >= c.min_height - VALIDATION_TOLERANCE,
                     "master-stack workspace {ws_id}: window {wid:?} height {} < effective min_height {}",

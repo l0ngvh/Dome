@@ -62,9 +62,9 @@ windows go in the master pane on the left, and the rest go in the stack pane on
 the right. Each pane stacks its windows vertically, with `master_ratio` setting
 where the split lands. Each pane scrolls vertically and independently when its
 content overflows, with focus movement as the sole trigger. Both panes honor
-per-window min/max size constraints the same way Partition Tree does, but when
-the panes' combined min widths exceed the screen, the layout overflows past the
-edge rather than scrolling horizontally.
+per-window min/max heights, and per-window max widths, the same way Partition
+Tree does. Min width is the exception: with no horizontal scroll to absorb it,
+Master ignores it and each pane fills its `master_ratio` share.
 
 ## macOS
 

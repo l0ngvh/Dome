@@ -35,30 +35,14 @@ impl MasterStrategy {
                 self.do_pane_layout(hub, &stack_ids, screen_width, Length::ZERO, h);
             }
             (_, _) => {
-                let master_min_w = master_ids
-                    .iter()
-                    .map(|&id| window_constraints(hub, &self.size_constraints, id).min_width)
-                    .fold(Length::ZERO, Length::max);
-                let stack_min_w = stack_ids
-                    .iter()
-                    .map(|&id| window_constraints(hub, &self.size_constraints, id).min_width)
-                    .fold(Length::ZERO, Length::max);
-
-                let desired_master_w = Length::new(
+                // Master ignores per-window min width. With no horizontal scroll to absorb it,
+                // an oversized min width would push the other pane off screen, so the split
+                // follows master_ratio alone and each pane fills its share.
+                let master_w = Length::new(
                     (screen_width.value() * state.master_ratio.unwrap_or(self.master_ratio))
                         .floor(),
                 );
-                let total_min = master_min_w + stack_min_w;
-
-                let (master_w, stack_w) = if total_min >= screen_width {
-                    (master_min_w, stack_min_w)
-                } else if desired_master_w < master_min_w {
-                    (master_min_w, screen_width - master_min_w)
-                } else if screen_width - desired_master_w < stack_min_w {
-                    (screen_width - stack_min_w, stack_min_w)
-                } else {
-                    (desired_master_w, screen_width - desired_master_w)
-                };
+                let stack_w = screen_width - master_w;
 
                 self.do_pane_layout(hub, &master_ids, master_w, Length::ZERO, h);
                 self.do_pane_layout(hub, &stack_ids, stack_w, master_w, h);
@@ -134,12 +118,6 @@ impl MasterStrategy {
         if ids.is_empty() {
             return;
         }
-        let pane_min_w = ids
-            .iter()
-            .map(|&id| window_constraints(hub, &self.size_constraints, id).min_width)
-            .fold(Length::ZERO, Length::max);
-        let adjusted_w = pane_min_w.max(pane_width);
-
         let constraints: Vec<(Length, Length)> = ids
             .iter()
             .map(|&id| {
@@ -156,7 +134,7 @@ impl MasterStrategy {
         };
         for (i, &id) in ids.iter().enumerate() {
             let c = window_constraints(hub, &self.size_constraints, id);
-            let (w, x_off) = apply_max_constraint(c.max_width, adjusted_w);
+            let (w, x_off) = apply_max_constraint(c.max_width, pane_width);
             let (slot_h, y_off) = apply_max_constraint(c.max_height, heights[i]);
             let dim = Dimension::new(x_start + x_off, y + y_off, w, slot_h);
             self.window_states
