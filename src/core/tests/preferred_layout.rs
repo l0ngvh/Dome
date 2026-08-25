@@ -498,7 +498,7 @@ fn per_workspace_override_beats_global() {
         ])
         .build();
     // "calc.exe" matches both per-workspace float on ws "3" and global float.
-    // Per-workspace wins — routes to workspace "3" as float.
+    // Per-workspace wins. Routes to workspace "3" as float.
     hub.insert_window(
         process_meta("calc.exe"),
         PixelRect::new(10, 5, 30, 20),
@@ -551,7 +551,7 @@ fn no_match_uses_global_matcher() {
                 .build(),
         )
         .build();
-    // "unknown.exe" matches nothing — tiles on current workspace.
+    // "unknown.exe" matches nothing, so it tiles on the current workspace.
     hub.insert_window(
         process_meta("unknown.exe"),
         PixelRect::new(10, 5, 30, 20),

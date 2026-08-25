@@ -1,4 +1,6 @@
 use rustc_hash::FxHashMap;
+#[cfg(test)]
+use rustc_hash::FxHashSet;
 
 use crate::config::{
     LayoutWorkspaceConfig, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
@@ -82,13 +84,14 @@ impl WorkspaceExport {
     }
 }
 
-/// Abstraction over tiling behavior. Tiling-specific operations live here;
-/// generic window management (monitors, workspaces, float, fullscreen, focus
+/// Abstraction over tiling behavior. Tiling-specific operations live here.
+/// Generic window management (monitors, workspaces, float, fullscreen, focus
 /// priority) does not.
 pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Pre-allocate per-workspace state.
     fn prepare_workspace(
         &mut self,
+        hub: &mut HubAccess,
         ws_id: WorkspaceId,
         preferred_layout: Option<&LayoutWorkspaceConfig>,
     );
@@ -154,8 +157,8 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Synchronize the preferred layout for a single workspace from an incoming
     /// workspace override.
     /// `incoming` is `None` when the workspace no longer has an override
-    /// in the new config — the strategy should clear its per-workspace
-    /// state and fall back to global defaults.
+    /// in the new config. The strategy clears its per-workspace state and
+    /// falls back to global defaults.
     fn sync_preferred_layout(
         &mut self,
         hub: &mut HubAccess,
@@ -174,6 +177,9 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
 #[cfg(test)]
 pub(super) trait ValidateStrategy {
     fn validate(&self, hub: &HubAccess);
+
+    /// Container ids this strategy reaches from its workspace roots.
+    fn reachable_containers(&self, hub: &HubAccess) -> FxHashSet<ContainerId>;
 }
 
 /// Absorbs the f32 error a constraint accumulates while being distributed.
@@ -378,22 +384,26 @@ impl StrategySet {
         }
     }
 
-    pub(super) fn register(
-        &mut self,
-        ws_id: WorkspaceId,
-        layout: &GlobalLayoutConfig,
-        preferred_layout: Option<&LayoutWorkspaceConfig>,
-    ) {
-        let preferred_strategy = preferred_layout
+    pub(super) fn register(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
+        let ws_name = hub.workspaces.get(ws_id).name.clone();
+        // Clone so the `&mut hub` below does not alias a borrow into `hub.preferred_layouts`.
+        let preferred = hub
+            .preferred_layouts
+            .iter()
+            .find(|w| w.name() == ws_name)
+            .cloned();
+        let preferred_strategy = preferred
+            .as_ref()
             .map(|w| match w {
                 LayoutWorkspaceConfig::PartitionTree { .. } => Strategy::PartitionTree,
                 LayoutWorkspaceConfig::Master { .. } => Strategy::Master,
             })
-            .unwrap_or(layout.strategy);
+            .unwrap_or(hub.layout.strategy);
 
         self.kinds.insert(ws_id, preferred_strategy);
-        self.get_mut(self.kind_of(ws_id))
-            .prepare_workspace(ws_id, preferred_layout);
+        let kind = self.kind_of(ws_id);
+        self.get_mut(kind)
+            .prepare_workspace(hub, ws_id, preferred.as_ref());
     }
 
     pub(super) fn kind_of(&self, ws_id: WorkspaceId) -> Strategy {
@@ -426,8 +436,8 @@ impl StrategySet {
         self.get_mut(kind)
     }
 
-    /// Recompute kinds and drive the full sync. Returns nothing — all
-    /// cross-kind rebuilds and same-kind syncs happen here.
+    /// Recompute kinds and drive the full sync. All cross-kind rebuilds and
+    /// same-kind syncs happen here.
     pub(super) fn resync(
         &mut self,
         hub: &mut HubAccess,
@@ -460,7 +470,7 @@ impl StrategySet {
                     "Per-workspace strategy changed, rebuilding",
                 );
                 let (tiling_windows, focused) = self.get_mut(old).migrate(hub, ws_id);
-                self.get_mut(new).prepare_workspace(ws_id, incoming);
+                self.get_mut(new).prepare_workspace(hub, ws_id, incoming);
 
                 for wid in &tiling_windows {
                     self.for_workspace_mut(ws_id)
@@ -479,6 +489,25 @@ impl StrategySet {
 
     #[cfg(test)]
     pub(super) fn validate(&self, hub: &HubAccess) {
+        // The container arena is shared across strategies, so union every strategy's reachable
+        // set before the leak sweep, or one strategy's containers look leaked to another.
+        let mut reachable = self.partition_tree.reachable_containers(hub);
+        reachable.extend(self.master.reachable_containers(hub));
+        let allocated: FxHashSet<ContainerId> = hub.containers.sorted_ids().into_iter().collect();
+
+        let mut leaked: Vec<ContainerId> = allocated.difference(&reachable).copied().collect();
+        leaked.sort_unstable();
+        assert!(
+            leaked.is_empty(),
+            "Containers allocated but reachable from no workspace root, so they leaked: {leaked:?}"
+        );
+        let mut dangling: Vec<ContainerId> = reachable.difference(&allocated).copied().collect();
+        dangling.sort_unstable();
+        assert!(
+            dangling.is_empty(),
+            "Containers reachable from a workspace root but not allocated: {dangling:?}"
+        );
+
         self.partition_tree.validate(hub);
         self.master.validate(hub);
     }

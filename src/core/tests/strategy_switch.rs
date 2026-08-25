@@ -182,7 +182,7 @@ fn sync_config_switches_master_to_partition_tree() {
         Window(id=WindowId(2), x=75.00, y=0.00, w=38.00, h=30.00)
         Window(id=WindowId(1), x=38.00, y=0.00, w=37.00, h=30.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=38.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w8, w9, w10, w11])
+        Container(id=ContainerId(2), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w8, w9, w10, w11])
       )
 
     +------------------------------------++-----------------------------------++------------------------------------+*************************************
@@ -274,7 +274,7 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
 
     // Remove fullscreen to expose tiling + float layer.
     hub.delete_window(_fs_id);
-    // Float survives with original dimension; tiling is laid out by master-stack.
+    // Float survives with original dimension. Tiling is laid out by master-stack.
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -512,7 +512,7 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w26, w27])
+        Container(id=ContainerId(2), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w26, w27])
       )
 
     +-------------------------------------------------------------------------+***************************************************************************

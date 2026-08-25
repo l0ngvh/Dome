@@ -42,7 +42,21 @@ impl ValidateStrategy for PartitionTreeStrategy {
                 }
             }
         }
-        self.validate_container_arena(hub, &reachable);
+        self.validate_container_arena(&reachable);
+    }
+
+    fn reachable_containers(&self, hub: &HubAccess) -> FxHashSet<ContainerId> {
+        let mut reachable = FxHashSet::default();
+        for workspace_id in hub.workspaces.sorted_ids() {
+            if let Some(root) = self.workspaces.get(&workspace_id).and_then(|s| s.root) {
+                for child in hub.children_dfs(root) {
+                    if let Child::Container(cid) = child {
+                        reachable.insert(cid);
+                    }
+                }
+            }
+        }
+        reachable
     }
 }
 
@@ -155,22 +169,9 @@ impl PartitionTreeStrategy {
         );
     }
 
-    /// The arena is shared, so a container the tree no longer references is a leak that
-    /// only an arena-wide sweep can see. `StrategySet` holds one `PartitionTreeStrategy`
-    /// across every tree workspace, so `reachable` covers every root and this is exact.
-    fn validate_container_arena(&self, hub: &HubAccess, reachable: &FxHashSet<ContainerId>) {
-        let allocated: FxHashSet<ContainerId> = hub.containers.sorted_ids().into_iter().collect();
-        assert_eq!(
-            sorted_difference(&allocated, reachable),
-            Vec::new(),
-            "Containers allocated but reachable from no workspace root, so they leaked"
-        );
-        assert_eq!(
-            sorted_difference(reachable, &allocated),
-            Vec::new(),
-            "Containers reachable from a workspace root but not allocated"
-        );
-
+    /// Every container that carries tiling state must be reachable from a workspace root, or
+    /// that state leaked.
+    fn validate_container_arena(&self, reachable: &FxHashSet<ContainerId>) {
         let with_state: FxHashSet<ContainerId> = self.tiling_containers.keys().copied().collect();
         assert_eq!(
             sorted_difference(&with_state, reachable),

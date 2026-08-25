@@ -11,8 +11,11 @@ impl MasterStrategy {
         let Some(state) = self.workspaces.get(&ws_id) else {
             return;
         };
-        let master_n = state.master.len();
-        let stack_n = state.secondary.len();
+        let master_ids: Vec<WindowId> = Self::pane_windows(hub, state.master.container);
+        let stack_ids: Vec<WindowId> = Self::pane_windows(hub, state.secondary.container);
+        let master_ratio = state.master_ratio.unwrap_or(self.master_ratio);
+        let master_n = master_ids.len();
+        let stack_n = stack_ids.len();
         if master_n == 0 && stack_n == 0 {
             return;
         }
@@ -23,9 +26,6 @@ impl MasterStrategy {
             .work_area;
         let screen_width = Length::from_pixels(work_area.width());
         let h = Length::from_pixels(work_area.height());
-
-        let master_ids: Vec<WindowId> = state.master.clone();
-        let stack_ids: Vec<WindowId> = state.secondary.clone();
 
         match (master_n, stack_n) {
             (_, 0) => {
@@ -38,10 +38,7 @@ impl MasterStrategy {
                 // Master ignores per-window min width. With no horizontal scroll to absorb it,
                 // an oversized min width would push the other pane off screen, so the split
                 // follows master_ratio alone and each pane fills its share.
-                let master_w = Length::new(
-                    (screen_width.value() * state.master_ratio.unwrap_or(self.master_ratio))
-                        .floor(),
-                );
+                let master_w = Length::new((screen_width.value() * master_ratio).floor());
                 let stack_w = screen_width - master_w;
 
                 self.do_pane_layout(hub, &master_ids, master_w, Length::ZERO, h);
@@ -70,7 +67,9 @@ impl MasterStrategy {
         let screen = hub.monitors.get(ws.monitor).work_area;
         let border = hub.border(ws.monitor);
 
-        let mut windows = Vec::with_capacity(state.master.len() + state.secondary.len());
+        let master_ids = Self::pane_windows(hub, state.master.container);
+        let stack_ids = Self::pane_windows(hub, state.secondary.container);
+        let mut windows = Vec::with_capacity(master_ids.len() + stack_ids.len());
 
         let focused_id = if focused && !ws.is_float_focused {
             state.focused_window()
@@ -98,8 +97,8 @@ impl MasterStrategy {
             }
         };
 
-        push_pane(&state.master, state.master_y_offset);
-        push_pane(&state.secondary, state.stack_y_offset);
+        push_pane(&master_ids, state.master.y_offset);
+        push_pane(&stack_ids, state.secondary.y_offset);
 
         TilingPlacements {
             windows,
@@ -157,7 +156,7 @@ impl MasterStrategy {
                 .height(),
         );
 
-        let master_ids: Vec<WindowId> = state.master.clone();
+        let master_ids: Vec<WindowId> = Self::pane_windows(hub, state.master.container);
         let master_max = if !master_ids.is_empty() {
             let content_h = self.pane_content_height(hub, &master_ids, pane_height);
             (content_h - pane_height).max(Length::ZERO)
@@ -165,7 +164,7 @@ impl MasterStrategy {
             Length::ZERO
         };
 
-        let stack_ids: Vec<WindowId> = state.secondary.clone();
+        let stack_ids: Vec<WindowId> = Self::pane_windows(hub, state.secondary.container);
         let stack_max = if !stack_ids.is_empty() {
             let content_h = self.pane_content_height(hub, &stack_ids, pane_height);
             (content_h - pane_height).max(Length::ZERO)
@@ -174,8 +173,8 @@ impl MasterStrategy {
         };
 
         let state = self.workspaces.get_mut(&ws_id).unwrap();
-        state.master_y_offset = state.master_y_offset.clamp(Length::ZERO, master_max);
-        state.stack_y_offset = state.stack_y_offset.clamp(Length::ZERO, stack_max);
+        state.master.y_offset = state.master.y_offset.clamp(Length::ZERO, master_max);
+        state.secondary.y_offset = state.secondary.y_offset.clamp(Length::ZERO, stack_max);
     }
 }
 

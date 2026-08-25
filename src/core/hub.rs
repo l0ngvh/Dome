@@ -515,13 +515,7 @@ impl Hub {
             .workspaces
             .allocate(Workspace::new(workspace_name.clone(), monitor_id));
         self.access.monitors.get_mut(monitor_id).active_workspace = ws_id;
-        let preferred_layout = self
-            .access
-            .preferred_layouts
-            .iter()
-            .find(|w| w.name() == workspace_name);
-        self.strategies
-            .register(ws_id, &self.access.layout, preferred_layout);
+        self.strategies.register(&mut self.access, ws_id);
         monitor_id
     }
 
@@ -906,13 +900,7 @@ impl Hub {
             name.to_string(),
             self.access.focused_monitor,
         ));
-        let preferred_layout = self
-            .access
-            .preferred_layouts
-            .iter()
-            .find(|w| w.name() == name);
-        self.strategies
-            .register(ws_id, &self.access.layout, preferred_layout);
+        self.strategies.register(&mut self.access, ws_id);
         ws_id
     }
 

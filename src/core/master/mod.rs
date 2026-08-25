@@ -13,7 +13,8 @@ use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
 use crate::core::master::preferred_layout::{Slot, SlotId};
 use crate::core::node::{
-    Child, Dimension, Direction, Length, PixelRect, WindowId, WindowMetadata, WorkspaceId,
+    Child, Container, ContainerId, Dimension, Direction, Length, PixelRect, WindowId,
+    WindowMetadata, WorkspaceId,
 };
 use crate::core::strategy::{
     TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, distribute_space, translate,
@@ -21,10 +22,10 @@ use crate::core::strategy::{
 };
 
 /// XMonad-style tiling: a master area on the left and a stack on the right.
-/// No containers, no tabs. Each pane scrolls vertically and independently when
-/// per-window min heights push the pane's total content past the screen height.
-/// Horizontal scroll does not exist in master, so per-window min width is not
-/// honored: the split follows master_ratio and each pane fills its share.
+/// Each pane scrolls vertically and independently when per-window min heights push the
+/// pane's total content past the screen height. Horizontal scroll does not exist in master,
+/// so per-window min width is not honored: the split follows master_ratio and each pane
+/// fills its share.
 #[derive(Debug)]
 pub(crate) struct MasterStrategy {
     workspaces: FxHashMap<WorkspaceId, WorkspaceState>,
@@ -38,68 +39,64 @@ pub(crate) struct MasterStrategy {
 impl TilingStrategy for MasterStrategy {
     fn prepare_workspace(
         &mut self,
+        hub: &mut HubAccess,
         ws_id: WorkspaceId,
         preferred_layout: Option<&LayoutWorkspaceConfig>,
     ) {
-        let Some(preferred_layout) = preferred_layout else {
-            self.workspaces.insert(
-                ws_id,
-                WorkspaceState {
-                    master: Vec::new(),
-                    secondary: Vec::new(),
-                    master_matchers: Vec::new(),
-                    secondary_matchers: Vec::new(),
-                    focus_history: Vec::new(),
-                    master_y_offset: Length::ZERO,
-                    stack_y_offset: Length::ZERO,
-                    master_count: None,
-                    master_ratio: None,
-                },
-            );
-            return;
-        };
-        let LayoutWorkspaceConfig::Master {
-            master_count,
-            master_ratio,
-            master,
-            secondary,
-            ..
-        } = preferred_layout
-        else {
-            panic!("Preparing partition tree workspace in master strategy");
+        // Reject a non-master config before allocating, so the panic path cannot
+        // leak the pane containers.
+        let master_cfg = match preferred_layout {
+            Some(LayoutWorkspaceConfig::Master {
+                master_count,
+                master_ratio,
+                master,
+                secondary,
+                ..
+            }) => Some((*master_count, *master_ratio, master, secondary)),
+            Some(_) => panic!("Preparing partition tree workspace in master strategy"),
+            None => None,
         };
 
-        let master_ids: Vec<SlotId> = master
-            .iter()
-            .map(|m| {
-                self.slots.allocate(Slot {
-                    matcher: m.clone(),
-                    windows: Vec::new(),
-                })
-            })
-            .collect();
-        let secondary_ids: Vec<SlotId> = secondary
-            .iter()
-            .map(|m| {
-                self.slots.allocate(Slot {
-                    matcher: m.clone(),
-                    windows: Vec::new(),
-                })
-            })
-            .collect();
+        let master_container = hub.allocate_container(Container {
+            children: Vec::new(),
+        });
+        let secondary_container = hub.allocate_container(Container {
+            children: Vec::new(),
+        });
+
+        let (master_ids, secondary_ids, master_count, master_ratio) = match master_cfg {
+            Some((master_count, master_ratio, master, secondary)) => {
+                let master_ids = master
+                    .iter()
+                    .map(|m| {
+                        self.slots.allocate(Slot {
+                            matcher: m.clone(),
+                            windows: Vec::new(),
+                        })
+                    })
+                    .collect();
+                let secondary_ids = secondary
+                    .iter()
+                    .map(|m| {
+                        self.slots.allocate(Slot {
+                            matcher: m.clone(),
+                            windows: Vec::new(),
+                        })
+                    })
+                    .collect();
+                (master_ids, secondary_ids, master_count, master_ratio)
+            }
+            None => (Vec::new(), Vec::new(), None, None),
+        };
 
         self.workspaces.insert(
             ws_id,
             WorkspaceState {
-                master: Vec::new(),
-                secondary: Vec::new(),
-                master_matchers: master_ids,
-                secondary_matchers: secondary_ids,
+                master: Pane::new(master_container, master_ids),
+                secondary: Pane::new(secondary_container, secondary_ids),
                 focus_history: Vec::new(),
-                master_y_offset: Length::ZERO,
-                stack_y_offset: Length::ZERO,
-                master_count: *master_count,
-                master_ratio: *master_ratio,
+                master_count,
+                master_ratio,
             },
         );
     }
@@ -121,11 +118,7 @@ impl TilingStrategy for MasterStrategy {
             .get(hub.workspaces.get(ws_id).monitor)
             .work_area;
 
-        let state = self.workspaces.get_mut(&ws_id).unwrap_or_else(|| {
-            panic!("master: detach_window called for {id:?} but workspace {ws_id} has no state")
-        });
-
-        let y_offset = state.remove_window(id);
+        let y_offset = self.remove_window(hub, ws_id, id);
 
         let removed = self.window_states.remove(&id).unwrap_or_else(|| {
             panic!("master: detach_window called for {id:?} but window_states has no entry")
@@ -147,14 +140,10 @@ impl TilingStrategy for MasterStrategy {
             .get(window_id)
             .workspace()
             .expect("setting focus on tiling window requires a workspace");
-        let Some(state) = self.workspaces.get_mut(&ws_id) else {
-            return;
-        };
-        let exists = state.master.contains(&window_id) || state.secondary.contains(&window_id);
-        if !exists {
-            return;
-        }
-        state.record_focus(window_id);
+        self.workspaces
+            .get_mut(&ws_id)
+            .unwrap()
+            .record_focus(window_id);
         self.scroll_into_view(hub, ws_id);
     }
 
@@ -176,15 +165,15 @@ impl TilingStrategy for MasterStrategy {
     fn handle_action(&mut self, hub: &mut HubAccess, action: TilingAction) {
         let ws_id = hub.monitors.get(hub.focused_monitor).active_workspace;
 
-        let (pane, idx, master_len, stack_len) = {
-            let Some(state) = self.workspaces.get(&ws_id) else {
-                return;
-            };
-            let Some((pane, idx)) = state.focused_position() else {
-                return;
-            };
-            (pane, idx, state.master.len(), state.secondary.len())
+        let Some((kind, idx)) = self.focused_position(hub, ws_id) else {
+            return;
         };
+        let (master_cid, secondary_cid) = {
+            let state = self.workspaces.get(&ws_id).unwrap();
+            (state.master.container, state.secondary.container)
+        };
+        let master_len = Self::pane_len(hub, master_cid);
+        let stack_len = Self::pane_len(hub, secondary_cid);
 
         match action {
             TilingAction::FocusDirection { direction, forward } => {
@@ -193,27 +182,39 @@ impl TilingStrategy for MasterStrategy {
                 }
                 match (direction, forward) {
                     (Direction::Horizontal, false) => {
-                        if pane == Pane::Secondary && master_len > 0 {
-                            let state = self.workspaces.get_mut(&ws_id).unwrap();
-                            let target = state.last_focused_in(Pane::Master);
-                            state.record_focus(target);
+                        if kind == PaneKind::Secondary && master_len > 0 {
+                            let target = self.last_focused_in(hub, ws_id, PaneKind::Master);
+                            self.workspaces
+                                .get_mut(&ws_id)
+                                .unwrap()
+                                .record_focus(target);
                         }
                     }
                     (Direction::Horizontal, true) => {
-                        if pane == Pane::Master && stack_len > 0 {
-                            let state = self.workspaces.get_mut(&ws_id).unwrap();
-                            let target = state.last_focused_in(Pane::Secondary);
-                            state.record_focus(target);
+                        if kind == PaneKind::Master && stack_len > 0 {
+                            let target = self.last_focused_in(hub, ws_id, PaneKind::Secondary);
+                            self.workspaces
+                                .get_mut(&ws_id)
+                                .unwrap()
+                                .record_focus(target);
                         }
                     }
                     (Direction::Vertical, _) => {
-                        let state = self.workspaces.get_mut(&ws_id).unwrap();
-                        let len = state.pane_vec(pane).len();
+                        let cid = if kind == PaneKind::Master {
+                            master_cid
+                        } else {
+                            secondary_cid
+                        };
+                        let members = Self::pane_windows(hub, cid);
+                        let len = members.len();
                         if len <= 1 {
                             return;
                         }
-                        let target = state.pane_vec(pane)[wrap_index(idx, len, forward)];
-                        state.record_focus(target);
+                        let target = members[wrap_index(idx, len, forward)];
+                        self.workspaces
+                            .get_mut(&ws_id)
+                            .unwrap()
+                            .record_focus(target);
                     }
                 }
                 self.scroll_into_view(hub, ws_id);
@@ -222,48 +223,57 @@ impl TilingStrategy for MasterStrategy {
                 if master_len + stack_len <= 1 {
                     return;
                 }
-                let state = self.workspaces.get_mut(&ws_id).unwrap();
+                let (master_matchers, secondary_matchers, effective) = {
+                    let state = self.workspaces.get(&ws_id).unwrap();
+                    (
+                        state.master.matchers.clone(),
+                        state.secondary.matchers.clone(),
+                        state.master_count.unwrap_or(self.master_count),
+                    )
+                };
                 match (direction, forward) {
                     (Direction::Horizontal, false) => {
-                        if pane == Pane::Secondary {
-                            let moved = state.secondary.remove(idx);
-                            let count = self.master_count;
-                            let effective = state.master_count.unwrap_or(count);
-                            if state.master.len() >= effective && master_len > 0 {
-                                let swapped = state.master.pop().unwrap();
-                                state.master.push(moved);
-                                state.secondary.push(swapped);
-                                let moved_slots = state.master_matchers.clone();
-                                let swapped_slots = state.secondary_matchers.clone();
-                                self.remap_slot_on_pane_change(hub, ws_id, moved, &moved_slots);
-                                self.remap_slot_on_pane_change(hub, ws_id, swapped, &swapped_slots);
-                            } else if state.master.len() < effective {
-                                state.master.push(moved);
-                                let moved_slots = state.master_matchers.clone();
-                                self.remap_slot_on_pane_change(hub, ws_id, moved, &moved_slots);
+                        if kind == PaneKind::Secondary {
+                            let moved = Self::remove_from_pane(hub, secondary_cid, idx);
+                            if Self::pane_len(hub, master_cid) >= effective && master_len > 0 {
+                                let swapped = Self::pop_from_pane(hub, master_cid).unwrap();
+                                Self::push_to_pane(hub, master_cid, moved);
+                                Self::push_to_pane(hub, secondary_cid, swapped);
+                                self.remap_slot_on_pane_change(hub, ws_id, moved, &master_matchers);
+                                self.remap_slot_on_pane_change(
+                                    hub,
+                                    ws_id,
+                                    swapped,
+                                    &secondary_matchers,
+                                );
+                            } else if Self::pane_len(hub, master_cid) < effective {
+                                Self::push_to_pane(hub, master_cid, moved);
+                                self.remap_slot_on_pane_change(hub, ws_id, moved, &master_matchers);
                             }
                         }
                     }
                     (Direction::Horizontal, true) => {
-                        if pane == Pane::Master && stack_len > 0 {
-                            let moved = state.master.remove(idx);
-                            let swapped = state.secondary.remove(0);
-                            state.master.push(swapped);
-                            state.secondary.push(moved);
-                            let moved_slots = state.secondary_matchers.clone();
-                            let swapped_slots = state.master_matchers.clone();
-                            self.remap_slot_on_pane_change(hub, ws_id, moved, &moved_slots);
-                            self.remap_slot_on_pane_change(hub, ws_id, swapped, &swapped_slots);
+                        if kind == PaneKind::Master && stack_len > 0 {
+                            let moved = Self::remove_from_pane(hub, master_cid, idx);
+                            let swapped = Self::remove_from_pane(hub, secondary_cid, 0);
+                            Self::push_to_pane(hub, master_cid, swapped);
+                            Self::push_to_pane(hub, secondary_cid, moved);
+                            self.remap_slot_on_pane_change(hub, ws_id, moved, &secondary_matchers);
+                            self.remap_slot_on_pane_change(hub, ws_id, swapped, &master_matchers);
                         }
                     }
                     (Direction::Vertical, _) => {
-                        let len = state.pane_vec(pane).len();
+                        let cid = if kind == PaneKind::Master {
+                            master_cid
+                        } else {
+                            secondary_cid
+                        };
+                        let len = Self::pane_len(hub, cid);
                         if len <= 1 {
                             return;
                         }
                         let target = wrap_index(idx, len, forward);
-                        let vec = state.pane_vec_mut(pane);
-                        vec.swap(idx, target);
+                        hub.containers.get_mut(cid).children.swap(idx, target);
                     }
                 }
                 self.compute_placement(hub, ws_id);
@@ -317,10 +327,11 @@ impl TilingStrategy for MasterStrategy {
         self.compute_placement(hub, ws_id);
     }
 
-    fn tiling_window_count(&self, _hub: &HubAccess, ws_id: WorkspaceId) -> usize {
-        self.workspaces
-            .get(&ws_id)
-            .map_or(0, |ws| ws.master.len() + ws.secondary.len())
+    fn tiling_window_count(&self, hub: &HubAccess, ws_id: WorkspaceId) -> usize {
+        self.workspaces.get(&ws_id).map_or(0, |ws| {
+            Self::pane_windows(hub, ws.master.container).len()
+                + Self::pane_windows(hub, ws.secondary.container).len()
+        })
     }
 
     fn matches_tiling(&self, ws_id: WorkspaceId, metadata: &dyn WindowMetadata) -> bool {
@@ -328,17 +339,17 @@ impl TilingStrategy for MasterStrategy {
             return false;
         };
         state
-            .master_matchers
+            .master
+            .matchers
             .iter()
-            .chain(state.secondary_matchers.iter())
+            .chain(state.secondary.matchers.iter())
             .any(|&sid| metadata.matches_window_matcher(&self.slots.get(sid).matcher))
     }
 
     fn detach_focused_child(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Option<Child> {
-        let state = self.workspaces.get_mut(&ws_id)?;
-        let focus_id = state.focused_window()?;
+        let focus_id = self.workspaces.get(&ws_id)?.focused_window()?;
 
-        state.remove_window(focus_id);
+        self.remove_window(hub, ws_id, focus_id);
 
         let removed = self.window_states.remove(&focus_id);
         if let Some(sid) = removed.and_then(|e| e.occupy) {
@@ -362,24 +373,23 @@ impl TilingStrategy for MasterStrategy {
 
     fn migrate(
         &mut self,
-        _hub: &mut HubAccess,
+        hub: &mut HubAccess,
         ws_id: WorkspaceId,
     ) -> (Vec<WindowId>, Option<WindowId>) {
         let focused = self.focused_tiling_window(ws_id);
         let mut tiling = Vec::new();
         if let Some(state) = self.workspaces.remove(&ws_id) {
-            tiling.extend(state.master.iter().copied());
-            tiling.extend(state.secondary.iter().copied());
-            for &wid in &state.master {
+            for cid in [state.master.container, state.secondary.container] {
+                tiling.extend(Self::pane_windows(hub, cid));
+                hub.free_container(cid);
+            }
+            for &wid in &tiling {
                 self.window_states.remove(&wid);
             }
-            for &wid in &state.secondary {
-                self.window_states.remove(&wid);
-            }
-            for &id in &state.master_matchers {
+            for &id in &state.master.matchers {
                 self.slots.delete(id);
             }
-            for &id in &state.secondary_matchers {
+            for &id in &state.secondary.matchers {
                 self.slots.delete(id);
             }
         }
@@ -434,51 +444,180 @@ impl MasterStrategy {
         }
     }
 
-    fn place(&mut self, hub: &HubAccess, ws_id: WorkspaceId, id: WindowId) {
-        let metadata = hub.windows.get(id).metadata.as_ref();
-        let occupy = self.sort_window_into_pane(ws_id, id, metadata);
+    fn pane_windows(hub: &HubAccess, container: ContainerId) -> Vec<WindowId> {
+        hub.containers
+            .get(container)
+            .children()
+            .iter()
+            .filter_map(|c| match c {
+                Child::Window(w) => Some(*w),
+                Child::Container(_) => None,
+            })
+            .collect()
+    }
 
-        let state = self.workspaces.get_mut(&ws_id).unwrap();
-        state.add_to_history(id);
+    fn pane_len(hub: &HubAccess, container: ContainerId) -> usize {
+        hub.containers.get(container).children().len()
+    }
 
+    fn position_in_pane(hub: &HubAccess, container: ContainerId, id: WindowId) -> Option<usize> {
+        hub.containers
+            .get(container)
+            .children()
+            .iter()
+            .position(|c| matches!(c, Child::Window(w) if *w == id))
+    }
+
+    fn push_to_pane(hub: &mut HubAccess, container: ContainerId, id: WindowId) {
+        hub.containers
+            .get_mut(container)
+            .children
+            .push(Child::Window(id));
+    }
+
+    fn insert_into_pane(hub: &mut HubAccess, container: ContainerId, idx: usize, id: WindowId) {
+        hub.containers
+            .get_mut(container)
+            .children
+            .insert(idx, Child::Window(id));
+    }
+
+    fn remove_from_pane(hub: &mut HubAccess, container: ContainerId, idx: usize) -> WindowId {
+        match hub.containers.get_mut(container).children.remove(idx) {
+            Child::Window(w) => w,
+            Child::Container(_) => unreachable!("master pane holds only windows"),
+        }
+    }
+
+    fn pop_from_pane(hub: &mut HubAccess, container: ContainerId) -> Option<WindowId> {
+        hub.containers
+            .get_mut(container)
+            .children
+            .pop()
+            .map(|c| match c {
+                Child::Window(w) => w,
+                Child::Container(_) => unreachable!("master pane holds only windows"),
+            })
+    }
+
+    fn locate(
+        hub: &HubAccess,
+        master: ContainerId,
+        secondary: ContainerId,
+        id: WindowId,
+    ) -> (PaneKind, usize) {
+        if let Some(i) = Self::position_in_pane(hub, master, id) {
+            return (PaneKind::Master, i);
+        }
+        let i = Self::position_in_pane(hub, secondary, id)
+            .unwrap_or_else(|| panic!("window {id:?} is in neither master nor secondary pane"));
+        (PaneKind::Secondary, i)
+    }
+
+    /// `None` only for an empty workspace.
+    fn focused_position(&self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<(PaneKind, usize)> {
+        let state = self.workspaces.get(&ws_id)?;
+        let focus = state.focused_window()?;
+        Some(Self::locate(
+            hub,
+            state.master.container,
+            state.secondary.container,
+            focus,
+        ))
+    }
+
+    /// Reads membership from the live containers, so a migrated window answers for the pane it
+    /// occupies now.
+    fn last_focused_in(&self, hub: &HubAccess, ws_id: WorkspaceId, kind: PaneKind) -> WindowId {
+        let state = self.workspaces.get(&ws_id).unwrap();
+        let members = Self::pane_windows(hub, state.pane(kind).container);
+        state
+            .focus_history
+            .iter()
+            .find(|w| members.contains(w))
+            .copied()
+            .or_else(|| members.first().copied())
+            .unwrap_or_else(|| panic!("last_focused_in called on empty {kind:?} pane"))
+    }
+
+    /// Focus repair needs no ladder here. Dropping `window_id` from the history leaves the head
+    /// on the surviving window focused before it, whichever pane that window lives in.
+    fn remove_window(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        window_id: WindowId,
+    ) -> Length {
+        let (container, y_offset, idx) = {
+            let state = self.workspaces.get(&ws_id).unwrap();
+            let (kind, idx) = Self::locate(
+                hub,
+                state.master.container,
+                state.secondary.container,
+                window_id,
+            );
+            (state.pane(kind).container, state.pane(kind).y_offset, idx)
+        };
+        Self::remove_from_pane(hub, container, idx);
+        self.workspaces
+            .get_mut(&ws_id)
+            .unwrap()
+            .drop_from_history(window_id);
+        y_offset
+    }
+
+    fn place(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId, id: WindowId) {
+        let occupy = self.sort_window_into_pane(hub, ws_id, id);
+        self.workspaces.get_mut(&ws_id).unwrap().add_to_history(id);
         self.window_states.insert(
             id,
             WindowState {
                 occupy,
-                // Only a place holder, will be populated later
                 dimension: Dimension::default(),
             },
         );
     }
 
-    fn reconcile_master_count(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
-        let Some(state) = self.workspaces.get_mut(&ws_id) else {
-            return;
+    fn reconcile_master_count(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
+        let (effective_count, secondary_slots, master, secondary) = {
+            let Some(state) = self.workspaces.get(&ws_id) else {
+                return;
+            };
+            (
+                state.master_count.unwrap_or(self.master_count),
+                state.secondary.matchers.clone(),
+                state.master.container,
+                state.secondary.container,
+            )
         };
-        let effective_count = state.master_count.unwrap_or(self.master_count);
 
-        while state.master.len() < effective_count {
-            let pos = state.secondary.iter().position(|&w| {
-                self.window_states
-                    .get(&w)
-                    .is_some_and(|e| e.occupy.is_none())
-            });
-            if let Some(pos) = pos {
-                let wid = state.secondary.remove(pos);
-                state.master.push(wid);
-            } else {
+        // Pull unmatched windows up from secondary until master reaches the count.
+        while Self::pane_len(hub, master) < effective_count {
+            let pos = hub
+                .containers
+                .get(secondary)
+                .children()
+                .iter()
+                .position(|c| {
+                    matches!(c, Child::Window(w)
+                    if self.window_states.get(w).is_some_and(|e| e.occupy.is_none()))
+                });
+            let Some(pos) = pos else {
                 break;
-            }
+            };
+            let wid = Self::remove_from_pane(hub, secondary, pos);
+            Self::push_to_pane(hub, master, wid);
         }
 
+        // Spill master overflow onto the front of secondary, then remap the moved slots.
         let mut overflow = Vec::new();
-        while state.master.len() > effective_count {
-            if let Some(wid) = state.master.pop() {
-                state.secondary.insert(0, wid);
-                overflow.push(wid);
-            }
+        while Self::pane_len(hub, master) > effective_count {
+            let Some(wid) = Self::pop_from_pane(hub, master) else {
+                break;
+            };
+            Self::insert_into_pane(hub, secondary, 0, wid);
+            overflow.push(wid);
         }
-        let secondary_slots = state.secondary_matchers.clone();
         for wid in overflow {
             self.remap_slot_on_pane_change(hub, ws_id, wid, &secondary_slots);
         }
@@ -517,28 +656,32 @@ impl MasterStrategy {
 /// Per-workspace state for master-stack layout.
 #[derive(Debug)]
 struct WorkspaceState {
-    master: Vec<WindowId>,
-    secondary: Vec<WindowId>,
-    master_matchers: Vec<SlotId>,
-    secondary_matchers: Vec<SlotId>,
+    master: Pane,
+    secondary: Pane,
     /// Windows of this workspace from most to least recently focused. Always set-equal to
-    /// `master` plus `secondary`.
+    /// the master pane plus the secondary pane.
     focus_history: Vec<WindowId>,
-    master_y_offset: Length,
-    stack_y_offset: Length,
     master_count: Option<usize>,
     master_ratio: Option<f32>,
 }
 
 impl WorkspaceState {
-    fn focused_window(&self) -> Option<WindowId> {
-        self.focus_history.first().copied()
+    fn pane(&self, kind: PaneKind) -> &Pane {
+        match kind {
+            PaneKind::Master => &self.master,
+            PaneKind::Secondary => &self.secondary,
+        }
     }
 
-    /// `None` only for an empty workspace. A focused window outside both panes panics.
-    fn focused_position(&self) -> Option<(Pane, usize)> {
-        let focus_id = self.focused_window()?;
-        Some(self.find_window(focus_id))
+    fn pane_mut(&mut self, kind: PaneKind) -> &mut Pane {
+        match kind {
+            PaneKind::Master => &mut self.master,
+            PaneKind::Secondary => &mut self.secondary,
+        }
+    }
+
+    fn focused_window(&self) -> Option<WindowId> {
+        self.focus_history.first().copied()
     }
 
     fn record_focus(&mut self, window_id: WindowId) {
@@ -563,58 +706,24 @@ impl WorkspaceState {
     fn clear_focus_history(&mut self) {
         self.focus_history.clear();
     }
+}
 
-    /// Membership is read from the pane vector on every call, so a window that migrated between
-    /// panes answers for the pane it occupies now and migration sites need no fix-up.
-    fn last_focused_in(&self, pane: Pane) -> WindowId {
-        let members = self.pane_vec(pane);
-        self.focus_history
-            .iter()
-            .find(|w| members.contains(w))
-            .copied()
-            .or_else(|| members.first().copied())
-            .unwrap_or_else(|| panic!("last_focused_in called on empty {pane:?} pane"))
-    }
+/// One side of the master-stack split. Windows live in `container`, a flat `Container`
+/// of `Child::Window` that never nests.
+#[derive(Debug)]
+struct Pane {
+    container: ContainerId,
+    matchers: Vec<SlotId>,
+    y_offset: Length,
+}
 
-    fn pane_vec(&self, pane: Pane) -> &[WindowId] {
-        match pane {
-            Pane::Master => &self.master,
-            Pane::Secondary => &self.secondary,
+impl Pane {
+    fn new(container: ContainerId, matchers: Vec<SlotId>) -> Self {
+        Pane {
+            container,
+            matchers,
+            y_offset: Length::ZERO,
         }
-    }
-
-    fn pane_vec_mut(&mut self, pane: Pane) -> &mut Vec<WindowId> {
-        match pane {
-            Pane::Master => &mut self.master,
-            Pane::Secondary => &mut self.secondary,
-        }
-    }
-
-    /// Focus repair needs no ladder here. Dropping `window_id` from the history leaves the head
-    /// on the surviving window focused before it, whichever pane that window lives in.
-    fn remove_window(&mut self, window_id: WindowId) -> Length {
-        let (pane, idx) = self.find_window(window_id);
-
-        let y_offset = match pane {
-            Pane::Master => self.master_y_offset,
-            Pane::Secondary => self.stack_y_offset,
-        };
-
-        self.pane_vec_mut(pane).remove(idx);
-        self.drop_from_history(window_id);
-        y_offset
-    }
-
-    fn find_window(&self, id: WindowId) -> (Pane, usize) {
-        if let Some(i) = self.master.iter().position(|&w| w == id) {
-            return (Pane::Master, i);
-        }
-        let i = self
-            .secondary
-            .iter()
-            .position(|&w| w == id)
-            .unwrap_or_else(|| panic!("window {id:?} is in neither master nor secondary pane"));
-        (Pane::Secondary, i)
     }
 }
 
@@ -625,9 +734,8 @@ struct WindowState {
     dimension: Dimension,
 }
 
-/// Which side of the master-stack split a window lives in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Pane {
+enum PaneKind {
     Master,
     Secondary,
 }
