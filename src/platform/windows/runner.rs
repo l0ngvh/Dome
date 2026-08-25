@@ -10,6 +10,7 @@ use crate::keymap::KeymapState;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
 use crate::platform::windows::dome::{Dome, HubEvent, NewWindow, WindowsMetadata};
 use crate::platform::windows::external::{HwndId, InspectExternalWindow, ManageExternalWindow};
+use crate::platform::windows::foreground::ForegroundActivator;
 use crate::platform::windows::handle::ExternalHwnd;
 use crate::platform::windows::throttle::{Throttle, ThrottleResult};
 use crate::platform::windows::timer_registry::{TimerKind, TimerRegistry, Win32Timer};
@@ -29,6 +30,7 @@ pub(super) struct Runner {
     timers: TimerRegistry,
     main_thread_id: u32,
     keymap_state: Arc<RwLock<KeymapState>>,
+    foreground_activator: ForegroundActivator,
 }
 
 impl Runner {
@@ -37,6 +39,7 @@ impl Runner {
         thread_id: u32,
         main_thread_id: u32,
         keymap_state: Arc<RwLock<KeymapState>>,
+        foreground_activator: ForegroundActivator,
     ) -> Self {
         let mut timers = TimerRegistry::new(Box::new(Win32Timer));
         timers.schedule_drift_retry(DRIFT_RETRY_INTERVAL);
@@ -47,6 +50,7 @@ impl Runner {
             timers,
             main_thread_id,
             keymap_state,
+            foreground_activator,
         }
     }
 
@@ -134,8 +138,10 @@ impl Runner {
                 observed_at,
             } => {
                 if self.dome.is_tracked_bar(hwnd_id) {
-                    let inspect: Arc<dyn InspectExternalWindow> =
-                        Arc::new(ExternalHwnd::new(hwnd_id.into()));
+                    let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(
+                        hwnd_id.into(),
+                        self.foreground_activator.clone(),
+                    ));
                     self.dispatcher.dispatch(
                         move || Some((inspect.get_visible_rect(), inspect.get_monitor())),
                         move |observation, runner| {
@@ -151,8 +157,10 @@ impl Runner {
                 }
             }
             HubEvent::WindowTitleChanged(hwnd_id) => {
-                let inspect: Arc<dyn InspectExternalWindow> =
-                    Arc::new(ExternalHwnd::new(hwnd_id.into()));
+                let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(
+                    hwnd_id.into(),
+                    self.foreground_activator.clone(),
+                ));
                 self.dispatcher.dispatch(
                     move || inspect.get_window_title(),
                     move |title, runner| {
@@ -226,7 +234,10 @@ impl Runner {
     }
 
     pub(super) fn dispatch_window_created(&mut self, hwnd_id: HwndId) {
-        let ext = Arc::new(ExternalHwnd::new(hwnd_id.into()));
+        let ext = Arc::new(ExternalHwnd::new(
+            hwnd_id.into(),
+            self.foreground_activator.clone(),
+        ));
         let inspect: Arc<dyn InspectExternalWindow> = ext.clone();
         let manage: Arc<dyn ManageExternalWindow> = ext;
         self.dispatcher.dispatch(
@@ -281,7 +292,10 @@ impl Runner {
     }
 
     fn dispatch_placement_read(&mut self, hwnd_id: HwndId, observed_at: Instant) {
-        let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
+        let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(
+            hwnd_id.into(),
+            self.foreground_activator.clone(),
+        ));
         self.dispatcher.dispatch(
             move || {
                 if inspect.is_minimized() {
@@ -327,7 +341,10 @@ impl Runner {
     }
 
     fn dispatch_constraint_read(&mut self, hwnd_id: HwndId) {
-        let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
+        let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(
+            hwnd_id.into(),
+            self.foreground_activator.clone(),
+        ));
         self.dispatcher.dispatch(
             move || inspect.get_size_constraints(),
             move |constraints, runner| {

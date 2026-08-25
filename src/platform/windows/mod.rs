@@ -2,6 +2,7 @@ mod dome;
 mod event_listener;
 mod external;
 mod font;
+mod foreground;
 mod handle;
 mod keyboard;
 mod login_item;
@@ -453,12 +454,15 @@ fn run_dome(
         thread_id: unsafe { GetCurrentThreadId() },
     };
 
+    let foreground_activator = foreground::ForegroundActivator::new();
+
     let overlays = WgpuOverlayFactory {
         instance,
         adapter,
         device,
         queue,
         hub_sender: hub_sender.clone(),
+        foreground_activator: foreground_activator.clone(),
     };
 
     let app_window =
@@ -486,6 +490,7 @@ fn run_dome(
         unsafe { GetCurrentThreadId() },
         main_thread_id,
         keymap_state,
+        foreground_activator,
     );
 
     for hwnd_id in initial_hwnds {

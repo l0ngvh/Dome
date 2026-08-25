@@ -33,6 +33,7 @@ use crate::core::{
 use crate::overlay;
 use crate::platform::windows::dome::CreateOverlay;
 use crate::platform::windows::external::{HwndId, ZOrder};
+use crate::platform::windows::foreground::ForegroundActivator;
 
 /// Struct fields must be declared before this so their renderer resources
 /// drop before the window's HDC.
@@ -386,9 +387,11 @@ pub(in crate::platform::windows) struct TilingOverlay {
     border_thickness: Pixels<Physical>,
     window: OwnedHwnd,
     scale: f32,
+    activator: ForegroundActivator,
 }
 
 impl TilingOverlay {
+    #[expect(clippy::too_many_arguments, reason = "dependency injection")]
     pub(in crate::platform::windows) fn new(
         instance: &wgpu::Instance,
         adapter: &wgpu::Adapter,
@@ -397,6 +400,7 @@ impl TilingOverlay {
         config: Config,
         monitor: PixelRect,
         scale: f32,
+        activator: ForegroundActivator,
     ) -> anyhow::Result<Box<Self>> {
         let flavor = config.theme;
         let font = &config.font;
@@ -445,6 +449,7 @@ impl TilingOverlay {
             config,
             window,
             scale,
+            activator,
         });
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &mut *boxed as *mut Self as isize) };
         Ok(boxed)
@@ -587,7 +592,7 @@ impl TilingOverlayApi for TilingOverlay {
     }
 
     fn focus(&self) {
-        crate::platform::windows::handle::force_set_foreground(self.window.hwnd());
+        self.activator.activate(self.window.hwnd());
     }
 }
 
@@ -851,6 +856,7 @@ pub(in crate::platform::windows) struct WgpuOverlayFactory {
     pub(in crate::platform::windows) device: Arc<wgpu::Device>,
     pub(in crate::platform::windows) queue: Arc<wgpu::Queue>,
     pub(in crate::platform::windows) hub_sender: HubSender,
+    pub(in crate::platform::windows) foreground_activator: ForegroundActivator,
 }
 
 impl CreateOverlay for WgpuOverlayFactory {
@@ -868,6 +874,7 @@ impl CreateOverlay for WgpuOverlayFactory {
             config,
             monitor,
             scale,
+            self.foreground_activator.clone(),
         )?)
     }
     fn create_float_overlay(
