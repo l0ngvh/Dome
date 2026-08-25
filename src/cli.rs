@@ -50,6 +50,10 @@ enum CliCommand {
         #[command(subcommand)]
         query: CliQuery,
     },
+    Generate {
+        #[command(subcommand)]
+        bar: CliGenerate,
+    },
     #[command(name = "unminimize-window")]
     UnminimizeWindow {
         id: u64,
@@ -126,6 +130,22 @@ enum CliQuery {
     Monitors,
 }
 
+#[derive(Subcommand, Debug)]
+enum CliGenerate {
+    Yasb {
+        /// YASB config.yaml to edit. Defaults to the YASB config location.
+        #[arg(long)]
+        config: Option<String>,
+    },
+    Sketchybar,
+    Zebar {
+        /// Directory to scaffold the widget pack into. Defaults to the Zebar
+        /// pack location.
+        #[arg(long)]
+        out: Option<String>,
+    },
+}
+
 #[derive(Debug)]
 enum Dispatch {
     Launch {
@@ -135,6 +155,7 @@ enum Dispatch {
     Action(Action),
     Query(Query),
     Export,
+    Generate(CliGenerate),
 }
 
 impl From<CliFocus> for FocusTarget {
@@ -221,6 +242,7 @@ impl From<CliCommand> for Dispatch {
             CliCommand::Mode { name } => Dispatch::Action(Action::Mode { name }),
             CliCommand::Export => Dispatch::Export,
             CliCommand::Query { query } => Dispatch::Query(query.into()),
+            CliCommand::Generate { bar } => Dispatch::Generate(bar),
             CliCommand::UnminimizeWindow { id } => {
                 // WindowId's tuple-struct constructor is pub(crate) in core, so round-trip
                 // through serde instead. Its Deserialize impl accepts a bare integer, and
@@ -254,6 +276,15 @@ pub fn run() -> anyhow::Result<()> {
         }
         Dispatch::Export => {
             crate::DomeClient.send_export_layout()?;
+        }
+        Dispatch::Generate(CliGenerate::Yasb { config }) => {
+            crate::integrations::yasb::generate(config.as_deref())?;
+        }
+        Dispatch::Generate(CliGenerate::Sketchybar) => {
+            crate::integrations::sketchybar::generate()?;
+        }
+        Dispatch::Generate(CliGenerate::Zebar { out }) => {
+            crate::integrations::zebar::generate(out.as_deref())?;
         }
     }
     Ok(())
@@ -444,6 +475,42 @@ mod tests {
         match d {
             Dispatch::Action(Action::UnminimizeWindow(id)) if id == expected => {}
             other => panic!("expected Action(UnminimizeWindow(7)), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_generate_yasb() {
+        let d = dispatch_from_argv(&["dome", "generate", "yasb"]);
+        match d {
+            Dispatch::Generate(CliGenerate::Yasb { config: None }) => {}
+            other => panic!("expected Generate(Yasb) with no config, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_generate_sketchybar() {
+        let d = dispatch_from_argv(&["dome", "generate", "sketchybar"]);
+        match d {
+            Dispatch::Generate(CliGenerate::Sketchybar) => {}
+            other => panic!("expected Generate(Sketchybar), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_generate_zebar() {
+        let d = dispatch_from_argv(&["dome", "generate", "zebar"]);
+        match d {
+            Dispatch::Generate(CliGenerate::Zebar { out: None }) => {}
+            other => panic!("expected Generate(Zebar) with no out, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_generate_zebar_with_out() {
+        let d = dispatch_from_argv(&["dome", "generate", "zebar", "--out", "/tmp/pack"]);
+        match d {
+            Dispatch::Generate(CliGenerate::Zebar { out: Some(ref p) }) if p == "/tmp/pack" => {}
+            other => panic!("expected Generate(Zebar) with out, got {other:?}"),
         }
     }
 

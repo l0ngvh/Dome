@@ -32,9 +32,11 @@
       function App() {
         const [output, setOutput] = useState(providers.outputMap);
         const [workspaces, setWorkspaces] = useState([]);
-        const [hasParked, setHasParked] = useState(false);
+        const [parked, setParked] = useState([]);
         // This widget's monitor as Dome's unique_name, or null until resolved.
         const monitorName = useRef(null);
+        // Set by the effect so a cell click can focus and repaint at once.
+        const focusWorkspace = useRef(() => {});
 
         useEffect(() => {
           providers.onOutput(() => setOutput(providers.outputMap));
@@ -56,10 +58,20 @@
             } catch {}
           }
 
+          // Numeric names sort numerically, non-numeric names lexically after them.
+          const isNum = s => /^[+-]?\d+$/.test(s);
+          function byName(a, b) {
+            const na = isNum(a.name);
+            const nb = isNum(b.name);
+            if (na !== nb) return na ? -1 : 1;
+            if (na) return parseInt(a.name, 10) - parseInt(b.name, 10);
+            return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+          }
+
           function mine(data) {
             return data
               .filter(w => w.monitor === monitorName.current && w.state === 'Attached')
-              .sort((a, b) => parseInt(a.name) - parseInt(b.name));
+              .sort(byName);
           }
 
           async function refresh() {
@@ -76,9 +88,23 @@
                 rows = mine(data);
               }
               setWorkspaces(rows);
-              setHasParked(data.some(w => w.state === 'Parked' && w.window_count > 0));
+              setParked(
+                data
+                  .filter(w => w.state === 'Parked' && w.window_count > 0)
+                  .sort(byName),
+              );
             } catch {}
           }
+
+          // Focus a workspace on a named monitor, then repaint without waiting for
+          // the next tick. A parked entry names its origin monitor.
+          focusWorkspace.current = async (name, monitor) => {
+            try {
+              await zebar.shellExec('dome', ['focus', 'workspace', name, '--monitor', monitor]);
+              await refresh();
+            } catch {}
+          };
+
           refresh();
           const id = setInterval(refresh, 1000);
           return () => clearInterval(id);
@@ -155,12 +181,27 @@
                     <span
                       key={ws.name}
                       className={ws.is_focused ? 'ws focused' : 'ws'}
+                      onClick={() => focusWorkspace.current(ws.name, ws.monitor)}
                     >
                       {ws.name}
                     </span>
                   );
                 })}
-                {hasParked && <span className="ws parked">parked</span>}
+                {parked.length > 0 && (
+                  <span className="parked-group">
+                    <span className="parked-label">parked</span>
+                    {parked.map(w => (
+                      <span
+                        key={`${w.monitor}::${w.name}`}
+                        className="ws parked"
+                        title={`return ${w.name} to ${w.monitor}`}
+                        onClick={() => focusWorkspace.current(w.name, w.monitor)}
+                      >
+                        {w.name}
+                      </span>
+                    ))}
+                  </span>
+                )}
               </div>
             </div>
 

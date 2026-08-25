@@ -81,8 +81,7 @@ launch to `~/Library/Logs/dome/dome.log` on macOS, or
 ## Status bar
 
 Dome doesn't ship with a status bar, but it provides basic integration for
-SketchyBar on macOS and for YASB and Zebar on Windows. Each has its own setup
-guide under [integrations/](integrations/).
+some popular status bars. See [Status bar integrations](docs/integration.md).
 
 ## Configuring Dome
 

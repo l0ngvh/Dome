@@ -3,6 +3,7 @@ pub mod cli;
 mod config;
 mod core;
 mod font;
+mod integrations;
 mod ipc;
 mod keymap;
 mod log_dedup;

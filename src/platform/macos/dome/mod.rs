@@ -339,9 +339,14 @@ impl Dome {
         let geo = match probed {
             Ok(geo) => geo,
             Err(e) => {
+                let state = if self.bar_geometry.is_some() {
+                    "keeping the last known reservation"
+                } else {
+                    "reserving no bar space yet"
+                };
                 crate::log_dedup::warn_once!(
                     key: "sketchybar-probe",
-                    "Bar probe failed, keeping the last known reservation: {e:#}"
+                    "Bar probe failed, {state}: {e:#}"
                 );
                 return;
             }

@@ -1,5 +1,5 @@
 use crate::action::MonitorTarget;
-use crate::action::{WorkspaceInfo, WorkspaceState};
+use crate::action::{MonitorDetails, MonitorFrame, WorkspaceInfo, WorkspaceState};
 use crate::core::GlobalLayoutConfig;
 use crate::core::ReportedMonitor;
 use crate::core::node::{PixelRect, WindowRestrictions};
@@ -128,15 +128,56 @@ fn workspace_info_json_shape() {
         is_visible: false,
         window_count: 3,
     };
-    let v: serde_json::Value = serde_json::to_value(&info).unwrap();
-    assert_eq!(v["name"], "main");
-    assert_eq!(v["monitor"], "DELL #1");
-    assert_eq!(v["state"], "Attached");
-    assert_eq!(v["is_focused"], true);
-    assert_eq!(v["is_visible"], false);
-    assert_eq!(v["window_count"], 3);
-    let back: WorkspaceInfo = serde_json::from_value(v).unwrap();
+    let json: serde_json::Value = serde_json::to_value(&info).unwrap();
+    assert_eq!(json["name"], "main");
+    assert_eq!(json["monitor"], "DELL #1");
+    assert_eq!(json["state"], "Attached");
+    assert_eq!(json["is_focused"], true);
+    assert_eq!(json["is_visible"], false);
+    assert_eq!(json["window_count"], 3);
+    let back: WorkspaceInfo = serde_json::from_value(json).unwrap();
     assert_eq!(back, info);
+}
+
+#[test]
+fn monitor_details_json_shape() {
+    // The bars parse these JSON keys (SketchyBar reads unique_name and
+    // cg_display_id, Zebar reads gdi_device), so the field names are the
+    // stability contract. A rename here breaks all three bars silently.
+    let details = MonitorDetails {
+        device_name: "DELL SE2416H".to_string(),
+        unique_name: "DELL SE2416H #1".to_string(),
+        cg_display_id: Some(7),
+        gdi_device: Some("\\\\.\\DISPLAY1".to_string()),
+        work_area: MonitorFrame {
+            x: 100,
+            y: -50,
+            width: 1920,
+            height: 1080,
+        },
+    };
+    let json: serde_json::Value = serde_json::to_value(&details).unwrap();
+    assert_eq!(json["device_name"], "DELL SE2416H");
+    assert_eq!(json["unique_name"], "DELL SE2416H #1");
+    assert_eq!(json["cg_display_id"], 7);
+    assert_eq!(json["gdi_device"], "\\\\.\\DISPLAY1");
+    assert_eq!(json["work_area"]["x"], 100);
+    assert_eq!(json["work_area"]["y"], -50);
+    assert_eq!(json["work_area"]["width"], 1920);
+    assert_eq!(json["work_area"]["height"], 1080);
+    let back: MonitorDetails = serde_json::from_value(json).unwrap();
+    assert_eq!(back, details);
+
+    // The bars test the Option fields against null, so None must serialize as an
+    // explicit null rather than a dropped key.
+    let missing = MonitorDetails {
+        cg_display_id: None,
+        gdi_device: None,
+        ..details
+    };
+    let missing_json = serde_json::to_value(&missing).unwrap();
+    assert!(missing_json["cg_display_id"].is_null());
+    assert!(missing_json["gdi_device"].is_null());
 }
 
 #[test]
