@@ -31,7 +31,7 @@ use crate::core::{Dimension, Length, LimitObservation, LimitUpdate, PixelRect, P
 use crate::platform::windows::external::{
     HwndId, InspectExternalWindow, ManageExternalWindow, ShowCmd, ZOrder,
 };
-use crate::platform::windows::foreground::ForegroundActivator;
+use crate::platform::windows::foreground::force_set_foreground;
 
 // Unlike macOS, we are allowed to move windows completely offscreen on Windows
 pub(crate) const OFFSCREEN_POS: Pixels = Pixels::new(-32000);
@@ -223,14 +223,14 @@ fn for_each_owned<F: FnMut(HWND)>(hwnd: HWND, callback: F) {
     }
 }
 
-pub(crate) struct ExternalHwnd(HWND, ForegroundActivator);
+pub(crate) struct ExternalHwnd(HWND);
 
 unsafe impl Send for ExternalHwnd {}
 unsafe impl Sync for ExternalHwnd {}
 
 impl ExternalHwnd {
-    pub(crate) fn new(hwnd: HWND, activator: ForegroundActivator) -> Self {
-        Self(hwnd, activator)
+    pub(crate) fn new(hwnd: HWND) -> Self {
+        Self(hwnd)
     }
 }
 
@@ -319,7 +319,7 @@ impl ManageExternalWindow for ExternalHwnd {
     }
 
     fn set_foreground_window(&self) {
-        self.1.activate(self.0);
+        force_set_foreground(self.0);
     }
 
     fn is_maximized(&self) -> bool {
