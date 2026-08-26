@@ -13,6 +13,9 @@ use super::{DebounceBurst, Dome, NewWindow};
 
 const MAX_ENFORCEMENT_RETRIES: u8 = 5;
 
+/// How long a cross-monitor placement suppresses detection.
+const MOVE_SETTLE: Duration = Duration::from_secs(5);
+
 #[derive(Clone, Copy)]
 pub(super) enum WindowState {
     Positioned(PositionedState),
@@ -76,6 +79,9 @@ pub(super) struct Placement {
     /// When the last placement was issued. AX position-change notifications
     /// generated before this timestamp reflect pre-placement state and are ignored.
     placed_at: Instant,
+    /// Set on a cross-monitor placement, whose arrival echo carries a
+    /// source-display clamp that must not be recorded as an app limit.
+    suppress_detect_until: Option<Instant>,
 }
 
 /// Lightweight placement state for floating windows. Floats accept the
@@ -118,6 +124,7 @@ impl Placement {
             actual,
             retries: 0,
             placed_at: Instant::now(),
+            suppress_detect_until: None,
         }
     }
 
@@ -130,6 +137,10 @@ impl Placement {
             self.placed_at = Instant::now();
         }
         target_changed
+    }
+
+    fn arm_move_settle(&mut self, crosses: bool) {
+        self.suppress_detect_until = crosses.then(|| Instant::now() + MOVE_SETTLE);
     }
 
     // FIXME: Change this to if new placement encompass the old placement
@@ -281,17 +292,20 @@ impl Dome {
         }
         match &mut window.state {
             WindowState::Positioned(PositionedState::Tiling(p)) => {
-                if p.set_target(target)
-                    && let Err(e) = window.ext.set_frame(target)
-                {
-                    tracing::trace!("Window {} set_frame failed: {e}", window.ext);
+                let crosses = self.monitor_registry.crosses_monitor(p.actual, target);
+                if p.set_target(target) {
+                    p.arm_move_settle(crosses);
+                    if let Err(e) = window.ext.set_frame(target) {
+                        tracing::trace!("Window {} set_frame failed: {e}", window.ext);
+                    }
                 }
             }
             // The window just toggled tiling-ward in core, so rebuild as Tiling.
-            WindowState::Positioned(PositionedState::Float(_)) => {
-                window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
-                    target, target,
-                )));
+            WindowState::Positioned(PositionedState::Float(fp)) => {
+                let crosses = self.monitor_registry.crosses_monitor(fp.target, target);
+                let mut placement = Placement::new(target, target);
+                placement.arm_move_settle(crosses);
+                window.state = WindowState::Positioned(PositionedState::Tiling(placement));
                 if let Err(e) = window.ext.set_frame(target) {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
@@ -300,9 +314,10 @@ impl Dome {
                 // Preserve the captured actual position from the offscreen state
                 // so drift correction starts from a real coordinate.
                 let actual = offscreen.actual;
-                window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
-                    actual, target,
-                )));
+                let crosses = self.monitor_registry.crosses_monitor(actual, target);
+                let mut placement = Placement::new(actual, target);
+                placement.arm_move_settle(crosses);
+                window.state = WindowState::Positioned(PositionedState::Tiling(placement));
                 if let Err(e) = window.ext.set_frame(target) {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
@@ -446,6 +461,7 @@ impl Dome {
     ) {
         let is_borderless_fullscreen = self.is_borderless_fullscreen_at(new_placement);
         let monitors = self.monitor_registry.all_monitors();
+        let monitor_settling = self.monitor_settling;
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
@@ -496,6 +512,18 @@ impl Dome {
                     window.state = WindowState::BorderlessFullscreen;
                     self.hub
                         .set_fullscreen(window_id, WindowRestrictions::ProtectFullscreen);
+                    return;
+                }
+
+                // While the display settles, an echo is macOS churn, not an app
+                // limit. The reconcile re-derives any real drift after the settle.
+                if monitor_settling {
+                    p.actual = new_placement;
+                    return;
+                }
+
+                if p.suppress_detect_until.is_some_and(|t| Instant::now() < t) {
+                    p.actual = new_placement;
                     return;
                 }
 

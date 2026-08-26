@@ -91,6 +91,9 @@ fn get_display_id(screen: &NSScreen) -> CGDirectDisplayID {
 
 type DisplayId = u32;
 
+/// True when a display was added or removed, or a surviving display's bounds
+/// changed. A work-area-only update (dock or bar) leaves bounds unchanged and
+/// returns false.
 pub(in crate::platform::macos) struct Monitor {
     id: MonitorId,
     info: MonitorInfo,
@@ -266,6 +269,18 @@ impl MonitorRegistry {
             }
         }
         best.map(|(m, _)| m)
+    }
+
+    /// A rect that overlaps no monitor on either side counts as no crossing.
+    pub(super) fn crosses_monitor(&self, from: PixelRect, to: PixelRect) -> bool {
+        let id = |rect: PixelRect| {
+            self.find_closest_monitor(rect.to_dimension())
+                .map(Monitor::id)
+        };
+        match (id(from), id(to)) {
+            (Some(a), Some(b)) => a != b,
+            _ => false,
+        }
     }
 
     pub(super) fn is_borderless_fullscreen_at(&self, rect: PixelRect) -> bool {

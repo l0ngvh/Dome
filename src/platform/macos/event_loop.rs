@@ -23,6 +23,10 @@ use crate::platform::macos::running_application::RunningApp;
 
 const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
 
+/// How long detection stays suppressed after a monitor change, while
+/// macOS finishes rearranging windows.
+const MONITOR_SETTLE: Duration = Duration::from_secs(10);
+
 pub(super) struct DomeRunner {
     dome: Dome,
     dispatcher: GcdDispatcher,
@@ -33,6 +37,9 @@ pub(super) struct DomeRunner {
     handle: LoopHandle<'static, DomeRunner>,
     signal: LoopSignal,
     keymap_state: Arc<RwLock<KeymapState>>,
+    /// Pending display-settle timer, replaced when a new display change arrives
+    /// mid-settle so coverage restarts from the latest change.
+    settle_token: Option<RegistrationToken>,
 }
 
 pub(super) fn run_dome(
@@ -56,6 +63,7 @@ pub(super) fn run_dome(
         handle: handle.clone(),
         signal,
         keymap_state,
+        settle_token: None,
     };
 
     handle
@@ -140,6 +148,21 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
         HubEvent::MonitorsChanged(monitors) => {
             tracing::info!(count = monitors.len(), "Monitors changed");
             runner.dome.monitors_changed(monitors);
+            if let Some(old) = runner.settle_token.take() {
+                runner.handle.remove(old);
+            }
+            let token = runner
+                .handle
+                .insert_source(
+                    Timer::from_duration(MONITOR_SETTLE),
+                    |_, _, runner: &mut DomeRunner| {
+                        runner.settle_token = None;
+                        runner.dome.finish_monitor_settle();
+                        TimeoutAction::Drop
+                    },
+                )
+                .expect("Failed to insert settle timer");
+            runner.settle_token = Some(token);
             runner.dispatcher.dispatch(
                 move |_marker| ExternalBarProbe::query(),
                 |result, runner| runner.dome.set_reserved_bar(result.ok().flatten()),

@@ -4,34 +4,6 @@ use crate::platform::macos::dome::{DebounceBurst, WindowMove};
 
 use super::*;
 
-/// Set up a MacOS harness with a single Safari window, settled.
-fn one_window() -> (MacOS, Dome, CGWindowID) {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
-    macos.settle(&mut dome, 10);
-    (macos, dome, cg1)
-}
-
-/// Set up a MacOS harness with Safari + Finder, both placed and settled.
-fn two_windows() -> (MacOS, Dome, CGWindowID, CGWindowID) {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let cg2 = macos.spawn_window(101, "Finder", "Home");
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
-    (macos, dome, cg1, cg2)
-}
-
 #[test]
 fn drift_exhausts_retries_dome_gives_up() {
     let (macos, mut dome, cg1) = one_window();
@@ -565,4 +537,249 @@ fn borderless_minimized_retries_reset_on_workspace_return() {
     macos.simulate_external_move(&mut dome, cg1, 0, 0, 1920, 1080);
     macos.settle(&mut dome, 10);
     assert!(macos.is_minimized(cg1));
+}
+
+#[test]
+fn genuine_limit_survives_display_change() {
+    let (macos, mut dome, _cg1, cg2) = two_windows();
+
+    let (x2, y2, _, h2) = macos.window_frame(cg2);
+    macos.simulate_external_move(&mut dome, cg2, x2, y2, 1200, h2);
+    macos.settle(&mut dome, 10);
+    let (_, _, w2, _) = macos.window_frame(cg2);
+    assert!(w2 >= 1200, "precondition: min-width recorded, got {w2}");
+
+    dome.monitors_changed(vec![default_monitor(), taller_right_monitor()]);
+    dome.finish_monitor_settle();
+    macos.settle(&mut dome, 10);
+
+    let (_, _, w2_after, _) = macos.window_frame(cg2);
+    assert!(
+        w2_after >= 1200,
+        "genuine min-width must survive the display change, got {w2_after}"
+    );
+}
+
+#[test]
+fn monitor_resolution_change_does_not_record_constraint() {
+    let (macos, mut dome, cg1, cg2) = two_windows();
+
+    // Shrinking the primary re-tiles both windows onto the smaller monitor and
+    // arms the settle.
+    let shrunk = MonitorInfo {
+        bounds: Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            Length::new(1400.0),
+            Length::new(900.0),
+        ),
+        work_area: PixelRect::from_dimension_inward(Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            Length::new(1400.0),
+            Length::new(900.0),
+        )),
+        full_height: 900.0,
+        ..default_monitor()
+    };
+    dome.monitors_changed(vec![shrunk]);
+    macos.settle(&mut dome, 10);
+    let (_, _, w1_before, _) = macos.window_frame(cg1);
+
+    // While macOS finishes the relayout, cg2 lingers wider than its new target.
+    // The armed settle must not read that transient as a min-width and starve cg1.
+    let (x2, y2, _, h2) = macos.window_frame(cg2);
+    macos.simulate_external_move(&mut dome, cg2, x2, y2, 1300, h2);
+    macos.settle(&mut dome, 10);
+
+    let (_, _, w1_after, _) = macos.window_frame(cg1);
+    assert_eq!(
+        w1_before, w1_after,
+        "a relayout's transient width must not become a min-width"
+    );
+}
+
+#[test]
+fn cross_monitor_move_does_not_record_clamp() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    dome.monitors_changed(vec![default_monitor(), taller_right_monitor()]);
+    dome.finish_monitor_settle();
+
+    let cg = macos.spawn_window(100, "Terminal", "zsh");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    // macOS clamps the window to the source-display height during the
+    // cross-monitor set_frame.
+    send(&mut dome, "move monitor right");
+    macos.settle(&mut dome, 10);
+    let (tx, ty, tw, _) = macos.window_frame(cg);
+    macos.moves.borrow_mut().clear();
+
+    // The arrival echo carries the source clamp: aligned origin, shorter height.
+    macos.simulate_external_move(&mut dome, cg, tx, ty, tw, 1072);
+
+    // A recorded max-height would re-clamp the window and log a set_frame, so
+    // empty moves prove the clamp was suppressed.
+    let clamped: Vec<_> = macos
+        .moves
+        .borrow()
+        .iter()
+        .filter(|m| m.0 == cg)
+        .copied()
+        .collect();
+    assert!(
+        clamped.is_empty(),
+        "a cross-monitor clamp must not be recorded, got {clamped:?}"
+    );
+}
+
+#[test]
+fn cross_monitor_move_settle_is_per_window() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    dome.monitors_changed(vec![default_monitor(), taller_right_monitor()]);
+    dome.finish_monitor_settle();
+
+    // Moving A to the taller monitor arms A's per-window settle.
+    let a = macos.spawn_window(100, "Terminal", "zsh");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, a)], &[], &[]);
+    macos.settle(&mut dome, 10);
+    send(&mut dome, "move monitor right");
+    macos.settle(&mut dome, 10);
+
+    send(&mut dome, "focus monitor left");
+    let b = macos.spawn_window(101, "Finder", "Home");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, b)], &[], &[]);
+    macos.settle(&mut dome, 10);
+    let (bx, by, bw, bh) = macos.window_frame(b);
+    macos.moves.borrow_mut().clear();
+
+    // B reports a narrower width (a genuine max-width) right after placement.
+    macos.simulate_external_move(&mut dome, b, bx, by, bw - 200, bh);
+    let b_moves: Vec<_> = macos
+        .moves
+        .borrow()
+        .iter()
+        .filter(|m| m.0 == b)
+        .copied()
+        .collect();
+    assert!(
+        !b_moves.is_empty(),
+        "A's settle must not suppress detection for B"
+    );
+}
+
+#[test]
+fn cross_monitor_move_relearns_on_destination() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    dome.monitors_changed(vec![default_monitor(), taller_right_monitor()]);
+    dome.finish_monitor_settle();
+
+    let w = macos.spawn_window(100, "Terminal", "zsh");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, w)], &[], &[]);
+    macos.settle(&mut dome, 10);
+    send(&mut dome, "move monitor right");
+    macos.settle(&mut dome, 10);
+
+    // A second window re-places W with a new, non-crossing target, clearing W's
+    // stamp so detection resumes.
+    send(&mut dome, "focus monitor right");
+    let v = macos.spawn_window(101, "Finder", "Home");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, v)], &[], &[]);
+    macos.settle(&mut dome, 10);
+    let (wx, wy, ww, wh) = macos.window_frame(w);
+    macos.moves.borrow_mut().clear();
+
+    // W reports a narrower width (a genuine max-width) after the re-place.
+    macos.simulate_external_move(&mut dome, w, wx, wy, ww - 200, wh);
+    let w_moves: Vec<_> = macos
+        .moves
+        .borrow()
+        .iter()
+        .filter(|m| m.0 == w)
+        .copied()
+        .collect();
+    assert!(
+        !w_moves.is_empty(),
+        "a non-crossing re-place must clear the stamp and resume detection"
+    );
+}
+
+#[test]
+fn genuine_limit_survives_cross_monitor_move() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    dome.monitors_changed(vec![default_monitor(), taller_right_monitor()]);
+    dome.finish_monitor_settle();
+
+    let w = macos.spawn_window(100, "Terminal", "zsh");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, w)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    let (wx, wy, ww, _) = macos.window_frame(w);
+    macos.simulate_external_move(&mut dome, w, wx, wy, ww, 800);
+    macos.settle(&mut dome, 10);
+    let (_, _, _, h_primary) = macos.window_frame(w);
+    assert!(
+        h_primary <= 800,
+        "precondition: max-height recorded, got {h_primary}"
+    );
+
+    send(&mut dome, "move monitor right");
+    macos.settle(&mut dome, 10);
+    let (_, _, _, h_external) = macos.window_frame(w);
+    assert!(
+        h_external <= 800,
+        "genuine max-height must survive the cross-monitor move, got {h_external}"
+    );
+}
+
+/// Set up a MacOS harness with a single Safari window, settled.
+fn one_window() -> (MacOS, Dome, CGWindowID) {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
+    macos.settle(&mut dome, 10);
+    (macos, dome, cg1)
+}
+
+/// Set up a MacOS harness with Safari + Finder, both placed and settled.
+fn two_windows() -> (MacOS, Dome, CGWindowID, CGWindowID) {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    let cg2 = macos.spawn_window(101, "Finder", "Home");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+        &[],
+        &[],
+    );
+    macos.settle(&mut dome, 10);
+    (macos, dome, cg1, cg2)
+}
+
+/// Taller than the primary (1440 vs 1080) so a window moved onto it has room to
+/// grow and a source-display clamp shows up.
+fn taller_right_monitor() -> MonitorInfo {
+    MonitorInfo {
+        display_id: 2,
+        name: "External".to_string(),
+        work_area: PixelRect::new(1920, 0, 2560, 1440),
+        bounds: Dimension::new(
+            Length::new(1920.0),
+            Length::ZERO,
+            Length::new(2560.0),
+            Length::new(1440.0),
+        ),
+        full_height: 1440.0,
+        is_primary: false,
+        scale: 2.0,
+    }
 }
