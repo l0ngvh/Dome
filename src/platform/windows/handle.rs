@@ -6,14 +6,15 @@ use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect, MonitorFromWindow,
 };
 use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
 };
 use windows::Win32::UI::HiDpi::{
-    AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow,
-    GetWindowDpiAwarenessContext,
+    AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT,
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, DPI_AWARENESS_CONTEXT_UNAWARE, GetDpiForMonitor,
+    GetDpiForWindow, GetWindowDpiAwarenessContext, MDT_EFFECTIVE_DPI, SetThreadDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GW_OWNER, GWL_EXSTYLE, GWL_STYLE,
@@ -130,37 +131,55 @@ const MAX_VERSION_INFO_BYTES: usize = 1 << 20;
 
 const MAX_FILE_DESCRIPTION_U16: usize = 1024;
 
-/// Target-dependent scale factor for values returned by WM_GETMINMAXINFO.
+/// Scale from the units WM_GETMINMAXINFO answers in to Dome's physical pixels.
+// SAFETY: GetWindowDpiAwarenessContext and AreDpiAwarenessContextsEqual both
+// accept HWNDs from other processes.
+fn target_has_context(hwnd: HWND, ctx: DPI_AWARENESS_CONTEXT) -> bool {
+    let target = unsafe { GetWindowDpiAwarenessContext(hwnd) };
+    unsafe { AreDpiAwarenessContextsEqual(target, ctx) }.as_bool()
+}
+
 ///
-/// MINMAXINFO fields are filled by the target HWND's wndproc, which runs
-/// under the DPI-awareness context the HWND was created with (per Windows'
-/// Mixed-Mode DPI rules). For a PMv2 target matching Dome's PMv2 caller
-/// context, the values are already physical pixels. For legacy DPI-unaware
-/// or System-DPI-aware targets, the values are in the target's own context
-/// (96-DPI logical or system-DPI-logical); Dome must scale them to match
-/// its own physical-pixel coordinate system.
-///
-/// This wrapper detects the target's awareness via GetWindowDpiAwarenessContext
-/// and, when it differs from PMv2, uses GetDpiForWindow to derive the scale
-/// factor target_dpi / 96.0. This fixes a pre-existing bug where legacy
-/// target apps reported size constraints in the wrong unit.
+/// MINMAXINFO fields are filled by the target HWND's wndproc under the
+/// awareness context the HWND was created with. A PMv2 target matches Dome's
+/// caller context and reports physical pixels already. System-aware targets
+/// report in system-DPI units, scaled via GetDpiForWindow. Unaware targets
+/// report in their virtualized space, scaled via the monitor they occupy.
 fn target_scale_to_physical(hwnd: HWND) -> f32 {
-    // SAFETY: GetWindowDpiAwarenessContext works across processes (Win10 1607+).
-    let ctx = unsafe { GetWindowDpiAwarenessContext(hwnd) };
-    let is_pmv2 =
-        unsafe { AreDpiAwarenessContextsEqual(ctx, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) }
-            .as_bool();
-    if is_pmv2 {
-        1.0
-    } else {
+    if target_has_context(hwnd, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) {
+        return 1.0;
+    }
+    if !target_has_context(hwnd, DPI_AWARENESS_CONTEXT_UNAWARE) {
         let dpi = unsafe { GetDpiForWindow(hwnd) };
-        if dpi == 0 {
+        return if dpi == 0 {
             // this means an invalid hwnd was passed in
             1.0
         } else {
             dpi as f32 / 96.0
-        }
+        };
     }
+    // An unaware wndproc fills MINMAXINFO in its virtualized space, which
+    // Windows re-materializes at the landing monitor's scale (the seam
+    // behavior placement_coords corrects). GetDpiForWindow reports a constant
+    // 96 there regardless of location, so scale by the monitor the window
+    // currently sits on.
+    let mut rect = RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
+        return 1.0;
+    }
+    monitor_effective_dpi(&rect).map_or(1.0, |dpi| dpi as f32 / 96.0)
+}
+
+/// Converts one MINMAXINFO track size into core's limit vocabulary.
+/// Win32 reports a zero track size when the app set no limit on that axis. A positive
+/// track size that does not exceed the invisible frame has no content-box equivalent, so
+/// it is reported as no limit rather than as a zero-sized one.
+fn scaled_track_limit(track: i32, border: i32, scale: f32) -> LimitUpdate {
+    let track = (track as f32 * scale) as i32;
+    if track <= 0 || track <= border {
+        return LimitUpdate::Cleared;
+    }
+    LimitUpdate::Set(Length::new((track - border) as f32))
 }
 
 pub(crate) fn enum_windows<F>(mut callback: F) -> windows::core::Result<()>
@@ -270,9 +289,13 @@ impl ManageExternalWindow for ExternalHwnd {
             flags |= SWP_NOZORDER;
         }
 
+        let ((x, y, cx, cy), _guard) = placement_coords(hwnd, x, y, cx, cy);
         if let Err(e) = unsafe { SetWindowPos(hwnd, insert_after, x, y, cx, cy, flags) } {
             tracing::trace!(?hwnd, rect = ?(x, y, cx, cy), "SetWindowPos failed: {e}");
         }
+        // Restore Dome's PMv2 context before the child propagation below, whose
+        // GetWindowRect reads assume physical pixels.
+        drop(_guard);
 
         // Propagate the position delta to owned child windows so they stay anchored
         // relative to the parent. Short-circuits on windows with no owned children.
@@ -594,21 +617,11 @@ impl InspectExternalWindow for ExternalHwnd {
         let (left, top, right, bottom) = get_invisible_border(hwnd);
         let horizontal = left + right;
         let vertical = top + bottom;
-        // Win32 reports a zero track size when the app set no limit on that axis. A positive
-        // track size that does not exceed the invisible frame has no content-box equivalent, so
-        // it is reported as no limit rather than as a zero-sized one.
-        let limit = |track: i32, border: i32| {
-            let track = (track as f32 * scale) as i32;
-            if track <= 0 || track <= border {
-                return LimitUpdate::Cleared;
-            }
-            LimitUpdate::Set(Length::new((track - border) as f32))
-        };
         LimitObservation {
-            min_width: limit(info.ptMinTrackSize.x, horizontal),
-            min_height: limit(info.ptMinTrackSize.y, vertical),
-            max_width: limit(info.ptMaxTrackSize.x, horizontal),
-            max_height: limit(info.ptMaxTrackSize.y, vertical),
+            min_width: scaled_track_limit(info.ptMinTrackSize.x, horizontal, scale),
+            min_height: scaled_track_limit(info.ptMinTrackSize.y, vertical, scale),
+            max_width: scaled_track_limit(info.ptMaxTrackSize.x, horizontal, scale),
+            max_height: scaled_track_limit(info.ptMaxTrackSize.y, vertical, scale),
         }
     }
 
@@ -744,4 +757,154 @@ fn clamp_desc_len(desc_ptr: usize, buf_ptr: usize, buf_len: usize, desc_len: u32
         .saturating_sub(1)
         .min(remaining_u16)
         .min(MAX_FILE_DESCRIPTION_U16)
+}
+
+/// Effective DPI of the nearest monitor to `rect`, or None when either query
+/// fails.
+fn monitor_effective_dpi(rect: &RECT) -> Option<u32> {
+    // SAFETY: rect outlives the call; MONITOR_DEFAULTTONEAREST always returns
+    // a monitor on a non-empty desktop.
+    let hmonitor = unsafe { MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST) };
+    if hmonitor.0.is_null() {
+        return None;
+    }
+    let mut dpi = 0u32;
+    // SAFETY: out-params are plain u32s owned by this call.
+    if unsafe { GetDpiForMonitor(hmonitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut dpi) }.is_err() {
+        return None;
+    }
+    (dpi > 0).then_some(dpi)
+}
+
+struct ThreadDpiGuard {
+    previous: DPI_AWARENESS_CONTEXT,
+}
+
+impl ThreadDpiGuard {
+    fn enter(ctx: DPI_AWARENESS_CONTEXT) -> Option<Self> {
+        // SAFETY: swapping the calling thread's context is documented and
+        // reversible; null means the swap failed and no guard should exist.
+        let previous = unsafe { SetThreadDpiAwarenessContext(ctx) };
+        if previous.0.is_null() {
+            None
+        } else {
+            Some(Self { previous })
+        }
+    }
+}
+
+impl Drop for ThreadDpiGuard {
+    fn drop(&mut self) {
+        unsafe { SetThreadDpiAwarenessContext(self.previous) };
+    }
+}
+
+/// Scales a physical rect into logical units of a display at `dpi`, rounding
+/// each edge half away from zero so width and height derive from rounded
+/// opposite edges.
+fn to_logical_rect(dpi: u32, x: i32, y: i32, cx: i32, cy: i32) -> (i32, i32, i32, i32) {
+    let scale = f64::from(dpi) / 96.0;
+    let edge = |v: i32| (f64::from(v) / scale).round() as i32;
+    let left = edge(x);
+    let top = edge(y);
+    let right = edge(x + cx);
+    let bottom = edge(y + cy);
+    (left, top, right - left, bottom - top)
+}
+
+/// Returns the coordinates to hand SetWindowPos for this target plus a guard
+/// holding the thread in the target's awareness context across the call.
+///
+/// A DPI-unaware target receiving a cross-process SetWindowPos gets its rect
+/// translated per edge, each edge using the scale of the edge's own monitor,
+/// and the result re-materialized at the anchor monitor's scale. An outer
+/// rect crossing onto a differently-scaled monitor is thus distorted in both
+/// directions (a requested right edge of 2563 beside a 100% monitor lands at
+/// 3204; a requested left edge 4px onto a 125% monitor from a 100% anchor
+/// pulls half a kilopixel sideways). Issuing pre-converted coordinates from
+/// inside the target's own context skips the translation entirely, so the
+/// guard is taken for every unaware target and the conversion is the only
+/// scale-dependent part.
+fn placement_coords(
+    hwnd: HWND,
+    x: i32,
+    y: i32,
+    cx: i32,
+    cy: i32,
+) -> ((i32, i32, i32, i32), Option<ThreadDpiGuard>) {
+    if !target_has_context(hwnd, DPI_AWARENESS_CONTEXT_UNAWARE) {
+        return ((x, y, cx, cy), None);
+    }
+    let rect = RECT {
+        left: x,
+        top: y,
+        right: x + cx,
+        bottom: y + cy,
+    };
+    let coords = match monitor_effective_dpi(&rect) {
+        Some(dpi) if dpi != 96 => to_logical_rect(dpi, x, y, cx, cy),
+        _ => (x, y, cx, cy),
+    };
+    match ThreadDpiGuard::enter(DPI_AWARENESS_CONTEXT_UNAWARE) {
+        Some(guard) => (coords, Some(guard)),
+        // Without the guard the OS translates the rect per edge and distorts
+        // it; identity coords are the best available fallback.
+        None => ((x, y, cx, cy), None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{scaled_track_limit, to_logical_rect};
+    use crate::core::LimitUpdate;
+
+    #[test]
+    fn identity_at_96_dpi() {
+        assert_eq!(
+            to_logical_rect(96, -3, 43, 1286, 1400),
+            (-3, 43, 1286, 1400)
+        );
+    }
+
+    // Values verified live against a tkinter window straddling a 125%/100%
+    // monitor boundary: issuing this logical rect landed the visible frame
+    // exactly on the tile instead of inflating the crossing edge by 1.25.
+    #[test]
+    fn scales_edges_independently_at_120_dpi() {
+        assert_eq!(
+            to_logical_rect(120, 1277, 43, 1286, 1400),
+            (1022, 34, 1028, 1120)
+        );
+    }
+
+    #[test]
+    fn rounds_half_away_from_zero() {
+        assert_eq!(to_logical_rect(192, 5, -5, 10, 20), (3, -3, 5, 11));
+    }
+
+    #[test]
+    fn cleared_for_zero_negative_or_subframe_tracks() {
+        assert!(matches!(
+            scaled_track_limit(0, 18, 1.0),
+            LimitUpdate::Cleared
+        ));
+        assert!(matches!(
+            scaled_track_limit(-5, 18, 1.0),
+            LimitUpdate::Cleared
+        ));
+        assert!(matches!(
+            scaled_track_limit(17, 18, 1.0),
+            LimitUpdate::Cleared
+        ));
+    }
+
+    #[test]
+    fn scales_track_before_stripping_borders() {
+        let LimitUpdate::Set(length) = scaled_track_limit(30, 18, 1.25) else {
+            panic!("expected a set limit");
+        };
+        // 30 virtualized units scale to 37 physical pixels (truncated), then
+        // the 18px frame pair comes off.
+        assert!((length.value() - 19.0).abs() < 1e-4);
+    }
 }

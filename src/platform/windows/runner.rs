@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -29,6 +30,7 @@ pub(super) struct Runner {
     timers: TimerRegistry,
     main_thread_id: u32,
     keymap_state: Arc<RwLock<KeymapState>>,
+    constraint_read_monitor: HashMap<HwndId, isize>,
 }
 
 impl Runner {
@@ -47,6 +49,7 @@ impl Runner {
             timers,
             main_thread_id,
             keymap_state,
+            constraint_read_monitor: HashMap::new(),
         }
     }
 
@@ -273,6 +276,7 @@ impl Runner {
                     runner.dome.capture_bar(ext.id(), monitor, rect);
                 }
                 CreatedWindow::Manageable(new, rect, monitor) => {
+                    runner.constraint_read_monitor.insert(new.ext.id(), monitor);
                     runner.dome.add_window(new, rect, monitor);
                 }
                 CreatedWindow::Skip => {}
@@ -298,8 +302,17 @@ impl Runner {
                 runner
                     .dome
                     .handle_window_moved(hwnd_id, rect, monitor, observed_at);
+                runner.refresh_constraints_if_monitor_changed(hwnd_id, monitor);
             },
         );
+    }
+
+    // Constraints from WM_GETMINMAXINFO answer in the anchor monitor's units,
+    // so a move onto another monitor invalidates the stored read until redone.
+    fn refresh_constraints_if_monitor_changed(&mut self, hwnd_id: HwndId, monitor: isize) {
+        if self.constraint_read_monitor.insert(hwnd_id, monitor) != Some(monitor) {
+            self.dispatch_constraint_read(hwnd_id);
+        }
     }
 
     pub(super) fn handle_display_change(&mut self) {
