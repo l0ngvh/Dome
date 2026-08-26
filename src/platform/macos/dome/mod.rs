@@ -200,6 +200,8 @@ pub(in crate::platform::macos) struct Dome {
     pending_deleted: Vec<WindowId>,
     status_bars: StatusBarTracker,
     monitors: Vec<MonitorInfo>,
+    /// Detection is suppressed while the display settles after a monitor change.
+    monitor_settling: bool,
 }
 
 impl Dome {
@@ -241,6 +243,7 @@ impl Dome {
             pending_deleted: Vec::new(),
             status_bars: StatusBarTracker::default(),
             monitors: monitors.to_vec(),
+            monitor_settling: false,
         }
     }
 
@@ -439,13 +442,14 @@ impl Dome {
     }
 
     pub(in crate::platform::macos) fn monitors_changed(&mut self, monitors: Vec<MonitorInfo>) {
-        if monitors.is_empty() {
-            tracing::warn!("Empty monitor list, skipping reconciliation");
-            return;
-        }
         self.rehide_offscreen_windows(&monitors);
         self.update_monitors(&monitors);
+        self.monitor_settling = true;
         self.flush_layout();
+    }
+
+    pub(in crate::platform::macos) fn finish_monitor_settle(&mut self) {
+        self.monitor_settling = false;
     }
 
     #[tracing::instrument(skip(self), fields(cg_id = %cg_id))]
