@@ -1,4 +1,6 @@
-use crate::config::{LayoutWorkspaceConfig, MasterConfig, SplitMode, Strategy, TreeLayoutNode};
+use crate::config::{
+    LayoutWorkspaceConfig, MasterConfig, PaneConfig, SplitMode, Strategy, TreeLayoutNode,
+};
 use crate::core::GlobalLayoutConfig;
 use crate::core::hub::Hub;
 use crate::core::node::{PixelRect, WindowRestrictions};
@@ -447,8 +449,8 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
             name: "1".to_string(),
             master_ratio: None,
             master_count: None,
-            master: Vec::new(),
-            secondary: Vec::new(),
+            master: PaneConfig::tiled(Vec::new()),
+            secondary: PaneConfig::tiled(Vec::new()),
             float: Vec::new(),
             fullscreen: Vec::new(),
         }],
@@ -660,8 +662,8 @@ fn setup_master_on_workspace_one() -> Hub {
             name: "1".to_string(),
             master_ratio: None,
             master_count: Some(1),
-            master: Vec::new(),
-            secondary: Vec::new(),
+            master: PaneConfig::tiled(Vec::new()),
+            secondary: PaneConfig::tiled(Vec::new()),
             float: Vec::new(),
             fullscreen: Vec::new(),
         }],

@@ -3,7 +3,7 @@ use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 
 use crate::config::{
-    LayoutWorkspaceConfig, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
+    LayoutWorkspaceConfig, PaneConfig, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
 };
 use crate::core::GlobalLayoutConfig;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
@@ -55,8 +55,8 @@ pub(crate) struct WorkspaceExport {
     pub(crate) tree: Option<TreeLayoutNode>,
     pub(crate) master_ratio: Option<f32>,
     pub(crate) master_count: Option<usize>,
-    pub(crate) master: Vec<WindowMatcher>,
-    pub(crate) secondary: Vec<WindowMatcher>,
+    pub(crate) master: PaneConfig,
+    pub(crate) secondary: PaneConfig,
     pub(crate) float: Vec<WindowMatcher>,
     pub(crate) fullscreen: Vec<WindowMatcher>,
 }

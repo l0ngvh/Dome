@@ -3,7 +3,7 @@ use rustc_hash::FxHashSet;
 use crate::core::{
     Length, WindowId,
     hub::HubAccess,
-    master::MasterStrategy,
+    master::{MasterStrategy, PaneDisplay, PaneKind},
     node::ContainerId,
     strategy::{VALIDATION_TOLERANCE, ValidateStrategy, window_constraints},
 };
@@ -201,6 +201,17 @@ impl ValidateStrategy for MasterStrategy {
                     state.secondary.y_offset == Length::ZERO,
                     "master-stack workspace {ws_id}: stack_y_offset should be zero (no stack windows)"
                 );
+            }
+
+            for kind in [PaneKind::Master, PaneKind::Secondary] {
+                let pane = state.pane(kind);
+                if pane.display == PaneDisplay::Tabbed && Self::pane_len(hub, pane.container) >= 2 {
+                    assert!(
+                        pane.y_offset == Length::ZERO,
+                        "master-stack workspace {ws_id}: tabbed {kind:?} pane y_offset {} is not zero",
+                        pane.y_offset
+                    );
+                }
             }
         }
     }

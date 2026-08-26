@@ -6,6 +6,7 @@ mod scroll;
 mod validate;
 
 use rustc_hash::FxHashMap;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{LayoutWorkspaceConfig, SizeConstraints};
 use crate::core::GlobalLayoutConfig;
@@ -65,9 +66,17 @@ impl TilingStrategy for MasterStrategy {
             children: Vec::new(),
         });
 
-        let (master_ids, secondary_ids, master_count, master_ratio) = match master_cfg {
+        let (
+            master_ids,
+            secondary_ids,
+            master_count,
+            master_ratio,
+            master_display,
+            secondary_display,
+        ) = match master_cfg {
             Some((master_count, master_ratio, master, secondary)) => {
                 let master_ids = master
+                    .children
                     .iter()
                     .map(|m| {
                         self.slots.allocate(Slot {
@@ -77,6 +86,7 @@ impl TilingStrategy for MasterStrategy {
                     })
                     .collect();
                 let secondary_ids = secondary
+                    .children
                     .iter()
                     .map(|m| {
                         self.slots.allocate(Slot {
@@ -85,16 +95,30 @@ impl TilingStrategy for MasterStrategy {
                         })
                     })
                     .collect();
-                (master_ids, secondary_ids, master_count, master_ratio)
+                (
+                    master_ids,
+                    secondary_ids,
+                    master_count,
+                    master_ratio,
+                    master.display,
+                    secondary.display,
+                )
             }
-            None => (Vec::new(), Vec::new(), None, None),
+            None => (
+                Vec::new(),
+                Vec::new(),
+                None,
+                None,
+                PaneDisplay::Tiled,
+                PaneDisplay::Tiled,
+            ),
         };
 
         self.workspaces.insert(
             ws_id,
             WorkspaceState {
-                master: Pane::new(master_container, master_ids),
-                secondary: Pane::new(secondary_container, secondary_ids),
+                master: Pane::new(master_container, master_ids, master_display),
+                secondary: Pane::new(secondary_container, secondary_ids, secondary_display),
                 focus_history: Vec::new(),
                 master_count,
                 master_ratio,
@@ -776,8 +800,10 @@ impl WorkspaceState {
 
 /// One side of the master-stack split. Windows live in `container`, a flat `Container`
 /// of `Child::Window` that never nests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PaneDisplay {
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum PaneDisplay {
+    #[default]
     Tiled,
     Tabbed,
 }
@@ -791,12 +817,12 @@ struct Pane {
 }
 
 impl Pane {
-    fn new(container: ContainerId, matchers: Vec<SlotId>) -> Self {
+    fn new(container: ContainerId, matchers: Vec<SlotId>, display: PaneDisplay) -> Self {
         Pane {
             container,
             matchers,
             y_offset: Length::ZERO,
-            display: PaneDisplay::Tiled,
+            display,
         }
     }
 }

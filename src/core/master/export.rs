@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    config::WindowMatcher,
+    config::{PaneConfig, WindowMatcher},
     core::{
         hub::HubAccess,
         master::{MasterStrategy, preferred_layout::Slot, preferred_layout::SlotId},
@@ -71,8 +71,14 @@ impl MasterStrategy {
             strategy: "master".into(),
             master_ratio: state.master_ratio,
             master_count: state.master_count,
-            master,
-            secondary,
+            master: PaneConfig {
+                display: state.master.display,
+                children: master,
+            },
+            secondary: PaneConfig {
+                display: state.secondary.display,
+                children: secondary,
+            },
             ..Default::default()
         }
     }

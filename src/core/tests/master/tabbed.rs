@@ -1,16 +1,54 @@
 use crate::config::Strategy;
 use crate::core::ContainerId;
+use crate::core::PaneDisplay;
 use crate::core::WindowRestrictions;
 use crate::core::allocator::NodeId;
-use crate::core::hub::Hub;
+use crate::core::node::Pixels;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, snapshot,
-    titled,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder,
+    default_rect, snapshot, titled,
 };
 use insta::assert_snapshot;
 
-fn master_hub(master_count: usize) -> Hub {
-    TestHubBuilder::new()
+#[test]
+fn tabbed_pane_keeps_min_height_when_tab_bar_exceeds_screen() {
+    // A tab bar taller than the screen leaves zero content height. Each window must
+    // still keep its min height, so snapshot's validate pass sees no zero-height window.
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .with_partition_tree_config(
+                    PartitionTreeConfigBuilder::new()
+                        .with_tab_bar_height(Pixels::new(46))
+                        .build(),
+                )
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(2)
+                .with_master_display(PaneDisplay::Tabbed)
+                .build(),
+        ])
+        .build();
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[W0, W1])
+      )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                   W0                                     |                                 [W1]                                    |
+    ");
+}
+
+#[test]
+fn toggle_master_pane_to_tabbed() {
+    let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
@@ -19,15 +57,10 @@ fn master_hub(master_count: usize) -> Hub {
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
-                .with_master_count(master_count)
+                .with_master_count(2)
                 .build(),
         ])
-        .build()
-}
-
-#[test]
-fn toggle_master_pane_to_tabbed() {
-    let mut hub = master_hub(2);
+        .build();
     hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
@@ -73,7 +106,19 @@ fn toggle_master_pane_to_tabbed() {
 
 #[test]
 fn single_window_pane_tabbed_shows_no_bar() {
-    let mut hub = master_hub(1);
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(1)
+                .build(),
+        ])
+        .build();
     hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
     assert_snapshot!(snapshot(&hub), @"
@@ -117,7 +162,19 @@ fn single_window_pane_tabbed_shows_no_bar() {
 
 #[test]
 fn secondary_pane_tabbed() {
-    let mut hub = master_hub(1);
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(1)
+                .build(),
+        ])
+        .build();
     hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
@@ -166,7 +223,19 @@ fn secondary_pane_tabbed() {
 
 #[test]
 fn focus_tab_cycles_active_window() {
-    let mut hub = master_hub(3);
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(3)
+                .build(),
+        ])
+        .build();
     let w0 = hub
         .insert_window(titled("W0"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -188,7 +257,19 @@ fn focus_tab_cycles_active_window() {
 
 #[test]
 fn focus_tab_wraps_backward() {
-    let mut hub = master_hub(3);
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(3)
+                .build(),
+        ])
+        .build();
     let w0 = hub
         .insert_window(titled("W0"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -207,7 +288,19 @@ fn focus_tab_wraps_backward() {
 
 #[test]
 fn tab_click_focuses_window() {
-    let mut hub = master_hub(3);
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(3)
+                .build(),
+        ])
+        .build();
     let w0 = hub
         .insert_window(titled("W0"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -226,7 +319,19 @@ fn tab_click_focuses_window() {
 
 #[test]
 fn tab_click_out_of_range_is_noop() {
-    let mut hub = master_hub(3);
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(3)
+                .build(),
+        ])
+        .build();
     hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     let w2 = hub
@@ -241,7 +346,19 @@ fn tab_click_out_of_range_is_noop() {
 
 #[test]
 fn focus_tab_is_noop_on_tiled_pane() {
-    let mut hub = master_hub(3);
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(3)
+                .build(),
+        ])
+        .build();
     hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     let w2 = hub
@@ -256,7 +373,19 @@ fn focus_tab_is_noop_on_tiled_pane() {
 
 #[test]
 fn toggle_off_restores_tiled() {
-    let mut hub = master_hub(3);
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(3)
+                .build(),
+        ])
+        .build();
     hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     let w2 = hub

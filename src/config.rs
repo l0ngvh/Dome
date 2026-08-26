@@ -9,7 +9,7 @@ use std::str::FromStr;
 use crate::action::{
     Action, Actions, FocusTarget, MonitorTarget, MoveTarget, TabDirection, ToggleTarget,
 };
-use crate::core::{Length, Logical, Pixels, Unit};
+use crate::core::{Length, Logical, PaneDisplay, Pixels, Unit};
 use crate::font::{FontConfig, MAX_FONT_SIZE, MIN_FONT_SIZE, default_text_size};
 use crate::theme::{Flavor, Theme};
 
@@ -972,6 +972,96 @@ impl LayoutConfig {
     }
 }
 
+/// One master-strategy pane as stored in `layout.toml`.
+///
+/// TOML shapes:
+///   Tiled:   `[{ process = "a" }, { process = "b" }]`
+///   Tabbed:  `{ display = "tabbed", children = [...] }`
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct PaneConfig {
+    pub(crate) display: PaneDisplay,
+    pub(crate) children: Vec<WindowMatcher>,
+}
+
+impl PaneConfig {
+    #[cfg(test)]
+    pub(crate) fn tiled(children: Vec<WindowMatcher>) -> Self {
+        Self {
+            display: PaneDisplay::Tiled,
+            children,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct PaneContainer {
+    #[serde(default)]
+    display: PaneDisplay,
+    #[serde(default)]
+    children: Vec<WindowMatcher>,
+}
+
+impl From<PaneContainer> for PaneConfig {
+    fn from(c: PaneContainer) -> Self {
+        PaneConfig {
+            display: c.display,
+            children: c.children,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PaneConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = PaneConfig;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("an array of window matchers, or a table with display and children")
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                let children = Vec::deserialize(serde::de::value::SeqAccessDeserializer::new(seq))?;
+                Ok(PaneConfig {
+                    display: PaneDisplay::Tiled,
+                    children,
+                })
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                map: M,
+            ) -> Result<Self::Value, M::Error> {
+                use serde::de::Error;
+                let value: toml::Value =
+                    toml::Value::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                        .map_err(|e| M::Error::custom(&e))?;
+                PaneContainer::deserialize(value)
+                    .map(Into::into)
+                    .map_err(|e| M::Error::custom(&e))
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
+impl Serialize for PaneConfig {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self.display {
+            PaneDisplay::Tiled => self.children.serialize(serializer),
+            PaneDisplay::Tabbed => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("display", &self.display)?;
+                map.serialize_entry("children", &self.children)?;
+                map.end()
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "strategy")]
 pub(crate) enum LayoutWorkspaceConfig {
@@ -993,9 +1083,9 @@ pub(crate) enum LayoutWorkspaceConfig {
         #[serde(default)]
         master_count: Option<usize>,
         #[serde(default)]
-        master: Vec<WindowMatcher>,
+        master: PaneConfig,
         #[serde(default)]
-        secondary: Vec<WindowMatcher>,
+        secondary: PaneConfig,
         #[serde(default)]
         float: Vec<WindowMatcher>,
         #[serde(default)]
@@ -2587,5 +2677,103 @@ tree = { split = "diagonal", children = []}
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn master_pane_bare_array_parses_tiled() {
+        let ws: LayoutWorkspaceConfig = toml::from_str(
+            r#"name = "1"
+strategy = "master"
+master = [{ process = "a.exe" }, { process = "b.exe" }]
+"#,
+        )
+        .unwrap();
+        match ws {
+            LayoutWorkspaceConfig::Master { master, .. } => {
+                assert_eq!(master.display, PaneDisplay::Tiled);
+                assert_eq!(master.children.len(), 2);
+            }
+            _ => panic!("expected Master variant"),
+        }
+    }
+
+    #[test]
+    fn master_pane_map_parses_tabbed() {
+        let ws: LayoutWorkspaceConfig = toml::from_str(
+            r#"name = "1"
+strategy = "master"
+master = { display = "tabbed", children = [{ process = "a.exe" }] }
+"#,
+        )
+        .unwrap();
+        match ws {
+            LayoutWorkspaceConfig::Master { master, .. } => {
+                assert_eq!(master.display, PaneDisplay::Tabbed);
+                assert_eq!(master.children.len(), 1);
+            }
+            _ => panic!("expected Master variant"),
+        }
+    }
+
+    #[test]
+    fn master_pane_map_display_tiled_parses() {
+        let ws: LayoutWorkspaceConfig = toml::from_str(
+            r#"name = "1"
+strategy = "master"
+secondary = { display = "tiled", children = [{ process = "a.exe" }] }
+"#,
+        )
+        .unwrap();
+        match ws {
+            LayoutWorkspaceConfig::Master { secondary, .. } => {
+                assert_eq!(secondary.display, PaneDisplay::Tiled);
+                assert_eq!(secondary.children.len(), 1);
+            }
+            _ => panic!("expected Master variant"),
+        }
+    }
+
+    #[test]
+    fn master_panes_default_to_empty_tiled() {
+        let ws: LayoutWorkspaceConfig = toml::from_str(
+            r#"name = "1"
+strategy = "master"
+"#,
+        )
+        .unwrap();
+        match ws {
+            LayoutWorkspaceConfig::Master {
+                master, secondary, ..
+            } => {
+                assert_eq!(master, PaneConfig::default());
+                assert_eq!(secondary, PaneConfig::default());
+            }
+            _ => panic!("expected Master variant"),
+        }
+    }
+
+    #[test]
+    fn master_pane_serializes_tiled_as_bare_array() {
+        let pane = PaneConfig::tiled(vec![WindowMatcher {
+            process: Some("a.exe".into()),
+            ..Default::default()
+        }]);
+        let value = toml::Value::try_from(&pane).unwrap();
+        assert!(value.is_array());
+    }
+
+    #[test]
+    fn master_pane_serializes_tabbed_as_map() {
+        let pane = PaneConfig {
+            display: PaneDisplay::Tabbed,
+            children: vec![WindowMatcher {
+                process: Some("a.exe".into()),
+                ..Default::default()
+            }],
+        };
+        let value = toml::Value::try_from(&pane).unwrap();
+        let table = value.as_table().expect("tabbed pane serializes as a table");
+        assert_eq!(table["display"].as_str(), Some("tabbed"));
+        assert!(table["children"].is_array());
     }
 }

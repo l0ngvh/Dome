@@ -34,16 +34,14 @@ impl MasterStrategy {
 
         if !master_ids.is_empty() {
             if master_display == PaneDisplay::Tabbed && master_ids.len() >= 2 {
-                let active = self.last_focused_in(hub, ws_id, PaneKind::Master);
-                self.do_tabbed_pane_layout(hub, active, master_x, master_w, h, scale);
+                self.do_tabbed_pane_layout(hub, &master_ids, master_x, master_w, h, scale);
             } else {
                 self.do_pane_layout(hub, &master_ids, master_w, master_x, h);
             }
         }
         if !stack_ids.is_empty() {
             if secondary_display == PaneDisplay::Tabbed && stack_ids.len() >= 2 {
-                let active = self.last_focused_in(hub, ws_id, PaneKind::Secondary);
-                self.do_tabbed_pane_layout(hub, active, stack_x, stack_w, h, scale);
+                self.do_tabbed_pane_layout(hub, &stack_ids, stack_x, stack_w, h, scale);
             } else {
                 self.do_pane_layout(hub, &stack_ids, stack_w, stack_x, h);
             }
@@ -232,11 +230,10 @@ impl MasterStrategy {
         }
     }
 
-    /// Only the active window is shown in a tabbed pane, so only it gets a fresh dimension.
     fn do_tabbed_pane_layout(
         &mut self,
         hub: &HubAccess,
-        active: WindowId,
+        ids: &[WindowId],
         x_start: Length,
         pane_width: Length,
         screen_height: Length,
@@ -244,18 +241,24 @@ impl MasterStrategy {
     ) {
         let band = self.tab_bar_length(scale);
         let content_h = (screen_height - band).max(Length::ZERO);
-        let c = window_constraints(hub, &self.size_constraints, active);
-        let adjusted_w = c.min_width.max(pane_width);
-        let (w, x_off) = apply_max_constraint(c.max_width, adjusted_w);
-        let (slot_h, y_off) = apply_max_constraint(c.max_height, content_h);
-        let dim = Dimension::new(x_start + x_off, band + y_off, w, slot_h);
-        self.window_states
-            .entry(active)
-            .and_modify(|s| s.dimension = dim)
-            .or_insert(WindowState {
-                occupy: None,
-                dimension: dim,
-            });
+        // Every tab shares the content box, so all windows get a dimension even
+        // though only the active one renders. Each honors its own min height, so a
+        // tab bar taller than the screen cannot collapse a window to zero height.
+        for &wid in ids {
+            let c = window_constraints(hub, &self.size_constraints, wid);
+            let adjusted_w = c.min_width.max(pane_width);
+            let (w, x_off) = apply_max_constraint(c.max_width, adjusted_w);
+            let adjusted_h = c.min_height.max(content_h);
+            let (slot_h, y_off) = apply_max_constraint(c.max_height, adjusted_h);
+            let dim = Dimension::new(x_start + x_off, band + y_off, w, slot_h);
+            self.window_states
+                .entry(wid)
+                .and_modify(|s| s.dimension = dim)
+                .or_insert(WindowState {
+                    occupy: None,
+                    dimension: dim,
+                });
+        }
     }
 
     fn clamp_scroll(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {

@@ -5,7 +5,7 @@ use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, process_meta,
     snapshot, titled, titled_process,
 };
-use crate::core::{Direction, TilingAction, WindowRestrictions};
+use crate::core::{Direction, PaneDisplay, TilingAction, WindowRestrictions};
 
 #[test]
 fn secondary_matched_goes_to_stack() {
@@ -1326,7 +1326,7 @@ fn insert_multiple_matched_windows_to_the_same_slot() {
     hub.sync_preferred_layout(vec![
         LayoutWorkspaceConfigBuilder::new("1")
             .with_strategy(Strategy::Master)
-            .with_master(exported.master)
+            .with_master(exported.master.children)
             .with_master_count(2)
             .build(),
     ]);
@@ -1497,4 +1497,250 @@ fn matches_tiling_no_preferred_layout() {
     let ws = hub.current_workspace();
     let strategy = hub.strategies.for_workspace(ws);
     assert!(!strategy.matches_tiling(ws, process_meta("editor.exe").as_ref()));
+}
+
+#[test]
+fn master_display_tabbed_renders_tab_bar() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(2)
+                .with_master_display(PaneDisplay::Tabbed)
+                .build(),
+        ])
+        .build();
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00, highlighted)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[W0, W1])
+      )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                   W0                                     |                                 [W1]                                    |
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W1                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    ");
+}
+
+#[test]
+fn master_tabbed_secondary_tiled() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(2)
+                .with_master_display(PaneDisplay::Tabbed)
+                .build(),
+        ])
+        .build();
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
+    // Master holds W0 and W1 (tabbed), secondary holds W2 and W3 (tiled).
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=2.00, w=75.00, h=28.00)
+        Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=15.00)
+        Window(id=WindowId(3), x=75.00, y=15.00, w=75.00, h=15.00, highlighted)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, titles=[W0, W1])
+      )
+
+    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
+    |                W0                  |               [W1]                 ||                                                                         |
+    +-------------------------------------------------------------------------+|                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                    W2                                   |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         |+-------------------------------------------------------------------------+
+    |                                                                         |***************************************************************************
+    |                                    W1                                   |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                    W3                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    +-------------------------------------------------------------------------+***************************************************************************
+    ");
+}
+
+#[test]
+fn both_panes_tabbed() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(2)
+                .with_master_display(PaneDisplay::Tabbed)
+                .with_secondary_display(PaneDisplay::Tabbed)
+                .build(),
+        ])
+        .build();
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
+    // Master holds W0 and W1, secondary holds W2 and W3. Both panes tabbed.
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=2.00, w=75.00, h=28.00)
+        Window(id=WindowId(3), x=75.00, y=2.00, w=75.00, h=28.00, highlighted)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, titles=[W0, W1])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, titles=[W2, W3])
+      )
+
+    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
+    |                W0                  |               [W1]                 ||                W2                  |               [W3]                 |
+    +-------------------------------------------------------------------------+***************************************************************************
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                    W1                                   |*                                    W3                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    +-------------------------------------------------------------------------+***************************************************************************
+    ");
+}
+
+#[test]
+fn secondary_display_tabbed_renders_tab_bar() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(1)
+                .with_secondary_display(PaneDisplay::Tabbed)
+                .build(),
+        ])
+        .build();
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
+    // Master holds W0, secondary holds W1 and W2.
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Window(id=WindowId(2), x=75.00, y=2.00, w=75.00, h=28.00, highlighted)
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, titles=[W1, W2])
+      )
+
+    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
+    |                                                                         ||                W1                  |               [W2]                 |
+    |                                                                         |***************************************************************************
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                    W0                                   |*                                                                         *
+    |                                                                         |*                                    W2                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    +-------------------------------------------------------------------------+***************************************************************************
+    ");
 }

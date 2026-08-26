@@ -16,21 +16,23 @@ impl MasterStrategy {
             return;
         };
 
-        let (new_count_opt, new_ratio_opt, incoming_master, incoming_secondary) = match incoming {
-            Some(LayoutWorkspaceConfig::Master {
-                master_count: incoming_count,
-                master_ratio: incoming_ratio,
-                master,
-                secondary,
-                ..
-            }) => (
-                *incoming_count,
-                *incoming_ratio,
-                master.clone(),
-                secondary.clone(),
-            ),
-            _ => (None, None, Vec::new(), Vec::new()),
-        };
+        let (new_count_opt, new_ratio_opt, incoming_master, incoming_secondary, incoming_displays) =
+            match incoming {
+                Some(LayoutWorkspaceConfig::Master {
+                    master_count: incoming_count,
+                    master_ratio: incoming_ratio,
+                    master,
+                    secondary,
+                    ..
+                }) => (
+                    *incoming_count,
+                    *incoming_ratio,
+                    master.children.clone(),
+                    secondary.children.clone(),
+                    Some((master.display, secondary.display)),
+                ),
+                _ => (None, None, Vec::new(), Vec::new(), None),
+            };
 
         let current_master: Vec<WindowMatcher> = state
             .master
@@ -53,12 +55,20 @@ impl MasterStrategy {
         let cur_effective_ratio = state.master_ratio.unwrap_or(self.master_ratio);
         let ratio_changed = new_ratio_opt.is_some()
             && (new_effective_ratio - cur_effective_ratio).abs() > f32::EPSILON;
+        let display_changed = incoming_displays
+            .is_some_and(|(m, s)| state.master.display != m || state.secondary.display != s);
 
-        if !matchers_changed && !count_changed && !ratio_changed {
+        if !matchers_changed && !count_changed && !ratio_changed && !display_changed {
             return;
         }
 
         tracing::debug!(%ws_id, "Master preferred layout changed, reloading");
+
+        if let Some((m_disp, s_disp)) = incoming_displays {
+            let state = self.workspaces.get_mut(&ws_id).unwrap();
+            state.master.display = m_disp;
+            state.secondary.display = s_disp;
+        }
 
         if matchers_changed {
             let (master_cid, secondary_cid) = {

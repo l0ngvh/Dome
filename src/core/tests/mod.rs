@@ -17,10 +17,11 @@ mod strategy_switch;
 use std::collections::HashSet;
 
 use crate::config::{
-    LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraint, SizeConstraints,
-    Strategy, TreeLayoutNode, WindowMatcher,
+    LayoutWorkspaceConfig, MasterConfig, PaneConfig, PartitionTreeConfig, SizeConstraint,
+    SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
 };
 use crate::core::GlobalLayoutConfig;
+use crate::core::PaneDisplay;
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
 use crate::core::node::{Direction, Logical, Pixels, WindowId};
@@ -846,6 +847,8 @@ struct LayoutWorkspaceConfigBuilder {
     master_count: Option<usize>,
     master: Vec<WindowMatcher>,
     secondary: Vec<WindowMatcher>,
+    master_display: PaneDisplay,
+    secondary_display: PaneDisplay,
     tree: Option<TreeLayoutNode>,
     float: Vec<WindowMatcher>,
     fullscreen: Vec<WindowMatcher>,
@@ -860,6 +863,8 @@ impl LayoutWorkspaceConfigBuilder {
             master_count: None,
             master: vec![],
             secondary: vec![],
+            master_display: PaneDisplay::Tiled,
+            secondary_display: PaneDisplay::Tiled,
             tree: None,
             float: vec![],
             fullscreen: vec![],
@@ -892,6 +897,20 @@ impl LayoutWorkspaceConfigBuilder {
         Self { secondary, ..self }
     }
 
+    fn with_master_display(self, master_display: PaneDisplay) -> Self {
+        Self {
+            master_display,
+            ..self
+        }
+    }
+
+    fn with_secondary_display(self, secondary_display: PaneDisplay) -> Self {
+        Self {
+            secondary_display,
+            ..self
+        }
+    }
+
     fn with_float(self, float: Vec<WindowMatcher>) -> Self {
         Self { float, ..self }
     }
@@ -913,8 +932,14 @@ impl LayoutWorkspaceConfigBuilder {
                 name: self.name,
                 master_count: self.master_count,
                 master_ratio: self.master_ratio,
-                master: self.master,
-                secondary: self.secondary,
+                master: PaneConfig {
+                    display: self.master_display,
+                    children: self.master,
+                },
+                secondary: PaneConfig {
+                    display: self.secondary_display,
+                    children: self.secondary,
+                },
                 float: self.float,
                 fullscreen: self.fullscreen,
             },

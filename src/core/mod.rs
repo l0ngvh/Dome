@@ -32,6 +32,8 @@ pub(crate) use node::{
 };
 pub(crate) use strategy::TilingAction;
 
+pub(crate) use master::PaneDisplay;
+
 pub(crate) use dto::WorkspaceInfo;
 
 const MAX_ITERATIONS: usize = 10000;
