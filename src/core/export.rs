@@ -1,110 +1,199 @@
 use std::path::Path;
 
-use serde::Serialize;
-use toml_edit::ser::ValueSerializer;
-use toml_edit::{ArrayOfTables, DocumentMut, Item};
+use jsonc_parser::ParseOptions;
+use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 
 use super::matcher::FloatFullscreenMatcherId;
 use super::node::{DisplayMode, WorkspaceId};
 use super::strategy::WorkspaceExport;
 use super::{Hub, WindowId};
-use crate::config::WindowMatcher;
+use crate::config::{PaneConfig, SplitMode, TreeLayoutNode, WindowMatcher};
+use crate::core::PaneDisplay;
 
-pub(super) fn write_layout(
-    layout_path: &Path,
-    exported: &[(String, WorkspaceExport)],
-) -> anyhow::Result<String> {
-    let content = std::fs::read_to_string(layout_path).unwrap_or_default();
-    let mut doc: DocumentMut = if content.is_empty() {
-        DocumentMut::new()
-    } else {
-        content.parse()?
+fn matcher_to_cst(matcher: &WindowMatcher) -> CstInputValue {
+    let mut fields: Vec<(String, CstInputValue)> = Vec::new();
+    let mut push = |key: &str, value: &Option<String>| {
+        if let Some(v) = value {
+            fields.push((key.to_string(), v.clone().into()));
+        }
     };
-
-    let arr = doc
-        .entry("workspace")
-        .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
-        .as_array_of_tables_mut()
-        .ok_or_else(|| anyhow::anyhow!("workspace key exists but is not an array of tables"))?;
-
-    for (name, ws) in exported {
-        let mut found = false;
-        for entry in arr.iter_mut() {
-            if entry["name"].as_str() == Some(name) {
-                fill_entry(entry, ws)?;
-                found = true;
-                break;
-            }
-        }
-
-        if !found {
-            let mut table = toml_edit::Table::new();
-            table.insert("name", toml_edit::value(name));
-            fill_entry(&mut table, ws)?;
-            arr.push(table);
-        }
-    }
-
-    Ok(doc.to_string())
+    push("app", &matcher.app);
+    push("bundle_id", &matcher.bundle_id);
+    push("title", &matcher.title);
+    push("process", &matcher.process);
+    push("class", &matcher.class);
+    push("aumid", &matcher.aumid);
+    CstInputValue::Object(fields)
 }
 
-fn fill_entry(table: &mut toml_edit::Table, ws: &WorkspaceExport) -> anyhow::Result<()> {
-    table.insert("strategy", toml_edit::value(&ws.strategy));
+fn push_matcher_list(fields: &mut Vec<(String, CstInputValue)>, key: &str, list: &[WindowMatcher]) {
+    if list.is_empty() {
+        return;
+    }
+    let matchers = list.iter().map(matcher_to_cst).collect::<Vec<_>>();
+    fields.push((key.to_string(), CstInputValue::Array(matchers)));
+}
+
+/// A tiled pane exports as a plain matcher array. A tabbed pane exports as
+/// `{ display: "tabbed", children: [...] }`, the object shape `PaneConfig`
+/// reads back. An empty pane exports nothing.
+fn push_pane(fields: &mut Vec<(String, CstInputValue)>, key: &str, pane: &PaneConfig) {
+    if pane.children.is_empty() {
+        return;
+    }
+    let matchers = pane.children.iter().map(matcher_to_cst).collect::<Vec<_>>();
+    let value = match pane.display {
+        PaneDisplay::Tiled => CstInputValue::Array(matchers),
+        PaneDisplay::Tabbed => CstInputValue::Object(vec![
+            ("display".to_string(), "tabbed".into()),
+            ("children".to_string(), CstInputValue::Array(matchers)),
+        ]),
+    };
+    fields.push((key.to_string(), value));
+}
+
+/// Work-stack frame for `tree_to_cst`, which builds the tree bottom-up without
+/// recursion per the no-recursion rule.
+enum TreeFrame<'a> {
+    Enter(&'a TreeLayoutNode),
+    ExitContainer {
+        split: Option<SplitMode>,
+        children: usize,
+    },
+}
+
+fn tree_to_cst(root: &TreeLayoutNode) -> CstInputValue {
+    let mut work: Vec<TreeFrame> = vec![TreeFrame::Enter(root)];
+    let mut built: Vec<CstInputValue> = Vec::new();
+    for _ in super::bounded_loop() {
+        let Some(frame) = work.pop() else {
+            break;
+        };
+        match frame {
+            TreeFrame::Enter(TreeLayoutNode::Leaf(matcher)) => {
+                built.push(matcher_to_cst(matcher));
+            }
+            TreeFrame::Enter(TreeLayoutNode::Container { split, children }) => {
+                work.push(TreeFrame::ExitContainer {
+                    split: *split,
+                    children: children.len(),
+                });
+                for child in children.iter().rev() {
+                    work.push(TreeFrame::Enter(child));
+                }
+            }
+            TreeFrame::ExitContainer { split, children } => {
+                let kids = built.split_off(built.len() - children);
+                match split {
+                    None => built.push(CstInputValue::Array(kids)),
+                    Some(split) => built.push(CstInputValue::Object(vec![
+                        ("split".to_string(), split_str(split).into()),
+                        ("children".to_string(), CstInputValue::Array(kids)),
+                    ])),
+                }
+            }
+        }
+    }
+    built
+        .pop()
+        .expect("tree_to_cst leaves exactly one built node")
+}
+
+fn workspace_to_cst(name: &str, ws: &WorkspaceExport) -> CstInputValue {
+    let mut fields: Vec<(String, CstInputValue)> = vec![
+        ("name".to_string(), name.into()),
+        ("strategy".to_string(), ws.strategy.clone().into()),
+    ];
     match ws.strategy.as_str() {
         "partition_tree" => {
-            table.remove("master_ratio");
-            table.remove("master_count");
-            table.remove("master");
-            table.remove("secondary");
-            match &ws.tree {
-                Some(t) => {
-                    table.insert("tree", Item::Value(t.serialize(ValueSerializer::new())?));
-                }
-                None => {
-                    table.remove("tree");
-                }
+            if let Some(tree) = &ws.tree {
+                fields.push(("tree".to_string(), tree_to_cst(tree)));
             }
         }
         "master" => {
-            table.remove("tree");
-            if let Some(r) = ws.master_ratio {
-                table.insert("master_ratio", toml_edit::value(r as f64));
+            if let Some(ratio) = ws.master_ratio {
+                fields.push(("master_ratio".to_string(), f64::from(ratio).into()));
             }
-            if let Some(c) = ws.master_count {
-                table.insert("master_count", toml_edit::value(c as i64));
+            if let Some(count) = ws.master_count {
+                fields.push(("master_count".to_string(), count.into()));
             }
-            if !ws.master.children.is_empty() {
-                table.insert(
-                    "master",
-                    Item::Value(ws.master.serialize(ValueSerializer::new())?),
-                );
-            }
-            if !ws.secondary.children.is_empty() {
-                table.insert(
-                    "secondary",
-                    Item::Value(ws.secondary.serialize(ValueSerializer::new())?),
-                );
-            }
+            push_pane(&mut fields, "master", &ws.master);
+            push_pane(&mut fields, "secondary", &ws.secondary);
         }
         _ => {}
     }
-    if !ws.float.is_empty() {
-        table.insert(
-            "float",
-            Item::Value(ws.float.serialize(ValueSerializer::new())?),
-        );
-    } else {
-        table.remove("float");
+    push_matcher_list(&mut fields, "float", &ws.float);
+    push_matcher_list(&mut fields, "fullscreen", &ws.fullscreen);
+    CstInputValue::Object(fields)
+}
+
+fn split_str(split: SplitMode) -> &'static str {
+    match split {
+        SplitMode::Horizontal => "horizontal",
+        SplitMode::Vertical => "vertical",
+        SplitMode::Tabbed => "tabbed",
     }
-    if !ws.fullscreen.is_empty() {
-        table.insert(
-            "fullscreen",
-            Item::Value(ws.fullscreen.serialize(ValueSerializer::new())?),
-        );
+}
+
+fn object_name(obj: &CstObject) -> Option<String> {
+    obj.to_serde_value()?
+        .get("name")?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Reconciles live workspaces into the existing `layout.jsonc` text, preserving
+/// comments and formatting. Matches each workspace to a document entry by name,
+/// updates it in place, appends a new one, and drops entries no longer live. A
+/// missing or empty file starts from an empty object. The root node stays alive
+/// until `to_string`, because dropping it early can panic.
+pub(super) fn render_layout(
+    existing: &str,
+    workspaces: &[(String, WorkspaceExport)],
+) -> anyhow::Result<String> {
+    let source = if existing.trim().is_empty() {
+        "{}\n"
     } else {
-        table.remove("fullscreen");
+        existing
+    };
+    let root =
+        CstRootNode::parse(source, &ParseOptions::default()).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let root_obj = root.object_value_or_set();
+    let ws_arr = root_obj.array_value_or_set("workspace");
+
+    let live: Vec<(String, CstInputValue)> = workspaces
+        .iter()
+        .map(|(name, ws)| (name.clone(), workspace_to_cst(name, ws)))
+        .collect();
+    let live_names: std::collections::HashSet<&str> =
+        live.iter().map(|(name, _)| name.as_str()).collect();
+
+    for element in ws_arr.elements() {
+        let Some(obj) = element.as_object() else {
+            continue;
+        };
+        if object_name(&obj).is_some_and(|name| !live_names.contains(name.as_str())) {
+            obj.remove();
+        }
     }
-    Ok(())
+
+    for (name, value) in live {
+        let existing = ws_arr
+            .elements()
+            .into_iter()
+            .filter_map(|element| element.as_object())
+            .find(|obj| object_name(obj).as_deref() == Some(name.as_str()));
+        match existing {
+            Some(obj) => {
+                obj.replace_with(value);
+            }
+            None => {
+                ws_arr.append(value);
+            }
+        }
+    }
+
+    Ok(root.to_string())
 }
 
 impl Hub {
@@ -147,10 +236,11 @@ impl Hub {
             .map(|(ws_id, name)| (name, self.export_workspace(ws_id)))
             .collect();
 
-        let toml_string = write_layout(layout_path, &workspaces)?;
+        let existing = std::fs::read_to_string(layout_path).unwrap_or_default();
+        let rendered = render_layout(&existing, &workspaces)?;
 
-        let tmp = layout_path.with_extension("toml.tmp");
-        std::fs::write(&tmp, &toml_string)?;
+        let tmp = layout_path.with_extension("jsonc.tmp");
+        std::fs::write(&tmp, &rendered)?;
         std::fs::rename(&tmp, layout_path)?;
 
         Ok(())

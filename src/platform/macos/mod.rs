@@ -25,11 +25,13 @@ use objc2_core_foundation::{CFDictionary, kCFBooleanTrue};
 use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess};
 
 use crate::config::{
-    Config, LayoutConfig, layout_default_path, load_or_default, start_config_watcher,
+    Config, LayoutConfig, ModalKeymaps, layout_default_path, load_or_default, start_config_watcher,
+    start_file_watcher,
 };
 use crate::ipc;
 use crate::keymap::KeymapState;
 use crate::logging::Logger;
+use crate::lua_runtime::{self, RuntimeMsg, RuntimeOut};
 pub(in crate::platform::macos) use dome::MonitorInfo;
 use dome::{Dome, HubEvent, get_all_monitors};
 use listeners::EventListener;
@@ -39,9 +41,6 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
     let logger = Logger::init();
 
     let config_path = config_path.unwrap_or_else(Config::default_path);
-    let config = load_or_default(&config_path, Config::load);
-    logger.set_level(config.log_level);
-    tracing::info!(%config_path, "Loaded config");
 
     let layout_path = layout_path.unwrap_or_else(|| {
         layout_default_path(std::path::Path::new(&config_path))
@@ -52,7 +51,6 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
     tracing::info!(path = %layout_path, "Loaded layout");
 
     let bundle_path = login_item::detect_bundle_path();
-    login_item::sync_login_item(config.start_at_login, bundle_path.as_deref());
 
     std::panic::set_hook(Box::new(|panic_info| {
         let backtrace = backtrace::Backtrace::new();
@@ -89,23 +87,50 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
 
     let (event_tx, event_rx) = calloop::channel::channel();
 
-    let hub_config = config.clone();
-    let hub_layout = layout.workspace.clone();
-    let keymap_state = Arc::new(RwLock::new(KeymapState::new(config.keymaps.clone())));
+    // KeymapState starts empty and is filled from the runtime thread's initial
+    // config below, before the event tap and watchers that read it start.
+    let keymap_state = Arc::new(RwLock::new(KeymapState::new(ModalKeymaps::default())));
 
-    let _config_watcher = start_config_watcher(&config_path, Config::load, {
+    let out: Box<dyn Fn(RuntimeOut) + Send> = {
         let keymap_state = keymap_state.clone();
         let tx = event_tx.clone();
-        let bundle_path_for_watcher = bundle_path.clone();
-        move |cfg| {
-            logger.set_level(cfg.log_level);
-            keymap_state
-                .write()
-                .unwrap()
-                .update_keymaps(cfg.keymaps.clone());
-            let start_at_login = cfg.start_at_login;
-            tx.send(HubEvent::ConfigChanged(Box::new(cfg))).ok();
-            login_item::sync_login_item(start_at_login, bundle_path_for_watcher.as_deref());
+        let logger = logger.clone();
+        let bundle_path = bundle_path.clone();
+        Box::new(move |event| match event {
+            RuntimeOut::Actions(actions) => send_hub_event(&tx, HubEvent::Action(actions)),
+            RuntimeOut::SwitchMode(name) => {
+                if let Ok(mut ks) = keymap_state.write() {
+                    ks.switch_mode(&name);
+                }
+            }
+            RuntimeOut::Reloaded(config) => {
+                logger.set_level(config.log_level);
+                if let Ok(mut ks) = keymap_state.write() {
+                    ks.update_keymaps(config.keymaps.clone());
+                }
+                let start_at_login = config.start_at_login;
+                send_hub_event(&tx, HubEvent::ConfigChanged(config));
+                login_item::sync_login_item(start_at_login, bundle_path.as_deref());
+            }
+        })
+    };
+
+    let (runtime_handle, runtime_tx, config) = lua_runtime::spawn(config_path.clone(), out)?;
+    logger.set_level(config.log_level);
+    tracing::info!(%config_path, "Loaded config");
+    keymap_state
+        .write()
+        .unwrap()
+        .update_keymaps(config.keymaps.clone());
+    login_item::sync_login_item(config.start_at_login, bundle_path.as_deref());
+
+    let hub_config = config.clone();
+    let hub_layout = layout.workspace.clone();
+
+    let _config_watcher = start_file_watcher(&config_path, {
+        let runtime_tx = runtime_tx.clone();
+        move || {
+            runtime_tx.send(RuntimeMsg::Reload).ok();
         }
     })
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))
@@ -152,7 +177,8 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
         .spawn({
             let keymap_state = keymap_state.clone();
             let hub_sender = event_tx.clone();
-            move || keyboard::run_event_tap(keymap_state, is_suspended, hub_sender)
+            let runtime_sender = runtime_tx.clone();
+            move || keyboard::run_event_tap(keymap_state, is_suspended, hub_sender, runtime_sender)
         })?;
 
     let (ui, sender) = Ui::new(mtm, event_tx, event_listener, config.clone());
@@ -167,6 +193,8 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
 
     ui.run();
 
+    runtime_tx.send(RuntimeMsg::Shutdown).ok();
+    runtime_handle.join().ok();
     hub_thread.join().ok();
     Ok(())
 }

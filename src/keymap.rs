@@ -1,5 +1,13 @@
 use crate::action::{Action, Actions};
-use crate::config::{Keymap, ModalKeymaps};
+use crate::config::{Binding, CallbackId, Keymap, ModalKeymaps};
+
+/// The outcome of resolving a keypress. A static action list goes to the hub.
+/// A callback is dispatched to the `dome-lua` thread by id.
+#[derive(Debug)]
+pub(crate) enum Resolved {
+    Actions(Actions),
+    Callback(CallbackId),
+}
 
 /// Runtime state for modal keybinding resolution. Both macOS and Windows
 /// keyboard handlers share a single `KeymapState` via `Arc<RwLock<KeymapState>>`.
@@ -25,49 +33,59 @@ impl KeymapState {
     /// The single entry point for keymap resolution. Both platforms call this.
     ///
     /// 1. Looks up `keymap` in the active mode's bindings. If the active mode
-    ///    has been removed (e.g. config reload dropped it), logs a warning and
-    ///    falls back to the `default` table so the keyboard keeps working.
-    /// 2. For any `Action::Mode` in the result, switches mode immediately.
-    /// 3. Returns only the non-Mode actions (to send to the hub).
-    /// 4. Returns `None` if no binding exists (after fallback) or all actions
-    ///    were Mode switches.
+    ///    was removed (e.g. a reload dropped it), logs a warning and falls back
+    ///    to the `default` table so the keyboard keeps working.
+    /// 2. A callback binding resolves directly to `Resolved::Callback(id)` for
+    ///    the caller to dispatch to the `dome-lua` thread. A callback is never
+    ///    a mode switch.
+    /// 3. A static binding switches mode for any `Action::Mode` immediately and
+    ///    returns the remaining actions as `Resolved::Actions`.
+    /// 4. Returns `None` if no binding exists (after fallback) or a static
+    ///    binding held only mode switches.
     ///
-    /// Multiple Mode actions in one binding are processed in order -- last one
-    /// wins (each switch_mode call overwrites the previous). This matches how
-    /// shells process trailing redirections.
-    pub(crate) fn resolve(&mut self, keymap: &Keymap) -> Option<Actions> {
-        let bindings = if self.active_mode == "default" {
-            &self.keymaps.default
-        } else {
-            match self.keymaps.modes.get(&self.active_mode) {
-                Some(m) => m,
-                None => {
-                    tracing::warn!(
-                        mode = %self.active_mode,
-                        "Active mode missing from keymaps, falling back to default table"
-                    );
-                    &self.keymaps.default
+    /// Returning `Some` for any bound key, callback included, is what makes a
+    /// callback binding suppress the keypress even though it emits no actions
+    /// on the event-tap thread.
+    ///
+    /// Multiple Mode actions in one binding are processed in order, last one
+    /// wins.
+    pub(crate) fn resolve(&mut self, keymap: &Keymap) -> Option<Resolved> {
+        // Clone the matched binding to drop the borrow on self.keymaps before
+        // calling self.switch_mode() (which needs &mut self).
+        let binding = {
+            let bindings = if self.active_mode == "default" {
+                &self.keymaps.default
+            } else {
+                match self.keymaps.modes.get(&self.active_mode) {
+                    Some(m) => m,
+                    None => {
+                        tracing::warn!(
+                            mode = %self.active_mode,
+                            "Active mode missing from keymaps, falling back to default table"
+                        );
+                        &self.keymaps.default
+                    }
                 }
-            }
+            };
+            bindings.get(keymap)?.clone()
         };
 
-        let actions = bindings.get(keymap)?;
+        let actions = match binding {
+            Binding::Callback(id) => return Some(Resolved::Callback(id)),
+            Binding::Static(actions) => actions,
+        };
 
-        // Fast path: when no Mode actions present (the common case), return a
-        // single clone without the per-action filter loop.
-        let has_mode = actions
+        // Fast path: when no Mode actions present (the common case), return
+        // without the per-action filter loop.
+        let has_mode = (&actions)
             .into_iter()
             .any(|a| matches!(a, Action::Mode { .. }));
         if !has_mode {
-            return Some(actions.clone());
+            return Some(Resolved::Actions(actions));
         }
 
-        // Clone into an owned Vec to drop the borrow on self.keymaps before
-        // calling self.switch_mode() (which needs &mut self).
-        let owned: Vec<Action> = actions.into_iter().cloned().collect();
-
         let mut hub_actions = Vec::new();
-        for action in &owned {
+        for action in &actions {
             if let Action::Mode { name } = action {
                 self.switch_mode(name);
             } else {
@@ -78,7 +96,7 @@ impl KeymapState {
         if hub_actions.is_empty() {
             return None;
         }
-        Some(Actions::new(hub_actions))
+        Some(Resolved::Actions(Actions::new(hub_actions)))
     }
 
     /// Switch to a named mode. Unknown mode names log a warning and leave
@@ -117,7 +135,8 @@ impl KeymapState {
 mod tests {
     use super::*;
     use crate::action::{Action, Actions, FocusTarget};
-    use crate::config::{Keymap, Modifiers};
+    use crate::config::{Binding, CallbackId, Keymap, Modifiers};
+    use std::collections::HashMap;
 
     fn km(key: &str, mods: Modifiers) -> Keymap {
         Keymap {
@@ -141,11 +160,29 @@ mod tests {
         modes: Vec<(&str, Vec<(Keymap, Actions)>)>,
     ) -> ModalKeymaps {
         ModalKeymaps {
-            default: default.into_iter().collect(),
+            default: default
+                .into_iter()
+                .map(|(k, a)| (k, Binding::Static(a)))
+                .collect(),
             modes: modes
                 .into_iter()
-                .map(|(name, bindings)| (name.to_string(), bindings.into_iter().collect()))
+                .map(|(name, bindings)| {
+                    (
+                        name.to_string(),
+                        bindings
+                            .into_iter()
+                            .map(|(k, a)| (k, Binding::Static(a)))
+                            .collect(),
+                    )
+                })
                 .collect(),
+        }
+    }
+
+    fn expect_focus_left(resolved: Option<Resolved>) {
+        match resolved {
+            Some(Resolved::Actions(a)) => assert_eq!(a.to_string(), "[focus left]"),
+            other => panic!("expected [focus left], got {other:?}"),
         }
     }
 
@@ -154,9 +191,23 @@ mod tests {
         let cmd_h = km("h", Modifiers::META);
         let keymaps = make_keymaps(vec![(cmd_h.clone(), focus_left_actions())], vec![]);
         let mut state = KeymapState::new(keymaps);
-        let result = state.resolve(&cmd_h);
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().to_string(), "[focus left]");
+        expect_focus_left(state.resolve(&cmd_h));
+    }
+
+    #[test]
+    fn keymap_state_resolve_callback_binding_suppresses() {
+        let cmd_c = km("c", Modifiers::META);
+        let mut default = HashMap::new();
+        default.insert(cmd_c.clone(), Binding::Callback(CallbackId(3)));
+        let keymaps = ModalKeymaps {
+            default,
+            modes: HashMap::new(),
+        };
+        let mut state = KeymapState::new(keymaps);
+        match state.resolve(&cmd_c) {
+            Some(Resolved::Callback(id)) => assert_eq!(id, CallbackId(3)),
+            other => panic!("expected callback, got {other:?}"),
+        }
     }
 
     #[test]
@@ -180,9 +231,7 @@ mod tests {
         state.switch_mode("resize");
 
         // h resolves in resize mode
-        let result = state.resolve(&h);
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().to_string(), "[focus left]");
+        expect_focus_left(state.resolve(&h));
 
         // cmd+h does NOT resolve in resize mode (not bound there)
         assert!(state.resolve(&cmd_h).is_none());
@@ -215,9 +264,7 @@ mod tests {
             vec![("resize", vec![])],
         );
         let mut state = KeymapState::new(keymaps);
-        let result = state.resolve(&cmd_r);
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().to_string(), "[focus left]");
+        expect_focus_left(state.resolve(&cmd_r));
         assert_eq!(state.active_mode(), "resize");
     }
 
@@ -287,9 +334,7 @@ mod tests {
         // active_mode is still "resize" (update_keymaps does not reset)
         assert_eq!(state.active_mode(), "resize");
         // But resolve falls back to default table
-        let result = state.resolve(&cmd_h);
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().to_string(), "[focus left]");
+        expect_focus_left(state.resolve(&cmd_h));
     }
 
     #[test]

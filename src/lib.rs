@@ -8,6 +8,7 @@ mod ipc;
 mod keymap;
 mod log_dedup;
 mod logging;
+mod lua_runtime;
 mod overlay;
 mod platform;
 mod theme;

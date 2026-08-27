@@ -48,7 +48,7 @@ pub(crate) struct TilingPlacements {
     pub(crate) containers: Vec<ContainerPlacement>,
 }
 
-/// Per-strategy export payload for serialization to layout.toml.
+/// Per-strategy export payload for serialization to layout.jsonc.
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct WorkspaceExport {
     pub(crate) strategy: String,

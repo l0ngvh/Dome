@@ -1,4 +1,6 @@
-use crate::config::{Strategy, TreeLayoutNode, WindowMatcher};
+use crate::config::{
+    LayoutConfig, LayoutWorkspaceConfig, PaneConfig, SplitMode, TreeLayoutNode, WindowMatcher,
+};
 use crate::core::node::WindowRestrictions;
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
@@ -303,30 +305,44 @@ fn export_layout_writes_entry_for_empty_workspace() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("dome_export_empty_entry_{nanos}.toml"));
+    let path = std::env::temp_dir().join(format!("dome_export_empty_entry_{nanos}.jsonc"));
     let _cleanup = CleanupFile(path.clone());
 
     hub.export_layout(&path).unwrap();
 
-    let written = std::fs::read_to_string(&path).unwrap();
-    let doc: toml::Value = toml::from_str(&written).unwrap();
-    let entries = doc["workspace"].as_array().unwrap();
+    let parsed = LayoutConfig::load(path.to_str().unwrap())
+        .expect("exported layout.jsonc parses through the JSONC loader");
 
-    let empty = entries
+    let empty = parsed
+        .workspace
         .iter()
-        .find(|s| s["name"].as_str() == Some("1"))
-        .unwrap();
-    assert_eq!(empty["strategy"].as_str(), Some("partition_tree"));
-    assert!(empty.get("tree").is_none());
-    assert!(empty.get("float").is_none());
-    assert!(empty.get("fullscreen").is_none());
+        .find(|w| w.name() == "1")
+        .expect("workspace 1 present");
+    match empty {
+        LayoutWorkspaceConfig::PartitionTree {
+            tree,
+            float,
+            fullscreen,
+            ..
+        } => {
+            assert!(tree.is_none());
+            assert!(float.is_empty());
+            assert!(fullscreen.is_empty());
+        }
+        _ => panic!("workspace 1 should be partition_tree"),
+    }
 
-    let filled = entries
+    let filled = parsed
+        .workspace
         .iter()
-        .find(|s| s["name"].as_str() == Some("2"))
-        .unwrap();
-    assert_eq!(filled["strategy"].as_str(), Some("partition_tree"));
-    assert!(filled.get("tree").is_some());
+        .find(|w| w.name() == "2")
+        .expect("workspace 2 present");
+    match filled {
+        LayoutWorkspaceConfig::PartitionTree { tree, .. } => {
+            assert!(tree.is_some());
+        }
+        _ => panic!("workspace 2 should be partition_tree"),
+    }
 }
 
 #[test]
@@ -370,43 +386,170 @@ fn export_float_toggled_to_tiling_returns_to_tree() {
 }
 
 #[test]
-fn export_layout_persists_tabbed_master_pane() {
-    let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .with_strategy(Strategy::Master)
-                .build(),
-        )
-        .with_preferred_layout(vec![
-            LayoutWorkspaceConfigBuilder::new("1")
-                .with_strategy(Strategy::Master)
-                .with_master_count(2)
-                .build(),
-        ])
-        .build();
-    hub.focus_workspace("1", None);
-    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
-    // Both windows land in the master pane.
-    hub.toggle_container_layout();
+fn render_layout_round_trips_master_and_nested_tree() {
+    // A quote and a backslash exercise JSONC string escaping.
+    let quoted = WindowMatcher {
+        title: Some("a\"b\\c".into()),
+        ..Default::default()
+    };
+    let master_ws = WorkspaceExport {
+        strategy: "master".into(),
+        master_ratio: Some(0.5),
+        master_count: Some(2),
+        master: PaneConfig::tiled(vec![WindowMatcher {
+            app: Some("Editor".into()),
+            title: Some("main".into()),
+            ..Default::default()
+        }]),
+        secondary: PaneConfig::tiled(vec![WindowMatcher {
+            process: Some("term".into()),
+            ..Default::default()
+        }]),
+        float: vec![quoted.clone()],
+        ..WorkspaceExport::default()
+    };
+    let tree = TreeLayoutNode::Container {
+        split: Some(SplitMode::Horizontal),
+        children: vec![
+            TreeLayoutNode::Leaf(WindowMatcher {
+                process: Some("editor".into()),
+                ..Default::default()
+            }),
+            TreeLayoutNode::Container {
+                split: None,
+                children: vec![
+                    TreeLayoutNode::Leaf(WindowMatcher {
+                        process: Some("terminal".into()),
+                        ..Default::default()
+                    }),
+                    TreeLayoutNode::Leaf(WindowMatcher {
+                        process: Some("logs".into()),
+                        ..Default::default()
+                    }),
+                ],
+            },
+        ],
+    };
+    let tree_ws = WorkspaceExport {
+        strategy: "partition_tree".into(),
+        tree: Some(tree.clone()),
+        ..WorkspaceExport::default()
+    };
+
+    let rendered =
+        crate::core::export::render_layout("", &[("m".into(), master_ws), ("t".into(), tree_ws)])
+            .unwrap();
 
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("dome_export_tabbed_pane_{nanos}.toml"));
+    let path = std::env::temp_dir().join(format!("dome_export_roundtrip_{nanos}.jsonc"));
     let _cleanup = CleanupFile(path.clone());
-    hub.export_layout(&path).unwrap();
+    std::fs::write(&path, &rendered).unwrap();
 
-    let written = std::fs::read_to_string(&path).unwrap();
-    let doc: toml::Value = toml::from_str(&written).unwrap();
-    let entry = doc["workspace"]
-        .as_array()
-        .unwrap()
+    let parsed = LayoutConfig::load(path.to_str().unwrap())
+        .expect("rendered layout.jsonc parses through the JSONC loader");
+
+    let m = parsed
+        .workspace
         .iter()
-        .find(|s| s["name"].as_str() == Some("1"))
-        .unwrap();
-    let master = &entry["master"];
-    assert_eq!(master["display"].as_str(), Some("tabbed"));
-    assert!(master["children"].as_array().is_some());
+        .find(|w| w.name() == "m")
+        .expect("workspace m present");
+    match m {
+        LayoutWorkspaceConfig::Master {
+            master_ratio,
+            master_count,
+            master,
+            secondary,
+            float,
+            fullscreen,
+            ..
+        } => {
+            assert_eq!(*master_ratio, Some(0.5));
+            assert_eq!(*master_count, Some(2));
+            assert_eq!(
+                master,
+                &PaneConfig::tiled(vec![WindowMatcher {
+                    app: Some("Editor".into()),
+                    title: Some("main".into()),
+                    ..Default::default()
+                }])
+            );
+            assert_eq!(
+                secondary,
+                &PaneConfig::tiled(vec![WindowMatcher {
+                    process: Some("term".into()),
+                    ..Default::default()
+                }])
+            );
+            assert_eq!(float, &vec![quoted]);
+            assert!(fullscreen.is_empty());
+        }
+        _ => panic!("workspace m should be master"),
+    }
+
+    let t = parsed
+        .workspace
+        .iter()
+        .find(|w| w.name() == "t")
+        .expect("workspace t present");
+    match t {
+        LayoutWorkspaceConfig::PartitionTree {
+            tree: parsed_tree, ..
+        } => {
+            assert_eq!(parsed_tree.as_ref(), Some(&tree));
+        }
+        _ => panic!("workspace t should be partition_tree"),
+    }
+}
+
+#[test]
+fn render_layout_preserves_comments_and_reconciles_in_place() {
+    let existing = r#"{
+  // Dome layout. Hand-written comments survive export.
+  "workspace": [
+    { "name": "1", "strategy": "master", "master_count": 1 }
+  ]
+}
+"#;
+    let updated = WorkspaceExport {
+        strategy: "master".into(),
+        master_count: Some(2),
+        ..WorkspaceExport::default()
+    };
+    let appended = WorkspaceExport {
+        strategy: "partition_tree".into(),
+        ..WorkspaceExport::default()
+    };
+    let rendered = crate::core::export::render_layout(
+        existing,
+        &[("1".into(), updated), ("2".into(), appended)],
+    )
+    .unwrap();
+
+    // The file header comment survives the rewrite.
+    assert!(rendered.contains("Dome layout. Hand-written comments survive export."));
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("dome_export_comments_{nanos}.jsonc"));
+    let _cleanup = CleanupFile(path.clone());
+    std::fs::write(&path, &rendered).unwrap();
+    let parsed = LayoutConfig::load(path.to_str().unwrap())
+        .expect("rendered layout.jsonc parses through the JSONC loader");
+
+    // Workspace 1 was updated in place, workspace 2 appended.
+    let ws1 = parsed
+        .workspace
+        .iter()
+        .find(|w| w.name() == "1")
+        .expect("workspace 1 present");
+    match ws1 {
+        LayoutWorkspaceConfig::Master { master_count, .. } => assert_eq!(*master_count, Some(2)),
+        _ => panic!("workspace 1 should be master"),
+    }
+    assert!(parsed.workspace.iter().any(|w| w.name() == "2"));
 }
