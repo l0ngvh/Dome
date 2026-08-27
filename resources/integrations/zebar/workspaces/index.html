@@ -27,15 +27,57 @@
         weather: { type: 'weather' },
       });
 
+      const isNumericName = (value) => /^[+-]?\d+$/.test(value);
+
+      function byName(left, right) {
+        const leftIsNumeric = isNumericName(left.name);
+        const rightIsNumeric = isNumericName(right.name);
+        if (leftIsNumeric !== rightIsNumeric) return leftIsNumeric ? -1 : 1;
+        if (leftIsNumeric) return parseInt(left.name, 10) - parseInt(right.name, 10);
+        return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+      }
+
+      async function getDeviceName() {
+        try {
+          const widget =
+            typeof zebar.currentWidget === 'function'
+              ? zebar.currentWidget()
+              : zebar.currentWidget;
+          if (widget?.window?.tauri?.currentMonitor) {
+            const monitor = await widget.window.tauri.currentMonitor();
+            if (monitor?.name) return monitor.name;
+          }
+          if (widget?.tauriWindow?.currentMonitor) {
+            const monitor = await widget.tauriWindow.currentMonitor();
+            if (monitor?.name) return monitor.name;
+          }
+        } catch {}
+        try {
+          const { currentMonitor } = await import(
+            'https://esm.sh/@tauri-apps/api@2/window.mjs'
+          );
+          const monitor = await currentMonitor();
+          if (monitor?.name) return monitor.name;
+        } catch {}
+        return null;
+      }
+
+      function filterByMonitor(data, monitorName) {
+        if (!monitorName) {
+          return data.filter((entry) => entry.state === 'Attached').sort(byName);
+        }
+        return data
+          .filter((entry) => entry.state === 'Attached' && entry.monitor === monitorName)
+          .sort(byName);
+      }
+
       createRoot(document.getElementById('root')).render(<App />);
 
       function App() {
         const [output, setOutput] = useState(providers.outputMap);
         const [workspaces, setWorkspaces] = useState([]);
         const [parked, setParked] = useState([]);
-        // This widget's monitor as Dome's unique_name, or null until resolved.
         const monitorName = useRef(null);
-        // Set by the effect so a cell click can focus and repaint at once.
         const focusWorkspace = useRef(() => {});
 
         useEffect(() => {
@@ -44,34 +86,15 @@
 
         useEffect(() => {
           async function resolveMonitor() {
+            const device = await getDeviceName();
+            if (!device) return;
             try {
-              // The OS device name is volatile, so resolve it fresh rather than caching it.
-              const monitor = await zebar.currentWidget().tauriWindow.currentMonitor();
-              const device = monitor?.name;
-              if (!device) return;
               const res = await zebar.shellExec('dome', ['query', 'monitors']);
               const rows = JSON.parse(res.stdout.trim());
-              if (Array.isArray(rows)) {
-                const match = rows.find(m => m.gdi_device === device);
-                monitorName.current = match ? match.unique_name : null;
-              }
+              if (!Array.isArray(rows)) return;
+              const match = rows.find((row) => row.gdi_device === device);
+              monitorName.current = match ? match.unique_name : null;
             } catch {}
-          }
-
-          // Numeric names sort numerically, non-numeric names lexically after them.
-          const isNum = s => /^[+-]?\d+$/.test(s);
-          function byName(a, b) {
-            const na = isNum(a.name);
-            const nb = isNum(b.name);
-            if (na !== nb) return na ? -1 : 1;
-            if (na) return parseInt(a.name, 10) - parseInt(b.name, 10);
-            return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
-          }
-
-          function mine(data) {
-            return data
-              .filter(w => w.monitor === monitorName.current && w.state === 'Attached')
-              .sort(byName);
           }
 
           async function refresh() {
@@ -80,24 +103,20 @@
               const res = await zebar.shellExec('dome', ['query', 'workspaces']);
               const data = JSON.parse(res.stdout.trim());
               if (!Array.isArray(data)) return;
-              let rows = mine(data);
-              // An attached monitor always owns a workspace, so an empty result for a
-              // resolved name means the name changed. Re-resolve and re-filter.
+              let rows = filterByMonitor(data, monitorName.current);
               if (monitorName.current !== null && rows.length === 0) {
                 await resolveMonitor();
-                rows = mine(data);
+                rows = filterByMonitor(data, monitorName.current);
               }
               setWorkspaces(rows);
               setParked(
                 data
-                  .filter(w => w.state === 'Parked' && w.window_count > 0)
+                  .filter((entry) => entry.state === 'Parked' && entry.window_count > 0)
                   .sort(byName),
               );
             } catch {}
           }
 
-          // Focus a workspace on a named monitor, then repaint without waiting for
-          // the next tick. A parked entry names its origin monitor.
           focusWorkspace.current = async (name, monitor) => {
             try {
               await zebar.shellExec('dome', ['focus', 'workspace', name, '--monitor', monitor]);
@@ -174,30 +193,30 @@
           <div className="app">
             <div className="left">
               <div className="workspaces">
-                {workspaces.map(ws => {
-                  if (!ws.is_focused && !ws.is_visible && ws.window_count === 0)
+                {workspaces.map((entry) => {
+                  if (!entry.is_focused && !entry.is_visible && entry.window_count === 0)
                     return null;
                   return (
                     <span
-                      key={ws.name}
-                      className={ws.is_focused ? 'ws focused' : 'ws'}
-                      onClick={() => focusWorkspace.current(ws.name, ws.monitor)}
+                      key={entry.name}
+                      className={entry.is_focused ? 'ws focused' : 'ws'}
+                      onClick={() => focusWorkspace.current(entry.name, entry.monitor)}
                     >
-                      {ws.name}
+                      {entry.name}
                     </span>
                   );
                 })}
                 {parked.length > 0 && (
                   <span className="parked-group">
                     <span className="parked-label">parked</span>
-                    {parked.map(w => (
+                    {parked.map((entry) => (
                       <span
-                        key={`${w.monitor}::${w.name}`}
+                        key={`${entry.monitor}::${entry.name}`}
                         className="ws parked"
-                        title={`return ${w.name} to ${w.monitor}`}
-                        onClick={() => focusWorkspace.current(w.name, w.monitor)}
+                        title={`return ${entry.name} to ${entry.monitor}`}
+                        onClick={() => focusWorkspace.current(entry.name, entry.monitor)}
                       >
-                        {w.name}
+                        {entry.name}
                       </span>
                     ))}
                   </span>

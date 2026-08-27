@@ -38,6 +38,7 @@ pub(super) use self::window::NewWindow;
 pub(super) use self::window::WindowsMetadata;
 
 use self::external_bar::StatusBars;
+use crate::platform::reserve_for_bar;
 
 use self::monitor::MonitorRegistry;
 use super::external::{HwndId, ShowCmd};
@@ -912,6 +913,10 @@ impl Dome {
         rect: PixelRect<Physical>,
     ) {
         if let Some(mid) = self.monitors.id_for_handle(monitor) {
+            if !self.is_edge_bar(rect, monitor) {
+                tracing::debug!(%hwnd_id, %mid, ?rect, "Ignoring non-edge bar at capture");
+                return;
+            }
             self.status_bars.capture(hwnd_id, mid, rect);
             tracing::info!(%hwnd_id, %mid, ?rect, "Status bar recognized, reserving work area");
             self.recompute_work_areas();
@@ -944,9 +949,31 @@ impl Dome {
         rect: PixelRect<Physical>,
     ) {
         if let Some(mid) = self.monitors.id_for_handle(monitor_handle) {
+            if !self.is_edge_bar(rect, monitor_handle) {
+                tracing::debug!(%hwnd_id, %mid, ?rect, "Ignoring non-edge bar move");
+                return;
+            }
             self.status_bars.move_to(hwnd_id, mid, rect);
+            tracing::info!(%hwnd_id, %mid, ?rect, "Status bar moved, reserving work area");
             self.recompute_work_areas();
         }
+    }
+
+    pub(super) fn is_edge_bar(&self, rect: PixelRect<Physical>, monitor_handle: isize) -> bool {
+        // Don't let a non-edge (still positioning) bar overwrite an edge bar. Reuse the reserve math to
+        // detect an edge and keep the rect if enumeration fails.
+        let Ok(monitors) = self.display.get_all_monitors() else {
+            return true;
+        };
+        let Some(info) = monitors.iter().find(|m| m.handle == monitor_handle) else {
+            return true;
+        };
+        let reserved = reserve_for_bar(
+            info.bounds,
+            info.work_area.to_dimension(),
+            rect.to_dimension(),
+        );
+        reserved != info.work_area.to_dimension()
     }
 
     fn recompute_work_areas(&mut self) {
