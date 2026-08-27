@@ -1,190 +1,232 @@
 # Configuration
 
-Dome reads `config.toml` from one of these locations:
+On first launch, Dome writes its own configuration file to these locations:
 
-- macOS: `~/.config/dome/config.toml` (or `$XDG_CONFIG_HOME/dome/config.toml`).
-- Windows: `%APPDATA%\dome\config.toml`.
+- macOS: `~/.config/dome/config.lua` (or `$XDG_CONFIG_HOME/dome/config.lua`).
+- Windows: `%APPDATA%\dome\config.lua`.
 
-Use `dome launch -c <path>` to point to a different file (see [cli.md](cli.md)).
+Both can be overridden with `dome launch -c <path>`. The configuration is
+automatically applied on save.
 
-All settings are hot-reloaded on save.
+```lua
+local config = dome.defaults()
 
-## General
+config.theme = "latte"
+config.font_size = 15.0
 
-```toml
-border_size = 4
-theme = "mocha"
-log_level = "info"
-start_at_login = false
+config.keymaps.main[Meta + Space] = function(actions)
+  actions.execute("open -a Raycast")
+end
+
+local terminal = dome.os == "macos" and "open -a Terminal" or "wt"
+config.keymaps.main[Meta + Return] = function(actions)
+  actions.execute(terminal)
+end
+
+-- Ignore, float, or fullscreen windows that match a rule.
+-- All keys must match, and the first matching rule wins.
+config.ignore = { { app = "Finder", title = "Trash" } }
+config.float = { { app = "System Settings" } }
+config.fullscreen = { { app = "/IINA|VLC/" } }  -- wrap a value in /.../ for a regex match
+
+return config
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `border_size` | integer | `4` | Border width around windows, in logical pixels. |
-| `theme` | string | `"mocha"` | Color theme. One of `"latte"`, `"frappe"`, `"macchiato"`, `"mocha"` ([Catppuccin](https://catppuccin.com/) flavors). |
-| `log_level` | string | `"info"` | Log verbosity. One of `trace`, `debug`, `info`, `warn`, `error`. |
-| `start_at_login` | boolean | `false` | Launch Dome at user login. |
+## Defining key bindings
 
-## Tiling layout
+Bindings live in named keymaps, and the default has only `main`.
+[`resources/default.lua`](../resources/default.lua) holds the default bindings.
 
-Controls how windows are tiled on screen.
+```lua
+local config = dome.defaults()
 
-```toml
-strategy = "partition_tree"
-minimum_width = "5%"
-minimum_height = "5%"
-maximum_width = 0
-maximum_height = 0
-
-[partition_tree]
-tab_bar_height = 24
-automatic_tiling = true
-
-[master]
-master_ratio = 0.5
-master_count = 1
+config.keymaps.main[Meta + "h"] = function(actions) actions.focus_left() end
+config.keymaps.main[Meta + Shift + "1"] = function(actions)
+  actions.move_to_workspace("1")
+  actions.focus_workspace("1")
+end
+local hyper = Meta + Alt + Shift + Ctrl
+config.keymaps.main[hyper + Space] = function(actions)
+  actions.execute("open -a Terminal")
+end
+-- a plain string works as well
+config.keymaps.main["meta+return"] = function(actions) actions.execute("open -a Terminal") end
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `strategy` | string | `"partition_tree"` | Default tiling strategy. One of `"partition_tree"` or `"master"`. Per-workspace preferred layouts in `layout.toml` can set this per workspace. |
-| `minimum_width` / `minimum_height` | size | `"5%"` | Minimum window size. A whole number (e.g. `200`) parses as logical pixels. String with `%` suffix (e.g. `"10%"`) parses as percentage of workspace dimension. Use `0` to disable. |
-| `maximum_width` / `maximum_height` | size | `0` | Maximum window size. Same parsing rules as min. `0` means no limit. Windows clamped by max are centered within their allocated space. |
-| `partition_tree.tab_bar_height` | integer | `24` | Height of the tab bar in tabbed containers, logical pixels, `>= 1`. This value does not auto-scale with `font.text_size`, so long tab titles may truncate earlier as the body size grows. |
-| `partition_tree.automatic_tiling` | boolean | `true` | Pick split direction based on the focused window's dimensions. |
-| `master.master_ratio` | float | `0.5` | Width of the master area, in `[0.1, 0.9]`. |
-| `master.master_count` | integer | `1` | Number of master windows, `>= 1`. |
+To add another keymap table:
 
-The master strategy splits the screen into a master area (left or top) and
-a secondary stack area (right or bottom). `master.master_ratio` controls the
-master area's width and `master.master_count` sets how many windows go there.
-The rest of the windows stack in the secondary area.
-
-The partition-tree strategy fills the screen by arranging windows in a tree of
-nested containers. Each container is either a split (horizontal or vertical) or
-tabbed. Unlike i3, Dome automatically removes single-child containers and
-alternates nested split direction, similar to Aerospace's normalized mode.
-
-`partition_tree.automatic_tiling` lets the runtime choose the split direction
-based on the focused window's dimensions.
-
-## Window rules
-
-Match windows by their attributes to ignore, float, or fullscreen them.
-All fields in a rule must match (AND) and the first matching rule wins.
-Wrap a value in `/pattern/` for regex matching or leave it bare for exact
-matching. Built-in `ignore` rules are always active and user rules add to
-them.
-
-| Key | Semantics |
-|-----|-----------|
-| `ignore` | Do not manage matching windows. |
-| `float` | Start matching windows as floating. |
-| `fullscreen` | Start matching windows as fullscreen. |
-
-| Platform | Matching fields |
-|----------|-----------------|
-| macOS | `app`, `bundle_id` (exact only), `title` |
-| Windows | `process`, `title`, `class` (Win32), `aumid` |
-
-```toml
-ignore = [
-  # macOS
-  { app = "System Preferences" },
-  { bundle_id = "com.apple.finder", title = "Trash" },
-  # Windows
-  { process = "SystemSettings.exe" },
-  { class = "Shell_TrayWnd" },
-]
-float = [
-  { process = "calculator.exe" },
-]
-fullscreen = [
-  { process = "slides.exe" },
-]
+```lua
+config.keymaps.main[Meta + "m"] = function(actions) actions.mode("monitor") end
+config.keymaps.monitor = {
+  ["h"] = function(actions) actions.focus_monitor_left() end,
+  ["l"] = function(actions) actions.focus_monitor_right() end,
+  -- keep a binding back to main, or the keyboard stays in this keymap until Dome restarts
+  ["escape"] = function(actions) actions.mode("main") end,
+}
 ```
 
-## Keybindings
+To replace the defaults outright:
 
-Keybindings go in the `[keymaps]` table. Defining `[keymaps]` **replaces all
-default bindings** with no merge, so copy any defaults you want to keep if
-you are adding your own.
-
-```toml
-"mods+...+key" = ["<action>", ...]
+```lua
+config.keymaps = {
+  main = {
+    [Meta + "h"] = function(actions) actions.focus_left() end,
+    [Meta + "r"] = function(actions) actions.mode("resize") end,
+  },
+  resize = {
+    ["h"] = function(actions) actions.decrease_master_ratio() end,
+    ["l"] = function(actions) actions.increase_master_ratio() end,
+    ["escape"] = function(actions) actions.mode("main") end,
+  },
+}
 ```
 
-Modifiers are `meta`, `shift`, `alt`, and `ctrl` (`cmd` and `win` work as
-aliases for `meta`), combined with `+`. A keymap can trigger one or more
-actions that fire in order on a single press.
+To change the base modifier from the default `Alt`:
 
-```toml
-"meta+h" = ["focus left"]
-"meta+shift+1" = ["move workspace 1", "focus workspace 1"]
+```lua
+local config = dome.with_default_modifier(Meta).defaults()
+return config
 ```
 
-### Default bindings
+## Built-in helpers
 
-| Key | Action |
-|-----|--------|
-| <kbd>meta</kbd>+<kbd>0</kbd> through <kbd>meta</kbd>+<kbd>9</kbd> | `focus workspace 0` through `focus workspace 9` |
-| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>0</kbd> through <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>9</kbd> | `move workspace 0` through `move workspace 9` |
-| <kbd>meta</kbd>+<kbd>h</kbd> | `focus left` |
-| <kbd>meta</kbd>+<kbd>j</kbd> | `focus down` |
-| <kbd>meta</kbd>+<kbd>k</kbd> | `focus up` |
-| <kbd>meta</kbd>+<kbd>l</kbd> | `focus right` |
-| <kbd>meta</kbd>+<kbd>p</kbd> | `focus parent` |
-| <kbd>meta</kbd>+<kbd>[</kbd> | `focus tab prev` |
-| <kbd>meta</kbd>+<kbd>]</kbd> | `focus tab next` |
-| <kbd>meta</kbd>+<kbd>e</kbd> | `toggle spawn` |
-| <kbd>meta</kbd>+<kbd>d</kbd> | `toggle direction` |
-| <kbd>meta</kbd>+<kbd>b</kbd> | `toggle layout` |
-| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>f</kbd> | `toggle float` |
-| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>h</kbd> | `move left` |
-| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>j</kbd> | `move down` |
-| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>k</kbd> | `move up` |
-| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>l</kbd> | `move right` |
-| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>h</kbd> | `focus monitor left` |
-| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>j</kbd> | `focus monitor down` |
-| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>k</kbd> | `focus monitor up` |
-| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>l</kbd> | `focus monitor right` |
-| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>h</kbd> | `move monitor left` |
-| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>j</kbd> | `move monitor down` |
-| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>k</kbd> | `move monitor up` |
-| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>l</kbd> | `move monitor right` |
-| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>q</kbd> | `close` |
+### `dome.os`
 
-### Modes
+The platform Dome runs on, `"macos"` or `"windows"`.
 
-Additional sets of bindings go in `[keymaps.mode.<name>]`. Switch between them
-with the `mode <name>` action or `dome mode <name>`. Unknown mode names are
-rejected.
+### `dome.defaults()`
 
-```toml
-[keymaps]
-"meta+h" = ["focus left"]
-"meta+r" = ["mode resize"]
+Returns the default config, the table
+[`resources/default.lua`](../resources/default.lua) builds. Read that file for
+every option and its default value.
 
-[keymaps.mode.resize]
-"h" = ["master shrink"]
-"l" = ["master grow"]
-"escape" = ["mode default"]
+### `dome.executable(name)`
+
+Returns `true` when `name` resolves on `PATH`.
+
+### `dome.with_default_modifier(m)`
+
+Returns a builder whose `defaults()` builds the default keymap on `m` as the
+primary modifier. `m` must be `Meta` or `Alt`.
+
+### `Meta`/`Alt`/`Ctrl`/`Shift`
+
+Combine a modifier with a key using `+`, for example `Meta + "h"`. Modifiers
+can be chained together, for example `Meta + Shift + "1"`. `Meta` (or `Cmd`,
+`Win`) is Command on macOS and the Windows key on Windows. `Alt` (or `Opt`,
+`Option`) is the Option key on macOS.
+
+### `Space`/`Enter`/`Escape` and the other named keys
+
+A key that types no character has a global of its own. Write it without quotes.
+`Space`, `Enter`, `Return`, `Escape`, `Esc`, `Tab`, `Backspace`, `Up`, `Down`,
+`Left`, and `Right` are the whole set. Both platforms recognize every key in the
+set. `Enter` and `Return` name the same key, the main Return key. `Esc` and
+`Escape` also name one key.
+
+```lua
+config.keymaps.main[Meta + Space] = function(actions) actions.execute("open -a Raycast") end
+config.keymaps.main[Meta + Shift + Enter] = function(actions) actions.execute("wt") end
+config.keymaps.main[Ctrl + Left] = function(actions) actions.focus_monitor_left() end
+-- a key global also stands on its own, with no modifier
+config.keymaps.resize = {
+  [Escape] = function(actions) actions.mode("main") end,
+}
 ```
 
-Always include an escape binding (like `"escape" = ["mode default"]`) or
-your keyboard stays in that mode until Dome exits. Config reload preserves
-the active mode, but Dome falls back to defaults on the next keypress if the
-new config removes it.
+On macOS the numpad Enter is a separate physical key. No key global selects it.
+Bind it as the string `"enter"`.
 
-## Font
+## Actions
 
-```toml
-[font]
-text_size = 14.0       # Body text: tab titles.
-# family = "PingFang SC"
-```
+Dome passes an `actions` handle to each binding function.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `font.text_size` | float | `14.0` | Body text size in points (`4.0` to `128.0`). |
-| `font.family` | string | unset | System font to use for rendering. When unset, egui's built-in Ubuntu-Light is used. Dome logs a warning and falls back to built-in fonts when a commercial font cannot be used. |
+### `actions.focus_left()`, `focus_right()`, `focus_up()`, `focus_down()`
+
+Focus the neighboring window in that direction in the tiling tree.
+
+### `actions.focus_parent()`
+
+Focus the parent container.
+
+### `actions.focus_workspace(name)`
+
+Switch to the workspace named `name`. Any string is valid.
+
+### `actions.focus_monitor_left()`, `focus_monitor_right()`, `focus_monitor_up()`, `focus_monitor_down()`
+
+Focus the nearest monitor in that direction.
+
+### `actions.focus_monitor(name)`
+
+Focus the monitor named `name`. `dome query monitors` lists the monitor names.
+
+### `actions.focus_tab_next()`, `focus_tab_prev()`
+
+Focus the next or previous tab in a tabbed container.
+
+### `actions.move_left()`, `move_right()`, `move_up()`, `move_down()`
+
+Move the focused window one step in that direction in the tiling tree.
+
+### `actions.move_to_workspace(name)`
+
+Move the focused window to the workspace named `name`.
+
+### `actions.move_to_monitor_left()`, `move_to_monitor_right()`, `move_to_monitor_up()`, `move_to_monitor_down()`
+
+Move the focused window to the nearest monitor in that direction.
+
+### `actions.move_to_monitor(name)`
+
+Move the focused window to the monitor named `name`.
+
+### `actions.toggle_split()`
+
+Toggle the spawn direction between horizontal and vertical.
+
+### `actions.rotate()`
+
+Flip the parent container's split direction between horizontal and vertical.
+
+### `actions.toggle_tabbed()`
+
+Toggle the parent container between split and tabbed layout. A new window does
+not join a tabbed container.
+
+### `actions.toggle_float()`
+
+Toggle the focused window between tiling and floating.
+
+### `actions.toggle_fullscreen()`
+
+Toggle the focused window between normal and fullscreen.
+
+### `actions.increase_master_ratio()`, `decrease_master_ratio()`
+
+Change the master area by 5 percentage points, clamped to `0.1` through `0.9`
+of the workspace.
+
+### `actions.increase_master_count()`, `decrease_master_count()`
+
+Add or remove one window slot in the master area, with a minimum of 1.
+
+### `actions.execute(command)`
+
+Run `command` as a shell command line. macOS runs it through `/bin/sh -c` and
+Windows through `cmd.exe /C`, so pipes, `&&`, and redirects work. On Windows
+there is no "open" verb, so open a URL, document, or folder with `start`, for
+example `start https://example.com`.
+
+### `actions.close()`
+
+Close the focused window.
+
+### `actions.exit()`
+
+Stop Dome and restore all windows.
+
+### `actions.mode(name)`
+
+Switch to the keymap named `name`. `actions.mode("main")` returns to the `main`
+keymap.

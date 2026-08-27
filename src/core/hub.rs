@@ -1,18 +1,15 @@
-use crate::config::{
-    Config, LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraints, Strategy,
-    WindowMatcher, WindowMode, default_border_size, default_master_config,
-    default_partition_tree_config, default_strategy,
-};
-
 use super::allocator::{Allocator, NodeId};
-use super::matcher::{FloatFullscreenMatcherId, MatcherHit};
+use super::matcher::{FloatFullscreenMatcherId, MatcherHit, WindowMatcher, WindowMode};
 use super::monitor::{Monitor, ReportedMonitor};
 use super::node::{
-    Container, ContainerId, DisplayMode, Length, LimitObservation, LimitUpdate, Logical, MonitorId,
-    PixelRect, Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions, WorkspaceId,
+    Container, ContainerId, Direction, DisplayMode, Length, LimitObservation, LimitUpdate,
+    MonitorId, PixelRect, Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions,
+    WorkspaceId,
 };
 use super::partition_tree::Child;
-use super::strategy::{StrategySet, TilingAction, WorkspaceExport};
+use super::preferred_layout::PreferredLayouts;
+use super::strategy::{StrategyAction, StrategySet, TilingAction, WorkspaceExport};
+use super::tiling::TilingConfig;
 use super::workspace::{Attachment, Workspace};
 
 pub(crate) struct VisiblePlacements {
@@ -38,7 +35,7 @@ pub(crate) struct TilingWindowPlacement {
     pub(crate) visible_content_box: PixelRect,
     /// Highlighting does not require keyboard focus.
     pub(crate) is_highlighted: bool,
-    pub(crate) spawn_indicator: Option<SpawnIndicator>,
+    pub(crate) spawn_direction: Option<Direction>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -59,7 +56,7 @@ pub(crate) struct ContainerPlacement {
     /// is not tabbed.
     pub(crate) tab_bar_band: PixelRect,
     pub(crate) is_highlighted: bool,
-    pub(crate) spawn_indicator: Option<SpawnIndicator>,
+    pub(crate) spawn_direction: Option<Direction>,
     pub(crate) is_tabbed: bool,
     pub(crate) active_tab_index: usize,
     pub(crate) titles: Vec<String>,
@@ -78,17 +75,6 @@ pub(crate) enum MonitorLayout {
         containers: Vec<ContainerPlacement>,
     },
     Fullscreen(WindowId),
-}
-
-/// Which border edges to highlight with the spawn indicator color.
-/// `left` is always false today but included so we don't need a struct change
-/// if a future spawn mode uses it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct SpawnIndicator {
-    pub(crate) top: bool,
-    pub(crate) right: bool,
-    pub(crate) bottom: bool,
-    pub(crate) left: bool,
 }
 
 /// Categorizes restricted operations by what they do, so each restriction level
@@ -110,51 +96,6 @@ pub(super) enum RestrictedAction {
     MonitorMove,
 }
 
-/// Convenience bundle of the global layout fields from Config.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct GlobalLayoutConfig {
-    pub(crate) strategy: Strategy,
-    pub(crate) border_size: Pixels<Logical>,
-    pub(crate) partition_tree: PartitionTreeConfig,
-    pub(crate) master: MasterConfig,
-    pub(crate) size_constraints: SizeConstraints,
-    pub(crate) float: Vec<WindowMatcher>,
-    pub(crate) fullscreen: Vec<WindowMatcher>,
-    pub(crate) ignore: Vec<WindowMatcher>,
-}
-
-impl From<&Config> for GlobalLayoutConfig {
-    fn from(c: &Config) -> Self {
-        Self {
-            strategy: c.strategy,
-            border_size: c.border_size,
-            partition_tree: c.partition_tree.clone(),
-            master: c.master.clone(),
-            size_constraints: c.size_constraints,
-            float: c.float.clone(),
-            fullscreen: c.fullscreen.clone(),
-            ignore: c.ignore.clone(),
-        }
-    }
-}
-
-impl Default for GlobalLayoutConfig {
-    fn default() -> Self {
-        Self {
-            strategy: default_strategy(),
-            border_size: default_border_size(),
-            partition_tree: default_partition_tree_config(),
-            master: default_master_config(),
-            size_constraints: SizeConstraints::default(),
-            // Empty rather than `Config::default()`'s bundled matcher lists, so a fixture
-            // manages every window it inserts.
-            float: Vec::new(),
-            fullscreen: Vec::new(),
-            ignore: Vec::new(),
-        }
-    }
-}
-
 /// Non-strategy fields of Hub, extracted so that `TilingStrategy` methods can
 /// receive `&mut HubAccess` while Hub holds `&mut strategy` separately. This
 /// solves the split-borrow problem: strategy and access are disjoint fields.
@@ -165,14 +106,26 @@ pub(crate) struct HubAccess {
     /// Re-keyed onto a new primary display rather than replaced, so this id
     /// never dies while any display exists.
     pub(super) primary_monitor: MonitorId,
-    pub(super) layout: GlobalLayoutConfig,
-    pub(super) preferred_layouts: Vec<LayoutWorkspaceConfig>,
+    pub(super) tiling: TilingConfig,
+    pub(super) preferred_layouts: PreferredLayouts,
     pub(super) workspaces: Allocator<Workspace>,
     pub(super) windows: Allocator<Window>,
     pub(super) containers: Allocator<Container>,
 }
 
 impl HubAccess {
+    /// The monitor name a workspace's layout entry is keyed under.
+    ///
+    /// For a parked workspace this is the origin monitor recorded at unplug,
+    /// not the monitor now hosting it.
+    pub(super) fn origin_monitor_name(&self, ws_id: WorkspaceId) -> String {
+        let ws = self.workspaces.get(ws_id);
+        match ws.origin() {
+            Some(origin) => origin.to_string(),
+            None => self.monitors.get(ws.monitor).unique_name.clone(),
+        }
+    }
+
     pub(super) fn allocate_container(&mut self, container: Container) -> ContainerId {
         self.containers.allocate(container)
     }
@@ -234,7 +187,7 @@ impl HubAccess {
 
     /// Lets a caller that already holds the scale skip the monitor lookup `border` does.
     pub(super) fn border_for_scale(&self, scale: f32) -> Pixels<Unit> {
-        Pixels::round(Length::from_pixels(self.layout.border_size).to_unit(scale))
+        Pixels::round(Length::from_pixels(self.tiling.border_size).to_unit(scale))
     }
 }
 
@@ -251,10 +204,10 @@ pub(crate) struct Hub {
 impl Hub {
     pub(crate) fn new(
         primary: ReportedMonitor,
-        layout: GlobalLayoutConfig,
-        preferred_layouts: Vec<LayoutWorkspaceConfig>,
+        tiling: TilingConfig,
+        preferred_layouts: PreferredLayouts,
     ) -> Self {
-        let strategies = StrategySet::new(&layout);
+        let strategies = StrategySet::new(&tiling);
 
         let mut hub = Self {
             access: HubAccess {
@@ -262,7 +215,7 @@ impl Hub {
                 // Placeholder ids. Both are set once the primary monitor exists.
                 focused_monitor: MonitorId::new(0),
                 primary_monitor: MonitorId::new(0),
-                layout,
+                tiling,
                 preferred_layouts,
                 workspaces: Allocator::new(),
                 windows: Allocator::new(),
@@ -278,8 +231,6 @@ impl Hub {
         let primary_id = hub.add_monitor(primary);
         hub.access.focused_monitor = primary_id;
         hub.access.primary_monitor = primary_id;
-        let preferred = hub.access.preferred_layouts.clone();
-        hub.index_matchers(&preferred);
         hub
     }
 
@@ -325,20 +276,35 @@ impl Hub {
         }
     }
 
-    /// Single entry point for tiling actions.
     #[tracing::instrument(skip(self))]
-    pub(crate) fn handle_tiling_action(&mut self, action: TilingAction) {
-        if self.is_restricted(RestrictedAction::TilingNavigation) {
-            return;
+    pub(crate) fn handle_tiling_action(
+        &mut self,
+        action: impl Into<TilingAction> + std::fmt::Debug,
+    ) {
+        match action.into() {
+            TilingAction::Strategy(action) => {
+                if self.is_restricted(RestrictedAction::TilingNavigation) {
+                    return;
+                }
+                let ws_id = self.current_workspace();
+                self.strategies
+                    .handle_action(&mut self.access, ws_id, action);
+            }
+            TilingAction::FocusWorkspace { name, monitor } => {
+                self.focus_workspace(&name, monitor.as_deref())
+            }
+            TilingAction::MoveToWorkspace { name, monitor } => {
+                self.move_focused_to_workspace(&name, monitor.as_deref())
+            }
+            TilingAction::FocusMonitor { selector } => self.focus_monitor(&selector),
+            TilingAction::MoveToMonitor { selector } => self.move_focused_to_monitor(&selector),
+            TilingAction::ToggleFloat => self.toggle_float(),
+            TilingAction::ToggleFullscreen => self.toggle_fullscreen(),
         }
-        let ws_id = self.current_workspace();
-        self.strategies
-            .for_workspace_mut(ws_id)
-            .handle_action(&mut self.access, action);
     }
 
     pub(crate) fn focus_tab_index(&mut self, container_id: ContainerId, index: usize) {
-        self.handle_tiling_action(TilingAction::TabClicked {
+        self.handle_tiling_action(StrategyAction::TabClicked {
             container_id,
             index,
         });
@@ -477,45 +443,39 @@ impl Hub {
         let float_windows: Vec<WindowId> = ws.float_windows.clone();
         let fullscreen_windows: Vec<WindowId> = ws.fullscreen_windows.clone();
 
-        let float = self.collect_display_matchers(&float_windows, |mode| match mode {
-            DisplayMode::Float { occupy, .. } => *occupy,
-            _ => None,
-        });
-        let fullscreen = self.collect_display_matchers(&fullscreen_windows, |mode| match mode {
-            DisplayMode::Fullscreen { occupy } => *occupy,
-            _ => None,
-        });
+        let float = self.synthesize_display_matchers(&float_windows);
+        let fullscreen = self.synthesize_display_matchers(&fullscreen_windows);
 
         export.float = float;
         export.fullscreen = fullscreen;
 
-        let config = export.to_layout_workspace_config(&ws_name);
+        let config = export.to_layout_workspace_config();
+        let monitor = self.access.origin_monitor_name(ws_id);
         self.access
             .preferred_layouts
-            .retain(|e| e.name() != ws_name);
-        self.access.preferred_layouts.push(config);
+            .insert(&monitor, &ws_name, config);
 
         export
     }
 
-    pub(crate) fn sync_configuration(&mut self, layout: GlobalLayoutConfig) {
-        self.access.layout = layout.clone();
+    pub(crate) fn sync_configuration(&mut self, tiling: TilingConfig) {
+        self.access.tiling = tiling.clone();
         for ws_id in self.access.workspaces.sorted_ids() {
             self.strategies
                 .for_workspace_mut(ws_id)
-                .apply_config(&mut self.access, layout.clone());
+                .apply_config(&mut self.access, tiling.clone());
         }
         let preferred_layouts = self.access.preferred_layouts.clone();
 
         self.strategies
-            .resync(&mut self.access, &preferred_layouts, layout.strategy);
+            .resync(&mut self.access, &preferred_layouts, tiling.layout);
 
         self.index_matchers(&preferred_layouts);
     }
 
-    pub(crate) fn sync_preferred_layout(&mut self, preferred_layouts: Vec<LayoutWorkspaceConfig>) {
+    pub(crate) fn sync_preferred_layout(&mut self, preferred_layouts: PreferredLayouts) {
         self.index_matchers(&preferred_layouts);
-        let default_strategy = self.access.layout.strategy;
+        let default_strategy = self.access.tiling.layout;
         self.strategies
             .resync(&mut self.access, &preferred_layouts, default_strategy);
         self.access.preferred_layouts = preferred_layouts;
@@ -535,7 +495,7 @@ impl Hub {
     ) -> Option<WindowId> {
         if let Some(r) = self
             .access
-            .layout
+            .tiling
             .ignore
             .iter()
             .find(|r| metadata.matches_window_matcher(r))

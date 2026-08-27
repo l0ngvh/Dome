@@ -1,7 +1,7 @@
-use crate::config::Strategy;
+use crate::core::Strategy;
 use crate::core::WindowRestrictions;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, snapshot,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect, snapshot,
     titled,
 };
 use insta::assert_snapshot;
@@ -9,8 +9,8 @@ use insta::assert_snapshot;
 #[test]
 fn focus_direction_left_right() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -44,8 +44,8 @@ fn focus_direction_left_right() {
 #[test]
 fn focus_across_panes_restores_last_focused() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -140,8 +140,8 @@ fn focus_across_panes_restores_last_focused() {
 #[test]
 fn focus_across_panes_after_moving_a_window() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -224,8 +224,8 @@ fn focus_across_panes_after_moving_a_window() {
 #[test]
 fn focus_across_panes_after_remembered_window_deleted() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -308,8 +308,8 @@ fn focus_across_panes_after_remembered_window_deleted() {
 #[test]
 fn removal_focuses_most_recent_surviving_window() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )

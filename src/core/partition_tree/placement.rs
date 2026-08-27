@@ -1,12 +1,12 @@
 use crate::core::hub::HubAccess;
 use crate::core::node::Constraints;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, PixelRect, WorkspaceId};
-use crate::core::partition_tree::{Child, SpawnMode};
+use crate::core::partition_tree::Child;
 use crate::core::strategy::{
     TilingPlacements, clip, container_titles, distribute_space, tab_bar_band, translate,
     window_constraints,
 };
-use crate::core::{ContainerPlacement, SpawnIndicator, TilingWindowPlacement};
+use crate::core::{ContainerPlacement, TilingWindowPlacement};
 
 use super::PartitionTreeStrategy;
 
@@ -128,8 +128,8 @@ impl PartitionTreeStrategy {
                                 .clip(screen)
                                 .unwrap_or(PixelRect::ZERO),
                             is_highlighted,
-                            spawn_indicator: if is_highlighted {
-                                Some(SpawnIndicator::from(self.child_spawn_mode(child)))
+                            spawn_direction: if is_highlighted {
+                                Some(self.child_spawn_direction(child))
                             } else {
                                 None
                             },
@@ -158,8 +158,8 @@ impl PartitionTreeStrategy {
                             data.is_tabbed(),
                         ),
                         is_highlighted,
-                        spawn_indicator: if is_highlighted {
-                            Some(SpawnIndicator::from(self.child_spawn_mode(child)))
+                        spawn_direction: if is_highlighted {
+                            Some(self.child_spawn_direction(child))
                         } else {
                             None
                         },
@@ -364,28 +364,26 @@ impl PartitionTreeStrategy {
         }
     }
 
-    /// The `!is_tab()` guard keeps tabbed children from being demoted to a split
-    /// mode by a layout pass.
     fn set_child_dimension(&mut self, child: Child, dim: Dimension) {
-        let spawn_mode = if dim.width >= dim.height {
-            SpawnMode::horizontal()
+        let spawn_direction = if dim.width >= dim.height {
+            Direction::Horizontal
         } else {
-            SpawnMode::vertical()
+            Direction::Vertical
         };
         let automatic_tiling = self.automatic_tiling;
         match child {
             Child::Window(wid) => {
                 let td = self.tiling_windows.get_mut(&wid).unwrap();
                 td.dimension = dim;
-                if automatic_tiling && !td.spawn_mode.is_tab() {
-                    td.spawn_mode = SpawnMode::without_history(spawn_mode);
+                if automatic_tiling {
+                    td.spawn_direction = spawn_direction;
                 }
             }
             Child::Container(cid) => {
                 let c = self.tiling_containers.get_mut(&cid).unwrap();
                 c.dimension = dim;
-                if automatic_tiling && !c.spawn_mode().is_tab() {
-                    c.set_spawn_mode_reset(spawn_mode);
+                if automatic_tiling {
+                    c.set_spawn_direction(spawn_direction);
                 }
             }
         }

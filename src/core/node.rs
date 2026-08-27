@@ -2,9 +2,8 @@ use std::iter::Sum;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
 
-use crate::config::WindowMatcher;
 use crate::core::allocator::{Node, NodeId};
-use crate::core::matcher::FloatFullscreenMatcherId;
+use crate::core::matcher::{FloatFullscreenMatcherId, WindowMatcher};
 
 pub use dome_ipc::WindowId;
 
@@ -528,6 +527,33 @@ impl<U> Pixels<U> {
     pub(crate) fn min(self, other: Self) -> Self {
         Self::new(self.v.min(other.v))
     }
+}
+
+impl crate::config::lua::deserializer::FromLuaValue for Pixels<Logical> {
+    fn from_lua_value(
+        value: &mlua::Value,
+        cx: &mut crate::config::lua::deserializer::LoadContext,
+    ) -> mlua::Result<Self> {
+        let n = f64::from_lua_value(value, cx)?;
+        pixels_from_lua_number(n)
+    }
+}
+
+/// Takes `f64` so the whole-number check runs before any narrowing. Narrowing
+/// first would round `100000000.5` to a whole `1e8` and let it pass.
+pub(super) fn pixels_from_lua_number(v: f64) -> mlua::Result<Pixels<Logical>> {
+    if !v.is_finite() || v < 0.0 {
+        return Err(mlua::Error::runtime(
+            "pixel value must be a finite non-negative number",
+        ));
+    }
+    if v.fract() != 0.0 {
+        return Err(mlua::Error::runtime("pixel value must be a whole number"));
+    }
+    if v > i32::MAX as f64 {
+        return Err(mlua::Error::runtime("pixel value is out of range"));
+    }
+    Ok(Pixels::new(v as i32))
 }
 
 impl<U> Add for Pixels<U> {

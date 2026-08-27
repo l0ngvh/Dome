@@ -1,17 +1,17 @@
-use crate::config::{MasterConfig, Strategy, WindowMatcher};
 use crate::core::WindowRestrictions;
-use crate::core::strategy::TilingAction;
+use crate::core::strategy::StrategyAction;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, snapshot,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect, snapshot,
     titled,
 };
+use crate::core::{MasterConfig, Strategy, WindowMatcher};
 use insta::assert_snapshot;
 
 #[test]
 fn single_window_layout() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -59,8 +59,8 @@ fn single_window_layout() {
 #[test]
 fn two_windows_default_ratio() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -110,8 +110,8 @@ fn two_windows_default_ratio() {
 #[test]
 fn three_windows_layout() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -163,8 +163,8 @@ fn three_windows_layout() {
 #[test]
 fn focus_direction_up_down() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -199,8 +199,8 @@ fn focus_direction_up_down() {
 #[test]
 fn increase_decrease_master_ratio() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -209,7 +209,7 @@ fn increase_decrease_master_ratio() {
     hub.insert_window(titled("w18"), default_rect(), WindowRestrictions::None);
 
     // Increase ratio: master gets wider
-    hub.handle_tiling_action(TilingAction::GrowMaster);
+    hub.handle_tiling_action(StrategyAction::GrowMaster);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -250,8 +250,8 @@ fn increase_decrease_master_ratio() {
     ");
 
     // Decrease twice to go below default
-    hub.handle_tiling_action(TilingAction::ShrinkMaster);
-    hub.handle_tiling_action(TilingAction::ShrinkMaster);
+    hub.handle_tiling_action(StrategyAction::ShrinkMaster);
+    hub.handle_tiling_action(StrategyAction::ShrinkMaster);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -293,7 +293,7 @@ fn increase_decrease_master_ratio() {
 
     // Clamp at 0.1: decrease many times
     for _ in 0..20 {
-        hub.handle_tiling_action(TilingAction::ShrinkMaster);
+        hub.handle_tiling_action(StrategyAction::ShrinkMaster);
     }
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -336,7 +336,7 @@ fn increase_decrease_master_ratio() {
 
     // Clamp at 0.9: increase many times
     for _ in 0..20 {
-        hub.handle_tiling_action(TilingAction::GrowMaster);
+        hub.handle_tiling_action(StrategyAction::GrowMaster);
     }
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -381,8 +381,8 @@ fn increase_decrease_master_ratio() {
 #[test]
 fn increment_decrement_master_count() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -392,7 +392,7 @@ fn increment_decrement_master_count() {
     hub.insert_window(titled("w21"), default_rect(), WindowRestrictions::None); // W2
 
     // Increment master_count to 2: two masters on left, one stack on right
-    hub.handle_tiling_action(TilingAction::MoreMaster);
+    hub.handle_tiling_action(StrategyAction::MoreMaster);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -434,7 +434,7 @@ fn increment_decrement_master_count() {
     ");
 
     // Decrement back to 1
-    hub.handle_tiling_action(TilingAction::FewerMaster);
+    hub.handle_tiling_action(StrategyAction::FewerMaster);
     let after_decrement = snapshot(&hub);
     assert_snapshot!(after_decrement, @"
     Hub(focused=WindowId(2))
@@ -477,15 +477,15 @@ fn increment_decrement_master_count() {
     ");
 
     // Decrement below 1 is no-op
-    hub.handle_tiling_action(TilingAction::FewerMaster);
+    hub.handle_tiling_action(StrategyAction::FewerMaster);
     assert_eq!(snapshot(&hub), after_decrement);
 }
 
 #[test]
 fn master_count_exceeds_window_count() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -496,7 +496,7 @@ fn master_count_exceeds_window_count() {
 
     // Set master_count to 5 (exceeds 3 windows): all windows fill screen
     for _ in 0..4 {
-        hub.handle_tiling_action(TilingAction::MoreMaster);
+        hub.handle_tiling_action(StrategyAction::MoreMaster);
     }
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -542,8 +542,8 @@ fn master_count_exceeds_window_count() {
 #[test]
 fn more_master_only_affects_focused_workspace() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -556,7 +556,7 @@ fn more_master_only_affects_focused_workspace() {
     hub.insert_window(titled("w57"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w58"), default_rect(), WindowRestrictions::None);
     // MoreMaster on workspace "1".
-    hub.handle_tiling_action(TilingAction::MoreMaster);
+    hub.handle_tiling_action(StrategyAction::MoreMaster);
 
     // Switch back to workspace "0". Its layout reflects original master_count=1.
     hub.focus_workspace("0", None);
@@ -603,13 +603,13 @@ fn more_master_only_affects_focused_workspace() {
 #[test]
 fn attach_window_falls_back_to_global_when_no_per_workspace_override() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
         .build();
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_strategy(Strategy::Master)
         .with_master_config(MasterConfig {
             master_ratio: 0.5,
@@ -667,8 +667,8 @@ fn more_master_promotes_unmatched_over_matched() {
     // MoreMaster promotes an unmatched window from stack before touching
     // matched secondary windows.
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -686,7 +686,7 @@ fn more_master_promotes_unmatched_over_matched() {
     hub.insert_window(titled("B"), default_rect(), WindowRestrictions::None); // W1 = stack (matched secondary)
     hub.insert_window(titled("C"), default_rect(), WindowRestrictions::None); // W2 = stack (unmatched, focused)
 
-    hub.handle_tiling_action(TilingAction::MoreMaster);
+    hub.handle_tiling_action(StrategyAction::MoreMaster);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
@@ -733,8 +733,8 @@ fn more_master_promotes_unmatched_over_matched() {
 fn more_master_noop_when_no_unmatched_in_stack() {
     // MoreMaster does not move windows when all stack windows are matched.
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -758,7 +758,7 @@ fn more_master_noop_when_no_unmatched_in_stack() {
     hub.insert_window(titled("B"), default_rect(), WindowRestrictions::None); // W1 = stack (matched)
     hub.insert_window(titled("C"), default_rect(), WindowRestrictions::None); // W2 = stack (matched, focused)
 
-    hub.handle_tiling_action(TilingAction::MoreMaster);
+    hub.handle_tiling_action(StrategyAction::MoreMaster);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
@@ -805,8 +805,8 @@ fn more_master_noop_when_no_unmatched_in_stack() {
 fn fewer_master_demotes_last_unmatched() {
     // FewerMaster demotes the last master window (which is unmatched) to stack.
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -825,7 +825,7 @@ fn fewer_master_demotes_last_unmatched() {
     hub.insert_window(titled("A"), default_rect(), WindowRestrictions::None); // W1 = master (matched, focused)
     hub.insert_window(titled("C"), default_rect(), WindowRestrictions::None); // W2 = stack
 
-    hub.handle_tiling_action(TilingAction::FewerMaster);
+    hub.handle_tiling_action(StrategyAction::FewerMaster);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))

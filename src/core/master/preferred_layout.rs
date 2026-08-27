@@ -1,16 +1,55 @@
-use crate::config::{LayoutWorkspaceConfig, WindowMatcher};
+use crate::config::lua::deserializer::{
+    FromLuaValue, LoadContext, Shape, as_table, warn_if_shape_mismatched,
+};
 use crate::core::allocator::{Node, NodeId};
 use crate::core::hub::HubAccess;
-use crate::core::master::MasterStrategy;
+use crate::core::master::{MasterStrategy, PaneDisplay};
 use crate::core::node::{Child, ContainerId, WindowId, WorkspaceId};
 use crate::core::strategy::TilingStrategy;
+use crate::core::{PreferredWorkspace, WindowMatcher};
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct PaneConfig {
+    pub(crate) display: PaneDisplay,
+    pub(crate) children: Vec<WindowMatcher>,
+}
+
+impl PaneConfig {
+    #[cfg(test)]
+    pub(crate) fn tiled(children: Vec<WindowMatcher>) -> Self {
+        Self {
+            display: PaneDisplay::Tiled,
+            children,
+        }
+    }
+}
+
+/// Accepts either a bare list of matchers or a table carrying `display` and
+/// `children`.
+impl FromLuaValue for PaneConfig {
+    fn from_lua_value(value: &mlua::Value, cx: &mut LoadContext) -> mlua::Result<Self> {
+        let table = as_table(value, "a list of window matchers, or a pane table")?;
+        let keyed = table.contains_key("display")? || table.contains_key("children")?;
+        if !keyed {
+            return Ok(PaneConfig {
+                display: PaneDisplay::Tiled,
+                children: Vec::from_lua_value(value, cx)?,
+            });
+        }
+        warn_if_shape_mismatched(table, Shape::Map, cx);
+        Ok(PaneConfig {
+            display: cx.field(table, "display"),
+            children: cx.field(table, "children"),
+        })
+    }
+}
 
 impl MasterStrategy {
     pub(super) fn sync_preferred_layout(
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        incoming: Option<&LayoutWorkspaceConfig>,
+        incoming: Option<&PreferredWorkspace>,
     ) {
         let Some(state) = self.workspaces.get(&ws_id) else {
             return;
@@ -18,7 +57,7 @@ impl MasterStrategy {
 
         let (new_count_opt, new_ratio_opt, incoming_master, incoming_secondary, incoming_displays) =
             match incoming {
-                Some(LayoutWorkspaceConfig::Master {
+                Some(PreferredWorkspace::Master {
                     master_count: incoming_count,
                     master_ratio: incoming_ratio,
                     master,

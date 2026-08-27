@@ -7,7 +7,7 @@ use egui::{
     StrokeKind, TextStyle, pos2, vec2,
 };
 
-use crate::core::{ContainerId, Dimension, Length, Logical, SpawnIndicator, WindowId};
+use crate::core::{ContainerId, Dimension, Direction, Length, Logical, WindowId};
 use crate::theme::Theme;
 
 /// Hardcoded corner radius for window borders and tabbed-container body
@@ -36,7 +36,7 @@ pub(crate) struct LogicalTiledWindow {
     pub frame: Dimension<Logical>,
     pub visible_frame: Dimension<Logical>,
     pub is_highlighted: bool,
-    pub spawn_indicator: Option<SpawnIndicator>,
+    pub spawn_direction: Option<Direction>,
 }
 
 #[derive(Clone, Debug)]
@@ -48,7 +48,7 @@ pub(crate) struct LogicalTiledContainer {
     /// seam against the painted bar.
     pub tab_bar_height: Length<Logical>,
     pub is_highlighted: bool,
-    pub spawn_indicator: Option<SpawnIndicator>,
+    pub spawn_direction: Option<Direction>,
     pub is_tabbed: bool,
     pub titles: Vec<String>,
 }
@@ -86,7 +86,7 @@ pub(crate) fn paint_tiling_overlay(
             wp.frame,
             wp.visible_frame,
             wp.is_highlighted,
-            wp.spawn_indicator,
+            wp.spawn_direction,
             theme,
             border,
             origin,
@@ -132,12 +132,12 @@ pub(crate) fn paint_window_border(
     frame: Dimension<Logical>,
     visible_frame: Dimension<Logical>,
     is_highlighted: bool,
-    spawn_indicator: Option<SpawnIndicator>,
+    spawn_direction: Option<Direction>,
     theme: &Theme,
     border: BorderMetrics,
     origin: egui::Vec2,
 ) {
-    let colors = border_colors(is_highlighted, spawn_indicator, theme);
+    let colors = border_colors(is_highlighted, spawn_direction, theme);
     paint_border_edges(
         painter,
         frame,
@@ -250,7 +250,7 @@ fn show_container(
     let r = effective_radius(border.radius.logical(), w, h);
 
     if placement.is_highlighted {
-        let colors = border_colors(true, placement.spawn_indicator, theme);
+        let colors = border_colors(true, placement.spawn_direction, theme);
         let focused = theme.focused_border;
         let painter = ui.painter();
 
@@ -659,26 +659,24 @@ fn paint_border_edges(
     );
 }
 
-/// [top, right, bottom, left] border colors based on highlight state and spawn indicator.
+/// [top, right, bottom, left] border colors based on highlight state and spawn direction.
 fn border_colors(
     is_highlighted: bool,
-    spawn_indicator: Option<SpawnIndicator>,
+    spawn_direction: Option<Direction>,
     theme: &Theme,
 ) -> [Color32; 4] {
     if !is_highlighted {
         return [theme.unfocused_border; 4];
     }
-    let Some(si) = spawn_indicator else {
+    let Some(direction) = spawn_direction else {
         return [theme.focused_border; 4];
     };
     let f = theme.focused_border;
     let s = theme.spawn_indicator;
-    [
-        if si.top { s } else { f },
-        if si.right { s } else { f },
-        if si.bottom { s } else { f },
-        if si.left { s } else { f },
-    ]
+    match direction {
+        Direction::Horizontal => [f, s, f, f],
+        Direction::Vertical => [f, f, s, f],
+    }
 }
 
 /// Returns [nw, ne, sw, se] corner colors. A corner gets the focused color only if both
@@ -734,17 +732,6 @@ mod tests {
         assert_eq!(
             corner_colors(edge_colors, focused),
             [focused, spawn, focused, spawn]
-        );
-    }
-
-    #[test]
-    fn corner_colors_spawn_top_and_right() {
-        let focused = Color32::from_rgb(102, 153, 255);
-        let spawn = Color32::from_rgb(255, 100, 100);
-        let edge_colors = [spawn, spawn, focused, focused];
-        assert_eq!(
-            corner_colors(edge_colors, focused),
-            [spawn, spawn, focused, spawn]
         );
     }
 

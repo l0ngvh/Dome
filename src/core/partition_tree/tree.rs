@@ -1,15 +1,14 @@
-use crate::config::SplitMode;
+use crate::core::SplitMode;
 use crate::core::hub::HubAccess;
-use crate::core::node::{ContainerId, Dimension, WindowId, WorkspaceId};
-use crate::core::partition_tree::{Child, Container, Parent, SpawnMode, TilingContainerData};
+use crate::core::node::{ContainerId, Dimension, Direction, WindowId, WorkspaceId};
+use crate::core::partition_tree::{Child, Container, Parent, TilingContainerData};
 
 use super::PartitionTreeStrategy;
 
 impl PartitionTreeStrategy {
-    /// Attach a `Child` (window or container) to a workspace. If the spawn mode is horizontal or
-    /// vertical, try to insert the child next to the focused child. If it's tabbed, try to insert
-    /// it into the closest tabbed container.
-    pub(super) fn attach_child_according_to_spawn_mode(
+    /// Attach a `Child` (window or container) to a workspace. Tries to insert the child next to
+    /// the focused child, along that child's spawn direction.
+    pub(super) fn attach_child_according_to_spawn_direction(
         &mut self,
         hub: &mut HubAccess,
         child: Child,
@@ -25,28 +24,14 @@ impl PartitionTreeStrategy {
             return;
         };
 
-        let spawn_mode = self.child_spawn_mode(insert_anchor);
+        let spawn_direction = self.child_spawn_direction(insert_anchor);
 
-        if spawn_mode.is_tab()
-            && let Some(tabbed_self_or_ancestor) = self.find_tabbed_self_or_ancestor(insert_anchor)
-        {
-            let active_tab_index = self
-                .tiling_containers
-                .get(&tabbed_self_or_ancestor)
-                .unwrap()
-                .active_tab_index();
-            self.attach_child_to_container(
-                hub,
-                child,
-                tabbed_self_or_ancestor,
-                Some(active_tab_index + 1),
-            );
-        } else if let Child::Container(cid) = insert_anchor
+        if let Child::Container(cid) = insert_anchor
             && self
                 .tiling_containers
                 .get(&cid)
                 .unwrap()
-                .can_accommodate(spawn_mode)
+                .has_direction(spawn_direction)
         {
             self.attach_child_to_container(hub, child, cid, None);
         } else {
@@ -56,7 +41,7 @@ impl PartitionTreeStrategy {
                         .tiling_containers
                         .get(&container_id)
                         .unwrap()
-                        .can_accommodate(spawn_mode)
+                        .has_direction(spawn_direction)
                     {
                         let anchor_index =
                             hub.containers.get(container_id).position_of(insert_anchor);
@@ -71,7 +56,7 @@ impl PartitionTreeStrategy {
                             hub,
                             insert_anchor,
                             vec![insert_anchor, child],
-                            spawn_mode.into(),
+                            spawn_direction.into(),
                         );
                     }
                 }
@@ -80,7 +65,7 @@ impl PartitionTreeStrategy {
                         hub,
                         insert_anchor,
                         vec![insert_anchor, child],
-                        spawn_mode.into(),
+                        spawn_direction.into(),
                     );
                 }
             }
@@ -245,10 +230,10 @@ impl PartitionTreeStrategy {
         }
     }
 
-    pub(super) fn child_spawn_mode(&self, child: Child) -> SpawnMode {
+    pub(super) fn child_spawn_direction(&self, child: Child) -> Direction {
         match child {
-            Child::Window(id) => self.tiling_windows.get(&id).unwrap().spawn_mode,
-            Child::Container(id) => self.tiling_containers.get(&id).unwrap().spawn_mode(),
+            Child::Window(id) => self.tiling_windows.get(&id).unwrap().spawn_direction,
+            Child::Container(id) => self.tiling_containers.get(&id).unwrap().spawn_direction(),
         }
     }
 
@@ -348,7 +333,6 @@ impl PartitionTreeStrategy {
         children: Vec<Child>,
         split_mode: SplitMode,
     ) -> ContainerId {
-        let spawn_mode = SpawnMode::from(split_mode);
         let parent = self.parent(anchor);
         let workspace_id = self.child_workspace(hub, anchor);
         let container_id = hub.allocate_container(Container {
@@ -358,18 +342,22 @@ impl PartitionTreeStrategy {
             container_id,
             TilingContainerData::new(parent, workspace_id, split_mode),
         );
+        let spawn_direction = self
+            .tiling_containers
+            .get(&container_id)
+            .unwrap()
+            .spawn_direction();
         tracing::debug!("Forming container {container_id} to replace {anchor}");
         for &c in &children {
             match c {
                 Child::Window(wid) => {
-                    self.tiling_windows.get_mut(&wid).unwrap().spawn_mode =
-                        SpawnMode::without_history(spawn_mode);
+                    self.tiling_windows.get_mut(&wid).unwrap().spawn_direction = spawn_direction;
                 }
                 Child::Container(cid) => {
                     self.tiling_containers
                         .get_mut(&cid)
                         .unwrap()
-                        .set_spawn_mode_reset(spawn_mode);
+                        .set_spawn_direction(spawn_direction);
                 }
             }
         }

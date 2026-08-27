@@ -20,22 +20,45 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
+use calloop::LoopSignal;
 use objc2_core_graphics::CGWindowID;
 
-use crate::action::{
-    FocusTarget, MasterTarget, MinimizedWindow, MoveTarget, TabDirection, ToggleTarget,
+use crate::action::MinimizedWindow;
+use crate::config::{
+    Appearance, Config, KeymapRuntime, Keystroke, PlatformEffects, PreferredLayouts,
 };
-use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig, WindowMatcher, pattern_matches};
-use crate::core::GlobalLayoutConfig;
 use crate::core::{
-    ContainerId, Dimension, Direction, Hub, Length, Logical, PixelRect, TilingAction, WindowId,
+    ContainerId, Dimension, Hub, Length, Logical, PixelRect, TilingAction, WindowId,
     WindowMetadata, WindowRestrictions,
 };
+use crate::core::{TilingConfig, WindowMatcher, pattern_matches};
 use crate::platform::macos::accessibility::ExternalWindow;
 
 use monitor::MonitorRegistry;
 use recovery::Recovery;
-use registry::{ManagedWindow, WindowRegistry};
+use registry::ManagedWindow;
+pub(in crate::platform::macos) use registry::WindowRegistry;
+
+struct MacPlatformEffects<'a> {
+    registry: &'a mut WindowRegistry,
+    signal: &'a LoopSignal,
+}
+
+impl PlatformEffects for MacPlatformEffects<'_> {
+    fn close(&mut self, id: WindowId) {
+        self.registry.close_window(id);
+    }
+
+    fn execute(&mut self, command: &str) {
+        if let Err(e) = crate::platform::macos::spawn::spawn_disclaimed_sh(command) {
+            tracing::warn!(%command, "Failed to execute: {e}");
+        }
+    }
+
+    fn exit(&mut self) {
+        self.signal.stop();
+    }
+}
 
 pub(in crate::platform::macos) struct NewWindow {
     pub(in crate::platform::macos) ax: Arc<dyn ExternalWindow>,
@@ -96,8 +119,8 @@ impl WindowMetadata for MacOSMetadata {
         {
             return false;
         }
-        if let Some(b) = matcher.bundle_id.as_deref()
-            && bundle_id != Some(b)
+        if let Some(p) = matcher.bundle_id.as_deref()
+            && !bundle_id.is_some_and(|b| pattern_matches(p, b))
         {
             return false;
         }
@@ -112,8 +135,8 @@ impl WindowMetadata for MacOSMetadata {
         matcher.app.is_some() || matcher.bundle_id.is_some() || matcher.title.is_some()
     }
 
-    fn to_window_matcher(&self) -> crate::config::WindowMatcher {
-        crate::config::WindowMatcher {
+    fn to_window_matcher(&self) -> WindowMatcher {
+        WindowMatcher {
             app: self.app_name.clone(),
             bundle_id: self.bundle_id.clone(),
             title: self.title.clone(),
@@ -166,7 +189,6 @@ pub(in crate::platform::macos) struct Dome {
     /// The windows Dome currently has on screen. Owned here rather than per monitor entry
     /// so it survives a monitor removal.
     displayed_windows: HashSet<WindowId>,
-    config: Config,
     /// Full height of the primary display (including menu bar/dock), used for Quartz→Cocoa
     /// coordinate conversion in overlay rendering.
     primary_full_height: f32,
@@ -181,24 +203,22 @@ pub(in crate::platform::macos) struct Dome {
     monitors: Vec<MonitorInfo>,
     /// Detection is suppressed while the display settles after a monitor change.
     monitor_settling: bool,
+    runtime: KeymapRuntime,
 }
 
 impl Dome {
     pub(in crate::platform::macos) fn new(
         monitors: &[MonitorInfo],
-        config: Config,
-        workspace_overrides: Vec<LayoutWorkspaceConfig>,
+        tiling: TilingConfig,
+        workspace_overrides: PreferredLayouts,
         sender: Box<dyn SceneSender>,
+        runtime: KeymapRuntime,
     ) -> Self {
         let primary = monitors
             .iter()
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
-        let mut hub = Hub::new(
-            primary.into(),
-            GlobalLayoutConfig::from(&config),
-            workspace_overrides.clone(),
-        );
+        let mut hub = Hub::new(primary.into(), tiling, workspace_overrides.clone());
         let primary_monitor_id = hub.primary_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         for monitor in monitors {
@@ -211,7 +231,6 @@ impl Dome {
             hub,
             registry: WindowRegistry::new(),
             monitor_registry,
-            config,
             primary_full_height: primary.full_height,
             observed_pids: HashSet::new(),
             sender,
@@ -223,6 +242,7 @@ impl Dome {
             bar_geometry: None,
             monitors: monitors.to_vec(),
             monitor_settling: false,
+            runtime,
         }
     }
 
@@ -344,7 +364,7 @@ impl Dome {
                 } else {
                     "reserving no bar space yet"
                 };
-                crate::log_dedup::warn_once!(
+                crate::logging::warn_once!(
                     key: "sketchybar-probe",
                     "Bar probe failed, {state}: {e:#}"
                 );
@@ -377,18 +397,19 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn config_changed(&mut self, new_config: Config) {
-        self.hub
-            .sync_configuration(GlobalLayoutConfig::from(&new_config));
-        self.sender
-            .send(HubMessage::ConfigChanged(Box::new(new_config.clone())));
-        self.config = new_config;
+    pub(in crate::platform::macos) fn config_changed(
+        &mut self,
+        tiling: TilingConfig,
+        appearance: Appearance,
+    ) {
+        self.hub.sync_configuration(tiling);
+        self.sender.send(HubMessage::AppearanceChanged(appearance));
         tracing::info!("Config reloaded");
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn layout_changed(&mut self, new_layout: LayoutConfig) {
-        self.hub.sync_preferred_layout(new_layout.workspace);
+    pub(in crate::platform::macos) fn layout_changed(&mut self, new_layout: PreferredLayouts) {
+        self.hub.sync_preferred_layout(new_layout);
         tracing::info!("Layout reloaded");
         self.flush_layout();
     }
@@ -406,9 +427,11 @@ impl Dome {
             return;
         };
         let window_id = entry.window_id;
-        let was_minimized = entry.is_minimized;
-        if was_minimized {
-            self.hub.unminimize_window(window_id);
+        // A minimized window holds no workspace, so the hub cannot focus it
+        // until the deminiaturize notification reattaches it.
+        if entry.is_minimized {
+            self.unminimize_window(window_id);
+            return;
         }
         self.hub.set_focus(window_id);
         self.flush_layout();
@@ -448,10 +471,12 @@ impl Dome {
             return;
         };
         let window_id = entry.window_id;
-        let was_minimized = entry.is_minimized;
         let ext = entry.ext.clone();
-        if was_minimized {
-            self.hub.unminimize_window(window_id);
+        // A minimized window holds no workspace, so the hub cannot focus it
+        // until the deminiaturize notification reattaches it.
+        if entry.is_minimized {
+            self.unminimize_window(window_id);
+            return;
         }
         if let Err(e) = ext.focus() {
             tracing::debug!("Failed to focus window: {e:#}");
@@ -603,19 +628,19 @@ impl Dome {
         serde_json::to_string(&entries).expect("MinimizedWindow is infallibly serializable")
     }
 
+    /// Ask the OS to take a window out of the Dock. The hub keeps the window
+    /// minimized until the deminiaturize notification reports the restore.
     #[tracing::instrument(skip(self), fields(window_id = %window_id))]
     pub(in crate::platform::macos) fn unminimize_window(&mut self, window_id: WindowId) {
-        self.hub.unminimize_window(window_id);
-        let Some(window) = self.registry.by_id_mut(window_id) else {
+        let Some(window) = self.registry.by_id(window_id) else {
             return;
         };
-        if window.is_minimized {
-            window.is_minimized = false;
-            if let Err(e) = window.ext.unminimize() {
-                tracing::debug!("Failed to unminimize window: {e:#}");
-            }
+        if !window.is_minimized {
+            return;
         }
-        self.flush_layout();
+        if let Err(e) = window.ext.unminimize() {
+            tracing::debug!("Failed to unminimize window: {e:#}");
+        }
     }
 
     #[tracing::instrument(skip(self))]
@@ -623,93 +648,33 @@ impl Dome {
         let Some(window_id) = self.hub.focused_window(self.hub.current_workspace()) else {
             return;
         };
-        let Some(window) = self.registry.by_id(window_id) else {
-            return;
+        self.registry.close_window(window_id);
+    }
+
+    pub(in crate::platform::macos) fn run_binding(
+        &mut self,
+        keymap: &str,
+        keystroke: &Keystroke,
+        signal: &LoopSignal,
+    ) {
+        let mut effects = MacPlatformEffects {
+            registry: &mut self.registry,
+            signal,
         };
-        if let Err(e) = window.ext.close() {
-            tracing::warn!(%window_id, "close failed: {e:#}");
-        }
+        self.runtime
+            .dispatch(keymap, keystroke, &mut self.hub, &mut effects);
+        self.flush_layout();
     }
 
-    #[tracing::instrument(skip(self), fields(target = ?target))]
-    pub(in crate::platform::macos) fn apply_focus(&mut self, target: &FocusTarget) {
-        match target {
-            FocusTarget::Up => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                direction: Direction::Vertical,
-                forward: false,
-            }),
-            FocusTarget::Down => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                direction: Direction::Vertical,
-                forward: true,
-            }),
-            FocusTarget::Left => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                direction: Direction::Horizontal,
-                forward: false,
-            }),
-            FocusTarget::Right => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                direction: Direction::Horizontal,
-                forward: true,
-            }),
-            FocusTarget::Parent => self.hub.handle_tiling_action(TilingAction::FocusParent),
-            FocusTarget::Tab { direction } => {
-                self.hub.handle_tiling_action(TilingAction::FocusTab {
-                    forward: matches!(direction, TabDirection::Next),
-                })
-            }
-            FocusTarget::Workspace { name, monitor } => {
-                self.hub.focus_workspace(name, monitor.as_deref())
-            }
-            FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
-        }
+    pub(in crate::platform::macos) fn reload(&mut self) -> Option<Box<Config>> {
+        self.runtime.reload()
     }
 
-    #[tracing::instrument(skip(self), fields(target = ?target))]
-    pub(in crate::platform::macos) fn apply_move(&mut self, target: &MoveTarget) {
-        match target {
-            MoveTarget::Up => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                direction: Direction::Vertical,
-                forward: false,
-            }),
-            MoveTarget::Down => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                direction: Direction::Vertical,
-                forward: true,
-            }),
-            MoveTarget::Left => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                direction: Direction::Horizontal,
-                forward: false,
-            }),
-            MoveTarget::Right => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                direction: Direction::Horizontal,
-                forward: true,
-            }),
-            MoveTarget::Workspace { name, monitor } => {
-                self.hub.move_focused_to_workspace(name, monitor.as_deref())
-            }
-            MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
-        }
+    pub(in crate::platform::macos) fn switch_mode(&mut self, name: &str) {
+        self.runtime.switch_mode(name);
     }
 
-    #[tracing::instrument(skip(self), fields(target = ?target))]
-    pub(in crate::platform::macos) fn apply_toggle(&mut self, target: &ToggleTarget) {
-        match target {
-            ToggleTarget::Spawn => self.hub.handle_tiling_action(TilingAction::ToggleSpawnMode),
-            ToggleTarget::Direction => self.hub.handle_tiling_action(TilingAction::ToggleDirection),
-            ToggleTarget::Layout => self
-                .hub
-                .handle_tiling_action(TilingAction::ToggleContainerLayout),
-            ToggleTarget::Float => self.hub.toggle_float(),
-            ToggleTarget::Fullscreen => self.hub.toggle_fullscreen(),
-        }
-    }
-
-    #[tracing::instrument(skip(self), fields(target = ?target))]
-    pub(in crate::platform::macos) fn apply_master(&mut self, target: &MasterTarget) {
-        let action = match target {
-            MasterTarget::Grow => TilingAction::GrowMaster,
-            MasterTarget::Shrink => TilingAction::ShrinkMaster,
-            MasterTarget::More => TilingAction::MoreMaster,
-            MasterTarget::Fewer => TilingAction::FewerMaster,
-        };
+    pub(in crate::platform::macos) fn handle_tiling_action(&mut self, action: TilingAction) {
         self.hub.handle_tiling_action(action);
     }
 }

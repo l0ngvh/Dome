@@ -1,15 +1,15 @@
-use crate::config::{MasterConfig, Strategy};
 use crate::core::WindowRestrictions;
 use crate::core::node::{Length, LimitObservation, LimitUpdate};
-use crate::core::strategy::TilingAction;
-use crate::core::tests::{LayoutConfigBuilder, TestHubBuilder, default_rect, snapshot, titled};
+use crate::core::strategy::StrategyAction;
+use crate::core::tests::{TestHubBuilder, TilingConfigBuilder, default_rect, snapshot, titled};
+use crate::core::{MasterConfig, Strategy};
 use insta::assert_snapshot;
 
 #[test]
 fn min_height_master_pane_overflows_and_scrolls_to_focus() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .with_master_config(MasterConfig {
                     master_ratio: 0.5,
@@ -101,8 +101,8 @@ fn min_height_master_pane_overflows_and_scrolls_to_focus() {
 #[test]
 fn min_height_stack_pane_overflows_independently_of_master() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .with_master_config(MasterConfig {
                     master_ratio: 0.5,
@@ -202,8 +202,8 @@ fn min_height_stack_pane_overflows_independently_of_master() {
 #[test]
 fn both_panes_scroll_independently() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .with_master_config(MasterConfig {
                     master_ratio: 0.5,
@@ -341,8 +341,8 @@ fn min_width_ignored_split_follows_ratio() {
     // Master ignores per-window min width horizontally. A min width wider than the whole
     // screen leaves the master_ratio split untouched and never overflows the edge.
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -410,8 +410,8 @@ fn min_width_ignored_split_follows_ratio() {
 #[test]
 fn max_height_centers_window_in_pane_slot() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -472,8 +472,8 @@ fn max_height_centers_window_in_pane_slot() {
 #[test]
 fn max_width_centers_window_in_stack_pane() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -534,8 +534,8 @@ fn max_width_centers_window_in_stack_pane() {
 #[test]
 fn max_width_centers_window_in_master_pane() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -596,8 +596,8 @@ fn max_width_centers_window_in_master_pane() {
 #[test]
 fn master_count_increment_clamps_stack_scroll() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -645,7 +645,7 @@ fn master_count_increment_clamps_stack_scroll() {
             ..Default::default()
         },
     );
-    hub.handle_tiling_action(TilingAction::MoreMaster);
+    hub.handle_tiling_action(StrategyAction::MoreMaster);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -691,8 +691,8 @@ fn master_count_increment_clamps_stack_scroll() {
 #[test]
 fn master_count_decrement_clamps_master_scroll() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .with_master_config(MasterConfig {
                     master_ratio: 0.5,
@@ -747,7 +747,7 @@ fn master_count_decrement_clamps_master_scroll() {
     // focus_left lands on w3, the last-inserted master window, scrolling master to the bottom
     // so the offset is out of range once master shrinks.
     hub.focus_left();
-    hub.handle_tiling_action(TilingAction::FewerMaster);
+    hub.handle_tiling_action(StrategyAction::FewerMaster);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -793,8 +793,8 @@ fn master_count_decrement_clamps_master_scroll() {
 #[test]
 fn detach_clamps_scroll() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .with_master_config(MasterConfig {
                     master_ratio: 0.5,
@@ -887,8 +887,8 @@ fn detach_clamps_scroll() {
 #[test]
 fn attach_does_not_disturb_other_pane_scroll() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -990,8 +990,8 @@ fn attach_does_not_disturb_other_pane_scroll() {
 #[test]
 fn apply_config_relayouts_and_clamps_scroll() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -1039,7 +1039,7 @@ fn apply_config_relayouts_and_clamps_scroll() {
             ..Default::default()
         },
     );
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_strategy(Strategy::Master)
         .with_master_config(MasterConfig {
             master_ratio: 0.5,

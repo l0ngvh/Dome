@@ -1,14 +1,14 @@
-use crate::core::GlobalLayoutConfig;
+use crate::core::TilingConfig;
 use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
+    TilingConfigBuilder, default_rect, setup, setup_with_tiling, snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
 /// Float and fullscreen matchers by exact title, since this file also inserts
 /// tiling windows named `wN`. Two lists because one test needs both modes on one hub.
-fn layout_modes(floats: &[&str], fullscreens: &[&str]) -> GlobalLayoutConfig {
-    LayoutConfigBuilder::new()
+fn tiling_modes(floats: &[&str], fullscreens: &[&str]) -> TilingConfig {
+    TilingConfigBuilder::new()
         .with_float(floats.iter().map(|t| titled_matcher(t)).collect())
         .with_fullscreen(fullscreens.iter().map(|t| titled_matcher(t)).collect())
         .build()
@@ -16,7 +16,7 @@ fn layout_modes(floats: &[&str], fullscreens: &[&str]) -> GlobalLayoutConfig {
 
 #[test]
 fn set_focus_same_workspace_tiling_and_float() {
-    let mut hub = setup_with_layout(layout_modes(&["w2"], &[]));
+    let mut hub = setup_with_tiling(tiling_modes(&["w2"], &[]));
 
     let w0 = hub
         .insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
@@ -206,7 +206,7 @@ fn set_focus_switches_workspace() {
     ");
 
     // Float: switch workspace via set_focus
-    let mut hub = setup_with_layout(layout_modes(&["w5"], &[]));
+    let mut hub = setup_with_tiling(tiling_modes(&["w5"], &[]));
     let f0 = hub
         .insert_window(
             titled("w5"),
@@ -293,7 +293,7 @@ fn set_focus_in_other_workspace_keeps_origin_workspace() {
 
 #[test]
 fn float_focus_changes_float_z_order() {
-    let mut hub = setup_with_layout(layout_modes(&["w8", "w9", "w10"], &[]));
+    let mut hub = setup_with_tiling(tiling_modes(&["w8", "w9", "w10"], &[]));
     let w0 = hub
         .insert_window(
             titled("w8"),
@@ -347,7 +347,7 @@ fn float_focus_changes_float_z_order() {
 
 #[test]
 fn detach_topmost_fullscreen_focuses_next_fullscreen() {
-    let mut hub = setup_with_layout(layout_modes(&[], &["w12", "w13"]));
+    let mut hub = setup_with_tiling(tiling_modes(&[], &["w12", "w13"]));
     hub.insert_window(titled("w11"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w12"), default_rect(), WindowRestrictions::None);
     let fs2 = hub
@@ -396,7 +396,7 @@ fn detach_topmost_fullscreen_focuses_next_fullscreen() {
 
 #[test]
 fn detach_only_fullscreen_focuses_tiling_even_in_presence_of_float() {
-    let mut hub = setup_with_layout(layout_modes(&["w15"], &["w16"]));
+    let mut hub = setup_with_tiling(tiling_modes(&["w15"], &["w16"]));
     hub.insert_window(titled("w14"), default_rect(), WindowRestrictions::None);
     hub.insert_window(
         titled("w15"),
@@ -451,7 +451,7 @@ fn detach_only_fullscreen_focuses_tiling_even_in_presence_of_float() {
 
 #[test]
 fn detach_last_tiling_with_floats_focuses_float() {
-    let mut hub = setup_with_layout(layout_modes(&["w18"], &[]));
+    let mut hub = setup_with_tiling(tiling_modes(&["w18"], &[]));
     let t = hub
         .insert_window(titled("w17"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -490,7 +490,7 @@ fn detach_last_tiling_with_floats_focuses_float() {
 #[test]
 fn detach_non_topmost_keeps_focus() {
     // Float: delete non-topmost, topmost stays focused
-    let mut hub = setup_with_layout(layout_modes(&["w19", "w20"], &[]));
+    let mut hub = setup_with_tiling(tiling_modes(&["w19", "w20"], &[]));
     let a = hub
         .insert_window(
             titled("w19"),
@@ -529,7 +529,7 @@ fn detach_non_topmost_keeps_focus() {
     ");
 
     // Fullscreen: delete non-topmost, topmost stays focused
-    let mut hub = setup_with_layout(layout_modes(&[], &["w21", "w22"]));
+    let mut hub = setup_with_tiling(tiling_modes(&[], &["w21", "w22"]));
     let fs1 = hub
         .insert_window(titled("w21"), default_rect(), WindowRestrictions::None)
         .unwrap();

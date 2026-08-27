@@ -1,17 +1,17 @@
 use insta::assert_snapshot;
 
-use crate::config::{SplitMode, TreeLayoutNode, WindowMatcher};
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect,
-    setup_logger_with_level, snapshot, titled,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect,
+    preferred_layout, setup_logger_with_level, snapshot, titled,
 };
-use crate::core::{PixelRect, WindowRestrictions};
+use crate::core::{PixelRect, PreferredLayouts, WindowRestrictions};
+use crate::core::{SplitMode, TreeLayoutNode, WindowMatcher};
 
 #[test]
 fn insert_first_preferred_window_next_to_focused_window() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -43,7 +43,7 @@ fn insert_first_preferred_window_next_to_focused_window() {
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(4), x=75.00, y=25.00, w=75.00, h=5.00, highlighted, spawn=top)
+        Window(id=WindowId(4), x=75.00, y=25.00, w=75.00, h=5.00, highlighted, spawn=right)
         Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=8.00)
         Window(id=WindowId(1), x=0.00, y=15.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
@@ -89,7 +89,7 @@ fn insert_first_preferred_window_next_to_focused_window() {
 #[test]
 fn insert_second_preferred_window_forming_lowest_common_ancestor() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -200,7 +200,7 @@ fn insert_second_preferred_window_forming_lowest_common_ancestor() {
 #[test]
 fn insert_three_preferred_window_to_lowest_common_ancestor() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -297,7 +297,7 @@ fn insert_three_preferred_window_to_lowest_common_ancestor() {
 #[test]
 fn insert_nested_preferred_layout_tree() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -404,7 +404,7 @@ fn insert_nested_preferred_layout_tree() {
 #[test]
 fn delete_and_reinsert_the_same_matching_window() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -561,7 +561,7 @@ fn delete_and_reinsert_the_same_matching_window() {
 #[test]
 fn clean_up_and_reforming_preferred_contaner() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -721,7 +721,7 @@ fn attach_window_after_moving_preferred_window_out_of_preferred_container_reform
  {
     setup_logger_with_level("trace");
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -776,7 +776,7 @@ fn attach_window_after_moving_preferred_window_out_of_preferred_container_reform
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(4), x=75.00, y=25.00, w=75.00, h=5.00, highlighted, spawn=top)
+        Window(id=WindowId(4), x=75.00, y=25.00, w=75.00, h=5.00, highlighted, spawn=right)
         Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=8.00)
         Window(id=WindowId(1), x=0.00, y=15.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
@@ -828,7 +828,7 @@ fn attach_window_after_moving_preferred_window_out_of_preferred_container_reform
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(3), x=100.00, y=23.00, w=50.00, h=7.00)
         Window(id=WindowId(2), x=100.00, y=15.00, w=50.00, h=8.00)
-        Window(id=WindowId(5), x=50.00, y=17.00, w=50.00, h=13.00, highlighted, spawn=top)
+        Window(id=WindowId(5), x=50.00, y=17.00, w=50.00, h=13.00, highlighted, spawn=right)
         Window(id=WindowId(1), x=0.00, y=15.00, w=50.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, Container])
@@ -874,7 +874,7 @@ fn attach_window_after_moving_preferred_window_out_of_preferred_container_reform
 fn move_preferred_root_to_another_workspace() {
     setup_logger_with_level("trace");
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -958,7 +958,7 @@ fn move_preferred_root_to_another_workspace() {
 fn move_preferred_container_to_another_workspace() {
     setup_logger_with_level("trace");
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -1063,7 +1063,7 @@ fn move_preferred_container_to_another_workspace() {
 #[test]
 fn reloading_preferred_layout_puts_matched_windows_to_place() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -1117,50 +1117,48 @@ fn reloading_preferred_layout_puts_matched_windows_to_place() {
         .insert_window(titled("DDD"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
-    hub.sync_preferred_layout(vec![
-        LayoutWorkspaceConfigBuilder::new("1")
-            .with_tree(TreeLayoutNode::Container {
-                split: Some(SplitMode::Horizontal),
-                children: vec![
-                    TreeLayoutNode::Leaf(WindowMatcher {
-                        title: Some("DDD".into()),
-                        ..Default::default()
-                    }),
-                    TreeLayoutNode::Container {
-                        split: Some(SplitMode::Horizontal),
-                        children: vec![
-                            TreeLayoutNode::Leaf(WindowMatcher {
-                                title: Some("YYY".into()),
-                                ..Default::default()
-                            }),
-                            TreeLayoutNode::Container {
-                                split: Some(SplitMode::Horizontal),
-                                children: vec![
-                                    TreeLayoutNode::Leaf(WindowMatcher {
-                                        title: Some("AAA".into()),
-                                        ..Default::default()
-                                    }),
-                                    TreeLayoutNode::Container {
-                                        split: Some(SplitMode::Horizontal),
-                                        children: vec![
-                                            TreeLayoutNode::Leaf(WindowMatcher {
-                                                title: Some("TTT".into()),
-                                                ..Default::default()
-                                            }),
-                                            TreeLayoutNode::Leaf(WindowMatcher {
-                                                title: Some("CCC".into()),
-                                                ..Default::default()
-                                            }),
-                                        ],
-                                    },
-                                ],
-                            },
-                        ],
-                    },
-                ],
-            })
-            .build(),
-    ]);
+    hub.sync_preferred_layout(preferred_layout([LayoutWorkspaceConfigBuilder::new("1")
+        .with_tree(TreeLayoutNode::Container {
+            split: Some(SplitMode::Horizontal),
+            children: vec![
+                TreeLayoutNode::Leaf(WindowMatcher {
+                    title: Some("DDD".into()),
+                    ..Default::default()
+                }),
+                TreeLayoutNode::Container {
+                    split: Some(SplitMode::Horizontal),
+                    children: vec![
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("YYY".into()),
+                            ..Default::default()
+                        }),
+                        TreeLayoutNode::Container {
+                            split: Some(SplitMode::Horizontal),
+                            children: vec![
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("AAA".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Container {
+                                    split: Some(SplitMode::Horizontal),
+                                    children: vec![
+                                        TreeLayoutNode::Leaf(WindowMatcher {
+                                            title: Some("TTT".into()),
+                                            ..Default::default()
+                                        }),
+                                        TreeLayoutNode::Leaf(WindowMatcher {
+                                            title: Some("CCC".into()),
+                                            ..Default::default()
+                                        }),
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        })
+        .build()]));
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -1212,7 +1210,7 @@ fn reloading_preferred_layout_puts_matched_windows_to_place() {
 fn reset_to_empty_preferred_layout_dont_disturb_layout() {
     setup_logger_with_level("trace");
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -1238,7 +1236,7 @@ fn reset_to_empty_preferred_layout_dont_disturb_layout() {
     hub.insert_window(titled("AAA"), default_rect(), WindowRestrictions::None);
 
     let hub_snapshot = snapshot(&hub);
-    hub.sync_preferred_layout(vec![]);
+    hub.sync_preferred_layout(PreferredLayouts::default());
     assert_eq!(hub_snapshot, snapshot(&hub));
 
     let result = hub.export_workspace(ws_id);
@@ -1276,7 +1274,7 @@ fn reset_to_empty_preferred_layout_dont_disturb_layout() {
 #[test]
 fn insert_preferred_window_to_non_focused_workspace() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("10")
                 .with_tree(TreeLayoutNode::Container {
@@ -1309,10 +1307,10 @@ fn insert_preferred_window_to_non_focused_workspace() {
 
     let prev_snapshot = snapshot(&hub);
 
-    assert_snapshot!(prev_snapshot, @r"
+    assert_snapshot!(prev_snapshot, @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=top)
+        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=0, titles=[AAA, BBB])
       )
 
@@ -1356,7 +1354,7 @@ fn insert_preferred_window_to_non_focused_workspace() {
 fn insert_same_slot_windows_as_sibling() {
     setup_logger_with_level("trace");
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -1568,7 +1566,7 @@ fn insert_same_slot_windows_as_sibling() {
 fn same_slot_windows_share_container_with_other_window_slot_under_same_preferred_container() {
     setup_logger_with_level("trace");
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -1688,7 +1686,7 @@ fn same_slot_windows_share_container_with_other_window_slot_under_same_preferred
 fn single_window_slot_in_container_slot() {
     setup_logger_with_level("trace");
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -1796,7 +1794,7 @@ fn single_window_slot_in_container_slot() {
 fn bare_window_slot() {
     setup_logger_with_level("trace");
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Leaf(WindowMatcher {
@@ -1928,7 +1926,7 @@ fn sync_preferred_layout_preserves_siblings_order() {
             .build(),
     ];
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(layout.clone())
         .build();
     hub.focus_workspace("1", None);
@@ -1997,7 +1995,7 @@ fn sync_preferred_layout_preserves_siblings_order() {
     |                                                ||                                                ||                                                |
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
     ");
-    hub.sync_preferred_layout(layout);
+    hub.sync_preferred_layout(preferred_layout(layout));
     let new_snapshot = snapshot(&hub);
     assert_eq!(hub_snapshot, new_snapshot);
 }
@@ -2005,7 +2003,7 @@ fn sync_preferred_layout_preserves_siblings_order() {
 #[test]
 fn export_container_with_single_multi_matched_slot() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -2101,7 +2099,7 @@ fn export_container_with_single_multi_matched_slot() {
 #[test]
 fn matches_tiling_leaf_matcher() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Leaf(WindowMatcher {
@@ -2121,7 +2119,7 @@ fn matches_tiling_leaf_matcher() {
 #[test]
 fn matches_tiling_no_preferred_root() {
     let hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .build();
     let ws = hub.current_workspace();
     let strategy = hub.strategies.for_workspace(ws);
@@ -2147,7 +2145,7 @@ fn sync_preferred_layout_keeps_focus_history() {
         ]
     };
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
@@ -2173,14 +2171,12 @@ fn sync_preferred_layout_keeps_focus_history() {
     let ws = hub.current_workspace();
 
     // Without the saved history, ccc's predecessor comes back as bbb.
-    hub.sync_preferred_layout(vec![
-        LayoutWorkspaceConfigBuilder::new("1")
-            .with_tree(TreeLayoutNode::Container {
-                split: Some(SplitMode::Vertical),
-                children: leaves(),
-            })
-            .build(),
-    ]);
+    hub.sync_preferred_layout(preferred_layout([LayoutWorkspaceConfigBuilder::new("1")
+        .with_tree(TreeLayoutNode::Container {
+            split: Some(SplitMode::Vertical),
+            children: leaves(),
+        })
+        .build()]));
     assert_eq!(hub.focused_window(ws), Some(ccc));
 
     hub.delete_window(ccc);
@@ -2191,7 +2187,7 @@ fn sync_preferred_layout_keeps_focus_history() {
 #[test]
 fn sync_preferred_layout_focuses_window_inside_previously_highlighted_container() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .build();
     hub.focus_workspace("3", None);
     hub.insert_window(titled("AAA"), default_rect(), WindowRestrictions::None)
@@ -2205,14 +2201,12 @@ fn sync_preferred_layout_focuses_window_inside_previously_highlighted_container(
     hub.focus_parent();
     assert_eq!(hub.focused_window(ws), None);
 
-    hub.sync_preferred_layout(vec![
-        LayoutWorkspaceConfigBuilder::new("3")
-            .with_tree(TreeLayoutNode::Leaf(WindowMatcher {
-                title: Some("pref-0".into()),
-                ..Default::default()
-            }))
-            .build(),
-    ]);
+    hub.sync_preferred_layout(preferred_layout([LayoutWorkspaceConfigBuilder::new("3")
+        .with_tree(TreeLayoutNode::Leaf(WindowMatcher {
+            title: Some("pref-0".into()),
+            ..Default::default()
+        }))
+        .build()]));
 
     // The rebuild deletes the container, so the highlight cannot survive it.
     assert_eq!(hub.focused_window(ws), Some(bbb));

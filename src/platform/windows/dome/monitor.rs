@@ -123,6 +123,10 @@ impl MonitorRegistry {
         &self.monitors[&id]
     }
 
+    pub(super) fn contains(&self, id: MonitorId) -> bool {
+        self.monitors.contains_key(&id)
+    }
+
     pub(super) fn insert(
         &mut self,
         handle: isize,

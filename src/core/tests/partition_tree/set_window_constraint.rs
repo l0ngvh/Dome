@@ -1,10 +1,10 @@
 use insta::assert_snapshot;
 
-use crate::config::SizeConstraint;
+use crate::core::SizeConstraint;
 
 use crate::core::node::{Length, LimitObservation, LimitUpdate, Pixels, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, PartitionTreeConfigBuilder, default_rect, setup, snapshot, titled,
+    PartitionTreeConfigBuilder, TilingConfigBuilder, default_rect, setup, snapshot, titled,
 };
 
 #[test]
@@ -920,11 +920,10 @@ fn both_windows_at_max_centered_collectively() {
 fn tabbed_window_with_max_size_is_centered() {
     let mut hub = setup();
     hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
-    hub.toggle_spawn_mode();
-    hub.toggle_spawn_mode();
     let w1 = hub
         .insert_window(titled("W1"), default_rect(), WindowRestrictions::None)
         .unwrap();
+    hub.toggle_container_layout();
 
     hub.set_window_constraint(
         w1,
@@ -938,7 +937,7 @@ fn tabbed_window_with_max_size_is_centered() {
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(1), x=44.00, y=10.00, w=62.00, h=12.00, highlighted, spawn=top)
+        Window(id=WindowId(1), x=44.00, y=10.00, w=62.00, h=12.00, highlighted, spawn=right)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[W0, W1])
       )
 
@@ -1051,7 +1050,7 @@ fn global_max_applies_to_all_windows() {
     hub.insert_window(titled("w33"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w34"), default_rect(), WindowRestrictions::None);
 
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_partition_tree_config(
             PartitionTreeConfigBuilder::new()
                 .with_automatic_tiling(true)
@@ -1110,7 +1109,7 @@ fn per_window_max_tightens_global() {
         .unwrap();
     hub.insert_window(titled("w36"), default_rect(), WindowRestrictions::None);
 
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_partition_tree_config(
             PartitionTreeConfigBuilder::new()
                 .with_automatic_tiling(true)
@@ -1176,7 +1175,7 @@ fn global_max_caps_larger_per_window_max() {
         .unwrap();
     hub.insert_window(titled("w65"), default_rect(), WindowRestrictions::None);
 
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_partition_tree_config(
             PartitionTreeConfigBuilder::new()
                 .with_automatic_tiling(true)
@@ -1910,7 +1909,7 @@ fn window_max_smaller_than_global_min_width() {
         .insert_window(titled("w49"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_min_width(SizeConstraint::Pixels(Pixels::new(300)))
         .build();
     hub.sync_configuration(l);
@@ -1969,7 +1968,7 @@ fn window_max_height_smaller_than_global_min_height() {
         .insert_window(titled("w50"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_min_height(SizeConstraint::Pixels(Pixels::new(300)))
         .build();
     hub.sync_configuration(l);
@@ -2020,7 +2019,7 @@ fn window_max_width_smaller_than_global_min_width() {
         .unwrap();
     hub.insert_window(titled("w52"), default_rect(), WindowRestrictions::None);
 
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_min_width(SizeConstraint::Pixels(Pixels::new(100)))
         .build();
     hub.sync_configuration(l);
@@ -2155,7 +2154,7 @@ fn constraint_survives_border_size_change() {
     ");
 
     hub.sync_configuration(
-        LayoutConfigBuilder::new()
+        TilingConfigBuilder::new()
             .with_border_size(Pixels::new(5))
             .build(),
     );

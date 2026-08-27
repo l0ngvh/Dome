@@ -74,12 +74,19 @@ pub(crate) trait ManageExternalWindow: Send + Sync {
     fn id(&self) -> HwndId;
     fn pid(&self) -> u32;
     fn set_position(&self, z: ZOrder, rect: PixelRect<Physical>);
+    /// Changes the z-order without moving the window, so no owned child moves.
+    fn set_z_order(&self, z: ZOrder);
     fn move_offscreen(&self);
     fn show_cmd(&self, cmd: ShowCmd);
     fn close(&self);
     fn set_foreground_window(&self);
     fn is_maximized(&self) -> bool;
     fn recover(&self, was_maximized: bool);
+}
+
+pub(crate) trait ManageOverlay: Send + Sync {
+    fn set_z_order(&self, z: ZOrder);
+    fn focus(&self);
 }
 
 /// Blocking reads on an external window (`SendMessageTimeout`-style calls

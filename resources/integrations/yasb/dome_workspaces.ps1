@@ -19,8 +19,7 @@ $SepStyle  = 'padding:2px 3px;vertical-align:middle'
 
 $Dome = __DOME__
 
-# Lowercase, collapse each run of non-alphanumeric characters to one '-', and
-# trim leading and trailing '-'. Matches dome's own slug.
+# Matches dome's own slug.
 function Get-Slug {
     param([string]$Name)
     if ([string]::IsNullOrEmpty($Name)) { return '' }

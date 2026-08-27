@@ -17,7 +17,7 @@ use objc2_io_surface::IOSurface;
 use super::dome::{HubEvent, HubMessage, SceneSender, get_all_monitors};
 use super::listeners::EventListener;
 use crate::action::{Actions, WorkspaceInfo};
-use crate::config::Config;
+use crate::config::Appearance;
 use crate::core::{ContainerId, MonitorId, WindowId};
 use crate::platform::render::WgpuContext;
 use crate::platform::shell_menu::{build_menu, focused_tooltip, id_to_action};
@@ -79,7 +79,7 @@ impl Ui {
         _mtm: MainThreadMarker,
         hub_sender: calloop::channel::Sender<HubEvent>,
         event_listener: EventListener,
-        config: Config,
+        appearance: Appearance,
     ) -> (Self, MessageSender) {
         let (scene_tx, scene_rx) = mpsc::channel();
         let (capture_tx, capture_rx) = mpsc::channel();
@@ -97,7 +97,7 @@ impl Ui {
             captures: HashMap::new(),
             event_listener,
             gpu,
-            config,
+            appearance,
             last_focused: None,
             last_focused_monitor_id: None,
             workspaces: Vec::new(),
@@ -166,7 +166,7 @@ struct UiState {
     captures: HashMap<CGWindowID, WindowCapture>,
     event_listener: EventListener,
     gpu: Rc<WgpuContext>,
-    config: Config,
+    appearance: Appearance,
     last_focused: Option<WindowId>,
     last_focused_monitor_id: Option<MonitorId>,
     workspaces: Vec<WorkspaceInfo>,
@@ -230,7 +230,7 @@ impl AppHandler for WindowLoopHandler {
                     state.workspaces = scene.workspaces.clone();
                     shell.set_tooltip(&focused_tooltip(&scene.workspaces));
 
-                    let config = state.config.clone();
+                    let appearance = state.appearance.clone();
                     let gpu = state.gpu.clone();
                     let hub_sender = state.hub_sender.clone();
 
@@ -245,7 +245,7 @@ impl AppHandler for WindowLoopHandler {
                                     TilingOverlay::new(
                                         mtm,
                                         &gpu,
-                                        config.clone(),
+                                        appearance.clone(),
                                         data.cocoa_frame,
                                         data.scale,
                                     )
@@ -280,7 +280,7 @@ impl AppHandler for WindowLoopHandler {
                                     TabBarOverlay::new(
                                         mtm,
                                         &gpu,
-                                        config.clone(),
+                                        appearance.clone(),
                                         cs.placement.id,
                                         cs.tab_bar_cocoa_frame,
                                         data.scale,
@@ -305,8 +305,8 @@ impl AppHandler for WindowLoopHandler {
                                 show.cg_id,
                                 hub_sender.clone(),
                                 &gpu,
-                                config.theme,
-                                &config.font,
+                                appearance.theme,
+                                &appearance.font,
                             )
                         });
                         overlay.render(
@@ -375,17 +375,16 @@ impl AppHandler for WindowLoopHandler {
                 HubMessage::RefreshObservers => {
                     state.event_listener.refresh_all_observers();
                 }
-                HubMessage::ConfigChanged(new_config) => {
-                    let new_config = *new_config;
-                    state.config = new_config.clone();
+                HubMessage::AppearanceChanged(new_appearance) => {
+                    state.appearance = new_appearance.clone();
                     for overlay in state.float_overlays.values_mut() {
-                        overlay.set_config(&new_config);
+                        overlay.set_appearance(&new_appearance);
                     }
                     for overlay in state.tiling_overlays.values_mut() {
-                        overlay.set_config(&new_config);
+                        overlay.set_appearance(&new_appearance);
                     }
                     for overlay in state.tab_bar_overlays.values() {
-                        overlay.set_config(&new_config);
+                        overlay.set_appearance(&new_appearance);
                     }
                 }
                 HubMessage::Shutdown => {

@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::config::WindowMatcher;
-use crate::core::{MonitorId, Physical, PixelRect, WindowMetadata as _};
+use crate::core::{MonitorId, Physical, PixelRect, WindowMatcher, WindowMetadata as _};
 use crate::platform::reserve_for_bar;
 use crate::platform::windows::external::HwndId;
 

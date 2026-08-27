@@ -1,11 +1,12 @@
 use std::any::Any;
+use std::sync::Arc;
 
 use dome_auxiliary_window::{
     AuxiliaryWindow, AuxiliaryWindowExtWindows, AuxiliaryWindowHandler, MouseButton, NativeUnit,
     Point, Size, WindowAttributes, WindowLevel,
 };
 
-use crate::config::Config;
+use crate::config::Appearance;
 use crate::platform::render::{Compositor, Renderer, WgpuContext};
 use crate::platform::tab_bar::{TabBarMessage, TabBarWidget};
 use crate::platform::windows::{HubEvent, HubSender};
@@ -23,9 +24,8 @@ use crate::core::{
     PixelRect, Pixels, TilingWindowPlacement,
 };
 use crate::overlay;
-use crate::platform::windows::dome::CreateOverlay;
-use crate::platform::windows::external::{HwndId, ZOrder};
-use crate::platform::windows::foreground::force_set_foreground;
+use crate::platform::windows::external::{ManageOverlay, ZOrder};
+use crate::platform::windows::handle::OverlayHwnd;
 
 /// The DirectComposition device and visual that wgpu renders into. Neither needs an HWND,
 /// so the renderer and its overlay state are built before the window exists.
@@ -102,7 +102,7 @@ impl TilingOverlay {
     pub(in crate::platform::windows) fn new(
         gpu: &WgpuContext,
         dcomp_device: &IDCompositionDevice,
-        config: Config,
+        appearance: Appearance,
         monitor: PixelRect,
         scale: f32,
         hub_sender: HubSender,
@@ -126,14 +126,14 @@ impl TilingOverlay {
             Box::new(compositor),
             init_w,
             init_h,
-            config.theme,
-            &config.font,
+            appearance.theme,
+            &appearance.font,
             Box::new(crate::platform::windows::font::resolve_system_font),
         )?;
         aux.set_content_visual(dcomp_device, &dcomp_visual)?;
         aux.set_visible(true);
-        // Park below managed windows after showing. Managed windows created later land
-        // above it, and show_tiling's per-window lift maintains the band thereafter.
+        // Park below managed windows after showing. A managed window created later lands
+        // above it.
         aux.set_level(WindowLevel::Bottom);
         let boxed = Box::new(Self {
             renderer,
@@ -149,6 +149,10 @@ impl TilingOverlay {
         Ok(boxed)
     }
 
+    fn hwnd(&self) -> HWND {
+        self.aux.hwnd()
+    }
+
     fn rerender(&mut self) {
         let scale = self.scale;
         let monitor_logical = self.monitor.to_logical(scale);
@@ -160,7 +164,7 @@ impl TilingOverlay {
                 frame: wp.border_box.to_logical(scale),
                 visible_frame: wp.visible_border_box.to_logical(scale),
                 is_highlighted: wp.is_highlighted,
-                spawn_indicator: wp.spawn_indicator,
+                spawn_direction: wp.spawn_direction,
             })
             .collect();
         let containers_logical: Vec<overlay::LogicalTiledContainer> = self
@@ -172,7 +176,7 @@ impl TilingOverlay {
                 visible_frame: cp.visible_border_box.to_logical(scale),
                 tab_bar_height: Length::from_pixels(cp.tab_bar_band.height()).to_logical(scale),
                 is_highlighted: cp.is_highlighted,
-                spawn_indicator: cp.spawn_indicator,
+                spawn_direction: cp.spawn_direction,
                 is_tabbed: cp.is_tabbed,
                 titles: cp.titles.clone(),
             })
@@ -197,8 +201,8 @@ impl TilingOverlay {
     }
 }
 
-impl TilingOverlayApi for TilingOverlay {
-    fn update(
+impl TilingOverlay {
+    pub(super) fn update(
         &mut self,
         monitor: PixelRect,
         windows: &[TilingWindowPlacement],
@@ -215,9 +219,6 @@ impl TilingOverlayApi for TilingOverlay {
             self.aux.set_level(WindowLevel::Bottom);
             self.aux.set_visible(true);
         }
-        // Same-monitor path: no SetWindowPos. Z-order is restored by the
-        // per-window lift in show_tiling whenever a tiling window enters the
-        // visible band from Float or Offscreen (or unminimizes via the flag).
 
         // All state assignments must precede rerender(), which reads cached
         // physical dimensions.
@@ -231,61 +232,19 @@ impl TilingOverlayApi for TilingOverlay {
         self.rerender();
     }
 
-    fn clear(&mut self) {
+    pub(super) fn clear(&mut self) {
         self.windows.clear();
         self.containers.clear();
         // No region clipping needed: the overlay sits behind managed windows.
         self.rerender();
     }
 
-    fn set_config(&mut self, config: &Config) {
+    pub(super) fn set_appearance(&mut self, appearance: &Appearance) {
         // Borders only, no text, so the font is not applied.
-        self.renderer.set_theme(config.theme);
-    }
-
-    fn focus(&self) {
-        force_set_foreground(self.aux.hwnd());
-    }
-
-    fn id(&self) -> HwndId {
-        HwndId::from(self.aux.hwnd())
+        self.renderer.set_theme(appearance.theme);
     }
 }
 
-pub(in crate::platform::windows) trait FloatOverlayApi {
-    fn update(
-        &mut self,
-        wp: &FloatWindowPlacement,
-        z: ZOrder,
-        scale: f32,
-        border_thickness: Pixels<Physical>,
-    );
-    fn hide(&mut self);
-    fn set_config(&mut self, config: &Config);
-}
-
-pub(in crate::platform::windows) trait TilingOverlayApi {
-    fn update(
-        &mut self,
-        monitor: PixelRect,
-        windows: &[TilingWindowPlacement],
-        containers: &[ContainerPlacement],
-        scale: f32,
-        border_thickness: Pixels<Physical>,
-    );
-    fn clear(&mut self);
-    fn set_config(&mut self, config: &Config);
-    /// The Win32 close-time focus walk lands here when the user closes a
-    /// managed window with no obvious successor on the same monitor, replacing
-    /// the process-wide focus-sink window the platform shell used to keep below
-    /// every overlay. The overlay HWND is `WS_EX_TRANSPARENT`, so claiming
-    /// foreground does not take pointer events away from anything below.
-    fn focus(&self);
-    fn id(&self) -> HwndId;
-}
-
-/// Empty: the float overlay renders from its seam's `update`, so it needs no window-event
-/// callback. The crate declines click-activation for every window.
 struct FloatHandler;
 impl AuxiliaryWindowHandler for FloatHandler {}
 
@@ -300,12 +259,11 @@ impl FloatOverlay {
     fn new(
         gpu: &WgpuContext,
         dcomp_device: &IDCompositionDevice,
-        config: Config,
-        x: i32,
-        y: i32,
-        width_phys: u32,
-        height_phys: u32,
+        appearance: Appearance,
+        visible_border_box: PixelRect,
+        z: ZOrder,
     ) -> anyhow::Result<Box<Self>> {
+        let (x, y, width_phys, height_phys) = visible_border_box.to_surface_size();
         // Not focusable, so clicking the float border never steals foreground.
         let attributes = WindowAttributes {
             position: Point::new(x, y),
@@ -321,8 +279,8 @@ impl FloatOverlay {
             Box::new(compositor),
             width_phys,
             height_phys,
-            config.theme,
-            &config.font,
+            appearance.theme,
+            &appearance.font,
             Box::new(crate::platform::windows::font::resolve_system_font),
         )?;
         aux.set_content_visual(dcomp_device, &dcomp_visual)?;
@@ -332,15 +290,19 @@ impl FloatOverlay {
             height_phys,
             aux,
         });
+        OverlayHwnd::new(boxed.aux.hwnd()).set_z_order(z);
         Ok(boxed)
+    }
+
+    fn hwnd(&self) -> HWND {
+        self.aux.hwnd()
     }
 }
 
-impl FloatOverlayApi for FloatOverlay {
-    fn update(
+impl FloatOverlay {
+    pub(super) fn update(
         &mut self,
         wp: &FloatWindowPlacement,
-        z: ZOrder,
         scale: f32,
         border_thickness: Pixels<Physical>,
     ) {
@@ -354,20 +316,15 @@ impl FloatOverlayApi for FloatOverlay {
         }
 
         // Position before showing, or the window flashes at its previous position.
-        let z_after: Option<HWND> = z.into();
-        let mut flags = SWP_NOACTIVATE | SWP_NOREDRAW;
-        if z_after.is_none() {
-            flags |= SWP_NOZORDER;
-        }
         unsafe {
             SetWindowPos(
                 self.aux.hwnd(),
-                z_after,
+                None,
                 x_phys,
                 y_phys,
                 w_phys as i32,
                 h_phys as i32,
-                flags,
+                SWP_NOACTIVATE | SWP_NOREDRAW | SWP_NOZORDER,
             )
             .ok();
         }
@@ -395,13 +352,13 @@ impl FloatOverlayApi for FloatOverlay {
         });
     }
 
-    fn hide(&mut self) {
+    pub(super) fn hide(&mut self) {
         unsafe { ShowWindow(self.aux.hwnd(), SW_HIDE).ok().ok() };
     }
 
-    fn set_config(&mut self, config: &Config) {
+    pub(super) fn set_appearance(&mut self, appearance: &Appearance) {
         // Borders only, no text, so the font is not applied.
-        self.renderer.set_theme(config.theme);
+        self.renderer.set_theme(appearance.theme);
     }
 }
 
@@ -428,55 +385,57 @@ impl WgpuOverlayFactory {
     }
 }
 
-impl CreateOverlay for WgpuOverlayFactory {
-    fn create_tiling_overlay(
+impl WgpuOverlayFactory {
+    pub(super) fn create_tiling_overlay(
         &self,
-        config: Config,
+        appearance: Appearance,
         monitor: PixelRect,
         scale: f32,
-    ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
-        Ok(TilingOverlay::new(
+    ) -> anyhow::Result<(Box<TilingOverlay>, Arc<dyn ManageOverlay>)> {
+        let overlay = TilingOverlay::new(
             &self.gpu,
             &self.dcomp_device,
-            config,
+            appearance,
             monitor,
             scale,
             self.hub_sender.clone(),
-        )?)
+        )?;
+        let handle = Arc::new(OverlayHwnd::new(overlay.hwnd()));
+        Ok((overlay, handle))
     }
-    fn create_float_overlay(
+    pub(super) fn create_float_overlay(
         &self,
-        config: Config,
+        appearance: Appearance,
         _scale: f32,
         visible_border_box: PixelRect,
-    ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
-        let (x_phys, y_phys, w_phys, h_phys) = visible_border_box.to_surface_size();
-        Ok(FloatOverlay::new(
+        z: ZOrder,
+    ) -> anyhow::Result<(Box<FloatOverlay>, Arc<dyn ManageOverlay>)> {
+        let overlay = FloatOverlay::new(
             &self.gpu,
             &self.dcomp_device,
-            config,
-            x_phys,
-            y_phys,
-            w_phys,
-            h_phys,
-        )?)
+            appearance,
+            visible_border_box,
+            z,
+        )?;
+        let handle = Arc::new(OverlayHwnd::new(overlay.hwnd()));
+        Ok((overlay, handle))
     }
-    fn create_tab_bar(
+    pub(super) fn create_tab_bar(
         &self,
-        config: Config,
+        appearance: Appearance,
         container_id: ContainerId,
         rect: PixelRect,
         scale: f32,
-    ) -> anyhow::Result<Box<dyn TabBarOverlayApi>> {
-        Ok(TabBarOverlay::new(
+    ) -> anyhow::Result<Box<TabBarOverlay>> {
+        TabBarOverlay::new(
             &self.gpu,
             &self.dcomp_device,
-            config,
+            appearance,
             container_id,
             rect,
             scale,
             self.hub_sender.clone(),
-        )?)
+        )
     }
 }
 
@@ -525,24 +484,6 @@ impl PhysicalRectExt for PixelRect<Physical> {
             self.height().value() as u32,
         )
     }
-}
-
-pub(in crate::platform::windows) trait TabBarOverlayApi {
-    fn update(
-        &mut self,
-        rect: PixelRect,
-        titles: Vec<String>,
-        active_index: usize,
-        is_highlighted: bool,
-        scale: f32,
-        border_thickness: Pixels<Physical>,
-    );
-    #[expect(
-        dead_code,
-        reason = "hide() is invoked when a tabbed container's active window minimizes. Wired up in the follow-up minimize/restore pass."
-    )]
-    fn hide(&mut self);
-    fn set_config(&mut self, config: &Config);
 }
 
 /// The bar must not raise itself on click. The crate declines click-activation for every
@@ -615,7 +556,7 @@ impl TabBarOverlay {
     pub(in crate::platform::windows) fn new(
         gpu: &WgpuContext,
         dcomp_device: &IDCompositionDevice,
-        config: Config,
+        appearance: Appearance,
         container_id: ContainerId,
         rect: PixelRect,
         scale: f32,
@@ -636,8 +577,8 @@ impl TabBarOverlay {
             Box::new(compositor),
             w_phys,
             h_phys,
-            config.theme,
-            &config.font,
+            appearance.theme,
+            &appearance.font,
             Box::new(crate::platform::windows::font::resolve_system_font),
         )?;
         let widget = TabBarWidget::new(renderer, container_id, scale, (w_phys, h_phys));
@@ -648,8 +589,8 @@ impl TabBarOverlay {
     }
 }
 
-impl TabBarOverlayApi for TabBarOverlay {
-    fn update(
+impl TabBarOverlay {
+    pub(super) fn update(
         &mut self,
         rect: PixelRect,
         titles: Vec<String>,
@@ -680,14 +621,18 @@ impl TabBarOverlayApi for TabBarOverlay {
         }));
     }
 
-    fn hide(&mut self) {
+    #[expect(
+        dead_code,
+        reason = "hide() is invoked when a tabbed container's active window minimizes. Wired up in the follow-up minimize/restore pass."
+    )]
+    pub(super) fn hide(&mut self) {
         unsafe { ShowWindow(self.aux.hwnd(), SW_HIDE).ok().ok() };
     }
 
-    fn set_config(&mut self, config: &Config) {
+    pub(super) fn set_appearance(&mut self, appearance: &Appearance) {
         self.aux.deliver(Box::new(TabBarMessage::Style {
-            theme: config.theme,
-            font: config.font.clone(),
+            theme: appearance.theme,
+            font: appearance.font.clone(),
         }));
     }
 }

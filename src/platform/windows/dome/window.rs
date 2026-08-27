@@ -3,12 +3,12 @@ use std::time::Instant;
 
 use super::Dome;
 use super::display_from_process;
-use super::events::{FloatOverlayAction, PendingPlacement, PlacementAction};
-use crate::config::{WindowMatcher, pattern_matches};
+use super::events::FloatOverlayAction;
 use crate::core::{
     FloatWindowPlacement, LimitObservation, MonitorId, Physical, PixelRect, Pixels,
     TilingWindowPlacement, WindowId, WindowRestrictions,
 };
+use crate::core::{WindowMatcher, pattern_matches};
 use crate::platform::windows::external::{ManageExternalWindow, ShowCmd, ZOrder};
 use crate::platform::windows::handle::OFFSCREEN_POS;
 
@@ -108,7 +108,8 @@ impl crate::core::WindowMetadata for WindowsMetadata {
         {
             return false;
         }
-        matcher.process.is_some()
+        matcher.app.is_some()
+            || matcher.process.is_some()
             || matcher.title.is_some()
             || matcher.class.is_some()
             || matcher.aumid.is_some()
@@ -116,6 +117,7 @@ impl crate::core::WindowMetadata for WindowsMetadata {
 
     fn to_window_matcher(&self) -> WindowMatcher {
         WindowMatcher {
+            app: self.app_name.clone(),
             process: Some(self.process.clone()),
             title: self.title.clone(),
             class: self.class.clone(),
@@ -266,12 +268,15 @@ impl Dome {
         is_focused: bool,
         monitor: MonitorId,
         border_thickness: Pixels<Physical>,
-    ) -> (Option<PendingPlacement>, Option<FloatOverlayAction>) {
+    ) -> Option<FloatOverlayAction> {
         let scale = self.monitors.monitor(monitor).scale();
-        let Some(entry) = self.registry.get_mut(id) else {
-            return (None, None);
-        };
+        let entry = self.registry.get_mut(id)?;
         let new_target = wp.content_box;
+        debug_assert!(
+            !entry.is_minimized,
+            "show_float reached with user-minimized window {id}: minimized \
+             windows are detached from their workspace"
+        );
 
         let (needs_topmost, settled) = match entry.state {
             WindowState::BorderlessFullscreen
@@ -282,47 +287,29 @@ impl Dome {
                      show_fullscreen_window by the hub"
                 )
             }
-            WindowState::Positioned(ps) => {
-                debug_assert!(
-                    !entry.is_minimized,
-                    "show_float reached with user-minimized window {id}: minimized \
-                     windows are detached from their workspace"
-                );
-                match ps {
-                    PositionedState::Float(fp) => {
-                        let needs_topmost = focus_changed && is_focused;
-                        let settled = fp.target == new_target && !needs_topmost;
-                        (needs_topmost, settled)
-                    }
-                    PositionedState::Tiling(_) | PositionedState::Offscreen { .. } => (true, false),
+            WindowState::Positioned(ps) => match ps {
+                PositionedState::Float(fp) => {
+                    let needs_topmost = focus_changed && is_focused;
+                    let settled = fp.target == new_target && !needs_topmost;
+                    (needs_topmost, settled)
                 }
-            }
+                PositionedState::Tiling(_) | PositionedState::Offscreen { .. } => (true, false),
+            },
         };
 
         let hwnd_id = entry.ext.id();
-        let mut action = None;
+        let ext = entry.ext.clone();
         let z_order = if needs_topmost {
-            action = Some(PlacementAction::SetPosition {
-                z_order: ZOrder::Topmost,
-                rect: new_target,
-            });
+            ext.set_position(ZOrder::Topmost, new_target);
             ZOrder::After(hwnd_id)
         } else if !settled {
             // Already Topmost, so leave the z-order unchanged rather than re-set topmost
             // and raise it up the stack.
-            action = Some(PlacementAction::SetPosition {
-                z_order: ZOrder::Unchanged,
-                rect: new_target,
-            });
+            ext.set_position(ZOrder::Unchanged, new_target);
             ZOrder::After(hwnd_id)
         } else {
             ZOrder::Unchanged
         };
-        let placement = action.map(|action| PendingPlacement {
-            ext: entry.ext.clone(),
-            action,
-        });
-
         if !settled {
             let prev_actual = match &entry.state {
                 WindowState::Positioned(PositionedState::Float(fp)) => fp.actual,
@@ -337,16 +324,26 @@ impl Dome {
             )));
         }
 
-        (
-            placement,
-            Some(FloatOverlayAction::Update {
+        Some(match self.float_overlays.get(&id) {
+            Some(overlay) => {
+                if !matches!(z_order, ZOrder::Unchanged) {
+                    overlay.set_z_order(z_order);
+                }
+                FloatOverlayAction::Update {
+                    window_id: id,
+                    placement: *wp,
+                    scale,
+                    border_thickness,
+                }
+            }
+            None => FloatOverlayAction::Create {
                 window_id: id,
                 placement: *wp,
                 z_order,
                 scale,
                 border_thickness,
-            }),
-        )
+            },
+        })
     }
 
     #[tracing::instrument(
@@ -354,14 +351,16 @@ impl Dome {
         skip(self, wp),
         fields(window_id = %id),
     )]
-    #[must_use]
     pub(super) fn show_tiling(
         &mut self,
         id: WindowId,
         wp: &TilingWindowPlacement,
         monitor: MonitorId,
-    ) -> Option<PendingPlacement> {
-        let entry = self.registry.get_mut(id)?;
+        z: ZOrder,
+    ) {
+        let Some(entry) = self.registry.get_mut(id) else {
+            return;
+        };
         let new_target = wp.content_box;
 
         let tiling_state = |actual: PixelRect<Physical>| {
@@ -376,42 +375,22 @@ impl Dome {
              are detached from their workspace by the hub"
         );
 
-        let mut action = None;
+        let ext = entry.ext.clone();
+        let mut rect_changed = true;
+        let mut escape_topmost = false;
         match entry.state {
             WindowState::Positioned(PositionedState::Tiling(d)) => {
-                if d.monitor != monitor {
-                    // Cross-monitor: window is re-entering a different overlay's
-                    // monitor.
-                    action = Some(PlacementAction::AnchorAboveOverlay {
-                        monitor_id: monitor,
-                        rect: new_target,
-                        escape_topmost: false,
-                    });
-                    entry.state = tiling_state(d.actual);
-                } else if d.target != new_target {
-                    // Same-monitor drift: reposition without touching z-order.
-                    action = Some(PlacementAction::SetPosition {
-                        z_order: ZOrder::Unchanged,
-                        rect: new_target,
-                    });
+                if d.monitor == monitor && d.target == new_target {
+                    rect_changed = false;
+                } else {
                     entry.state = tiling_state(d.actual);
                 }
-                // else: stable on the same monitor at the same target, no-op.
             }
             WindowState::Positioned(PositionedState::Float(fp)) => {
-                action = Some(PlacementAction::AnchorAboveOverlay {
-                    monitor_id: monitor,
-                    rect: new_target,
-                    escape_topmost: true,
-                });
+                escape_topmost = true;
                 entry.state = tiling_state(fp.actual);
             }
             WindowState::Positioned(PositionedState::Offscreen { actual, .. }) => {
-                action = Some(PlacementAction::AnchorAboveOverlay {
-                    monitor_id: monitor,
-                    rect: new_target,
-                    escape_topmost: false,
-                });
                 entry.state = tiling_state(actual);
             }
             WindowState::BorderlessFullscreen
@@ -423,10 +402,17 @@ impl Dome {
                 )
             }
         }
-        action.map(|action| PendingPlacement {
-            ext: entry.ext.clone(),
-            action,
-        })
+
+        if escape_topmost {
+            ext.set_z_order(ZOrder::NotTopmost);
+        }
+        if rect_changed {
+            ext.set_position(z, new_target);
+        } else if !matches!(z, ZOrder::Unchanged) {
+            // SWP_NOMOVE | SWP_NOSIZE, so a settled window reaches its slot without
+            // dragging its owned children through a move.
+            ext.set_z_order(z);
+        }
     }
 
     #[tracing::instrument(
@@ -434,40 +420,32 @@ impl Dome {
         skip(self),
         fields(window_id = %id),
     )]
-    #[must_use]
     pub(super) fn show_fullscreen_window(
         &mut self,
         id: WindowId,
         work_area: PixelRect,
         monitor: MonitorId,
-    ) -> Option<PendingPlacement> {
-        let entry = self.registry.get_mut(id)?;
+    ) {
+        let Some(entry) = self.registry.get_mut(id) else {
+            return;
+        };
         // Borderless-fullscreen window hidden by Dome because its workspace
         // was inactive. The workspace is now visible again, so transition
         // back and drive the OS-side restore.
         if matches!(entry.state, WindowState::BorderlessMinimized { .. }) {
-            let placement = PendingPlacement {
-                ext: entry.ext.clone(),
-                action: PlacementAction::ShowCmd(ShowCmd::Restore),
-            };
+            entry.ext.show_cmd(ShowCmd::Restore);
             entry.state = WindowState::BorderlessFullscreen;
-            return Some(placement);
+            return;
         }
         match entry.state {
             WindowState::BorderlessFullscreen
             | WindowState::BorderlessMinimized { .. }
-            | WindowState::ExclusiveFullscreen => None,
+            | WindowState::ExclusiveFullscreen => {}
             WindowState::Positioned(ps) => {
                 if matches!(ps, PositionedState::Tiling(d) if d.target == work_area) {
-                    return None;
+                    return;
                 }
-                let placement = PendingPlacement {
-                    ext: entry.ext.clone(),
-                    action: PlacementAction::SetPosition {
-                        z_order: ZOrder::Unchanged,
-                        rect: work_area,
-                    },
-                };
+                entry.ext.set_position(ZOrder::Unchanged, work_area);
                 let prev_actual = match ps {
                     PositionedState::Tiling(d) => d.actual,
                     PositionedState::Float(fp) => fp.actual,
@@ -478,86 +456,65 @@ impl Dome {
                     prev_actual,
                     monitor,
                 )));
-                Some(placement)
             }
         }
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
     #[must_use]
-    pub(super) fn hide_window(
-        &mut self,
-        id: WindowId,
-    ) -> (Option<PendingPlacement>, Option<FloatOverlayAction>) {
-        let Some(entry) = self.registry.get_mut(id) else {
-            return (None, None);
-        };
+    pub(super) fn hide_window(&mut self, id: WindowId) -> Option<FloatOverlayAction> {
+        let entry = self.registry.get_mut(id)?;
         if entry.is_minimized {
-            return (None, None);
+            return None;
         }
         match entry.state {
             WindowState::Positioned(PositionedState::Tiling(d)) => {
-                let placement = PendingPlacement {
-                    ext: entry.ext.clone(),
-                    action: PlacementAction::MoveOffscreen,
-                };
+                entry.ext.move_offscreen();
                 entry.state = WindowState::Positioned(PositionedState::Offscreen {
                     retries: 0,
                     actual: d.actual,
                 });
-                (Some(placement), Some(FloatOverlayAction::Hide(id)))
+                Some(FloatOverlayAction::Hide(id))
             }
             WindowState::Positioned(PositionedState::Float(fp)) => {
-                let placement = PendingPlacement {
-                    ext: entry.ext.clone(),
-                    action: PlacementAction::MoveOffscreen,
-                };
+                entry.ext.move_offscreen();
                 entry.state = WindowState::Positioned(PositionedState::Offscreen {
                     retries: 0,
                     actual: fp.actual,
                 });
-                (Some(placement), Some(FloatOverlayAction::Hide(id)))
+                Some(FloatOverlayAction::Hide(id))
             }
             WindowState::BorderlessFullscreen => {
-                let placement = PendingPlacement {
-                    ext: entry.ext.clone(),
-                    action: PlacementAction::ShowCmd(ShowCmd::Minimize),
-                };
+                entry.ext.show_cmd(ShowCmd::Minimize);
                 entry.state = WindowState::BorderlessMinimized { retries: 0 };
-                (Some(placement), None)
+                None
             }
             WindowState::Positioned(PositionedState::Offscreen { actual, .. }) => {
                 if actual.x() > OFFSCREEN_POS && actual.y() > OFFSCREEN_POS {
-                    (
-                        Some(PendingPlacement {
-                            ext: entry.ext.clone(),
-                            action: PlacementAction::MoveOffscreen,
-                        }),
-                        None,
-                    )
-                } else {
-                    (None, None)
+                    entry.ext.move_offscreen();
                 }
+                None
             }
-            WindowState::BorderlessMinimized { .. } => (None, None),
-            WindowState::ExclusiveFullscreen => (None, None),
+            WindowState::BorderlessMinimized { .. } => None,
+            WindowState::ExclusiveFullscreen => None,
         }
     }
 
     /// Apply a fresh visible-rect observation from the OS.
     #[tracing::instrument(level = "trace", skip(self))]
-    #[must_use]
     pub(in crate::platform::windows) fn window_moved(
         &mut self,
         id: WindowId,
         new_placement: PixelRect<Physical>,
         monitor_handle: isize,
         observed_at: Instant,
-    ) -> Option<PendingPlacement> {
+    ) {
         let is_fullscreen = self
             .monitors
             .is_borderless_fullscreen_at(new_placement, monitor_handle);
-        let entry = self.registry.get_mut(id)?;
+        let Some(entry) = self.registry.get_mut(id) else {
+            return;
+        };
 
         if entry.is_minimized {
             self.hub.unminimize_window(id);
@@ -591,27 +548,20 @@ impl Dome {
                     if *retries == MAX_DRIFT_RETRIES + 1 {
                         tracing::debug!(%id, "BorderlessMinimized resurface retries exhausted, giving up");
                     }
-                    return None;
+                    return;
                 }
-                return Some(PendingPlacement {
-                    ext: entry.ext.clone(),
-                    action: PlacementAction::ShowCmd(ShowCmd::Minimize),
-                });
+                entry.ext.show_cmd(ShowCmd::Minimize);
             }
             (WindowState::BorderlessMinimized { .. }, false) => {
                 // Resurfaced but not fullscreen-shaped: user dragged or shrunk
                 // it. Demote to Offscreen.
                 tracing::trace!(%id, "Previously-minimized borderless-fullscreen window reappeared");
-                let placement = PendingPlacement {
-                    ext: entry.ext.clone(),
-                    action: PlacementAction::ShowCmd(ShowCmd::Restore),
-                };
+                entry.ext.show_cmd(ShowCmd::Restore);
                 entry.state = WindowState::Positioned(PositionedState::Offscreen {
                     retries: 0,
                     actual: new_placement,
                 });
                 self.hub.unset_fullscreen(id);
-                return Some(placement);
             }
 
             (WindowState::Positioned(PositionedState::Tiling(drift)), true) => {
@@ -623,11 +573,11 @@ impl Dome {
                         %id, ?observed_at, placed_at = ?drift.placed_at,
                         "stale tiling observation, ignoring",
                     );
-                    return None;
+                    return;
                 }
                 if drift.target == new_placement {
                     tracing::trace!(%id, "ignoring fullscreen observation: new_placement matches Dome-issued target");
-                    return None;
+                    return;
                 }
                 entry.state = WindowState::BorderlessFullscreen;
                 self.hub
@@ -639,7 +589,7 @@ impl Dome {
                         %id, ?observed_at, placed_at = ?drift.placed_at,
                         "stale tiling observation, ignoring",
                     );
-                    return None;
+                    return;
                 }
                 drift.actual = new_placement;
                 if drift.actual != drift.target {
@@ -648,13 +598,8 @@ impl Dome {
                         tracing::debug!("Drift retries exhausted, giving up");
                     } else {
                         tracing::trace!(%id, target = ?drift.target, actual = ?drift.actual, retries = drift.retries, "window drifted, correcting");
-                        return Some(PendingPlacement {
-                            ext: entry.ext.clone(),
-                            action: PlacementAction::SetPosition {
-                                z_order: ZOrder::Unchanged,
-                                rect: drift.target,
-                            },
-                        });
+                        let target = drift.target;
+                        entry.ext.set_position(ZOrder::Unchanged, target);
                     }
                 }
             }
@@ -665,7 +610,7 @@ impl Dome {
                         %id, ?observed_at, placed_at = ?fp.placed_at,
                         "stale float observation, ignoring",
                     );
-                    return None;
+                    return;
                 }
                 entry.state = WindowState::BorderlessFullscreen;
                 self.hub
@@ -677,7 +622,7 @@ impl Dome {
                         %id, ?observed_at, placed_at = ?fp.placed_at,
                         "stale float observation, ignoring",
                     );
-                    return None;
+                    return;
                 }
                 let resolved = match self.monitors.id_for_handle(monitor_handle) {
                     Some(id) => id,
@@ -688,7 +633,7 @@ impl Dome {
                             "MonitorFromWindow returned an HMONITOR not in monitor_handles; \
                              skipping float-drift observation"
                         );
-                        return None;
+                        return;
                     }
                 };
                 fp.monitor = resolved;
@@ -708,10 +653,7 @@ impl Dome {
                 self.hub
                     .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
                 entry.state = WindowState::BorderlessMinimized { retries: 0 };
-                return Some(PendingPlacement {
-                    ext: entry.ext.clone(),
-                    action: PlacementAction::ShowCmd(ShowCmd::Minimize),
-                });
+                entry.ext.show_cmd(ShowCmd::Minimize);
             }
 
             (WindowState::Positioned(PositionedState::Offscreen { retries, actual }), false) => {
@@ -721,67 +663,50 @@ impl Dome {
                     if *retries >= MAX_DRIFT_RETRIES {
                         tracing::debug!("Offscreen re-hide retries exhausted");
                     } else {
-                        return Some(PendingPlacement {
-                            ext: entry.ext.clone(),
-                            action: PlacementAction::MoveOffscreen,
-                        });
+                        entry.ext.move_offscreen();
                     }
                 }
             }
         }
-        None
     }
 
-    /// Called periodically by the drift retry timer.
-    /// Re-issues the last placement if the window has not yet
-    /// acknowledged it, up to `MAX_DRIFT_RETRIES` attempts.
+    /// Re-issues the last placement when the window has not acknowledged it, up to
+    /// `MAX_DRIFT_RETRIES` attempts.
     #[tracing::instrument(level = "trace", skip(self))]
-    #[must_use]
-    pub(super) fn retry_drift(&mut self, id: WindowId) -> Option<PendingPlacement> {
-        let entry = self.registry.get_mut(id)?;
+    pub(super) fn retry_drift(&mut self, id: WindowId) {
+        let Some(entry) = self.registry.get_mut(id) else {
+            return;
+        };
         match &mut entry.state {
             WindowState::Positioned(PositionedState::Tiling(drift)) => {
                 if drift.actual == drift.target || drift.retries > MAX_DRIFT_RETRIES {
-                    return None;
+                    return;
                 }
                 drift.retries = drift.retries.saturating_add(1);
                 drift.placed_at = Instant::now();
-                Some(PendingPlacement {
-                    ext: entry.ext.clone(),
-                    action: PlacementAction::SetPosition {
-                        z_order: ZOrder::Unchanged,
-                        rect: drift.target,
-                    },
-                })
+                let target = drift.target;
+                entry.ext.set_position(ZOrder::Unchanged, target);
             }
             WindowState::Positioned(PositionedState::Float(fp)) => {
                 if fp.actual == fp.target || fp.retries > MAX_DRIFT_RETRIES {
-                    return None;
+                    return;
                 }
                 fp.retries = fp.retries.saturating_add(1);
                 fp.placed_at = Instant::now();
-                Some(PendingPlacement {
-                    ext: entry.ext.clone(),
-                    action: PlacementAction::SetPosition {
-                        z_order: ZOrder::Unchanged,
-                        rect: fp.target,
-                    },
-                })
+                let target = fp.target;
+                entry.ext.set_position(ZOrder::Unchanged, target);
             }
             WindowState::Positioned(PositionedState::Offscreen { retries, actual }) => {
                 if actual.x() <= OFFSCREEN_POS || actual.y() <= OFFSCREEN_POS {
-                    return None;
+                    return;
                 }
                 if *retries >= MAX_DRIFT_RETRIES {
-                    return None;
+                    return;
                 }
                 *retries = retries.saturating_add(1);
-                Some(PendingPlacement {
-                    ext: entry.ext.clone(),
-                    action: PlacementAction::MoveOffscreen,
-                })
+                entry.ext.move_offscreen();
             }
-            _ => None,
+            _ => {}
         }
     }
 
@@ -802,5 +727,45 @@ impl Dome {
             entry.state = WindowState::ExclusiveFullscreen;
         }
         self.hub.set_fullscreen(id, WindowRestrictions::BlockAll);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WindowsMetadata;
+    use crate::core::{WindowMatcher, WindowMetadata};
+
+    fn notepad() -> WindowsMetadata {
+        WindowsMetadata {
+            title: Some(String::from("Untitled - Notepad")),
+            process: String::from("notepad.exe"),
+            process_path: None,
+            class: Some(String::from("Notepad")),
+            aumid: None,
+            app_name: Some(String::from("Notepad")),
+        }
+    }
+
+    #[test]
+    fn an_app_only_matcher_matches() {
+        let matcher = WindowMatcher {
+            app: Some(String::from("Notepad")),
+            ..WindowMatcher::default()
+        };
+        assert!(notepad().matches_window_matcher(&matcher));
+    }
+
+    #[test]
+    fn an_app_only_matcher_rejects_another_app() {
+        let matcher = WindowMatcher {
+            app: Some(String::from("Calculator")),
+            ..WindowMatcher::default()
+        };
+        assert!(!notepad().matches_window_matcher(&matcher));
+    }
+
+    #[test]
+    fn an_empty_matcher_matches_nothing() {
+        assert!(!notepad().matches_window_matcher(&WindowMatcher::default()));
     }
 }

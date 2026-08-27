@@ -1,6 +1,8 @@
+use crate::platform::keymap::KeymapView;
+use std::cell::RefCell;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, OnceLock, RwLock};
 use std::thread::{self, JoinHandle};
 
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
@@ -16,11 +18,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
+use crate::config::{Keystroke, Modifiers};
+use crate::platform::windows::dome::HubEvent;
+
 use super::HubSender;
-use super::dome::HubEvent;
-use crate::action::Actions;
-use crate::config::{Keymap, Modifiers};
-use crate::keymap::KeymapState;
 
 pub(super) struct KeyboardHookHandle {
     thread_id: u32,
@@ -28,8 +29,7 @@ pub(super) struct KeyboardHookHandle {
 }
 
 struct KeyboardState {
-    sender: HubSender,
-    keymap_state: Arc<RwLock<KeymapState>>,
+    hub_sender: HubSender,
 }
 
 static STATE: OnceLock<KeyboardState> = OnceLock::new();
@@ -48,19 +48,15 @@ static STATE: OnceLock<KeyboardState> = OnceLock::new();
 static MODIFIERS: AtomicU8 = AtomicU8::new(0);
 
 pub(super) fn install_keyboard_hook(
-    sender: HubSender,
-    keymap_state: Arc<RwLock<KeymapState>>,
+    keymap_rx: mpsc::Receiver<KeymapView>,
+    hub_sender: HubSender,
 ) -> anyhow::Result<KeyboardHookHandle> {
-    STATE
-        .set(KeyboardState {
-            sender,
-            keymap_state,
-        })
-        .ok();
+    STATE.set(KeyboardState { hub_sender }).ok();
 
     let (tx, rx) = mpsc::sync_channel::<Result<u32, windows::core::Error>>(0);
 
     let join_handle = thread::spawn(move || {
+        KEYMAP_RX.with(|cell| *cell.borrow_mut() = Some(keymap_rx));
         let thread_id = unsafe { GetCurrentThreadId() };
         match unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_proc), None, 0) } {
             Ok(hook) => {
@@ -114,10 +110,13 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
             }
         } else if is_down {
             let modifiers = Modifiers::from_bits_truncate(MODIFIERS.load(Ordering::Relaxed));
-            if let Some(actions) = get_actions(vk, modifiers) {
-                if let Some(state) = STATE.get() {
-                    state.sender.send(HubEvent::Action(actions));
-                }
+            if let Some(state) = STATE.get()
+                && let Some((keymap, keystroke)) = resolve_key(vk, modifiers)
+            {
+                tracing::trace!(%keymap, %keystroke, "Keystroke matched binding");
+                state
+                    .hub_sender
+                    .send(HubEvent::RunBinding { keymap, keystroke });
                 return LRESULT(1);
             }
         }
@@ -138,16 +137,28 @@ fn modifier_of(vk: VIRTUAL_KEY) -> Option<Modifiers> {
     }
 }
 
-fn get_actions(vk: VIRTUAL_KEY, modifiers: Modifiers) -> Option<Actions> {
-    let key = vk_to_string(vk)?;
-    let keymap = Keymap { key, modifiers };
+// A `Receiver` is not `Sync`, so it cannot live in the global `STATE`. The hook
+// thread that runs the proc owns it instead.
+thread_local! {
+    static KEYMAP: RefCell<KeymapView> = RefCell::new(KeymapView::new());
+    static KEYMAP_RX: RefCell<Option<mpsc::Receiver<KeymapView>>> = const { RefCell::new(None) };
+}
 
-    let state = STATE.get()?;
-    let mut ks = state.keymap_state.write().ok()?;
-    let actions = ks.resolve(&keymap)?;
-    drop(ks);
-    tracing::trace!(?keymap, %actions, "Keymap matched");
-    Some(actions)
+fn resolve_key(vk: VIRTUAL_KEY, modifiers: Modifiers) -> Option<(String, Keystroke)> {
+    let key = vk_to_string(vk)?;
+    let keystroke = Keystroke { key, modifiers };
+
+    KEYMAP_RX.with(|rx| {
+        if let Some(rx) = rx.borrow().as_ref() {
+            KEYMAP.with(|local| {
+                while let Ok(next) = rx.try_recv() {
+                    *local.borrow_mut() = next;
+                }
+            });
+        }
+    });
+    let keymap = KEYMAP.with(|local| local.borrow().resolve(&keystroke).map(str::to_string))?;
+    Some((keymap, keystroke))
 }
 
 fn vk_to_string(vk: VIRTUAL_KEY) -> Option<String> {

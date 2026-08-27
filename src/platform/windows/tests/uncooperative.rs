@@ -5,22 +5,19 @@ use crate::platform::windows::dome::window::MAX_DRIFT_RETRIES;
 #[test]
 fn compliant_window_no_redundant_set_position() {
     let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let _w1 = env.open();
+    let _w2 = env.open();
     env.settle(10);
 
-    env.moves.lock().unwrap().clear();
-    env.dome.apply_layout();
-    assert!(
-        env.moves.lock().unwrap().is_empty(),
-        "apply_layout should not re-issue set_position for settled windows"
-    );
+    env.clear_moves();
+    env.layout();
+    env.assert_settled("apply_layout should not re-issue set_position for settled windows");
 }
 
 #[test]
 fn drift_exhausts_retries() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w1 = env.open();
     env.settle(10);
 
     // Window resists placement -- always snaps to (100, 100, 800, 600)
@@ -35,7 +32,7 @@ fn drift_exhausts_retries() {
 #[test]
 fn drift_retries_reset_on_new_target() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w1 = env.open();
     env.settle(10);
 
     // Exhaust retries
@@ -44,7 +41,7 @@ fn drift_retries_reset_on_new_target() {
 
     // Stop resisting and add a new window -- target changes, retries reset
     env.clear_override_position(w1);
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let _w2 = env.open();
     env.settle(10);
 
     let d = env.dim(w1);
@@ -58,7 +55,7 @@ fn drift_retries_reset_on_new_target() {
 #[test]
 fn drift_correction_repositions_window() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w1 = env.open();
     env.settle(10);
     let expected = env.dim(w1);
 
@@ -79,24 +76,21 @@ fn drift_correction_repositions_window() {
 #[test]
 fn stale_tiling_observation_ignored() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w1 = env.open();
     env.settle(10);
 
     let before = Instant::now();
 
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let _w2 = env.open();
     env.settle(10);
 
     let dim_after_retile = env.dim(w1);
-    env.moves.lock().unwrap().clear();
+    env.clear_moves();
 
     env.dome
         .handle_window_moved(w1, PixelRect::new(100, 100, 400, 300), 1, before);
 
-    assert!(
-        env.moves.lock().unwrap().is_empty(),
-        "stale observation must not trigger drift correction"
-    );
+    env.assert_settled("stale observation must not trigger drift correction");
     assert_eq!(
         env.dim(w1),
         dim_after_retile,
@@ -107,16 +101,16 @@ fn stale_tiling_observation_ignored() {
 #[test]
 fn stale_tiling_observation_in_fullscreen_arm_ignored() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w1 = env.open();
     env.settle(10);
 
     let before = Instant::now();
 
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let _w2 = env.open();
     env.settle(10);
 
     let dim_after_retile = env.dim(w1);
-    env.moves.lock().unwrap().clear();
+    env.clear_moves();
 
     env.dome
         .handle_window_moved(w1, PixelRect::from_dimension(fullscreen_dim()), 1, before);
@@ -131,7 +125,7 @@ fn stale_tiling_observation_in_fullscreen_arm_ignored() {
 #[test]
 fn stale_float_observation_does_not_write_target() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w1 = env.open();
     env.run_actions("toggle float");
     env.settle(10);
 
@@ -143,15 +137,12 @@ fn stale_float_observation_does_not_write_target() {
     env.run_actions("toggle float");
     env.settle(10);
 
-    env.moves.lock().unwrap().clear();
+    env.clear_moves();
 
     let drag_target = PixelRect::new(300, 200, 500, 400);
     env.dome.handle_window_moved(w1, drag_target, 1, before);
 
-    assert!(
-        env.moves.lock().unwrap().is_empty(),
-        "stale float observation must not trigger any set_position"
-    );
+    env.assert_settled("stale float observation must not trigger any set_position");
     assert_eq!(
         env.dim(w1),
         target_before,
@@ -162,8 +153,8 @@ fn stale_float_observation_does_not_write_target() {
 #[test]
 fn offscreen_window_fights_hide() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w1 = env.open();
+    let _w2 = env.open();
     env.settle(10);
 
     env.run_actions("focus workspace 1");
@@ -171,23 +162,29 @@ fn offscreen_window_fights_hide() {
     assert!(env.is_offscreen(w1));
 
     env.simulate_resist(w1, (100, 100, 800, 600));
+    env.flush_moves();
 
-    for _ in 0..4 {
-        assert!(
-            !env.moves.lock().unwrap().is_empty(),
-            "should still be retrying"
-        );
+    let mut rehides = 0;
+    for _ in 0..=MAX_DRIFT_RETRIES {
+        if !env.moved(w1) {
+            break;
+        }
+        rehides += 1;
         env.flush_moves();
     }
-    env.flush_moves();
-    assert!(env.moves.lock().unwrap().is_empty(), "should have given up");
+
+    assert_eq!(
+        rehides,
+        MAX_DRIFT_RETRIES - 1,
+        "a parked window that keeps resurfacing must be re-hidden until its retry budget is spent, then left alone"
+    );
 }
 
 #[test]
 fn offscreen_retries_reset_on_fresh_hide() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w1 = env.open();
+    let _w2 = env.open();
     env.settle(10);
 
     env.run_actions("focus workspace 1");
@@ -210,23 +207,17 @@ fn offscreen_retries_reset_on_fresh_hide() {
     // Fight again -- should get fresh retries
     env.simulate_resist(w1, (100, 100, 800, 600));
     for _ in 0..4 {
-        assert!(
-            !env.moves.lock().unwrap().is_empty(),
-            "should still be retrying"
-        );
+        env.assert_placement_pending("should still be retrying");
         env.flush_moves();
     }
     env.flush_moves();
-    assert!(
-        env.moves.lock().unwrap().is_empty(),
-        "should have given up again"
-    );
+    env.assert_settled("should have given up again");
 }
 
 #[test]
 fn borderless_minimized_resurface_loop_caps() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "Game", "game.exe", fullscreen_dim());
+    let w1 = env.window().spawned_at(fullscreen_dim()).open();
     env.run_actions("focus workspace 1");
     env.settle(20);
     assert!(env.is_minimized(w1));
@@ -241,10 +232,10 @@ fn borderless_minimized_resurface_loop_caps() {
 fn borderless_minimized_resurface_loop_caps_with_other_workspace_unaffected() {
     let mut env = TestEnv::new();
 
-    let w1 = env.open(1, "Game1", "game1.exe", fullscreen_dim());
+    let w1 = env.window().spawned_at(fullscreen_dim()).open();
     env.run_actions("focus workspace 1");
     env.settle(20);
-    let w2 = env.open(2, "Game2", "game2.exe", fullscreen_dim());
+    let w2 = env.window().spawned_at(fullscreen_dim()).open();
     env.settle(20);
 
     // w1 stays BorderlessFullscreen on ws0. w2 parks BorderlessMinimized.
@@ -267,7 +258,7 @@ fn borderless_minimized_resurface_loop_caps_with_other_workspace_unaffected() {
 #[test]
 fn borderless_minimized_retries_reset_on_workspace_return() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "Game", "game.exe", fullscreen_dim());
+    let w1 = env.window().spawned_at(fullscreen_dim()).open();
     env.run_actions("focus workspace 1");
     env.settle(20);
     assert!(env.is_minimized(w1));
@@ -291,15 +282,15 @@ fn borderless_minimized_retries_reset_on_workspace_return() {
 #[test]
 fn drift_retry_timer_caps_tiling_retries() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w1 = env.open();
     // Prevent the initial full-screen placement so dim stays at spawn.
     env.simulate_resist(w1, (0, 0, 800, 600));
-    env.moves.lock().unwrap().clear();
+    env.clear_moves();
 
     // Opening _w2 triggers re-layout. show_tiling fires for w1 but
     // resist clamps it — OS ignored both placements.
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    env.moves.lock().unwrap().clear();
+    let _w2 = env.open();
+    env.clear_moves();
     env.clear_override_position(w1);
     let correct = dim(4, 4, 952, 1072);
     assert_eq!(
@@ -321,7 +312,7 @@ fn drift_retry_timer_caps_tiling_retries() {
 
     // Create a fresh gap — the cap prevents a fix.
     env.simulate_resist(w1, (0, 0, 800, 600));
-    env.moves.lock().unwrap().clear();
+    env.clear_moves();
     env.dome.retry_drifted_windows();
     assert_eq!(
         env.dim(w1),
@@ -333,10 +324,10 @@ fn drift_retry_timer_caps_tiling_retries() {
 #[test]
 fn drift_retry_timer_stops_when_tiling_window_settles() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w1 = env.open();
     // Prevent the initial placement so actual != target.
     env.simulate_resist(w1, (0, 0, 800, 600));
-    env.moves.lock().unwrap().clear();
+    env.clear_moves();
     env.clear_override_position(w1);
     let correct = dim(4, 4, 1912, 1072);
     assert_eq!(env.dim(w1), SPAWN_DIM, "placement dropped");
@@ -350,7 +341,7 @@ fn drift_retry_timer_stops_when_tiling_window_settles() {
 
     // Create a new gap — retry should NOT fire (actual == target).
     env.simulate_resist(w1, (0, 0, 800, 600));
-    env.moves.lock().unwrap().clear();
+    env.clear_moves();
     env.dome.retry_drifted_windows();
     assert_eq!(
         env.dim(w1),
@@ -362,7 +353,7 @@ fn drift_retry_timer_stops_when_tiling_window_settles() {
 #[test]
 fn drift_retry_timer_repositions_silently_dropped_float_window() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w1 = env.open();
     env.run_actions("toggle float");
     env.settle(10);
 
@@ -377,11 +368,11 @@ fn drift_retry_timer_repositions_silently_dropped_float_window() {
 
     // Resist the next float placement — OS drops it.
     env.simulate_resist(w1, (300, 200, 500, 400));
-    env.moves.lock().unwrap().clear();
+    env.clear_moves();
 
     // Toggle float on — show_float fires, resist clamps it to old_pos.
     env.run_actions("toggle float");
-    env.moves.lock().unwrap().clear();
+    env.clear_moves();
     env.clear_override_position(w1);
     assert_eq!(
         env.dim(w1),
@@ -397,8 +388,8 @@ fn drift_retry_timer_repositions_silently_dropped_float_window() {
 #[test]
 fn drift_retry_timer_retries_offscreen() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w1 = env.open();
+    let _w2 = env.open();
     env.settle(10);
 
     // Capture w1's on-screen position so resist clamps move_offscreen to it.
@@ -410,11 +401,11 @@ fn drift_retry_timer_retries_offscreen() {
         onscreen.height.value() as i32,
     );
     env.simulate_resist(w1, tup);
-    env.moves.lock().unwrap().clear();
+    env.clear_moves();
 
     // Switch workspace — hide_window calls move_offscreen, clamped to tup.
     env.run_actions("focus workspace 1");
-    env.moves.lock().unwrap().clear();
+    env.clear_moves();
     env.clear_override_position(w1);
     assert!(
         !env.is_offscreen(w1),
@@ -429,13 +420,13 @@ fn drift_retry_timer_retries_offscreen() {
 #[test]
 fn drift_retry_timer_after_workspace_return() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w1 = env.open();
     // Prevent both the initial and re-layout placements.
     env.simulate_resist(w1, (0, 0, 800, 600));
-    env.moves.lock().unwrap().clear();
+    env.clear_moves();
 
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    env.moves.lock().unwrap().clear();
+    let _w2 = env.open();
+    env.clear_moves();
     env.clear_override_position(w1);
     let correct = dim(4, 4, 952, 1072);
     assert_eq!(env.dim(w1), SPAWN_DIM);
@@ -449,11 +440,11 @@ fn drift_retry_timer_after_workspace_return() {
 
     // Resist the return placement.
     env.simulate_resist(w1, (0, 0, 800, 600));
-    env.moves.lock().unwrap().clear();
+    env.clear_moves();
 
     // Switch back — show_tiling fires, resist clamps it.
     env.run_actions("focus workspace 0");
-    env.moves.lock().unwrap().clear();
+    env.clear_moves();
     env.clear_override_position(w1);
     assert_eq!(env.dim(w1), SPAWN_DIM, "still at spawn after return");
 

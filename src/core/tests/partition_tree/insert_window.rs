@@ -221,7 +221,6 @@ fn insert_window_after_focused_container_with_same_new_window_direction() {
     hub.focus_left();
     hub.focus_parent();
     hub.toggle_spawn_mode();
-    hub.toggle_spawn_mode();
     hub.insert_window(titled("w14"), default_rect(), WindowRestrictions::None);
     // w4 should be inserted right after the focused container, not at the end
     assert_snapshot!(snapshot(&hub), @r"

@@ -1,8 +1,7 @@
 use clap::{Parser, Subcommand};
 
 use crate::action::{
-    Action, FocusTarget, MasterTarget, MonitorTarget, MoveTarget, Query, TabDirection,
-    ToggleTarget, parse_monitor_target,
+    Action, FocusTarget, MasterTarget, MonitorTarget, MoveTarget, Query, TabDirection, ToggleTarget,
 };
 use crate::core::WindowId;
 
@@ -13,6 +12,8 @@ struct Cli {
     command: Option<CliCommand>,
 }
 
+// Clap derives each command name from its variant name in kebab-case, and the Lua
+// action name is that command with every hyphen replaced by an underscore.
 #[derive(Subcommand)]
 enum CliCommand {
     Launch {
@@ -21,23 +22,53 @@ enum CliCommand {
         #[arg(short, long)]
         layout: Option<String>,
     },
-    Focus {
-        #[command(subcommand)]
-        target: CliFocus,
+    FocusLeft,
+    FocusRight,
+    FocusUp,
+    FocusDown,
+    FocusParent,
+    FocusTabNext,
+    FocusTabPrev,
+    FocusWorkspace {
+        name: String,
+        #[arg(long)]
+        monitor: Option<String>,
     },
-    Move {
-        #[command(subcommand)]
-        target: CliMove,
+    FocusMonitorLeft,
+    FocusMonitorRight,
+    FocusMonitorUp,
+    FocusMonitorDown,
+    FocusMonitor {
+        // Never matched against the four direction words, which have their own
+        // commands, so a monitor named `left` stays reachable.
+        name: String,
     },
-    Toggle {
-        #[command(subcommand)]
-        target: CliToggle,
+    MoveLeft,
+    MoveRight,
+    MoveUp,
+    MoveDown,
+    MoveToWorkspace {
+        name: String,
+        #[arg(long)]
+        monitor: Option<String>,
     },
-    Master {
-        #[command(subcommand)]
-        target: CliMaster,
+    MoveToMonitorLeft,
+    MoveToMonitorRight,
+    MoveToMonitorUp,
+    MoveToMonitorDown,
+    MoveToMonitor {
+        name: String,
     },
-    Exec {
+    ToggleSplit,
+    Rotate,
+    ToggleTabbed,
+    ToggleFloat,
+    ToggleFullscreen,
+    IncreaseMasterRatio,
+    DecreaseMasterRatio,
+    IncreaseMasterCount,
+    DecreaseMasterCount,
+    Execute {
         command: String,
     },
     Exit,
@@ -61,68 +92,6 @@ enum CliCommand {
 }
 
 #[derive(Subcommand)]
-enum CliFocus {
-    Up,
-    Down,
-    Left,
-    Right,
-    Parent,
-    Tab {
-        #[command(subcommand)]
-        direction: CliTab,
-    },
-    Workspace {
-        name: String,
-        #[arg(long)]
-        monitor: Option<String>,
-    },
-    Monitor {
-        #[arg(value_parser = parse_monitor_target)]
-        target: MonitorTarget,
-    },
-}
-
-#[derive(Subcommand)]
-enum CliMove {
-    Up,
-    Down,
-    Left,
-    Right,
-    Workspace {
-        name: String,
-        #[arg(long)]
-        monitor: Option<String>,
-    },
-    Monitor {
-        #[arg(value_parser = parse_monitor_target)]
-        target: MonitorTarget,
-    },
-}
-
-#[derive(Subcommand)]
-enum CliToggle {
-    Spawn,
-    Direction,
-    Layout,
-    Float,
-    Fullscreen,
-}
-
-#[derive(Subcommand)]
-enum CliMaster {
-    Grow,
-    Shrink,
-    More,
-    Fewer,
-}
-
-#[derive(Subcommand)]
-enum CliTab {
-    Next,
-    Prev,
-}
-
-#[derive(Subcommand)]
 enum CliQuery {
     Workspaces,
     #[command(name = "minimized")]
@@ -132,18 +101,9 @@ enum CliQuery {
 
 #[derive(Subcommand, Debug)]
 enum CliGenerate {
-    Yasb {
-        /// YASB config.yaml to edit. Defaults to the YASB config location.
-        #[arg(long)]
-        config: Option<String>,
-    },
+    Yasb,
     Sketchybar,
-    Zebar {
-        /// Directory to scaffold the widget pack into. Defaults to the Zebar
-        /// pack location.
-        #[arg(long)]
-        out: Option<String>,
-    },
+    Zebar,
 }
 
 #[derive(Debug)]
@@ -158,56 +118,6 @@ enum Dispatch {
     Generate(CliGenerate),
 }
 
-impl From<CliFocus> for FocusTarget {
-    fn from(cf: CliFocus) -> Self {
-        match cf {
-            CliFocus::Up => FocusTarget::Up,
-            CliFocus::Down => FocusTarget::Down,
-            CliFocus::Left => FocusTarget::Left,
-            CliFocus::Right => FocusTarget::Right,
-            CliFocus::Parent => FocusTarget::Parent,
-            CliFocus::Tab { direction } => FocusTarget::Tab {
-                direction: direction.into(),
-            },
-            CliFocus::Workspace { name, monitor } => FocusTarget::Workspace { name, monitor },
-            CliFocus::Monitor { target } => FocusTarget::Monitor { target },
-        }
-    }
-}
-
-impl From<CliMove> for MoveTarget {
-    fn from(cm: CliMove) -> Self {
-        match cm {
-            CliMove::Up => MoveTarget::Up,
-            CliMove::Down => MoveTarget::Down,
-            CliMove::Left => MoveTarget::Left,
-            CliMove::Right => MoveTarget::Right,
-            CliMove::Workspace { name, monitor } => MoveTarget::Workspace { name, monitor },
-            CliMove::Monitor { target } => MoveTarget::Monitor { target },
-        }
-    }
-}
-
-impl From<CliMaster> for MasterTarget {
-    fn from(cm: CliMaster) -> Self {
-        match cm {
-            CliMaster::Grow => MasterTarget::Grow,
-            CliMaster::Shrink => MasterTarget::Shrink,
-            CliMaster::More => MasterTarget::More,
-            CliMaster::Fewer => MasterTarget::Fewer,
-        }
-    }
-}
-
-impl From<CliTab> for TabDirection {
-    fn from(ct: CliTab) -> Self {
-        match ct {
-            CliTab::Next => TabDirection::Next,
-            CliTab::Prev => TabDirection::Prev,
-        }
-    }
-}
-
 impl From<CliQuery> for Query {
     fn from(cq: CliQuery) -> Self {
         match cq {
@@ -218,41 +128,51 @@ impl From<CliQuery> for Query {
     }
 }
 
-fn cli_toggle_to_action(t: CliToggle) -> Action {
-    match t {
-        CliToggle::Spawn => Action::Toggle {
-            target: ToggleTarget::Spawn,
-        },
-        CliToggle::Direction => Action::Toggle {
-            target: ToggleTarget::Direction,
-        },
-        CliToggle::Layout => Action::Toggle {
-            target: ToggleTarget::Layout,
-        },
-        CliToggle::Float => Action::Toggle {
-            target: ToggleTarget::Float,
-        },
-        CliToggle::Fullscreen => Action::Toggle {
-            target: ToggleTarget::Fullscreen,
-        },
-    }
-}
-
 impl From<CliCommand> for Dispatch {
     fn from(cmd: CliCommand) -> Self {
         match cmd {
             CliCommand::Launch { config, layout } => Dispatch::Launch { config, layout },
-            CliCommand::Focus { target } => Dispatch::Action(Action::Focus {
-                target: target.into(),
+            CliCommand::FocusLeft => focus(FocusTarget::Left),
+            CliCommand::FocusRight => focus(FocusTarget::Right),
+            CliCommand::FocusUp => focus(FocusTarget::Up),
+            CliCommand::FocusDown => focus(FocusTarget::Down),
+            CliCommand::FocusParent => focus(FocusTarget::Parent),
+            CliCommand::FocusTabNext => focus(FocusTarget::Tab {
+                direction: TabDirection::Next,
             }),
-            CliCommand::Move { target } => Dispatch::Action(Action::Move {
-                target: target.into(),
+            CliCommand::FocusTabPrev => focus(FocusTarget::Tab {
+                direction: TabDirection::Prev,
             }),
-            CliCommand::Toggle { target } => Dispatch::Action(cli_toggle_to_action(target)),
-            CliCommand::Master { target } => Dispatch::Action(Action::Master {
-                target: target.into(),
-            }),
-            CliCommand::Exec { command } => Dispatch::Action(Action::Exec { command }),
+            CliCommand::FocusWorkspace { name, monitor } => {
+                focus(FocusTarget::Workspace { name, monitor })
+            }
+            CliCommand::FocusMonitorLeft => focus_monitor(MonitorTarget::Left),
+            CliCommand::FocusMonitorRight => focus_monitor(MonitorTarget::Right),
+            CliCommand::FocusMonitorUp => focus_monitor(MonitorTarget::Up),
+            CliCommand::FocusMonitorDown => focus_monitor(MonitorTarget::Down),
+            CliCommand::FocusMonitor { name } => focus_monitor(MonitorTarget::Name(name)),
+            CliCommand::MoveLeft => move_window(MoveTarget::Left),
+            CliCommand::MoveRight => move_window(MoveTarget::Right),
+            CliCommand::MoveUp => move_window(MoveTarget::Up),
+            CliCommand::MoveDown => move_window(MoveTarget::Down),
+            CliCommand::MoveToWorkspace { name, monitor } => {
+                move_window(MoveTarget::Workspace { name, monitor })
+            }
+            CliCommand::MoveToMonitorLeft => move_to_monitor(MonitorTarget::Left),
+            CliCommand::MoveToMonitorRight => move_to_monitor(MonitorTarget::Right),
+            CliCommand::MoveToMonitorUp => move_to_monitor(MonitorTarget::Up),
+            CliCommand::MoveToMonitorDown => move_to_monitor(MonitorTarget::Down),
+            CliCommand::MoveToMonitor { name } => move_to_monitor(MonitorTarget::Name(name)),
+            CliCommand::ToggleSplit => toggle(ToggleTarget::Spawn),
+            CliCommand::Rotate => toggle(ToggleTarget::Direction),
+            CliCommand::ToggleTabbed => toggle(ToggleTarget::Layout),
+            CliCommand::ToggleFloat => toggle(ToggleTarget::Float),
+            CliCommand::ToggleFullscreen => toggle(ToggleTarget::Fullscreen),
+            CliCommand::IncreaseMasterRatio => master(MasterTarget::Grow),
+            CliCommand::DecreaseMasterRatio => master(MasterTarget::Shrink),
+            CliCommand::IncreaseMasterCount => master(MasterTarget::More),
+            CliCommand::DecreaseMasterCount => master(MasterTarget::Fewer),
+            CliCommand::Execute { command } => Dispatch::Action(Action::Execute { command }),
             CliCommand::Exit => Dispatch::Action(Action::Exit),
             CliCommand::Close => Dispatch::Action(Action::Close),
             CliCommand::Mode { name } => Dispatch::Action(Action::Mode { name }),
@@ -273,13 +193,7 @@ impl From<CliCommand> for Dispatch {
 
 pub fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let dispatch = match cli.command {
-        None => Dispatch::Launch {
-            config: None,
-            layout: None,
-        },
-        Some(cmd) => Dispatch::from(cmd),
-    };
+    let dispatch = dispatch_from(cli.command);
 
     match dispatch {
         Dispatch::Launch { config, layout } => crate::run_app(config, layout)?,
@@ -299,32 +213,104 @@ pub fn run() -> anyhow::Result<()> {
         Dispatch::Export => {
             crate::DomeClient.export_layout()?;
         }
-        Dispatch::Generate(CliGenerate::Yasb { config }) => {
-            crate::integrations::yasb::generate(config.as_deref())?;
+        Dispatch::Generate(CliGenerate::Yasb) => {
+            crate::integrations::yasb::generate()?;
         }
         Dispatch::Generate(CliGenerate::Sketchybar) => {
             crate::integrations::sketchybar::generate()?;
         }
-        Dispatch::Generate(CliGenerate::Zebar { out }) => {
-            crate::integrations::zebar::generate(out.as_deref())?;
+        Dispatch::Generate(CliGenerate::Zebar) => {
+            crate::integrations::zebar::generate()?;
         }
     }
     Ok(())
 }
 
+fn dispatch_from(command: Option<CliCommand>) -> Dispatch {
+    match command {
+        None => Dispatch::Launch {
+            config: None,
+            layout: None,
+        },
+        Some(cmd) => Dispatch::from(cmd),
+    }
+}
+
+fn focus(target: FocusTarget) -> Dispatch {
+    Dispatch::Action(Action::Focus { target })
+}
+
+fn focus_monitor(target: MonitorTarget) -> Dispatch {
+    focus(FocusTarget::Monitor { target })
+}
+
+fn move_window(target: MoveTarget) -> Dispatch {
+    Dispatch::Action(Action::Move { target })
+}
+
+fn move_to_monitor(target: MonitorTarget) -> Dispatch {
+    move_window(MoveTarget::Monitor { target })
+}
+
+fn toggle(target: ToggleTarget) -> Dispatch {
+    Dispatch::Action(Action::Toggle { target })
+}
+
+fn master(target: MasterTarget) -> Dispatch {
+    Dispatch::Action(Action::Master { target })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
+
+    /// Every action command, paired with the wire string it must send.
+    const ACTION_COMMANDS: &[(&[&str], &str)] = &[
+        (&["focus-left"], "focus left"),
+        (&["focus-right"], "focus right"),
+        (&["focus-up"], "focus up"),
+        (&["focus-down"], "focus down"),
+        (&["focus-parent"], "focus parent"),
+        (&["focus-tab-next"], "focus tab next"),
+        (&["focus-tab-prev"], "focus tab prev"),
+        (&["focus-workspace", "3"], "focus workspace 3"),
+        (&["focus-monitor-left"], "focus monitor left"),
+        (&["focus-monitor-right"], "focus monitor right"),
+        (&["focus-monitor-up"], "focus monitor up"),
+        (&["focus-monitor-down"], "focus monitor down"),
+        (
+            &["focus-monitor", "DELL U2720Q #1"],
+            "focus monitor DELL U2720Q #1",
+        ),
+        (&["move-left"], "move left"),
+        (&["move-right"], "move right"),
+        (&["move-up"], "move up"),
+        (&["move-down"], "move down"),
+        (&["move-to-workspace", "3"], "move workspace 3"),
+        (&["move-to-monitor-left"], "move monitor left"),
+        (&["move-to-monitor-right"], "move monitor right"),
+        (&["move-to-monitor-up"], "move monitor up"),
+        (&["move-to-monitor-down"], "move monitor down"),
+        (&["move-to-monitor", "HDMI"], "move monitor HDMI"),
+        (&["toggle-split"], "toggle spawn"),
+        (&["rotate"], "toggle direction"),
+        (&["toggle-tabbed"], "toggle layout"),
+        (&["toggle-float"], "toggle float"),
+        (&["toggle-fullscreen"], "toggle fullscreen"),
+        (&["increase-master-ratio"], "master grow"),
+        (&["decrease-master-ratio"], "master shrink"),
+        (&["increase-master-count"], "master more"),
+        (&["decrease-master-count"], "master fewer"),
+        (&["execute", "open -a Terminal"], "execute open -a Terminal"),
+        (&["close"], "close"),
+        (&["exit"], "exit"),
+        (&["mode", "resize"], "mode resize"),
+    ];
 
     fn dispatch_from_argv(argv: &[&str]) -> Dispatch {
         let cli = Cli::try_parse_from(argv).expect("parse");
-        match cli.command {
-            None => Dispatch::Launch {
-                config: None,
-                layout: None,
-            },
-            Some(cmd) => Dispatch::from(cmd),
-        }
+        dispatch_from(cli.command)
     }
 
     fn assert_action(argv: &[&str], expected: &str) {
@@ -349,32 +335,68 @@ mod tests {
     }
 
     #[test]
-    fn cli_focus_subcommands() {
-        assert_action(&["dome", "focus", "up"], "focus up");
-        assert_action(&["dome", "focus", "down"], "focus down");
-        assert_action(&["dome", "focus", "left"], "focus left");
-        assert_action(&["dome", "focus", "right"], "focus right");
-        assert_action(&["dome", "focus", "parent"], "focus parent");
-        assert_action(&["dome", "focus", "tab", "next"], "focus tab next");
-        assert_action(&["dome", "focus", "tab", "prev"], "focus tab prev");
-        assert_action(&["dome", "focus", "workspace", "3"], "focus workspace 3");
-        assert_action(&["dome", "focus", "monitor", "left"], "focus monitor left");
-        assert_action(&["dome", "focus", "monitor", "foo"], "focus monitor foo");
+    fn cli_definition_is_valid() {
+        Cli::command().debug_assert();
     }
 
     #[test]
-    fn cli_move_subcommands() {
-        assert_action(&["dome", "move", "up"], "move up");
-        assert_action(&["dome", "move", "down"], "move down");
-        assert_action(&["dome", "move", "left"], "move left");
-        assert_action(&["dome", "move", "right"], "move right");
-        assert_action(&["dome", "move", "workspace", "3"], "move workspace 3");
-        assert_action(&["dome", "move", "monitor", "left"], "move monitor left");
+    fn cli_action_commands_produce_their_wire_action() {
+        for (tail, expected) in ACTION_COMMANDS {
+            let argv: Vec<&str> = std::iter::once("dome")
+                .chain(tail.iter().copied())
+                .collect();
+            assert_action(&argv, expected);
+        }
+    }
+
+    #[test]
+    fn cli_every_action_command_has_a_table_row() {
+        const NOT_ACTIONS: &[&str] =
+            &["launch", "export", "query", "generate", "unminimize-window"];
+        let covered: Vec<&str> = ACTION_COMMANDS.iter().map(|(tail, _)| tail[0]).collect();
+        for sub in Cli::command().get_subcommands() {
+            let name = sub.get_name();
+            assert!(
+                NOT_ACTIONS.contains(&name) || covered.contains(&name),
+                "command {name:?} has no row in ACTION_COMMANDS"
+            );
+        }
+    }
+
+    #[test]
+    fn cli_launch_default() {
+        match dispatch_from_argv(&["dome"]) {
+            Dispatch::Launch {
+                config: None,
+                layout: None,
+            } => {}
+            other => panic!("expected Launch {{ None, None }}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_focus_monitor_takes_a_name_not_a_direction() {
+        match focus_target(&["dome", "focus-monitor", "left"]) {
+            FocusTarget::Monitor {
+                target: MonitorTarget::Name(name),
+            } => assert_eq!(name, "left"),
+            other => panic!("expected Monitor {{ Name(\"left\") }}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_move_to_monitor_takes_a_name_not_a_direction() {
+        match move_target(&["dome", "move-to-monitor", "left"]) {
+            MoveTarget::Monitor {
+                target: MonitorTarget::Name(name),
+            } => assert_eq!(name, "left"),
+            other => panic!("expected Monitor {{ Name(\"left\") }}, got {other:?}"),
+        }
     }
 
     #[test]
     fn cli_focus_workspace_without_monitor() {
-        match focus_target(&["dome", "focus", "workspace", "3"]) {
+        match focus_target(&["dome", "focus-workspace", "3"]) {
             FocusTarget::Workspace { name, monitor } => {
                 assert_eq!(name, "3");
                 assert_eq!(monitor, None);
@@ -387,8 +409,7 @@ mod tests {
     fn cli_focus_workspace_with_monitor() {
         match focus_target(&[
             "dome",
-            "focus",
-            "workspace",
+            "focus-workspace",
             "3",
             "--monitor",
             "DELL U2720Q #1",
@@ -402,8 +423,8 @@ mod tests {
     }
 
     #[test]
-    fn cli_move_workspace_without_monitor() {
-        match move_target(&["dome", "move", "workspace", "3"]) {
+    fn cli_move_to_workspace_without_monitor() {
+        match move_target(&["dome", "move-to-workspace", "3"]) {
             MoveTarget::Workspace { name, monitor } => {
                 assert_eq!(name, "3");
                 assert_eq!(monitor, None);
@@ -413,54 +434,14 @@ mod tests {
     }
 
     #[test]
-    fn cli_move_workspace_with_monitor() {
-        match move_target(&["dome", "move", "workspace", "2", "--monitor", "B"]) {
+    fn cli_move_to_workspace_with_monitor() {
+        match move_target(&["dome", "move-to-workspace", "2", "--monitor", "B"]) {
             MoveTarget::Workspace { name, monitor } => {
                 assert_eq!(name, "2");
                 assert_eq!(monitor.as_deref(), Some("B"));
             }
             other => panic!("expected Workspace, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn cli_toggle_subcommands() {
-        assert_action(&["dome", "toggle", "spawn"], "toggle spawn");
-        assert_action(&["dome", "toggle", "direction"], "toggle direction");
-        assert_action(&["dome", "toggle", "layout"], "toggle layout");
-        assert_action(&["dome", "toggle", "float"], "toggle float");
-        assert_action(&["dome", "toggle", "fullscreen"], "toggle fullscreen");
-    }
-
-    #[test]
-    fn cli_master_subcommands() {
-        assert_action(&["dome", "master", "grow"], "master grow");
-        assert_action(&["dome", "master", "shrink"], "master shrink");
-        assert_action(&["dome", "master", "more"], "master more");
-        assert_action(&["dome", "master", "fewer"], "master fewer");
-    }
-
-    #[test]
-    fn cli_exec_passthrough() {
-        assert_action(
-            &["dome", "exec", "open -a Terminal"],
-            "exec open -a Terminal",
-        );
-    }
-
-    #[test]
-    fn cli_mode() {
-        assert_action(&["dome", "mode", "resize"], "mode resize");
-    }
-
-    #[test]
-    fn cli_exit() {
-        assert_action(&["dome", "exit"], "exit");
-    }
-
-    #[test]
-    fn cli_close() {
-        assert_action(&["dome", "close"], "close");
     }
 
     #[test]
@@ -504,8 +485,8 @@ mod tests {
     fn cli_generate_yasb() {
         let d = dispatch_from_argv(&["dome", "generate", "yasb"]);
         match d {
-            Dispatch::Generate(CliGenerate::Yasb { config: None }) => {}
-            other => panic!("expected Generate(Yasb) with no config, got {other:?}"),
+            Dispatch::Generate(CliGenerate::Yasb) => {}
+            other => panic!("expected Generate(Yasb), got {other:?}"),
         }
     }
 
@@ -522,29 +503,8 @@ mod tests {
     fn cli_generate_zebar() {
         let d = dispatch_from_argv(&["dome", "generate", "zebar"]);
         match d {
-            Dispatch::Generate(CliGenerate::Zebar { out: None }) => {}
-            other => panic!("expected Generate(Zebar) with no out, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn cli_generate_zebar_with_out() {
-        let d = dispatch_from_argv(&["dome", "generate", "zebar", "--out", "/tmp/pack"]);
-        match d {
-            Dispatch::Generate(CliGenerate::Zebar { out: Some(ref p) }) if p == "/tmp/pack" => {}
-            other => panic!("expected Generate(Zebar) with out, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn cli_launch_default() {
-        let d = dispatch_from_argv(&["dome"]);
-        match d {
-            Dispatch::Launch {
-                config: None,
-                layout: None,
-            } => {}
-            other => panic!("expected Launch {{ None, None }}, got {other:?}"),
+            Dispatch::Generate(CliGenerate::Zebar) => {}
+            other => panic!("expected Generate(Zebar), got {other:?}"),
         }
     }
 

@@ -107,7 +107,7 @@ impl MasterStrategy {
                         content_box,
                         visible_content_box: content_box.clip(screen).unwrap_or(PixelRect::ZERO),
                         is_highlighted: focused_id == Some(active),
-                        spawn_indicator: None,
+                        spawn_direction: None,
                     });
                 }
                 let pane_dim = Dimension::new(
@@ -132,7 +132,7 @@ impl MasterStrategy {
                             true,
                         ),
                         is_highlighted: false,
-                        spawn_indicator: None,
+                        spawn_direction: None,
                         is_tabbed: true,
                         active_tab_index: Self::position_in_pane(hub, pane.container, active)
                             .unwrap_or(0),
@@ -155,7 +155,7 @@ impl MasterStrategy {
                                 .clip(screen)
                                 .unwrap_or(PixelRect::ZERO),
                             is_highlighted: focused_id == Some(wid),
-                            spawn_indicator: None,
+                            spawn_direction: None,
                         });
                     }
                 }

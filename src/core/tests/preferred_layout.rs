@@ -1,25 +1,129 @@
 use super::LayoutWorkspaceConfigBuilder;
-use crate::config::{Strategy, WindowMatcher};
-use crate::core::node::{DisplayMode, PixelRect, WindowRestrictions};
+use crate::core::node::{PixelRect, WindowRestrictions, WorkspaceId};
 use crate::core::strategy::WorkspaceExport;
-use crate::core::tests::{LayoutConfigBuilder, TestHubBuilder, process_meta, snapshot, titled};
+use crate::core::tests::{
+    PRIMARY_MONITOR, TestHubBuilder, TilingConfigBuilder, preferred_layout, process_meta,
+    reported_monitor, snapshot, titled, work_area_at,
+};
+use crate::core::{Strategy, WindowMatcher};
 use insta::assert_snapshot;
+
+#[test]
+fn preferred_layout_indexing_visits_workspace_names_sorted() {
+    let hub = TestHubBuilder::new()
+        .with_tiling(TilingConfigBuilder::new().build())
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("e").build(),
+            LayoutWorkspaceConfigBuilder::new("d").build(),
+            LayoutWorkspaceConfigBuilder::new("c").build(),
+            LayoutWorkspaceConfigBuilder::new("b").build(),
+            LayoutWorkspaceConfigBuilder::new("a").build(),
+        ])
+        .build();
+
+    let names: Vec<String> = hub
+        .access
+        .workspaces
+        .sorted_ids()
+        .into_iter()
+        .map(|ws_id| hub.access.workspaces.get(ws_id).name.clone())
+        .collect();
+
+    assert_eq!(names, vec!["0", "a", "b", "c", "d", "e"]);
+}
+
+#[test]
+fn each_monitor_takes_its_own_entry_for_a_shared_workspace_name() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(TilingConfigBuilder::new().build())
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("1")
+                .with_strategy(Strategy::Master)
+                .build(),
+        ])
+        .with_preferred_layout_on(
+            "monitor-1",
+            vec![
+                LayoutWorkspaceConfigBuilder::new("1")
+                    .with_strategy(Strategy::PartitionTree)
+                    .build(),
+            ],
+        )
+        .build();
+
+    hub.add_monitor(reported_monitor(
+        "monitor-1".to_string(),
+        work_area_at(150, 0),
+        1.0,
+    ));
+
+    let on_primary = workspace_on(&hub, PRIMARY_MONITOR, "1");
+    let on_second = workspace_on(&hub, "monitor-1", "1");
+    assert_eq!(hub.export_workspace(on_primary).strategy, "master");
+    assert_eq!(hub.export_workspace(on_second).strategy, "partition_tree");
+}
+
+#[test]
+fn entry_under_an_absent_monitor_applies_nothing() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(TilingConfigBuilder::new().build())
+        .with_preferred_layout_on(
+            "desktop",
+            vec![
+                LayoutWorkspaceConfigBuilder::new("desk")
+                    .with_float(vec![WindowMatcher {
+                        process: Some("float.exe".into()),
+                        ..Default::default()
+                    }])
+                    .build(),
+            ],
+        )
+        .build();
+
+    let names: Vec<String> = hub
+        .access
+        .workspaces
+        .sorted_ids()
+        .into_iter()
+        .map(|ws_id| hub.access.workspaces.get(ws_id).name.clone())
+        .collect();
+    assert_eq!(names, vec!["0"]);
+
+    let ws_id = hub.access.workspaces.sorted_ids()[0];
+    hub.insert_window(
+        process_meta("float.exe"),
+        PixelRect::new(10, 5, 30, 20),
+        WindowRestrictions::None,
+    )
+    .expect("window inserted");
+    assert!(hub.export_workspace(ws_id).float.is_empty());
+}
+
+fn workspace_on(hub: &crate::core::Hub, monitor: &str, name: &str) -> WorkspaceId {
+    hub.access
+        .workspaces
+        .sorted_ids()
+        .into_iter()
+        .find(|&ws_id| {
+            let ws = hub.access.workspaces.get(ws_id);
+            ws.name == name && hub.access.origin_monitor_name(ws_id) == monitor
+        })
+        .expect("workspace present on that monitor")
+}
 
 #[test]
 fn sync_preferred_layout_creates_new_workspace() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .build();
 
-    hub.sync_preferred_layout(vec![
-        LayoutWorkspaceConfigBuilder::new("dev")
-            .with_strategy(Strategy::Master)
-            .with_float(vec![WindowMatcher {
-                process: Some("float.exe".into()),
-                ..Default::default()
-            }])
-            .build(),
-    ]);
+    hub.sync_preferred_layout(preferred_layout([LayoutWorkspaceConfigBuilder::new("dev")
+        .with_strategy(Strategy::Master)
+        .with_float(vec![WindowMatcher {
+            process: Some("float.exe".into()),
+            ..Default::default()
+        }])
+        .build()]));
 
     hub.focus_workspace("dev", None);
     hub.insert_window(
@@ -64,7 +168,7 @@ fn sync_preferred_layout_creates_new_workspace() {
 #[test]
 fn float_matcher_routes_to_float() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("3")
                 .with_strategy(Strategy::Master)
@@ -122,7 +226,7 @@ fn float_matcher_routes_to_float() {
 #[test]
 fn fullscreen_matcher_routes_to_fullscreen() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("3")
                 .with_strategy(Strategy::Master)
@@ -185,7 +289,7 @@ fn fullscreen_matcher_routes_to_fullscreen() {
 #[test]
 fn fullscreen_beats_float_when_both_match() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("3")
                 .with_strategy(Strategy::Master)
@@ -248,7 +352,7 @@ fn fullscreen_beats_float_when_both_match() {
 #[test]
 fn no_match_tiles_on_current_workspace() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("3")
                 .with_strategy(Strategy::Master)
@@ -310,8 +414,8 @@ fn no_match_tiles_on_current_workspace() {
 #[test]
 fn matchers_on_partition_tree_variant() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::PartitionTree)
                 .build(),
         )
@@ -371,8 +475,8 @@ fn matchers_on_partition_tree_variant() {
 #[test]
 fn global_float_matcher_floats_on_current_workspace() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_float(vec![WindowMatcher {
                     process: Some("calc.exe".into()),
                     ..Default::default()
@@ -423,8 +527,8 @@ fn global_float_matcher_floats_on_current_workspace() {
 #[test]
 fn global_fullscreen_matcher_fullscreens_on_current_workspace() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_fullscreen(vec![WindowMatcher {
                     process: Some("slides.exe".into()),
                     ..Default::default()
@@ -479,8 +583,8 @@ fn global_fullscreen_matcher_fullscreens_on_current_workspace() {
 #[test]
 fn per_workspace_override_beats_global() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_float(vec![WindowMatcher {
                     process: Some("calc.exe".into()),
                     ..Default::default()
@@ -542,8 +646,8 @@ fn per_workspace_override_beats_global() {
 #[test]
 fn no_match_uses_global_matcher() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_float(vec![WindowMatcher {
                     process: Some("calc.exe".into()),
                     ..Default::default()
@@ -599,8 +703,8 @@ fn no_match_uses_global_matcher() {
 #[test]
 fn tiling_matcher_routes_to_workspace() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -664,8 +768,8 @@ fn tiling_matcher_routes_to_workspace() {
 #[test]
 fn float_beats_tiling() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -725,10 +829,10 @@ fn float_beats_tiling() {
 }
 
 #[test]
-fn config_order_first_match_wins() {
+fn name_order_first_match_wins() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -755,7 +859,7 @@ fn config_order_first_match_wins() {
         WindowRestrictions::None,
     )
     .unwrap();
-    hub.focus_workspace("code", None);
+    hub.focus_workspace("chat", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -798,8 +902,8 @@ fn config_order_first_match_wins() {
 #[test]
 fn no_tiling_match_falls_back_to_current() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -866,14 +970,14 @@ fn no_tiling_match_falls_back_to_current() {
 }
 
 #[test]
-fn sync_preferred_layout_reemits_matched_float_when_matcher_survives() {
+fn sync_preferred_layout_synthesises_float_when_matcher_survives() {
     let float_matcher = WindowMatcher {
         process: Some("/float.*/".into()),
         ..Default::default()
     };
 
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("dev")
                 .with_float(vec![float_matcher.clone()])
@@ -887,19 +991,22 @@ fn sync_preferred_layout_reemits_matched_float_when_matcher_survives() {
         process_meta("float-live-window"),
         PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
-    );
+    )
+    .expect("the window should insert");
 
-    hub.sync_preferred_layout(vec![
-        LayoutWorkspaceConfigBuilder::new("dev")
-            .with_float(vec![float_matcher.clone()])
-            .build(),
-    ]);
+    hub.sync_preferred_layout(preferred_layout([LayoutWorkspaceConfigBuilder::new("dev")
+        .with_float(vec![float_matcher.clone()])
+        .build()]));
 
+    // Export synthesises from live metadata rather than re-emitting the rule.
     assert_eq!(
         hub.export_workspace(ws_id),
         WorkspaceExport {
             strategy: "partition_tree".into(),
-            float: vec![float_matcher],
+            float: vec![WindowMatcher {
+                process: Some("float-live-window".into()),
+                ..Default::default()
+            }],
             ..WorkspaceExport::default()
         }
     );
@@ -913,7 +1020,7 @@ fn sync_preferred_layout_synthesises_float_when_matcher_removed() {
     };
 
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("dev")
                 .with_float(vec![float_matcher.clone()])
@@ -929,7 +1036,9 @@ fn sync_preferred_layout_synthesises_float_when_matcher_removed() {
         WindowRestrictions::None,
     );
 
-    hub.sync_preferred_layout(vec![LayoutWorkspaceConfigBuilder::new("dev").build()]);
+    hub.sync_preferred_layout(preferred_layout([
+        LayoutWorkspaceConfigBuilder::new("dev").build()
+    ]));
 
     assert_eq!(
         hub.export_workspace(ws_id),
@@ -947,7 +1056,7 @@ fn sync_preferred_layout_synthesises_float_when_matcher_removed() {
 #[test]
 fn sync_preferred_layout_adopts_manual_float_when_matcher_added() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![LayoutWorkspaceConfigBuilder::new("dev").build()])
         .build();
     hub.focus_workspace("dev", None);
@@ -963,26 +1072,23 @@ fn sync_preferred_layout_adopts_manual_float_when_matcher_added() {
     hub.set_focus(window_id);
     hub.toggle_float();
 
-    match hub.access.windows.get(window_id).mode {
-        DisplayMode::Float { occupy, .. } => assert_eq!(occupy, None),
-        other => panic!("expected manual float, got {other:?}"),
-    }
-
     let float_matcher = WindowMatcher {
         process: Some("/float.*/".into()),
         ..Default::default()
     };
-    hub.sync_preferred_layout(vec![
-        LayoutWorkspaceConfigBuilder::new("dev")
-            .with_float(vec![float_matcher.clone()])
-            .build(),
-    ]);
+    hub.sync_preferred_layout(preferred_layout([LayoutWorkspaceConfigBuilder::new("dev")
+        .with_float(vec![float_matcher.clone()])
+        .build()]));
 
+    // Export synthesises from live metadata rather than re-emitting the rule.
     assert_eq!(
         hub.export_workspace(ws_id),
         WorkspaceExport {
             strategy: "partition_tree".into(),
-            float: vec![float_matcher],
+            float: vec![WindowMatcher {
+                process: Some("float-live-window".into()),
+                ..Default::default()
+            }],
             ..WorkspaceExport::default()
         }
     );
@@ -991,8 +1097,8 @@ fn sync_preferred_layout_adopts_manual_float_when_matcher_added() {
 #[test]
 fn tiling_insert_routes_against_post_export_state() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -1048,8 +1154,8 @@ fn tiling_routes_to_current_workspace_when_it_can_house() {
         ..Default::default()
     };
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -1121,8 +1227,8 @@ fn tiling_routes_to_current_workspace_when_it_can_house() {
 #[test]
 fn tiling_falls_back_to_first_workspace_when_current_cannot_house() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -1193,7 +1299,7 @@ fn float_routes_to_current_workspace_when_it_can_house() {
         ..Default::default()
     };
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("a")
                 .with_float(vec![chat()])

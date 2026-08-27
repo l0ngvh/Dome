@@ -1,21 +1,21 @@
-use crate::core::GlobalLayoutConfig;
+use crate::core::TilingConfig;
 use crate::core::allocator::NodeId;
 use crate::core::node::{MonitorId, PixelRect, WindowId, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
+    TilingConfigBuilder, default_rect, setup, setup_with_tiling, snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
-    LayoutConfigBuilder::new()
+fn tiling_floating(titles: &[&str]) -> TilingConfig {
+    TilingConfigBuilder::new()
         .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
         .build()
 }
 
 #[test]
 fn insert_float_window() {
-    let mut hub = setup_with_layout(layout_floating(&["w0"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w0"]));
     hub.insert_window(
         titled("w0"),
         PixelRect::new(10, 5, 30, 20),
@@ -58,7 +58,7 @@ fn insert_float_window() {
 
 #[test]
 fn float_window_with_tiling() {
-    let mut hub = setup_with_layout(layout_floating(&["w2"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w2"]));
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     hub.insert_window(
         titled("w2"),
@@ -108,7 +108,7 @@ fn float_window_with_tiling() {
 
 #[test]
 fn move_float_to_workspace() {
-    let mut hub = setup_with_layout(layout_floating(&["w4"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w4"]));
     hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
     hub.insert_window(
         titled("w4"),
@@ -158,7 +158,7 @@ fn move_float_to_workspace() {
 
 #[test]
 fn focus_falls_back_to_tiling_after_float_delete() {
-    let mut hub = setup_with_layout(layout_floating(&["w6"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w6"]));
     hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
     let f0 = hub
         .insert_window(
@@ -211,7 +211,7 @@ fn focus_falls_back_to_tiling_after_float_delete() {
 
 #[test]
 fn focus_falls_back_to_last_float() {
-    let mut hub = setup_with_layout(layout_floating(&["w7", "w8"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w7", "w8"]));
     hub.insert_window(
         titled("w7"),
         PixelRect::new(10, 5, 30, 10),
@@ -298,7 +298,7 @@ fn toggle_tiling_to_float() {
 
 #[test]
 fn toggle_float_to_tiling() {
-    let mut hub = setup_with_layout(layout_floating(&["w10"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w10"]));
     hub.insert_window(
         titled("w10"),
         PixelRect::new(50, 5, 40, 15),
@@ -438,7 +438,7 @@ fn toggle_tiling_to_float_scenarios() {
 #[test]
 fn workspace_with_only_floats_not_deleted_prematurely() {
     // Regression test: workspace should not be deleted if it still has floats
-    let mut hub = setup_with_layout(layout_floating(&["w14"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w14"]));
 
     hub.insert_window(titled("w13"), default_rect(), WindowRestrictions::None);
 
@@ -544,7 +544,7 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
 
 #[test]
 fn delete_unfocused_float_window() {
-    let mut hub = setup_with_layout(layout_floating(&["w16"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w16"]));
 
     let f0 = hub
         .insert_window(
@@ -600,7 +600,7 @@ fn delete_unfocused_float_window() {
 fn delete_float_keeps_workspace_alive() {
     // Scenario 1: delete float on current workspace -- workspace kept
     let canonical = {
-        let mut hub = setup_with_layout(layout_floating(&["w18"]));
+        let mut hub = setup_with_tiling(tiling_floating(&["w18"]));
         let f0 = hub
             .insert_window(
                 titled("w18"),
@@ -619,7 +619,7 @@ fn delete_float_keeps_workspace_alive() {
 
     // Scenario 2: non-current workspace kept because tiling exists
     {
-        let mut hub = setup_with_layout(layout_floating(&["w20"]));
+        let mut hub = setup_with_tiling(tiling_floating(&["w20"]));
         hub.focus_workspace("1", None);
         hub.insert_window(titled("w19"), default_rect(), WindowRestrictions::None);
         let f0 = hub
@@ -641,7 +641,7 @@ fn delete_float_keeps_workspace_alive() {
 
     // Scenario 3: non-current workspace kept because other float exists
     {
-        let mut hub = setup_with_layout(layout_floating(&["w21", "w22"]));
+        let mut hub = setup_with_tiling(tiling_floating(&["w21", "w22"]));
         hub.focus_workspace("1", None);
         let f0 = hub
             .insert_window(
@@ -667,7 +667,7 @@ fn delete_float_keeps_workspace_alive() {
     }
 
     {
-        let mut hub = setup_with_layout(layout_floating(&["w23"]));
+        let mut hub = setup_with_tiling(tiling_floating(&["w23"]));
         hub.focus_workspace("1", None);
         let f0 = hub
             .insert_window(
@@ -689,7 +689,7 @@ fn delete_float_keeps_workspace_alive() {
 
 #[test]
 fn insert_float_offscreen_does_not_scroll_viewport() {
-    let mut hub = setup_with_layout(layout_floating(&["w25"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w25"]));
     let _w0 = hub
         .insert_window(titled("w24"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -742,7 +742,7 @@ fn insert_float_offscreen_does_not_scroll_viewport() {
 
 #[test]
 fn update_float_rect_writes_new_dim() {
-    let mut hub = setup_with_layout(layout_floating(&["w26"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w26"]));
     hub.insert_window(
         titled("w26"),
         PixelRect::new(10, 5, 30, 20),
@@ -795,7 +795,7 @@ fn update_float_rect_writes_new_dim() {
 
 #[test]
 fn update_float_rect_preserves_z_order() {
-    let mut hub = setup_with_layout(layout_floating(&["w27", "w28", "w29"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w27", "w28", "w29"]));
     let a = hub
         .insert_window(
             titled("w27"),
@@ -871,7 +871,7 @@ fn update_float_rect_on_tiling_panics() {
 #[test]
 #[should_panic]
 fn update_float_rect_on_unknown_panics() {
-    let mut hub = setup_with_layout(layout_floating(&["w31"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w31"]));
     hub.insert_window(
         titled("w31"),
         PixelRect::new(10, 5, 30, 20),

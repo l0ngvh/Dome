@@ -1,19 +1,25 @@
+use crate::config::lua::deserializer::string_enum;
 use egui::Color32;
 use egui::epaint::Shadow;
 use egui::style::{Selection, WidgetVisuals, Widgets};
 use egui::{Stroke, Visuals};
-use serde::Deserialize;
 
-// Mocha is the darkest flavour and matches Dome's pre-theme default palette.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Flavor {
     Latte,
     Frappe,
     Macchiato,
-    #[default]
     Mocha,
 }
+
+string_enum!(
+    Flavor,
+    "a Catppuccin flavour",
+    "latte" => Flavor::Latte,
+    "frappe" => Flavor::Frappe,
+    "macchiato" => Flavor::Macchiato,
+    "mocha" => Flavor::Mocha,
+);
 
 // DTO: a resolved palette with no invariants. pub(crate) fields are intentional.
 #[derive(Debug, Clone, Copy)]
@@ -277,39 +283,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn flavor_default_is_mocha() {
-        assert_eq!(Flavor::default(), Flavor::Mocha);
-    }
-
-    #[test]
-    fn flavor_deserializes_lowercase() {
-        #[derive(Deserialize)]
-        struct W {
-            theme: Flavor,
-        }
-        for (input, expected) in [
-            ("latte", Flavor::Latte),
-            ("frappe", Flavor::Frappe),
-            ("macchiato", Flavor::Macchiato),
-            ("mocha", Flavor::Mocha),
-        ] {
-            let toml_str = format!("theme = \"{input}\"");
-            let w: W = toml::from_str(&toml_str).unwrap();
-            assert_eq!(w.theme, expected);
-        }
-    }
-
-    #[test]
-    fn flavor_rejects_unknown() {
-        #[derive(Deserialize)]
-        struct W {
-            #[expect(dead_code, reason = "only testing deserialization failure")]
-            theme: Flavor,
-        }
-        assert!(toml::from_str::<W>(r#"theme = "dracula""#).is_err());
-    }
-
-    #[test]
     fn from_flavor_produces_distinct_themes() {
         let latte = Theme::from_flavor(Flavor::Latte);
         let mocha = Theme::from_flavor(Flavor::Mocha);
@@ -317,19 +290,6 @@ mod tests {
         assert_ne!(latte.focused_border, mocha.focused_border);
         // Within Mocha, focused_border (blue) differs from unfocused_border (surface1).
         assert_ne!(mocha.focused_border, mocha.unfocused_border);
-    }
-
-    #[test]
-    fn all_flavors_resolve() {
-        for flavor in [
-            Flavor::Latte,
-            Flavor::Frappe,
-            Flavor::Macchiato,
-            Flavor::Mocha,
-        ] {
-            // Passes if none panic. Catches palette field renames early.
-            let _ = Theme::from_flavor(flavor);
-        }
     }
 
     #[test]

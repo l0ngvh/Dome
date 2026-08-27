@@ -1,10 +1,10 @@
-use crate::config::{MasterConfig, Strategy};
 use crate::core::WindowRestrictions;
-use crate::core::strategy::TilingAction;
+use crate::core::strategy::StrategyAction;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, snapshot,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect, snapshot,
     titled,
 };
+use crate::core::{MasterConfig, Strategy};
 use insta::assert_snapshot;
 
 #[test]
@@ -12,8 +12,8 @@ fn sync_config_fill_master() {
     // Global master_count increase promotes unmatched windows from stack
     // into master for workspaces without a per-workspace override.
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -27,7 +27,7 @@ fn sync_config_fill_master() {
     let ws = hub.current_workspace();
     let focus_before = hub.focused_window(ws);
 
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_strategy(Strategy::Master)
         .with_master_config(MasterConfig {
             master_ratio: 0.5,
@@ -86,14 +86,14 @@ fn sync_config_drop_masters() {
     // master_ratio=0.3, a previously-untouched workspace gets that ratio on
     // its first attach.
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
         .build();
 
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_strategy(Strategy::Master)
         .with_master_config(MasterConfig {
             master_ratio: 0.3,
@@ -152,8 +152,8 @@ fn sync_config_preserves_runtime_tuned_master_ratio() {
     // Runtime GrowMaster tuning persists across config reload. A hot-reload
     // does NOT reset the ratio back to the file value (preserve semantics).
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -162,12 +162,12 @@ fn sync_config_preserves_runtime_tuned_master_ratio() {
     hub.insert_window(titled("w50"), default_rect(), WindowRestrictions::None);
 
     // GrowMaster 3 times: 0.5 -> 0.55 -> 0.60 -> 0.65
-    hub.handle_tiling_action(TilingAction::GrowMaster);
-    hub.handle_tiling_action(TilingAction::GrowMaster);
-    hub.handle_tiling_action(TilingAction::GrowMaster);
+    hub.handle_tiling_action(StrategyAction::GrowMaster);
+    hub.handle_tiling_action(StrategyAction::GrowMaster);
+    hub.handle_tiling_action(StrategyAction::GrowMaster);
 
     // Hot-reload with a different file value does NOT override runtime tuning.
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_strategy(Strategy::Master)
         .with_master_config(MasterConfig {
             master_ratio: 0.4,
@@ -222,8 +222,8 @@ fn sync_config_preserves_runtime_tuned_master_count() {
     // Runtime MoreMaster tuning persists across config reload. A hot-reload
     // does NOT reset the count back to the file value (preserve semantics).
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -234,10 +234,10 @@ fn sync_config_preserves_runtime_tuned_master_count() {
     hub.insert_window(titled("w54"), default_rect(), WindowRestrictions::None);
 
     // MoreMaster: master_count 1 -> 2
-    hub.handle_tiling_action(TilingAction::MoreMaster);
+    hub.handle_tiling_action(StrategyAction::MoreMaster);
 
     // Hot-reload with a different file value does NOT override runtime tuning.
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_strategy(Strategy::Master)
         .with_master_config(MasterConfig {
             master_ratio: 0.5,
@@ -295,8 +295,8 @@ fn sync_config_preserves_workspace_master_count_override() {
     // (which has no override). The preferred layout override on workspace 1
     // is unaffected.
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -313,7 +313,7 @@ fn sync_config_preserves_workspace_master_count_override() {
     hub.insert_window(titled("w54"), default_rect(), WindowRestrictions::None);
 
     hub.sync_configuration(
-        LayoutConfigBuilder::new()
+        TilingConfigBuilder::new()
             .with_strategy(Strategy::Master)
             .with_master_config(MasterConfig {
                 master_ratio: 0.5,
@@ -371,8 +371,8 @@ fn sync_config_preserves_workspace_master_ratio_override() {
     // (which has no override). The preferred layout ratio override on
     // workspace 1 is unaffected.
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -389,7 +389,7 @@ fn sync_config_preserves_workspace_master_ratio_override() {
     hub.insert_window(titled("w54"), default_rect(), WindowRestrictions::None);
 
     hub.sync_configuration(
-        LayoutConfigBuilder::new()
+        TilingConfigBuilder::new()
             .with_strategy(Strategy::Master)
             .with_master_config(MasterConfig {
                 master_ratio: 0.5,
@@ -446,8 +446,8 @@ fn sync_config_global_count_decrease() {
     // Global master_count decrease demotes excess masters to stack
     // for workspaces without a per-workspace override.
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .with_master_config(MasterConfig {
                     master_ratio: 0.5,
@@ -461,7 +461,7 @@ fn sync_config_global_count_decrease() {
     hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
 
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_strategy(Strategy::Master)
         .with_master_config(MasterConfig {
             master_ratio: 0.5,

@@ -449,33 +449,6 @@ fn toggle_fullscreen_hides_siblings() {
 }
 
 #[test]
-fn toggle_fullscreen_on_and_off() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
-
-    send(&mut dome, "toggle fullscreen");
-    macos.settle(&mut dome, 10);
-
-    send(&mut dome, "toggle fullscreen");
-    macos.settle(&mut dome, 10);
-
-    // TODO: after toggling fullscreen off with move event feedback, windows
-    // don't restore correctly — separate bug from convergence
-}
-
-#[test]
 fn native_fullscreen_blocks_toggle_float() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
@@ -685,7 +658,7 @@ fn user_minimized_unminimize_via_focus() {
 
     assert_eq!(macos.window_frame(cg2), (4, 4, 1912, 1072));
 
-    dome.focus_window_by_cg(cg1);
+    macos.focus_window(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     assert_eq!(macos.window_frame(cg1), (964, 4, 952, 1072));
@@ -718,7 +691,7 @@ fn user_minimized_deminiaturize_then_focus() {
     macos.settle(&mut dome, 10);
     assert_eq!(macos.window_frame(cg1), (964, 4, 952, 1072));
 
-    dome.focus_window_by_cg(cg1);
+    macos.focus_window(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     assert_eq!(macos.window_frame(cg1), (964, 4, 952, 1072));
@@ -737,7 +710,7 @@ fn user_minimize_single_window_then_unminimize() {
     macos.user_minimize(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
-    dome.focus_window_by_cg(cg1);
+    macos.focus_window(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     assert_eq!(macos.window_frame(cg1), (4, 4, 1912, 1072));
@@ -800,7 +773,7 @@ fn tiling_state_preserved_through_user_minimize_round_trip() {
     macos.user_minimize(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
-    dome.focus_window_by_cg(cg1);
+    macos.focus_window(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     assert!(!macos.is_offscreen(cg1));
@@ -867,7 +840,39 @@ fn float_state_preserved_through_user_minimize_round_trip() {
     macos.user_minimize(&mut dome, cg2);
     macos.settle(&mut dome, 10);
 
-    dome.focus_window_by_cg(cg2);
+    macos.focus_window(&mut dome, cg2);
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(macos.window_frame(cg2), placed);
+    assert!(!macos.is_minimized(cg2));
+}
+
+#[test]
+fn tiling_state_restored_by_the_unminimize_action() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+        &[],
+        &[],
+    );
+    macos.settle(&mut dome, 10);
+
+    let placed = macos.window_frame(cg2);
+    // Read the id while cg2 still holds focus, which the minimize below clears.
+    let window_id = macos.last_scene_state().focused_window.unwrap();
+
+    macos.user_minimize(&mut dome, cg2);
+    macos.settle(&mut dome, 10);
+
+    send_action(&mut dome, &Action::UnminimizeWindow { id: window_id });
+    macos.deminiaturize(&mut dome, cg2);
     macos.settle(&mut dome, 10);
 
     assert_eq!(macos.window_frame(cg2), placed);
@@ -876,9 +881,6 @@ fn float_state_preserved_through_user_minimize_round_trip() {
 
 #[test]
 fn native_fullscreen_state_preserved_through_user_minimize_round_trip() {
-    // The unminimize_window path is required because focus_window_by_cg alone
-    // does not clear ByUser on NativeFullscreen windows (place_fullscreen_window
-    // only handles ByDome).
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
 
@@ -897,8 +899,8 @@ fn native_fullscreen_state_preserved_through_user_minimize_round_trip() {
     macos.user_minimize(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
-    dome.unminimize_window(window_id);
-    dome.flush_layout();
+    send_action(&mut dome, &Action::UnminimizeWindow { id: window_id });
+    macos.deminiaturize(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     // Geometry unchanged (NativeFullscreen windows are positioned by macOS)

@@ -1,22 +1,22 @@
 use crate::core::ContainerId;
-use crate::core::GlobalLayoutConfig;
+use crate::core::TilingConfig;
 use crate::core::allocator::NodeId;
 use crate::core::node::{Length, LimitObservation, LimitUpdate, PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
+    TilingConfigBuilder, default_rect, setup, setup_with_tiling, snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
-    LayoutConfigBuilder::new()
+fn tiling_floating(titles: &[&str]) -> TilingConfig {
+    TilingConfigBuilder::new()
         .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
         .build()
 }
 
 #[test]
 fn focus_falls_back_to_last_focused_window_after_float_delete() {
-    let mut hub = setup_with_layout(layout_floating(&["w3"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w3"]));
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
@@ -79,7 +79,7 @@ fn focus_falls_back_to_last_focused_window_after_float_delete() {
 
 #[test]
 fn toggle_float_to_tiling_with_nested_containers() {
-    let mut hub = setup_with_layout(layout_floating(&["w7"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w7"]));
     hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
     hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
@@ -347,7 +347,7 @@ fn toggle_float_to_tiling_with_scrolled_viewport() {
 
 #[test]
 fn focus_direction_keeps_float_focus() {
-    let mut hub = setup_with_layout(layout_floating(&["w2"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w2"]));
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     let float_id = hub
@@ -374,7 +374,7 @@ fn focus_direction_keeps_float_focus() {
 
 #[test]
 fn focus_parent_keeps_float_focus() {
-    let mut hub = setup_with_layout(layout_floating(&["w2"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w2"]));
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     let float_id = hub
@@ -395,7 +395,7 @@ fn focus_parent_keeps_float_focus() {
 
 #[test]
 fn move_direction_keeps_float_focus() {
-    let mut hub = setup_with_layout(layout_floating(&["w2"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w2"]));
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     let float_id = hub
@@ -457,7 +457,7 @@ fn move_direction_keeps_float_focus() {
 
 #[test]
 fn tab_switch_keeps_float_focus() {
-    let mut hub = setup_with_layout(layout_floating(&["w2"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w2"]));
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();

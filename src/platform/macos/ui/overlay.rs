@@ -17,7 +17,7 @@ use objc2_quartz_core::{CAAutoresizingMask, CALayer, CATransaction, kCAGravityRe
 
 use super::super::dome::{ContainerShow, HubEvent};
 use super::compositor::{MacOsCompositor, physical_size};
-use crate::config::Config;
+use crate::config::Appearance;
 use crate::core::{
     ContainerId, Dimension, FloatWindowPlacement, Length, Logical, TilingWindowPlacement,
 };
@@ -167,9 +167,9 @@ impl FloatOverlay {
         self.window.set_visible(true);
     }
 
-    pub(super) fn set_config(&mut self, config: &Config) {
+    pub(super) fn set_appearance(&mut self, appearance: &Appearance) {
         // Borders only, no text, so the font is not applied.
-        self.renderer.set_theme(config.theme);
+        self.renderer.set_theme(appearance.theme);
         if let Some(placement) = self.placement {
             let border = BorderMetrics::from_thickness(self.border_thickness);
             let theme = self.renderer.theme();
@@ -222,12 +222,12 @@ impl TilingOverlay {
     pub(super) fn new(
         _mtm: MainThreadMarker,
         gpu: &WgpuContext,
-        config: Config,
+        appearance: Appearance,
         cocoa_frame: NSRect,
         scale: f64,
     ) -> Self {
-        let flavor = config.theme;
-        let font = config.font.clone();
+        let flavor = appearance.theme;
+        let font = appearance.font.clone();
         let compositor = MacOsCompositor::new(scale, None);
         let metal_layer = compositor.layer();
         let (init_w, init_h) = physical_size(0.0, 0.0, scale);
@@ -298,9 +298,9 @@ impl TilingOverlay {
         self.window.focus();
     }
 
-    pub(super) fn set_config(&mut self, config: &Config) {
+    pub(super) fn set_appearance(&mut self, appearance: &Appearance) {
         // Borders only, no text, so the font is not applied.
-        self.renderer.set_theme(config.theme);
+        self.renderer.set_theme(appearance.theme);
         self.render_now();
     }
 
@@ -334,7 +334,7 @@ impl TilingOverlay {
                 frame: wp.border_box.to_dimension(),
                 visible_frame: wp.visible_border_box.to_dimension(),
                 is_highlighted: wp.is_highlighted,
-                spawn_indicator: wp.spawn_indicator,
+                spawn_direction: wp.spawn_direction,
             })
             .collect();
         let containers_logical: Vec<LogicalTiledContainer> = self
@@ -346,7 +346,7 @@ impl TilingOverlay {
                 visible_frame: cs.placement.visible_border_box.to_dimension(),
                 tab_bar_height: Length::from_pixels(cs.placement.tab_bar_band.height()),
                 is_highlighted: cs.placement.is_highlighted,
-                spawn_indicator: cs.placement.spawn_indicator,
+                spawn_direction: cs.placement.spawn_direction,
                 is_tabbed: cs.placement.is_tabbed,
                 titles: cs.placement.titles.clone(),
             })
@@ -427,7 +427,7 @@ impl TabBarOverlay {
     pub(super) fn new(
         _mtm: MainThreadMarker,
         gpu: &WgpuContext,
-        config: Config,
+        appearance: Appearance,
         container_id: ContainerId,
         cocoa_frame: NSRect,
         scale: f64,
@@ -441,8 +441,8 @@ impl TabBarOverlay {
             Box::new(compositor),
             init_w,
             init_h,
-            config.theme,
-            &config.font,
+            appearance.theme,
+            &appearance.font,
             Box::new(crate::platform::macos::font::resolve_system_font),
         )
         .expect("tab bar renderer init");
@@ -484,10 +484,10 @@ impl TabBarOverlay {
         self.window.set_visible(true);
     }
 
-    pub(super) fn set_config(&self, config: &Config) {
+    pub(super) fn set_appearance(&self, appearance: &Appearance) {
         self.window.deliver(Box::new(TabBarMessage::Style {
-            theme: config.theme,
-            font: config.font.clone(),
+            theme: appearance.theme,
+            font: appearance.font.clone(),
         }));
     }
 }

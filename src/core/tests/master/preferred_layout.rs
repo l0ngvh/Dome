@@ -1,17 +1,17 @@
 use insta::assert_snapshot;
 
-use crate::config::{Strategy, WindowMatcher};
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, process_meta,
-    snapshot, titled, titled_process,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect,
+    preferred_layout, process_meta, snapshot, titled, titled_process,
 };
-use crate::core::{Direction, PaneDisplay, TilingAction, WindowRestrictions};
+use crate::core::{Direction, PaneDisplay, StrategyAction, WindowRestrictions};
+use crate::core::{Strategy, WindowMatcher};
 
 #[test]
 fn secondary_matched_goes_to_stack() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -83,8 +83,8 @@ fn secondary_matched_goes_to_stack() {
 #[test]
 fn master_matched_goes_to_master_pane() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -159,8 +159,8 @@ fn master_matched_goes_to_master_pane() {
 #[test]
 fn master_full_pushes_unmatched_to_secondary() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -231,8 +231,8 @@ fn master_full_pushes_unmatched_to_secondary() {
 #[test]
 fn master_full_continue_matching_in_secondary() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -327,8 +327,8 @@ fn master_full_continue_matching_in_secondary() {
 #[test]
 fn unmatched_fills_master_room() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -396,8 +396,8 @@ fn unmatched_fills_master_room() {
 #[test]
 fn mixed_matched_and_unmatched_order() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -487,8 +487,8 @@ fn mixed_matched_and_unmatched_order() {
 #[test]
 fn unmatched_goes_to_stack_when_master_full() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -543,8 +543,8 @@ fn unmatched_goes_to_stack_when_master_full() {
 #[test]
 fn insert_master_full_evicts_unmatched() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -617,8 +617,8 @@ fn insert_master_full_evicts_unmatched() {
 #[test]
 fn matched_order_on_both_lanes() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -734,8 +734,8 @@ fn matched_order_on_both_lanes() {
 #[test]
 fn decrease_master_count_drop_matched_master() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -784,7 +784,7 @@ fn decrease_master_count_drop_matched_master() {
             WindowRestrictions::None,
         )
         .unwrap();
-    hub.handle_tiling_action(TilingAction::FewerMaster);
+    hub.handle_tiling_action(StrategyAction::FewerMaster);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -830,7 +830,7 @@ fn decrease_master_count_drop_matched_master() {
 #[test]
 fn reloading_preferred_layout_puts_matched_windows_to_place() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
@@ -870,22 +870,20 @@ fn reloading_preferred_layout_puts_matched_windows_to_place() {
         )
         .unwrap();
 
-    hub.sync_preferred_layout(vec![
-        LayoutWorkspaceConfigBuilder::new("0")
-            .with_strategy(Strategy::Master)
-            .with_master(vec![
-                WindowMatcher {
-                    process: Some("A.exe".into()),
-                    ..Default::default()
-                },
-                WindowMatcher {
-                    process: Some("B.exe".into()),
-                    ..Default::default()
-                },
-            ])
-            .with_master_count(2)
-            .build(),
-    ]);
+    hub.sync_preferred_layout(preferred_layout([LayoutWorkspaceConfigBuilder::new("0")
+        .with_strategy(Strategy::Master)
+        .with_master(vec![
+            WindowMatcher {
+                process: Some("A.exe".into()),
+                ..Default::default()
+            },
+            WindowMatcher {
+                process: Some("B.exe".into()),
+                ..Default::default()
+            },
+        ])
+        .with_master_count(2)
+        .build()]));
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
@@ -931,8 +929,8 @@ fn reloading_preferred_layout_puts_matched_windows_to_place() {
 #[test]
 fn reordering_matched_windows_doesnt_guarrantee_next_match() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -971,7 +969,7 @@ fn reordering_matched_windows_doesnt_guarrantee_next_match() {
             WindowRestrictions::None,
         )
         .unwrap();
-    hub.handle_tiling_action(TilingAction::MoveDirection {
+    hub.handle_tiling_action(StrategyAction::MoveDirection {
         direction: Direction::Vertical,
         forward: false,
     });
@@ -1026,7 +1024,7 @@ fn reordering_matched_windows_doesnt_guarrantee_next_match() {
 #[test]
 fn swapping_secondary_window_doesnt_guarrantee_next_match() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
@@ -1057,7 +1055,7 @@ fn swapping_secondary_window_doesnt_guarrantee_next_match() {
             WindowRestrictions::None,
         )
         .unwrap();
-    hub.handle_tiling_action(TilingAction::MoveDirection {
+    hub.handle_tiling_action(StrategyAction::MoveDirection {
         direction: Direction::Horizontal,
         forward: true,
     });
@@ -1130,16 +1128,14 @@ fn increase_master_count_without_matcher_change() {
     hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
 
     // Hot-reload preferred layout with count=2, same (empty) matchers.
-    hub.sync_preferred_layout(vec![
-        LayoutWorkspaceConfigBuilder::new("0")
-            .with_strategy(Strategy::Master)
-            .with_secondary(vec![WindowMatcher {
-                title: Some("w2".into()),
-                ..Default::default()
-            }])
-            .with_master_count(2)
-            .build(),
-    ]);
+    hub.sync_preferred_layout(preferred_layout([LayoutWorkspaceConfigBuilder::new("0")
+        .with_strategy(Strategy::Master)
+        .with_secondary(vec![WindowMatcher {
+            title: Some("w2".into()),
+            ..Default::default()
+        }])
+        .with_master_count(2)
+        .build()]));
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
@@ -1185,8 +1181,8 @@ fn increase_master_count_without_matcher_change() {
 #[test]
 fn insert_multiple_matched_windows_to_the_same_slot() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -1323,21 +1319,19 @@ fn insert_multiple_matched_windows_to_the_same_slot() {
 
     let exported = hub.export_workspace(ws_id);
 
-    hub.sync_preferred_layout(vec![
-        LayoutWorkspaceConfigBuilder::new("1")
-            .with_strategy(Strategy::Master)
-            .with_master(exported.master.children)
-            .with_master_count(2)
-            .build(),
-    ]);
+    hub.sync_preferred_layout(preferred_layout([LayoutWorkspaceConfigBuilder::new("1")
+        .with_strategy(Strategy::Master)
+        .with_master(exported.master.children)
+        .with_master_count(2)
+        .build()]));
     assert_eq!(prev_snapshot, snapshot(&hub));
 }
 
 #[test]
 fn insert_master_full_no_evictable_matches_against_secondary() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -1440,8 +1434,8 @@ fn insert_master_full_no_evictable_matches_against_secondary() {
 #[test]
 fn matches_tiling_master_matcher() {
     let hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -1464,8 +1458,8 @@ fn matches_tiling_master_matcher() {
 #[test]
 fn matches_tiling_secondary_matcher() {
     let hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -1488,8 +1482,8 @@ fn matches_tiling_secondary_matcher() {
 #[test]
 fn matches_tiling_no_preferred_layout() {
     let hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -1502,8 +1496,8 @@ fn matches_tiling_no_preferred_layout() {
 #[test]
 fn master_display_tabbed_renders_tab_bar() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -1560,8 +1554,8 @@ fn master_display_tabbed_renders_tab_bar() {
 #[test]
 fn master_tabbed_secondary_tiled() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -1623,8 +1617,8 @@ fn master_tabbed_secondary_tiled() {
 #[test]
 fn both_panes_tabbed() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -1687,8 +1681,8 @@ fn both_panes_tabbed() {
 #[test]
 fn secondary_display_tabbed_renders_tab_bar() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )

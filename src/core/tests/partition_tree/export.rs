@@ -1,14 +1,14 @@
-use crate::config::{SplitMode, TreeLayoutNode, WindowMatcher};
 use crate::core::node::WindowRestrictions;
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, titled,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect, titled,
 };
+use crate::core::{SplitMode, TreeLayoutNode, WindowMatcher};
 
 #[test]
 fn export_empty_workspace_returns_empty_export() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .build();
     hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
@@ -26,7 +26,7 @@ fn export_empty_workspace_returns_empty_export() {
 #[test]
 fn export_single_foreign_window() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .build();
     hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
@@ -53,7 +53,7 @@ fn export_occupied_window_slot_uses_slot_matcher() {
         ..Default::default()
     };
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Leaf(slot_matcher.clone()))
@@ -83,7 +83,7 @@ fn export_occupied_window_slot_uses_slot_matcher() {
 #[test]
 fn export_foreign_container_with_two_windows() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .build();
     hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
@@ -117,14 +117,13 @@ fn export_foreign_container_with_two_windows() {
 #[test]
 fn export_tabbed_container() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .build();
     hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
-    hub.toggle_spawn_mode();
-    hub.toggle_spawn_mode();
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    hub.toggle_container_layout();
 
     let result = hub.export_workspace(ws_id);
     assert_eq!(
@@ -152,16 +151,14 @@ fn export_tabbed_container() {
 #[test]
 fn export_nested_containers() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .build();
     hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
 
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
-    hub.toggle_spawn_mode();
-    hub.toggle_spawn_mode();
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
-    hub.toggle_spawn_mode();
+    hub.toggle_container_layout();
     hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
 
     let result = hub.export_workspace(ws_id);
@@ -199,7 +196,7 @@ fn export_nested_containers() {
 #[test]
 fn export_mixed_occupied_and_foreign() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(LayoutConfigBuilder::new().build())
+        .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {

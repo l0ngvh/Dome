@@ -295,13 +295,6 @@ impl Dome {
         if window.is_moving {
             return;
         }
-        // User-minimized window being restored via focus_window_by_cg.
-        if window.is_minimized {
-            window.is_minimized = false;
-            if let Err(e) = window.ext.unminimize() {
-                tracing::trace!("Failed to unminimize window: {e:#}");
-            }
-        }
         match &mut window.state {
             WindowState::Positioned(PositionedState::Tiling(p)) => {
                 let crosses = self.monitor_registry.crosses_monitor(p.actual, target);
@@ -356,13 +349,6 @@ impl Dome {
         tracing::Span::current().record("window", window.to_string());
         if window.is_moving {
             return;
-        }
-        // User-minimized window being restored via focus_window_by_cg.
-        if window.is_minimized {
-            window.is_minimized = false;
-            if let Err(e) = window.ext.unminimize() {
-                tracing::trace!("Failed to unminimize window: {e:#}");
-            }
         }
         match &mut window.state {
             WindowState::Positioned(PositionedState::Float(fp)) => {
