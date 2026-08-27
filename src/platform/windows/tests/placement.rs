@@ -605,6 +605,76 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
 }
 
 #[test]
+fn handle_window_moved_signals_monitor_change() {
+    let mut env = TestEnv::new_with_monitors(
+        Config::default(),
+        LayoutConfig::default(),
+        vec![default_monitor(), second_monitor()],
+    );
+    let w = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.run_actions("toggle float");
+    env.move_window_to(w, dim(200, 150, 600, 400));
+    env.settle(10);
+
+    // Settled on monitor 1: a report on monitor 1 is no change.
+    assert!(
+        !env.dome
+            .handle_window_moved(w, PixelRect::new(200, 150, 600, 400), 1, Instant::now()),
+        "same monitor must not signal a constraint re-read"
+    );
+    // Crossing to monitor 2 signals a re-read.
+    assert!(
+        env.dome
+            .handle_window_moved(w, PixelRect::new(2000, 100, 600, 400), 2, Instant::now()),
+        "monitor change must signal a constraint re-read"
+    );
+    // Staying on monitor 2 is no change.
+    assert!(
+        !env.dome
+            .handle_window_moved(w, PixelRect::new(2200, 200, 600, 400), 2, Instant::now()),
+        "same monitor must not signal a constraint re-read"
+    );
+    // Unknown window: no entry to compare, no re-read.
+    assert!(
+        !env.dome.handle_window_moved(
+            HwndId::test(0x9999),
+            PixelRect::new(200, 150, 600, 400),
+            1,
+            Instant::now(),
+        ),
+        "unknown window must not signal a constraint re-read"
+    );
+}
+
+#[test]
+fn monitor_dpi_changed_returns_only_windows_on_that_monitor() {
+    let mut env = TestEnv::new_with_monitors(
+        Config::default(),
+        LayoutConfig::default(),
+        vec![default_monitor(), second_monitor()],
+    );
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.settle(10);
+
+    // Unchanged scale (96 DPI == 1.0) absorbs the duplicate posts: no re-read.
+    assert!(
+        env.dome.monitor_dpi_changed(1, 96).is_empty(),
+        "unchanged scale must not request a re-read"
+    );
+    // A scale change on monitor 2, which holds no windows, re-reads nothing.
+    assert!(
+        env.dome.monitor_dpi_changed(2, 144).is_empty(),
+        "a monitor with no windows must not request a re-read"
+    );
+    // A scale change on monitor 1 re-reads the window that lives there.
+    assert_eq!(
+        env.dome.monitor_dpi_changed(1, 144),
+        vec![w1],
+        "the window on the changed monitor re-reads"
+    );
+}
+
+#[test]
 fn float_move_monitor_same_dpi_preserves_content_rect() {
     let mut env = TestEnv::new_with_monitors(
         Config::default(),

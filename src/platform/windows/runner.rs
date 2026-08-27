@@ -295,9 +295,12 @@ impl Runner {
                 let Some((rect, monitor)) = observation else {
                     return;
                 };
-                runner
+                if runner
                     .dome
-                    .handle_window_moved(hwnd_id, rect, monitor, observed_at);
+                    .handle_window_moved(hwnd_id, rect, monitor, observed_at)
+                {
+                    runner.dispatch_constraint_read(hwnd_id);
+                }
             },
         );
     }
@@ -319,10 +322,11 @@ impl Runner {
     }
 
     pub(super) fn handle_dpi_change(&mut self, handle: isize, dpi: u32) {
-        self.dome.monitor_dpi_changed(handle, dpi);
-        // apply_layout is idempotent: runs even when monitor_dpi_changed
-        // early-returns on same-scale, because stored targets are physical
-        // and Hub state is unchanged so positions match.
+        for hwnd_id in self.dome.monitor_dpi_changed(handle, dpi) {
+            self.dispatch_constraint_read(hwnd_id);
+        }
+        // apply_layout runs even on an unchanged scale (empty result): Hub state
+        // is unchanged and stored targets are physical, so positions match.
         self.dome.apply_layout();
     }
 
