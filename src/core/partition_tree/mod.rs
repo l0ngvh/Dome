@@ -30,7 +30,7 @@ use crate::core::strategy::{
 
 /// i3-style manual tiling strategy. Manages a container tree where windows are
 /// leaves and containers define split direction (horizontal/vertical) or tabbed
-/// layout. This is the default (and currently only) tiling strategy.
+/// layout. This is the default tiling strategy.
 #[derive(Debug)]
 pub(crate) struct PartitionTreeStrategy {
     tiling_containers: FxHashMap<ContainerId, TilingContainerData>,
@@ -46,6 +46,7 @@ pub(crate) struct PartitionTreeStrategy {
 impl TilingStrategy for PartitionTreeStrategy {
     fn prepare_workspace(
         &mut self,
+        _hub: &mut HubAccess,
         ws_id: WorkspaceId,
         preferred_layout: Option<&LayoutWorkspaceConfig>,
     ) {

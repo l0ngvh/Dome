@@ -315,7 +315,7 @@ impl UnitKind for Physical {
     }
 }
 
-/// 1D length tagged with a unit. `Length<Logical>` is the config unit;
+/// 1D length tagged with a unit. `Length<Logical>` is the config unit.
 /// `Length<Unit>` is the binary's target unit (= `Logical` on macOS,
 /// `Physical` on Windows). Inner `f32` is private to force every core
 /// consumer to cross the logical-to-unit boundary via `to_unit(scale)`.
@@ -414,7 +414,7 @@ impl Length<Logical> {
     /// Raw `f32` accessor for callers that stay in logical space (config
     /// validation, platform shells bridging to egui's raw-f32 logical-point
     /// coordinate space). Not for core code that mixes with `Unit`-space
-    /// rectangles; use `to_unit(scale).value()` instead. Greppable escape
+    /// rectangles. Use `to_unit(scale).value()` instead. Greppable escape
     /// hatch: should never appear in `src/core/**`.
     pub(crate) fn logical(self) -> f32 {
         self.v
@@ -917,8 +917,8 @@ impl std::fmt::Display for Child {
     }
 }
 
-/// Invariant: `children.len() >= 2`. A container that drops to one child is dissolved
-/// and the survivor is promoted to its parent.
+/// An opaque, ordered collection of children. Strategies define what may go inside
+/// a container and own any per-container arrangement state.
 #[derive(Debug, Clone)]
 pub(crate) struct Container {
     pub(super) children: Vec<Child>,

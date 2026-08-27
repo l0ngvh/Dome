@@ -7,8 +7,8 @@ use super::PartitionTreeStrategy;
 
 impl PartitionTreeStrategy {
     /// Attach a `Child` (window or container) to a workspace. If the spawn mode is horizontal or
-    /// vertical then try to insert the child next to the focused child. if it's tabbed then try to
-    /// insert it into the closest tabbed container
+    /// vertical, try to insert the child next to the focused child. If it's tabbed, try to insert
+    /// it into the closest tabbed container.
     pub(super) fn attach_child_according_to_spawn_mode(
         &mut self,
         hub: &mut HubAccess,

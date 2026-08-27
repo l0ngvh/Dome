@@ -17,12 +17,12 @@
 //!   workspace-wide. It lands through spawn mode, the slot becomes the
 //!   occupied root, and the workspace records it as
 //!   `occupied_preferred_root`.
-//! - There are other windows matched this slot. The window joins the existing
+//! - Other windows already match this slot. The window joins the existing
 //!   same-slot cluster through `attach_window_into_same_slot`, which
 //!   inserts it after the most recent sibling in that cluster. If that sibling
 //!   is alone, the two are wrapped in a fresh container, occupying the lowest
-//!   container slot housing this window slot, ready to houses next windows
-//!   matching this or other child window slots.
+//!   container slot housing this window slot, ready to house later windows
+//!   that match this or other child window slots.
 //! - The matched slot has an occupied ancestor in the preferred tree.
 //!   `attach_window_into_occupied_ancestor` looks at the ancestor's
 //!   direct children for one whose preferred slot and the new window's
@@ -32,9 +32,9 @@
 //!     container at the position that keeps the preferred tree order.
 //!   - Found. The direct child housing that picked slot is moved with the new
 //!     window into a fresh sub-container at that same lowest common ancestor.
-//! - None of the matched slot ancestor's has been occupied. This means that the
-//!   matched slot and the current occupied preferred root lives in two different
-//!   subtree of the preferred layout. Their lowest common ancestor is then
+//! - None of the matched slot's ancestors is occupied. The matched slot and the
+//!   current occupied preferred root then live in two different subtrees of the
+//!   preferred layout. Their lowest common ancestor is then
 //!   materialized through `attach_window_to_unoccupied_container`.
 
 use std::cmp::Ordering;
@@ -156,8 +156,7 @@ impl PartitionTreeStrategy {
         if slot.windows.len() == 1 {
             let children = vec![last_sibling, new_child];
             if let Some(parent_slot) = slot.parent {
-                // Forming the lowest housing container, for all windows in this slot, and all other slots
-                // inside this container
+                // Form the lowest container housing this slot's windows and any sibling slots.
                 let split = self.container_slot_split(parent_slot);
                 let c_id = self.replace_anchor_with_container(hub, last_sibling, children, split);
                 self.occupy_container_slot(parent_slot, c_id);
@@ -166,7 +165,7 @@ impl PartitionTreeStrategy {
                 self.replace_anchor_with_container(hub, last_sibling, children, split_mode);
             }
         } else {
-            // 2 or more windows in this workspace, so this window's parent must be a container.
+            // 2 or more windows in this slot, so this window's parent must be a container.
             let Parent::Container(parent_cid) = self.parent(last_sibling) else {
                 unreachable!();
             };
@@ -177,8 +176,8 @@ impl PartitionTreeStrategy {
         self.compute_placement(hub, ws_id);
     }
 
-    /// When lowest common ancestor of the being inserted window and the current preferred root is
-    /// not yet constructed.
+    /// Called when the lowest common ancestor of the inserted window and the current preferred
+    /// root is not yet constructed.
     pub(super) fn attach_window_to_unoccupied_container(
         &mut self,
         hub: &mut HubAccess,
@@ -202,10 +201,10 @@ impl PartitionTreeStrategy {
                     Child::Window(first_matched_window_id)
                 } else {
                     match first_matched_window.parent {
-                        // Since the preferred root is still a window, this mean this is a bare
-                        // preferred window slot (with no preferred container)
+                        // The preferred root is still a window, so this is a bare preferred
+                        // window slot with no preferred container.
                         Parent::Container(container_id) => Child::Container(container_id),
-                        // 2 or more windows in this workspace, so this window's parent must be a container.
+                        // 2 or more windows in this slot, so this window's parent must be a container.
                         Parent::Workspace(_) => unreachable!(),
                     }
                 };
@@ -417,8 +416,8 @@ impl PartitionTreeStrategy {
 
         tracing::debug!(%ws_id, "PartitionTree preferred layout changed, reloading");
 
-        // Phase: immutable snapshot — collect windows, old root, and focus.
-        // Mutable work (detach_child, container deletion) happens below.
+        // Immutable snapshot: collect windows and the old root. Mutable work
+        // (detach_child, container deletion) happens below.
         let (tiling_windows, old_root) = {
             let state = self.workspaces.get(&ws_id).unwrap();
             let windows: Vec<WindowId> = state
@@ -439,16 +438,14 @@ impl PartitionTreeStrategy {
         // Re-attaching seeds the history in tree order, losing recency.
         let previous_history = self.workspaces.get(&ws_id).unwrap().focus_history.clone();
 
-        // Phase: mutable — detach root (clears bookmarks + occupation,
-        // triggers one layout on the now-empty workspace).
-        // The free is ordered after the detach, which still reads the tiling state of the
-        // subtree it is unlinking.
+        // Mutable phase: detach the root (clears bookmarks and occupation, triggers
+        // one layout on the now-empty workspace). The free is ordered after the detach,
+        // which still reads the tiling state of the subtree it unlinks.
         if let Some(root) = old_root {
             self.detach_child(hub, root);
             self.free_container_subtree(hub, root);
         }
 
-        // Set the new preferred layout.
         let new_root = match incoming {
             LayoutWorkspaceConfig::PartitionTree { tree, .. } => {
                 tree.as_ref().map(|t| self.build_preferred_layout(t))
@@ -461,7 +458,6 @@ impl PartitionTreeStrategy {
             .unwrap()
             .occupied_preferred_root = None;
 
-        // Reattach windows under the new layout.
         for &wid in &tiling_windows {
             self.attach_window(hub, wid, ws_id);
         }
@@ -719,8 +715,8 @@ impl PartitionTreeStrategy {
         Some(pref_root)
     }
 
-    /// It's acceptable to use recursion here, because if the tree has any circle we would have
-    /// panicked in the previous step
+    /// Recursion is acceptable here because a cyclic tree would have panicked in the previous
+    /// step.
     fn build_layout_node(&self, slot: PreferredSlot) -> TreeLayoutNode {
         match slot {
             PreferredSlot::Window(id) => {

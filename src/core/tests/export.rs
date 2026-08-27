@@ -1,4 +1,4 @@
-use crate::config::{TreeLayoutNode, WindowMatcher};
+use crate::config::{Strategy, TreeLayoutNode, WindowMatcher};
 use crate::core::node::WindowRestrictions;
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
@@ -367,4 +367,46 @@ fn export_float_toggled_to_tiling_returns_to_tree() {
             ..WorkspaceExport::default()
         }
     );
+}
+
+#[test]
+fn export_layout_persists_tabbed_master_pane() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("1")
+                .with_strategy(Strategy::Master)
+                .with_master_count(2)
+                .build(),
+        ])
+        .build();
+    hub.focus_workspace("1");
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    // Both windows land in the master pane.
+    hub.toggle_container_layout();
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("dome_export_tabbed_pane_{nanos}.toml"));
+    let _cleanup = CleanupFile(path.clone());
+    hub.export_layout(&path).unwrap();
+
+    let written = std::fs::read_to_string(&path).unwrap();
+    let doc: toml::Value = toml::from_str(&written).unwrap();
+    let entry = doc["workspace"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"].as_str() == Some("1"))
+        .unwrap();
+    let master = &entry["master"];
+    assert_eq!(master["display"].as_str(), Some("tabbed"));
+    assert!(master["children"].as_array().is_some());
 }

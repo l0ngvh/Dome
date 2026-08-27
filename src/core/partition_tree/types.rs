@@ -34,7 +34,6 @@ impl SpawnMode {
         }
     }
 
-    /// Build a no-history `SpawnMode` from a `Direction`.
     pub(crate) fn from_direction(direction: Direction) -> Self {
         match direction {
             Direction::Horizontal => Self::horizontal(),
@@ -112,8 +111,8 @@ impl SpawnMode {
         }
     }
 
-    /// Build a `SpawnMode` with `previous == current`, dropping rotation
-    /// history. Prevents stale history from leaking into the next `toggle`.
+    /// Reset rotation history (`previous == current`) so it cannot leak into the
+    /// next `toggle`.
     pub(crate) fn without_history(other: SpawnMode) -> Self {
         Self {
             current: other.current,
@@ -140,9 +139,8 @@ pub(crate) enum SpawnState {
     Tab,
 }
 
-/// Parent role in the partition tree. A `Container` can be a parent of other
-/// nodes. A `Workspace` can be a parent only of the root node. Windows are
-/// never parents.
+/// Parent role in the partition tree. A `Container` parents other nodes. A
+/// `Workspace` parents only the root node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Parent {
     Container(ContainerId),
@@ -179,8 +177,6 @@ impl TilingWindowData {
     fn with_parent(parent: Parent) -> Self {
         TilingWindowData {
             parent,
-            // Zero placeholder -- layout_workspace at the end of this function
-            // computes the real rect before any reader observes this entry.
             dimension: Dimension::default(),
             spawn_mode: SpawnMode::default(),
             occupy: None,

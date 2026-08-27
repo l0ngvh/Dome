@@ -1,4 +1,6 @@
-use crate::config::{LayoutWorkspaceConfig, MasterConfig, SplitMode, Strategy, TreeLayoutNode};
+use crate::config::{
+    LayoutWorkspaceConfig, MasterConfig, PaneConfig, SplitMode, Strategy, TreeLayoutNode,
+};
 use crate::core::GlobalLayoutConfig;
 use crate::core::hub::Hub;
 use crate::core::node::{PixelRect, WindowRestrictions};
@@ -182,7 +184,7 @@ fn sync_config_switches_master_to_partition_tree() {
         Window(id=WindowId(2), x=75.00, y=0.00, w=38.00, h=30.00)
         Window(id=WindowId(1), x=38.00, y=0.00, w=37.00, h=30.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=38.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w8, w9, w10, w11])
+        Container(id=ContainerId(2), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w8, w9, w10, w11])
       )
 
     +------------------------------------++-----------------------------------++------------------------------------+*************************************
@@ -274,7 +276,7 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
 
     // Remove fullscreen to expose tiling + float layer.
     hub.delete_window(_fs_id);
-    // Float survives with original dimension; tiling is laid out by master-stack.
+    // Float survives with original dimension. Tiling is laid out by master-stack.
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -447,8 +449,8 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
             name: "1".to_string(),
             master_ratio: None,
             master_count: None,
-            master: Vec::new(),
-            secondary: Vec::new(),
+            master: PaneConfig::tiled(Vec::new()),
+            secondary: PaneConfig::tiled(Vec::new()),
             float: Vec::new(),
             fullscreen: Vec::new(),
         }],
@@ -512,7 +514,7 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w26, w27])
+        Container(id=ContainerId(2), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w26, w27])
       )
 
     +-------------------------------------------------------------------------+***************************************************************************
@@ -660,8 +662,8 @@ fn setup_master_on_workspace_one() -> Hub {
             name: "1".to_string(),
             master_ratio: None,
             master_count: Some(1),
-            master: Vec::new(),
-            secondary: Vec::new(),
+            master: PaneConfig::tiled(Vec::new()),
+            secondary: PaneConfig::tiled(Vec::new()),
             float: Vec::new(),
             fullscreen: Vec::new(),
         }],

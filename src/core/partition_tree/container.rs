@@ -3,8 +3,8 @@ use crate::core::node::ContainerId;
 use crate::core::partition_tree::{Child, Parent, PartitionTreeStrategy, SpawnMode};
 
 impl PartitionTreeStrategy {
-    /// Delete a container with exactly one child remaining. Promotes the last
-    /// child to grandparent.
+    /// Partition-tree invariant: a container holds at least two children. When one child
+    /// remains, dissolve it and promote the survivor to the grandparent.
     pub(super) fn delete_container(&mut self, hub: &mut HubAccess, container_id: ContainerId) {
         debug_assert_eq!(hub.containers.get(container_id).children.len(), 1);
         let grandparent = self.tiling_containers.get(&container_id).unwrap().parent;

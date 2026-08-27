@@ -73,13 +73,13 @@ fn fill_entry(table: &mut toml_edit::Table, ws: &WorkspaceExport) -> anyhow::Res
             if let Some(c) = ws.master_count {
                 table.insert("master_count", toml_edit::value(c as i64));
             }
-            if !ws.master.is_empty() {
+            if !ws.master.children.is_empty() {
                 table.insert(
                     "master",
                     Item::Value(ws.master.serialize(ValueSerializer::new())?),
                 );
             }
-            if !ws.secondary.is_empty() {
+            if !ws.secondary.children.is_empty() {
                 table.insert(
                     "secondary",
                     Item::Value(ws.secondary.serialize(ValueSerializer::new())?),

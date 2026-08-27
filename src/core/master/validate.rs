@@ -3,15 +3,27 @@ use rustc_hash::FxHashSet;
 use crate::core::{
     Length, WindowId,
     hub::HubAccess,
-    master::MasterStrategy,
+    master::{MasterStrategy, PaneDisplay, PaneKind},
+    node::ContainerId,
     strategy::{VALIDATION_TOLERANCE, ValidateStrategy, window_constraints},
 };
 
 impl ValidateStrategy for MasterStrategy {
+    fn reachable_containers(&self, _hub: &HubAccess) -> FxHashSet<ContainerId> {
+        let mut reachable = FxHashSet::default();
+        for state in self.workspaces.values() {
+            reachable.insert(state.master.container);
+            reachable.insert(state.secondary.container);
+        }
+        reachable
+    }
+
     fn validate(&self, hub: &HubAccess) {
         for (&ws_id, state) in &self.workspaces {
+            let master = Self::pane_windows(hub, state.master.container);
+            let secondary = Self::pane_windows(hub, state.secondary.container);
             let mut seen = FxHashSet::default();
-            for &wid in state.master.iter().chain(state.secondary.iter()) {
+            for &wid in master.iter().chain(secondary.iter()) {
                 hub.windows.get(wid);
                 assert!(
                     seen.insert(wid),
@@ -20,9 +32,9 @@ impl ValidateStrategy for MasterStrategy {
             }
             let effective_count = state.master_count.unwrap_or(self.master_count);
             assert!(
-                state.master.len() <= effective_count,
+                master.len() <= effective_count,
                 "master-stack workspace {ws_id}: master.len() {} > master_count {effective_count}",
-                state.master.len()
+                master.len()
             );
 
             assert_eq!(
@@ -40,37 +52,37 @@ impl ValidateStrategy for MasterStrategy {
                  (a duplicate entry also shows up here)"
             );
 
-            for &wid in state.master.iter().chain(state.secondary.iter()) {
+            for &wid in master.iter().chain(secondary.iter()) {
                 assert!(
                     self.window_states.contains_key(&wid),
                     "master-stack workspace {ws_id}: window {wid:?} missing from window_states"
                 );
             }
 
-            for &wid in &state.master {
+            for &wid in &master {
                 if let Some(occupy) = self.window_states.get(&wid).and_then(|w| w.occupy) {
                     assert!(
-                        state.master_matchers.contains(&occupy),
+                        state.master.matchers.contains(&occupy),
                         "master-stack workspace {ws_id}: master window {wid:?} occupies slot {occupy:?} outside master pane"
                     );
                 }
             }
-            for &wid in &state.secondary {
+            for &wid in &secondary {
                 if let Some(occupy) = self.window_states.get(&wid).and_then(|w| w.occupy) {
                     assert!(
-                        state.secondary_matchers.contains(&occupy),
+                        state.secondary.matchers.contains(&occupy),
                         "master-stack workspace {ws_id}: secondary window {wid:?} occupies slot {occupy:?} outside secondary pane"
                     );
                 }
             }
-            for slot in &state.master_matchers {
+            for slot in &state.master.matchers {
                 assert!(
-                    !state.secondary_matchers.contains(slot),
+                    !state.secondary.matchers.contains(slot),
                     "master-stack workspace {ws_id}: slot {slot:?} shared between master and secondary panes"
                 );
             }
 
-            if state.master.is_empty() && state.secondary.is_empty() {
+            if master.is_empty() && secondary.is_empty() {
                 continue;
             }
 
@@ -81,7 +93,7 @@ impl ValidateStrategy for MasterStrategy {
                     .height(),
             );
 
-            for &wid in &state.master {
+            for &wid in &master {
                 let dim = self.window_states[&wid].dimension;
                 assert!(
                     dim.width > Length::ZERO,
@@ -118,7 +130,7 @@ impl ValidateStrategy for MasterStrategy {
                 }
             }
 
-            for &wid in &state.secondary {
+            for &wid in &secondary {
                 let dim = self.window_states[&wid].dimension;
                 assert!(
                     dim.width > Length::ZERO,
@@ -155,40 +167,51 @@ impl ValidateStrategy for MasterStrategy {
                 }
             }
 
-            let master_ids: Vec<WindowId> = state.master.clone();
+            let master_ids: Vec<WindowId> = master.clone();
             if !master_ids.is_empty() {
                 let master_content_h = self.pane_content_height(hub, &master_ids, pane_height);
                 let master_max_offset = (master_content_h - pane_height).max(Length::ZERO);
                 assert!(
-                    state.master_y_offset >= Length::ZERO
-                        && state.master_y_offset <= master_max_offset,
+                    state.master.y_offset >= Length::ZERO
+                        && state.master.y_offset <= master_max_offset,
                     "master-stack workspace {ws_id}: master_y_offset {} out of bounds [0, {}]",
-                    state.master_y_offset,
+                    state.master.y_offset,
                     master_max_offset
                 );
             } else {
                 assert!(
-                    state.master_y_offset == Length::ZERO,
+                    state.master.y_offset == Length::ZERO,
                     "master-stack workspace {ws_id}: master_y_offset should be zero (no master windows)"
                 );
             }
 
-            let stack_ids: Vec<WindowId> = state.secondary.clone();
+            let stack_ids: Vec<WindowId> = secondary.clone();
             if !stack_ids.is_empty() {
                 let stack_content_h = self.pane_content_height(hub, &stack_ids, pane_height);
                 let stack_max_offset = (stack_content_h - pane_height).max(Length::ZERO);
                 assert!(
-                    state.stack_y_offset >= Length::ZERO
-                        && state.stack_y_offset <= stack_max_offset,
+                    state.secondary.y_offset >= Length::ZERO
+                        && state.secondary.y_offset <= stack_max_offset,
                     "master-stack workspace {ws_id}: stack_y_offset {} out of bounds [0, {}]",
-                    state.stack_y_offset,
+                    state.secondary.y_offset,
                     stack_max_offset
                 );
             } else {
                 assert!(
-                    state.stack_y_offset == Length::ZERO,
+                    state.secondary.y_offset == Length::ZERO,
                     "master-stack workspace {ws_id}: stack_y_offset should be zero (no stack windows)"
                 );
+            }
+
+            for kind in [PaneKind::Master, PaneKind::Secondary] {
+                let pane = state.pane(kind);
+                if pane.display == PaneDisplay::Tabbed && Self::pane_len(hub, pane.container) >= 2 {
+                    assert!(
+                        pane.y_offset == Length::ZERO,
+                        "master-stack workspace {ws_id}: tabbed {kind:?} pane y_offset {} is not zero",
+                        pane.y_offset
+                    );
+                }
             }
         }
     }

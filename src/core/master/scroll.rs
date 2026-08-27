@@ -1,16 +1,28 @@
 use crate::core::{
     Length,
     hub::HubAccess,
-    master::{MasterStrategy, Pane},
+    master::{MasterStrategy, PaneDisplay},
     node::WorkspaceId,
 };
 
 impl MasterStrategy {
     pub(super) fn scroll_into_view(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
-        let state = self.workspaces.get(&ws_id).unwrap();
-        let Some((pane, idx)) = state.focused_position() else {
+        let Some((kind, idx)) = self.focused_position(hub, ws_id) else {
             return;
         };
+        let tabbed = {
+            let pane = self.workspaces.get(&ws_id).unwrap().pane(kind);
+            pane.display == PaneDisplay::Tabbed && Self::pane_len(hub, pane.container) >= 2
+        };
+        if tabbed {
+            self.workspaces
+                .get_mut(&ws_id)
+                .unwrap()
+                .pane_mut(kind)
+                .y_offset = Length::ZERO;
+            return;
+        }
+        let state = self.workspaces.get(&ws_id).unwrap();
         let pane_height = Length::from_pixels(
             hub.monitors
                 .get(hub.workspaces.get(ws_id).monitor)
@@ -18,12 +30,10 @@ impl MasterStrategy {
                 .height(),
         );
 
-        let offset = match pane {
-            Pane::Master => state.master_y_offset,
-            Pane::Secondary => state.stack_y_offset,
-        };
+        let offset = state.pane(kind).y_offset;
 
-        let slot_heights = self.pane_slot_heights(hub, state.pane_vec(pane), pane_height);
+        let members = Self::pane_windows(hub, state.pane(kind).container);
+        let slot_heights = self.pane_slot_heights(hub, &members, pane_height);
         let content_h: Length = slot_heights.iter().copied().sum();
         let max_offset = (content_h - pane_height).max(Length::ZERO);
 
@@ -45,9 +55,6 @@ impl MasterStrategy {
         new_offset = new_offset.clamp(Length::ZERO, max_offset);
 
         let state = self.workspaces.get_mut(&ws_id).unwrap();
-        match pane {
-            Pane::Master => state.master_y_offset = new_offset,
-            Pane::Secondary => state.stack_y_offset = new_offset,
-        }
+        state.pane_mut(kind).y_offset = new_offset;
     }
 }
