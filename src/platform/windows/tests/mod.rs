@@ -13,12 +13,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::action::{Action, Actions};
-use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
-use crate::core::GlobalLayoutConfig;
+use crate::config::{Appearance, Config, PreferredLayouts};
+use crate::core::LayoutOptions;
+use crate::core::PreferredWorkspace;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Length, LimitObservation, LimitUpdate, Logical,
     Physical, PixelRect, Pixels, TilingWindowPlacement, WindowId,
 };
+use crate::keybinding::{KeymapPublisher, KeymapState, ModalKeymaps};
 use crate::platform::windows::dome::MonitorInfo;
 use crate::platform::windows::dome::events::SceneSender;
 use crate::platform::windows::dome::{
@@ -29,6 +31,7 @@ use crate::platform::windows::handle::ManageZOrder;
 use crate::platform::windows::taskbar::ManageTaskbar;
 use crate::platform::windows::ui::WindowThread;
 use crate::platform::windows::ui::overlay::{FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi};
+use crate::scripting::LuaRuntime;
 use crate::theme::Flavor;
 
 /// Mirrors what the real tiling overlay shows on screen. The mock writes
@@ -199,31 +202,35 @@ impl TestEnv {
     }
 
     fn new_with_config(config: Config) -> Self {
-        Self::new_with_monitors(config, LayoutConfig::default(), vec![default_monitor()])
+        Self::new_with_monitors(config, PreferredLayouts::default(), vec![default_monitor()])
     }
 
     fn new_with_layout_settings(
         config: Config,
-        layout: GlobalLayoutConfig,
-        workspace_overrides: Vec<LayoutWorkspaceConfig>,
+        layout: LayoutOptions,
+        workspace_overrides: Vec<PreferredWorkspace>,
     ) -> Self {
         let mut config = config;
-        config.strategy = layout.strategy;
-        config.partition_tree = layout.partition_tree;
-        config.master = layout.master;
-        config.size_constraints = layout.size_constraints;
-        config.float = layout.float;
-        config.fullscreen = layout.fullscreen;
+        config.layout.strategy = layout.strategy;
+        config.layout.partition_tree = layout.partition_tree;
+        config.layout.master = layout.master;
+        config.layout.size_constraints = layout.size_constraints;
+        config.layout.float = layout.float;
+        config.layout.fullscreen = layout.fullscreen;
         Self::new_with_monitors(
             config,
-            LayoutConfig {
+            PreferredLayouts {
                 workspace: workspace_overrides,
             },
             vec![default_monitor()],
         )
     }
 
-    fn new_with_monitors(config: Config, layout: LayoutConfig, monitors: Vec<MonitorInfo>) -> Self {
+    fn new_with_monitors(
+        config: Config,
+        layout: PreferredLayouts,
+        monitors: Vec<MonitorInfo>,
+    ) -> Self {
         setup_logger();
 
         let exclusive_fullscreen_hwnd = Arc::new(Mutex::new(None));
@@ -252,16 +259,21 @@ impl TestEnv {
         }));
 
         let window: Box<dyn SceneSender> = Box::new(WindowThread::new(
-            config.clone(),
+            config.appearance.clone(),
             Box::new(overlays.clone()),
             Box::new(z_stack.clone()),
         ));
         let dome = Dome::new(
-            config.clone(),
+            config.layout.clone(),
             layout.workspace,
             Rc::new(NoopTaskbar),
             Box::new(display),
             window,
+            {
+                let (keymap_tx, _keymap_rx) = std::sync::mpsc::channel();
+                KeymapPublisher::new(KeymapState::new(ModalKeymaps::default()), keymap_tx)
+            },
+            LuaRuntime::new(String::new()).expect("build test Lua VM"),
         )
         .unwrap();
         Self {
@@ -515,12 +527,8 @@ impl TestEnv {
 
     fn run_actions(&mut self, s: &str) {
         let action: Action = s.parse().unwrap();
-        match &action {
-            Action::Focus { target: t } => self.dome.apply_focus(t),
-            Action::Move { target: t } => self.dome.apply_move(t),
-            Action::Toggle { target: t } => self.dome.apply_toggle(t),
-            Action::Master { target: t } => self.dome.apply_master(t),
-            _ => {}
+        if let Some(tiling) = crate::platform::tiling_action(&action) {
+            self.dome.handle_tiling_action(tiling);
         }
         self.dome.apply_layout();
     }
@@ -974,14 +982,14 @@ struct MockFloatOverlay {
     z_stack: ZOrderStack,
     shared: Rc<FloatOverlayShared>,
     overlays: Rc<RefCell<MockOverlays>>,
-    config: Rc<RefCell<Config>>,
+    appearance: Rc<RefCell<Appearance>>,
 }
 
 impl MockFloatOverlay {
     fn new(
         overlay_id: HwndId,
         z_stack: ZOrderStack,
-        config: Config,
+        appearance: Appearance,
         overlays: Rc<RefCell<MockOverlays>>,
     ) -> Self {
         Self {
@@ -991,10 +999,10 @@ impl MockFloatOverlay {
                 overlay_id,
                 stale: Cell::new(false),
                 state: Cell::new(FloatOverlayState::Hidden),
-                flavor: Cell::new(config.theme),
+                flavor: Cell::new(appearance.theme),
             }),
             overlays,
-            config: Rc::new(RefCell::new(config)),
+            appearance: Rc::new(RefCell::new(appearance)),
         }
     }
 }
@@ -1022,9 +1030,9 @@ impl FloatOverlayApi for MockFloatOverlay {
         self.shared.state.set(FloatOverlayState::Hidden);
         self.z_stack.remove(self.overlay_id);
     }
-    fn set_config(&mut self, config: &Config) {
-        self.shared.flavor.set(config.theme);
-        *self.config.borrow_mut() = config.clone();
+    fn set_appearance(&mut self, appearance: &Appearance) {
+        self.shared.flavor.set(appearance.theme);
+        *self.appearance.borrow_mut() = appearance.clone();
     }
 }
 
@@ -1043,7 +1051,7 @@ struct MockTilingOverlay {
     /// Shared (not just `Cell<PixelRect>`) so the struct stays cheaply `Clone`:
     /// the factory hands clones to the Hub while `TestEnv` retains one for inspection.
     monitor: Rc<Cell<PixelRect>>,
-    config: Rc<RefCell<Config>>,
+    appearance: Rc<RefCell<Appearance>>,
     focus_target: Arc<Mutex<FocusTarget>>,
 }
 
@@ -1051,16 +1059,16 @@ impl MockTilingOverlay {
     fn new(
         overlay_id: HwndId,
         z_stack: ZOrderStack,
-        config: Config,
+        appearance: Appearance,
         focus_target: Arc<Mutex<FocusTarget>>,
     ) -> Self {
         Self {
             overlay_id,
             z_stack,
             state: Rc::new(RefCell::new(TilingOverlayState::Hidden)),
-            flavor: Rc::new(Cell::new(config.theme)),
+            flavor: Rc::new(Cell::new(appearance.theme)),
             monitor: Rc::new(Cell::new(PixelRect::ZERO)),
-            config: Rc::new(RefCell::new(config)),
+            appearance: Rc::new(RefCell::new(appearance)),
             focus_target,
         }
     }
@@ -1098,9 +1106,9 @@ impl TilingOverlayApi for MockTilingOverlay {
     fn clear(&mut self) {
         *self.state.borrow_mut() = TilingOverlayState::Hidden;
     }
-    fn set_config(&mut self, config: &Config) {
-        self.flavor.set(config.theme);
-        *self.config.borrow_mut() = config.clone();
+    fn set_appearance(&mut self, appearance: &Appearance) {
+        self.flavor.set(appearance.theme);
+        *self.appearance.borrow_mut() = appearance.clone();
     }
     fn focus(&self) {
         *self.focus_target.lock().unwrap() = FocusTarget::Overlay;
@@ -1165,7 +1173,7 @@ impl TabBarOverlayApi for MockTabBarHandle {
         });
     }
     fn hide(&mut self) {}
-    fn set_config(&mut self, _config: &Config) {}
+    fn set_appearance(&mut self, _appearance: &Appearance) {}
 }
 
 impl Drop for MockTabBarHandle {
@@ -1188,7 +1196,7 @@ struct MockOverlays {
 impl CreateOverlay for Rc<RefCell<MockOverlays>> {
     fn create_tiling_overlay(
         &self,
-        config: Config,
+        appearance: Appearance,
         monitor: PixelRect,
         _scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
@@ -1200,7 +1208,7 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
         let overlay = MockTilingOverlay::new(
             id,
             this.z_stack.clone(),
-            config.clone(),
+            appearance.clone(),
             this.tiling_focus_target.clone(),
         );
         // Record monitor work area from create call (also updated on
@@ -1219,7 +1227,7 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
     }
     fn create_float_overlay(
         &self,
-        config: Config,
+        appearance: Appearance,
         _scale: f32,
         _visible_border_box: PixelRect,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
@@ -1231,7 +1239,7 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
 
         let z_stack = self.borrow().z_stack.clone();
         let overlays = self.clone();
-        let overlay = MockFloatOverlay::new(id, z_stack, config, overlays);
+        let overlay = MockFloatOverlay::new(id, z_stack, appearance, overlays);
 
         // Mirror CreateWindowExW: seed at top of normal band. The first
         // `update()` call will reposition (typically `ZOrder::After(float_window)`).
@@ -1240,7 +1248,7 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
     }
     fn create_tab_bar(
         &self,
-        _config: Config,
+        _appearance: Appearance,
         container_id: ContainerId,
         _rect: PixelRect,
         _scale: f32,

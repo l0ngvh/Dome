@@ -3,7 +3,7 @@ pub(in crate::platform::windows) mod overlay;
 use std::collections::{HashMap, HashSet};
 
 use self::overlay::{FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi};
-use crate::config::Config;
+use crate::config::Appearance;
 use crate::core::{ContainerId, MonitorId, WindowId};
 use crate::platform::windows::dome::CreateOverlay;
 use crate::platform::windows::dome::events::{
@@ -15,7 +15,7 @@ use crate::platform::windows::handle::ManageZOrder;
 
 /// Owns every Dome-created window and the only code that touches one.
 pub(in crate::platform::windows) struct WindowThread {
-    config: Config,
+    appearance: Appearance,
     overlay_factory: Box<dyn CreateOverlay>,
     tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>>,
     tab_bars: HashMap<ContainerId, Box<dyn TabBarOverlayApi>>,
@@ -25,12 +25,12 @@ pub(in crate::platform::windows) struct WindowThread {
 
 impl WindowThread {
     pub(in crate::platform::windows) fn new(
-        config: Config,
+        appearance: Appearance,
         overlay_factory: Box<dyn CreateOverlay>,
         z_order: Box<dyn ManageZOrder>,
     ) -> Self {
         Self {
-            config,
+            appearance,
             overlay_factory,
             tiling_overlays: HashMap::new(),
             tab_bars: HashMap::new(),
@@ -42,7 +42,7 @@ impl WindowThread {
     pub(in crate::platform::windows) fn apply_monitor_change(&mut self, change: MonitorSetChange) {
         for spec in change.added {
             if let Ok(overlay) = self.overlay_factory.create_tiling_overlay(
-                self.config.clone(),
+                self.appearance.clone(),
                 spec.work_area,
                 spec.scale,
             ) {
@@ -54,16 +54,16 @@ impl WindowThread {
         }
     }
 
-    pub(in crate::platform::windows) fn apply_config(&mut self, config: &Config) {
-        self.config = config.clone();
+    pub(in crate::platform::windows) fn apply_appearance(&mut self, appearance: &Appearance) {
+        self.appearance = appearance.clone();
         for overlay in self.tiling_overlays.values_mut() {
-            overlay.set_config(config);
+            overlay.set_appearance(appearance);
         }
         for overlay in self.float_overlays.values_mut() {
-            overlay.set_config(config);
+            overlay.set_appearance(appearance);
         }
         for overlay in self.tab_bars.values_mut() {
-            overlay.set_config(config);
+            overlay.set_appearance(appearance);
         }
     }
 
@@ -121,7 +121,7 @@ impl WindowThread {
                 } => {
                     if !self.float_overlays.contains_key(window_id) {
                         match self.overlay_factory.create_float_overlay(
-                            self.config.clone(),
+                            self.appearance.clone(),
                             *scale,
                             placement.visible_border_box,
                         ) {
@@ -182,7 +182,7 @@ impl WindowThread {
                     std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
                     std::collections::hash_map::Entry::Vacant(e) => {
                         match self.overlay_factory.create_tab_bar(
-                            self.config.clone(),
+                            self.appearance.clone(),
                             placement.id,
                             rect,
                             data.scale,
@@ -226,7 +226,7 @@ impl SceneSender for WindowThread {
         match msg {
             HubMessage::Scene(scene) => self.apply_scene(scene),
             HubMessage::MonitorsChanged(change) => self.apply_monitor_change(change),
-            HubMessage::ConfigChanged(config) => self.apply_config(&config),
+            HubMessage::AppearanceChanged(appearance) => self.apply_appearance(&appearance),
             HubMessage::Placements(placements) => self.apply_placements(&placements),
         }
     }

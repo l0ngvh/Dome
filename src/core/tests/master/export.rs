@@ -1,11 +1,12 @@
-use crate::config::{PaneConfig, Strategy, WindowMatcher};
 use crate::core::PaneDisplay;
 use crate::core::WindowRestrictions;
+use crate::core::layout::PaneConfig;
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, titled,
     titled_process,
 };
+use crate::core::{Strategy, WindowMatcher};
 
 #[test]
 fn export_master_empty_workspace() {

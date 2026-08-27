@@ -4,14 +4,14 @@ use super::{
     LayoutConfigBuilder, PixelRect, default_rect, setup, setup_with_layout, snapshot, titled,
     titled_matcher,
 };
-use crate::core::GlobalLayoutConfig;
+use crate::core::LayoutOptions;
 use crate::core::node::{
     Length, LimitObservation, LimitUpdate, MinimizedWindowEntry, MonitorId, WindowRestrictions,
 };
 use insta::assert_snapshot;
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
+fn layout_floating(titles: &[&str]) -> LayoutOptions {
     LayoutConfigBuilder::new()
         .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
         .build()

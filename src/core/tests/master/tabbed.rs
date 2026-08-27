@@ -1,6 +1,6 @@
-use crate::config::Strategy;
 use crate::core::ContainerId;
 use crate::core::PaneDisplay;
+use crate::core::Strategy;
 use crate::core::WindowRestrictions;
 use crate::core::allocator::NodeId;
 use crate::core::node::Pixels;

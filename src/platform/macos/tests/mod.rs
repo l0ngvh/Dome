@@ -15,6 +15,7 @@ use objc2_core_graphics::CGWindowID;
 use crate::action::Action;
 use crate::config::Config;
 use crate::core::{Dimension, Length, Logical, MonitorId, PixelRect, WindowId};
+use crate::keybinding::{KeymapPublisher, KeymapState, ModalKeymaps};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::dispatcher::DispatcherMarker;
@@ -22,6 +23,7 @@ use crate::platform::macos::dome::{
     BarGeometry, DebounceBurst, Dome, ExitNativeFullscreen, HubMessage, MacOSMetadata, NewWindow,
     PendingAdd, SceneSender, WindowMove,
 };
+use crate::scripting::LuaRuntime;
 
 const SCREEN_WIDTH: Length = Length::new(1920.0);
 const SCREEN_HEIGHT: Length = Length::new(1080.0);
@@ -468,11 +470,16 @@ impl MacOS {
         let sender = TestSender {
             scene_state: self.scene_state.clone(),
         };
+        let (keymap_tx, _keymap_rx) = std::sync::mpsc::channel();
+        let keymap = KeymapPublisher::new(KeymapState::new(ModalKeymaps::default()), keymap_tx);
+        let runtime = LuaRuntime::new(String::new()).expect("build test Lua VM");
         Dome::new(
             &[default_monitor()],
-            config.clone(),
+            config.layout.clone(),
             Vec::new(),
             Box::new(sender),
+            keymap,
+            runtime,
         )
     }
 
@@ -577,23 +584,8 @@ fn end_drag(
 
 fn send(dome: &mut Dome, s: &str) {
     let action: Action = s.parse().unwrap();
-    match &action {
-        Action::Focus { target: t } => {
-            dome.apply_focus(t);
-            dome.flush_layout();
-        }
-        Action::Move { target: t } => {
-            dome.apply_move(t);
-            dome.flush_layout();
-        }
-        Action::Toggle { target: t } => {
-            dome.apply_toggle(t);
-            dome.flush_layout();
-        }
-        Action::Master { target: t } => {
-            dome.apply_master(t);
-            dome.flush_layout();
-        }
-        _ => panic!("send() only handles tiling actions, got: {action}"),
-    }
+    let tiling = crate::platform::tiling_action(&action)
+        .unwrap_or_else(|| panic!("send() only handles tiling actions, got: {action}"));
+    dome.handle_tiling_action(tiling);
+    dome.flush_layout();
 }

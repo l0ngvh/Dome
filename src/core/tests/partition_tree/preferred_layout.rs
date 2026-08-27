@@ -1,12 +1,12 @@
 use insta::assert_snapshot;
 
-use crate::config::{SplitMode, TreeLayoutNode, WindowMatcher};
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect,
     setup_logger_with_level, snapshot, titled,
 };
 use crate::core::{PixelRect, WindowRestrictions};
+use crate::core::{SplitMode, TreeLayoutNode, WindowMatcher};
 
 #[test]
 fn insert_first_preferred_window_next_to_focused_window() {

@@ -2,9 +2,10 @@ use std::iter::Sum;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
 
-use crate::config::WindowMatcher;
+use serde::{Deserialize, Deserializer};
+
 use crate::core::allocator::{Node, NodeId};
-use crate::core::matcher::FloatFullscreenMatcherId;
+use crate::core::matcher::{FloatFullscreenMatcherId, WindowMatcher};
 
 pub use dome_ipc::WindowId;
 
@@ -527,6 +528,29 @@ impl<U> Pixels<U> {
 
     pub(crate) fn min(self, other: Self) -> Self {
         Self::new(self.v.min(other.v))
+    }
+}
+
+/// Takes `f64` so the whole-number check runs before any narrowing. Narrowing
+/// first would round `100000000.5` to a whole `1e8` and let it pass.
+pub(super) fn pixels_from_number<E: serde::de::Error>(v: f64) -> Result<Pixels<Logical>, E> {
+    if !v.is_finite() || v < 0.0 {
+        return Err(E::custom(
+            "pixel value must be a finite non-negative number",
+        ));
+    }
+    if v.fract() != 0.0 {
+        return Err(E::custom("pixel value must be a whole number"));
+    }
+    if v > i32::MAX as f64 {
+        return Err(E::custom("pixel value is out of range"));
+    }
+    Ok(Pixels::new(v as i32))
+}
+
+impl<'de> Deserialize<'de> for Pixels<Logical> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        pixels_from_number(f64::deserialize(d)?)
     }
 }
 

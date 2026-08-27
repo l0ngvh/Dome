@@ -1,4 +1,4 @@
-use crate::core::GlobalLayoutConfig;
+use crate::core::LayoutOptions;
 use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{
     LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
@@ -7,7 +7,7 @@ use insta::assert_snapshot;
 
 /// Float and fullscreen matchers by exact title, since this file also inserts
 /// tiling windows named `wN`. Two lists because one test needs both modes on one hub.
-fn layout_modes(floats: &[&str], fullscreens: &[&str]) -> GlobalLayoutConfig {
+fn layout_modes(floats: &[&str], fullscreens: &[&str]) -> LayoutOptions {
     LayoutConfigBuilder::new()
         .with_float(floats.iter().map(|t| titled_matcher(t)).collect())
         .with_fullscreen(fullscreens.iter().map(|t| titled_matcher(t)).collect())

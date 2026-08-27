@@ -3,6 +3,7 @@ mod export;
 mod float;
 mod fullscreen;
 mod hub;
+mod layout;
 mod master;
 mod matcher;
 mod minimize;
@@ -18,9 +19,14 @@ pub(crate) use hub::Hub;
 #[cfg(target_os = "macos")]
 pub(crate) use hub::MonitorPlacements;
 pub(crate) use hub::{
-    ContainerPlacement, FloatWindowPlacement, GlobalLayoutConfig, MonitorLayout, SpawnIndicator,
-    TilingWindowPlacement,
+    ContainerPlacement, FloatWindowPlacement, MonitorLayout, SpawnIndicator, TilingWindowPlacement,
 };
+pub(crate) use layout::{
+    LayoutOptions, MasterConfig, PartitionTreeConfig, PreferredWorkspace, SizeConstraint,
+    SizeConstraints, SplitMode, Strategy, TreeLayoutNode,
+};
+pub(crate) use matcher::{WindowMatcher, pattern_matches};
+pub(crate) use monitor::MonitorSelector;
 pub(crate) use monitor::ReportedMonitor;
 pub(crate) use node::Direction;
 #[cfg(target_os = "windows")]
@@ -31,7 +37,7 @@ pub(crate) use node::{
     ContainerId, Dimension, Length, LimitObservation, LimitUpdate, Logical, MonitorId, Unit,
     WindowId, WindowMetadata, WindowRestrictions,
 };
-pub(crate) use strategy::TilingAction;
+pub(crate) use strategy::{StrategyAction, TilingAction};
 
 pub(crate) use master::PaneDisplay;
 

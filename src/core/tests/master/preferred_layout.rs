@@ -1,11 +1,11 @@
 use insta::assert_snapshot;
 
-use crate::config::{Strategy, WindowMatcher};
 use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, process_meta,
     snapshot, titled, titled_process,
 };
-use crate::core::{Direction, PaneDisplay, TilingAction, WindowRestrictions};
+use crate::core::{Direction, PaneDisplay, StrategyAction, WindowRestrictions};
+use crate::core::{Strategy, WindowMatcher};
 
 #[test]
 fn secondary_matched_goes_to_stack() {
@@ -784,7 +784,7 @@ fn decrease_master_count_drop_matched_master() {
             WindowRestrictions::None,
         )
         .unwrap();
-    hub.handle_tiling_action(TilingAction::FewerMaster);
+    hub.handle_tiling_action(StrategyAction::FewerMaster);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -971,7 +971,7 @@ fn reordering_matched_windows_doesnt_guarrantee_next_match() {
             WindowRestrictions::None,
         )
         .unwrap();
-    hub.handle_tiling_action(TilingAction::MoveDirection {
+    hub.handle_tiling_action(StrategyAction::MoveDirection {
         direction: Direction::Vertical,
         forward: false,
     });
@@ -1057,7 +1057,7 @@ fn swapping_secondary_window_doesnt_guarrantee_next_match() {
             WindowRestrictions::None,
         )
         .unwrap();
-    hub.handle_tiling_action(TilingAction::MoveDirection {
+    hub.handle_tiling_action(StrategyAction::MoveDirection {
         direction: Direction::Horizontal,
         forward: true,
     });

@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::Pixels;
+use crate::core::{LayoutOptions, Pixels};
 
 #[test]
 fn single_window_placed_in_view() {
@@ -20,7 +20,10 @@ fn a_fractional_work_area_keeps_the_window_inside_it() {
     // Zero border so the sole tile fills the work area exactly, leaving no inset to
     // absorb a sub-point rounding error.
     let mut dome = macos.setup_dome_with_config(Config {
-        border_size: Pixels::ZERO,
+        layout: LayoutOptions {
+            border_size: Pixels::ZERO,
+            ..Config::default().layout
+        },
         ..Config::default()
     });
 
@@ -40,7 +43,10 @@ fn degenerate_content_box_parks_window() {
     let mut macos = MacOS::new();
     // Each edge exceeds half of SCREEN_HEIGHT, so no content height remains.
     let mut dome = macos.setup_dome_with_config(Config {
-        border_size: Pixels::new(600),
+        layout: LayoutOptions {
+            border_size: Pixels::new(600),
+            ..Config::default().layout
+        },
         ..Config::default()
     });
 
@@ -167,7 +173,7 @@ fn float_window_moved_by_user() {
     // Float should stay at the user-chosen position, not be corrected
     assert_eq!(macos.window_frame(cg2), (200, 150, 600, 400));
 
-    let border = Length::from_pixels(Config::default().border_size).logical();
+    let border = Length::from_pixels(Config::default().layout.border_size).logical();
     let snap = macos
         .last_float_snapshot(cg2)
         .expect("float snapshot should be present for focused float");
@@ -225,7 +231,10 @@ fn float_window_reshaped_on_border_size_change() {
     // A border several points above the default, so the delta cannot be
     // mistaken for rounding noise.
     let new_config = Config {
-        border_size: Pixels::new(12),
+        layout: LayoutOptions {
+            border_size: Pixels::new(12),
+            ..Config::default().layout
+        },
         ..Default::default()
     };
     dome.config_changed(new_config);
@@ -362,7 +371,10 @@ fn a_fractional_reserved_bar_keeps_the_window_inside_the_reserved_area() {
     // Zero border so the sole tile fills the work area exactly, leaving no inset to
     // absorb a sub-point rounding error.
     let mut dome = macos.setup_dome_with_config(Config {
-        border_size: Pixels::ZERO,
+        layout: LayoutOptions {
+            border_size: Pixels::ZERO,
+            ..Config::default().layout
+        },
         ..Config::default()
     });
 

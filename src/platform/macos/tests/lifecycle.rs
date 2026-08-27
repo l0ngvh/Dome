@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::action::{Action, Actions};
+use crate::action::Actions;
 use crate::core::ReportedMonitor;
 use crate::platform::macos::dome::{ExtRefresh, MacOSMetadata, NewWindow, PendingAdd};
 
@@ -265,24 +265,9 @@ fn multi_action_sequence_applies_each_hub_action() {
         "focus workspace 0".parse().unwrap(),
     ]);
     for action in &actions {
-        match action {
-            Action::Focus { target: t } => {
-                dome.apply_focus(t);
-                dome.flush_layout();
-            }
-            Action::Move { target: t } => {
-                dome.apply_move(t);
-                dome.flush_layout();
-            }
-            Action::Toggle { target: t } => {
-                dome.apply_toggle(t);
-                dome.flush_layout();
-            }
-            Action::Master { target: t } => {
-                dome.apply_master(t);
-                dome.flush_layout();
-            }
-            _ => {}
+        if let Some(tiling) = crate::platform::tiling_action(action) {
+            dome.handle_tiling_action(tiling);
+            dome.flush_layout();
         }
     }
 

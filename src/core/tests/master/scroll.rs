@@ -1,8 +1,8 @@
-use crate::config::{MasterConfig, Strategy};
 use crate::core::WindowRestrictions;
 use crate::core::node::{Length, LimitObservation, LimitUpdate};
-use crate::core::strategy::TilingAction;
+use crate::core::strategy::StrategyAction;
 use crate::core::tests::{LayoutConfigBuilder, TestHubBuilder, default_rect, snapshot, titled};
+use crate::core::{MasterConfig, Strategy};
 use insta::assert_snapshot;
 
 #[test]
@@ -645,7 +645,7 @@ fn master_count_increment_clamps_stack_scroll() {
             ..Default::default()
         },
     );
-    hub.handle_tiling_action(TilingAction::MoreMaster);
+    hub.handle_tiling_action(StrategyAction::MoreMaster);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -747,7 +747,7 @@ fn master_count_decrement_clamps_master_scroll() {
     // focus_left lands on w3, the last-inserted master window, scrolling master to the bottom
     // so the offset is out of range once master shrinks.
     hub.focus_left();
-    hub.handle_tiling_action(TilingAction::FewerMaster);
+    hub.handle_tiling_action(StrategyAction::FewerMaster);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

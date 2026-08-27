@@ -1,4 +1,4 @@
-use crate::config::SplitMode;
+use crate::core::SplitMode;
 use crate::core::hub::HubAccess;
 use crate::core::node::{ContainerId, Dimension, WindowId, WorkspaceId};
 use crate::core::partition_tree::{Child, Container, Parent, SpawnMode, TilingContainerData};

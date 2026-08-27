@@ -2,20 +2,20 @@ use rustc_hash::FxHashMap;
 #[cfg(test)]
 use rustc_hash::FxHashSet;
 
-use crate::config::{
-    LayoutWorkspaceConfig, PaneConfig, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
-};
-use crate::core::GlobalLayoutConfig;
+use crate::core::LayoutOptions;
+use crate::core::MonitorSelector;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
+use crate::core::layout::PaneConfig;
 use crate::core::master::MasterStrategy;
 use crate::core::node::{
     Child, Constraints, ContainerId, Dimension, Direction, Length, PixelRect, Pixels, Unit,
     WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
+use crate::core::{PreferredWorkspace, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher};
 
 #[derive(Debug)]
-pub(crate) enum TilingAction {
+pub(crate) enum StrategyAction {
     FocusDirection {
         direction: Direction,
         forward: bool,
@@ -41,6 +41,35 @@ pub(crate) enum TilingAction {
     FewerMaster,
 }
 
+/// Core's own vocabulary for a tiling op, separate from the wire `Action` so
+/// the two evolve independently.
+#[derive(Debug)]
+pub(crate) enum TilingAction {
+    Strategy(StrategyAction),
+    FocusWorkspace {
+        name: String,
+        monitor: Option<String>,
+    },
+    MoveToWorkspace {
+        name: String,
+        monitor: Option<String>,
+    },
+    FocusMonitor {
+        selector: MonitorSelector,
+    },
+    MoveToMonitor {
+        selector: MonitorSelector,
+    },
+    ToggleFloat,
+    ToggleFullscreen,
+}
+
+impl From<StrategyAction> for TilingAction {
+    fn from(action: StrategyAction) -> Self {
+        Self::Strategy(action)
+    }
+}
+
 /// Tiling window and container placements collected by the strategy for a
 /// single workspace.
 pub(crate) struct TilingPlacements {
@@ -48,7 +77,6 @@ pub(crate) struct TilingPlacements {
     pub(crate) containers: Vec<ContainerPlacement>,
 }
 
-/// Per-strategy export payload for serialization to layout.toml.
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct WorkspaceExport {
     pub(crate) strategy: String,
@@ -62,15 +90,15 @@ pub(crate) struct WorkspaceExport {
 }
 
 impl WorkspaceExport {
-    pub(crate) fn to_layout_workspace_config(&self, name: &str) -> LayoutWorkspaceConfig {
+    pub(crate) fn to_layout_workspace_config(&self, name: &str) -> PreferredWorkspace {
         match self.strategy.as_str() {
-            "partition_tree" => LayoutWorkspaceConfig::PartitionTree {
+            "partition_tree" => PreferredWorkspace::PartitionTree {
                 name: name.to_owned(),
                 tree: self.tree.clone(),
                 float: self.float.clone(),
                 fullscreen: self.fullscreen.clone(),
             },
-            "master" => LayoutWorkspaceConfig::Master {
+            "master" => PreferredWorkspace::Master {
                 name: name.to_owned(),
                 master_ratio: self.master_ratio,
                 master_count: self.master_count,
@@ -93,7 +121,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        preferred_layout: Option<&LayoutWorkspaceConfig>,
+        preferred_layout: Option<&PreferredWorkspace>,
     );
 
     /// Insert a window into the tiling tree for the given workspace. Does not
@@ -108,7 +136,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Dispatch a tiling-specific action. Reads the current workspace from
     /// `hub.focused_monitor` internally. Both mutates state and triggers
     /// layout as needed.
-    fn handle_action(&mut self, hub: &mut HubAccess, action: TilingAction);
+    fn handle_action(&mut self, hub: &mut HubAccess, action: StrategyAction);
 
     /// Compute layout for all tiling windows in the workspace.
     fn compute_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId);
@@ -163,11 +191,11 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        incoming: Option<&LayoutWorkspaceConfig>,
+        incoming: Option<&PreferredWorkspace>,
     );
 
     /// Refresh config-derived internal state and relayout the given workspace.
-    fn apply_config(&mut self, hub: &mut HubAccess, layout: GlobalLayoutConfig);
+    fn apply_config(&mut self, hub: &mut HubAccess, layout: LayoutOptions);
 
     /// Export the current layout for a workspace, updating the strategy's
     /// internal preferred-layout representation to match the live tree.
@@ -403,7 +431,7 @@ pub(super) struct StrategySet {
 }
 
 impl StrategySet {
-    pub(super) fn new(layout: &GlobalLayoutConfig) -> Self {
+    pub(super) fn new(layout: &LayoutOptions) -> Self {
         let partition_tree = PartitionTreeStrategy::new(
             layout.partition_tree.tab_bar_height,
             layout.partition_tree.automatic_tiling,
@@ -433,8 +461,8 @@ impl StrategySet {
         let preferred_strategy = preferred
             .as_ref()
             .map(|w| match w {
-                LayoutWorkspaceConfig::PartitionTree { .. } => Strategy::PartitionTree,
-                LayoutWorkspaceConfig::Master { .. } => Strategy::Master,
+                PreferredWorkspace::PartitionTree { .. } => Strategy::PartitionTree,
+                PreferredWorkspace::Master { .. } => Strategy::Master,
             })
             .unwrap_or(hub.layout.strategy);
 
@@ -479,7 +507,7 @@ impl StrategySet {
     pub(super) fn resync(
         &mut self,
         hub: &mut HubAccess,
-        preferred_layouts: &[LayoutWorkspaceConfig],
+        preferred_layouts: &[PreferredWorkspace],
         default_strategy: Strategy,
     ) {
         for ws_id in hub.workspaces.sorted_ids() {
@@ -492,8 +520,8 @@ impl StrategySet {
                 .iter()
                 .find(|w| w.name() == ws_name)
                 .map(|w| match w {
-                    LayoutWorkspaceConfig::PartitionTree { .. } => Strategy::PartitionTree,
-                    LayoutWorkspaceConfig::Master { .. } => Strategy::Master,
+                    PreferredWorkspace::PartitionTree { .. } => Strategy::PartitionTree,
+                    PreferredWorkspace::Master { .. } => Strategy::Master,
                 })
                 .unwrap_or(default_strategy);
             self.kinds.insert(ws_id, new);

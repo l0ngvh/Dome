@@ -8,15 +8,16 @@ use super::{
     reported_monitor, setup_logger_with_level, titled, titled_matcher, validate_hub,
 };
 use crate::action::MonitorTarget;
-use crate::config::{
-    LayoutWorkspaceConfig, SizeConstraint, SplitMode, Strategy, TreeLayoutNode, WindowMatcher,
-};
-use crate::core::hub::{GlobalLayoutConfig, Hub};
+use crate::core::hub::Hub;
+use crate::core::layout::LayoutOptions;
 use crate::core::node::{
     Length, LimitObservation, LimitUpdate, MonitorId, PixelRect, Pixels, WindowId,
     WindowRestrictions,
 };
-use crate::core::strategy::TilingAction;
+use crate::core::strategy::StrategyAction;
+use crate::core::{
+    PreferredWorkspace, SizeConstraint, SplitMode, Strategy, TreeLayoutNode, WindowMatcher,
+};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
@@ -79,7 +80,7 @@ fn pref_title_pool() -> Vec<String> {
     (0..PREF_TITLE_POOL_SIZE).map(pref_title).collect()
 }
 
-fn initial_layout(strategy: SmokeStrategy) -> GlobalLayoutConfig {
+fn initial_layout(strategy: SmokeStrategy) -> LayoutOptions {
     match strategy {
         SmokeStrategy::PartitionTree => LayoutConfigBuilder::new().build(),
         SmokeStrategy::Master => LayoutConfigBuilder::new()
@@ -346,7 +347,7 @@ enum RecordedOp {
     DecrementMasterCount,
     QueryWorkspaces,
     ConfigReload {
-        layout: GlobalLayoutConfig,
+        layout: LayoutOptions,
     },
     SyncPreferredLayout {
         workspace_name: String,
@@ -412,7 +413,7 @@ fn run_iteration<F>(
     mut observer: F,
     rng: &mut ChaCha8Rng,
     ops_per_run: usize,
-    current_layout: &mut GlobalLayoutConfig,
+    current_layout: &mut LayoutOptions,
 ) where
     F: FnMut(&RecordedOp),
 {
@@ -496,7 +497,7 @@ fn build_op(
     monitors: &[MonitorId],
     monitor_origin: &[usize],
     next_op_index: usize,
-    current_layout: &mut GlobalLayoutConfig,
+    current_layout: &mut LayoutOptions,
     workspace_names: &[String],
 ) -> Option<RecordedOp> {
     match kind {
@@ -917,10 +918,10 @@ fn apply_op(
             hub.focus_workspace(name, None);
         }
         RecordedOp::FocusMonitor { target } => {
-            hub.focus_monitor(target);
+            hub.focus_monitor(&target.into());
         }
         RecordedOp::MoveToMonitor { target } => {
-            hub.move_focused_to_monitor(target);
+            hub.move_focused_to_monitor(&target.into());
         }
         RecordedOp::FocusLeft => hub.focus_left(),
         RecordedOp::FocusRight => hub.focus_right(),
@@ -939,16 +940,16 @@ fn apply_op(
         RecordedOp::ToggleFloat => hub.toggle_float(),
         RecordedOp::ToggleFullscreen => hub.toggle_fullscreen(),
         RecordedOp::IncreaseMasterRatio => {
-            hub.handle_tiling_action(TilingAction::GrowMaster);
+            hub.handle_tiling_action(StrategyAction::GrowMaster);
         }
         RecordedOp::DecreaseMasterRatio => {
-            hub.handle_tiling_action(TilingAction::ShrinkMaster);
+            hub.handle_tiling_action(StrategyAction::ShrinkMaster);
         }
         RecordedOp::IncrementMasterCount => {
-            hub.handle_tiling_action(TilingAction::MoreMaster);
+            hub.handle_tiling_action(StrategyAction::MoreMaster);
         }
         RecordedOp::DecrementMasterCount => {
-            hub.handle_tiling_action(TilingAction::FewerMaster);
+            hub.handle_tiling_action(StrategyAction::FewerMaster);
         }
         RecordedOp::QueryWorkspaces => {
             hub.query_workspaces();
@@ -1264,10 +1265,10 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 hub.focus_workspace(name, None);
             }
             RecordedOp::FocusMonitor { target } => {
-                hub.focus_monitor(target);
+                hub.focus_monitor(&target.into());
             }
             RecordedOp::MoveToMonitor { target } => {
-                hub.move_focused_to_monitor(target);
+                hub.move_focused_to_monitor(&target.into());
             }
             RecordedOp::FocusLeft => hub.focus_left(),
             RecordedOp::FocusRight => hub.focus_right(),
@@ -1286,16 +1287,16 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
             RecordedOp::ToggleFloat => hub.toggle_float(),
             RecordedOp::ToggleFullscreen => hub.toggle_fullscreen(),
             RecordedOp::IncreaseMasterRatio => {
-                hub.handle_tiling_action(TilingAction::GrowMaster);
+                hub.handle_tiling_action(StrategyAction::GrowMaster);
             }
             RecordedOp::DecreaseMasterRatio => {
-                hub.handle_tiling_action(TilingAction::ShrinkMaster);
+                hub.handle_tiling_action(StrategyAction::ShrinkMaster);
             }
             RecordedOp::IncrementMasterCount => {
-                hub.handle_tiling_action(TilingAction::MoreMaster);
+                hub.handle_tiling_action(StrategyAction::MoreMaster);
             }
             RecordedOp::DecrementMasterCount => {
-                hub.handle_tiling_action(TilingAction::FewerMaster);
+                hub.handle_tiling_action(StrategyAction::FewerMaster);
             }
             RecordedOp::QueryWorkspaces => {
                 hub.query_workspaces();
@@ -1547,7 +1548,7 @@ fn preferred_workspace_config(
     secondary: &[String],
     float: &[String],
     fullscreen: &[String],
-) -> LayoutWorkspaceConfig {
+) -> PreferredWorkspace {
     let mut builder = LayoutWorkspaceConfigBuilder::new(workspace_name)
         .with_strategy(strategy)
         .with_float(float.iter().map(|t| titled_matcher(t)).collect())

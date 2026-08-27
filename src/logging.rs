@@ -4,10 +4,11 @@ use tracing_subscriber::reload::{self, Handle};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 
-use crate::config::{Config, LogLevel};
+use crate::config::{LogLevel, paths};
 
 type FilterHandle = Handle<EnvFilter, Registry>;
 
+#[derive(Clone)]
 pub(crate) struct Logger {
     handle: Option<FilterHandle>,
 }
@@ -25,7 +26,7 @@ impl Logger {
                 (layer, Some(h))
             }
         };
-        let log_dir = Config::log_dir();
+        let log_dir = paths::log_dir();
         let file_layer = std::fs::create_dir_all(&log_dir)
             .and_then(|_| std::fs::File::create(format!("{log_dir}/dome.log")))
             .ok()

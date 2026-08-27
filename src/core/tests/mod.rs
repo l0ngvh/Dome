@@ -16,18 +16,19 @@ mod strategy_switch;
 
 use std::collections::HashSet;
 
-use crate::config::{
-    LayoutWorkspaceConfig, MasterConfig, PaneConfig, PartitionTreeConfig, SizeConstraint,
-    SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
-};
-use crate::core::GlobalLayoutConfig;
+use crate::core::LayoutOptions;
 use crate::core::PaneDisplay;
 use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
+use crate::core::layout::PaneConfig;
 use crate::core::node::{Direction, Logical, Pixels, WindowId};
-use crate::core::strategy::TilingAction;
+use crate::core::strategy::StrategyAction;
 use crate::core::{
     ContainerPlacement, FloatWindowPlacement, PixelRect, ReportedMonitor, TilingWindowPlacement,
     WindowMetadata,
+};
+use crate::core::{
+    MasterConfig, PartitionTreeConfig, PreferredWorkspace, SizeConstraint, SizeConstraints,
+    Strategy, TreeLayoutNode, WindowMatcher,
 };
 
 const ASCII_WIDTH: usize = 150;
@@ -564,83 +565,83 @@ fn validate_minimized(hub: &Hub) {
 
 impl Hub {
     pub(crate) fn focus_left(&mut self) {
-        self.handle_tiling_action(TilingAction::FocusDirection {
+        self.handle_tiling_action(StrategyAction::FocusDirection {
             direction: Direction::Horizontal,
             forward: false,
         });
     }
 
     pub(crate) fn focus_right(&mut self) {
-        self.handle_tiling_action(TilingAction::FocusDirection {
+        self.handle_tiling_action(StrategyAction::FocusDirection {
             direction: Direction::Horizontal,
             forward: true,
         });
     }
 
     pub(crate) fn focus_up(&mut self) {
-        self.handle_tiling_action(TilingAction::FocusDirection {
+        self.handle_tiling_action(StrategyAction::FocusDirection {
             direction: Direction::Vertical,
             forward: false,
         });
     }
 
     pub(crate) fn focus_down(&mut self) {
-        self.handle_tiling_action(TilingAction::FocusDirection {
+        self.handle_tiling_action(StrategyAction::FocusDirection {
             direction: Direction::Vertical,
             forward: true,
         });
     }
 
     pub(crate) fn focus_parent(&mut self) {
-        self.handle_tiling_action(TilingAction::FocusParent);
+        self.handle_tiling_action(StrategyAction::FocusParent);
     }
 
     pub(crate) fn focus_next_tab(&mut self) {
-        self.handle_tiling_action(TilingAction::FocusTab { forward: true });
+        self.handle_tiling_action(StrategyAction::FocusTab { forward: true });
     }
 
     pub(crate) fn focus_prev_tab(&mut self) {
-        self.handle_tiling_action(TilingAction::FocusTab { forward: false });
+        self.handle_tiling_action(StrategyAction::FocusTab { forward: false });
     }
 
     pub(crate) fn move_left(&mut self) {
-        self.handle_tiling_action(TilingAction::MoveDirection {
+        self.handle_tiling_action(StrategyAction::MoveDirection {
             direction: Direction::Horizontal,
             forward: false,
         });
     }
 
     pub(crate) fn move_right(&mut self) {
-        self.handle_tiling_action(TilingAction::MoveDirection {
+        self.handle_tiling_action(StrategyAction::MoveDirection {
             direction: Direction::Horizontal,
             forward: true,
         });
     }
 
     pub(crate) fn move_up(&mut self) {
-        self.handle_tiling_action(TilingAction::MoveDirection {
+        self.handle_tiling_action(StrategyAction::MoveDirection {
             direction: Direction::Vertical,
             forward: false,
         });
     }
 
     pub(crate) fn move_down(&mut self) {
-        self.handle_tiling_action(TilingAction::MoveDirection {
+        self.handle_tiling_action(StrategyAction::MoveDirection {
             direction: Direction::Vertical,
             forward: true,
         });
     }
 
     pub(crate) fn toggle_spawn_mode(&mut self) {
-        self.handle_tiling_action(TilingAction::ToggleSpawnMode);
+        self.handle_tiling_action(StrategyAction::ToggleSpawnMode);
     }
 
     pub(crate) fn toggle_direction(&mut self) {
-        self.handle_tiling_action(TilingAction::ToggleDirection);
+        self.handle_tiling_action(StrategyAction::ToggleDirection);
     }
 
     pub(crate) fn toggle_container_layout(&mut self) {
-        self.handle_tiling_action(TilingAction::ToggleContainerLayout);
+        self.handle_tiling_action(StrategyAction::ToggleContainerLayout);
     }
 }
 
@@ -652,8 +653,8 @@ pub(super) fn setup_logger_with_level(level: &str) {
 
 #[derive(Clone)]
 struct TestHubBuilder {
-    layout: GlobalLayoutConfig,
-    preferred_layout: Vec<LayoutWorkspaceConfig>,
+    layout: LayoutOptions,
+    preferred_layout: Vec<PreferredWorkspace>,
     scale: f32,
 }
 
@@ -666,11 +667,11 @@ impl TestHubBuilder {
         }
     }
 
-    fn with_layout(self, layout: GlobalLayoutConfig) -> Self {
+    fn with_layout(self, layout: LayoutOptions) -> Self {
         Self { layout, ..self }
     }
 
-    fn with_preferred_layout(self, preferred_layout: Vec<LayoutWorkspaceConfig>) -> Self {
+    fn with_preferred_layout(self, preferred_layout: Vec<PreferredWorkspace>) -> Self {
         Self {
             preferred_layout,
             ..self
@@ -806,8 +807,8 @@ impl LayoutConfigBuilder {
         Self { fullscreen, ..self }
     }
 
-    fn build(self) -> GlobalLayoutConfig {
-        GlobalLayoutConfig {
+    fn build(self) -> LayoutOptions {
+        LayoutOptions {
             strategy: self.strategy,
             border_size: self.border_size,
             partition_tree: self.partition_tree,
@@ -941,9 +942,9 @@ impl LayoutWorkspaceConfigBuilder {
         }
     }
 
-    fn build(self) -> LayoutWorkspaceConfig {
+    fn build(self) -> PreferredWorkspace {
         match self.strategy {
-            Strategy::Master => LayoutWorkspaceConfig::Master {
+            Strategy::Master => PreferredWorkspace::Master {
                 name: self.name,
                 master_count: self.master_count,
                 master_ratio: self.master_ratio,
@@ -958,7 +959,7 @@ impl LayoutWorkspaceConfigBuilder {
                 float: self.float,
                 fullscreen: self.fullscreen,
             },
-            Strategy::PartitionTree => LayoutWorkspaceConfig::PartitionTree {
+            Strategy::PartitionTree => PreferredWorkspace::PartitionTree {
                 name: self.name,
                 tree: self.tree,
                 float: self.float,
@@ -979,7 +980,7 @@ pub(super) fn setup() -> Hub {
 
 /// `setup()` with a caller-supplied layout config. An open-coded
 /// `TestHubBuilder` chain would lose the logger initialisation.
-pub(super) fn setup_with_layout(layout: GlobalLayoutConfig) -> Hub {
+pub(super) fn setup_with_layout(layout: LayoutOptions) -> Hub {
     setup_logger_with_level("warn");
     TestHubBuilder::new().with_layout(layout).build()
 }
@@ -1017,7 +1018,7 @@ impl WindowMetadata for TestMetadata {
         Box::new(self.clone())
     }
 
-    fn matches_window_matcher(&self, matcher: &crate::config::WindowMatcher) -> bool {
+    fn matches_window_matcher(&self, matcher: &WindowMatcher) -> bool {
         let title = self.title.as_deref();
         let process = self.process.as_deref();
 
@@ -1034,25 +1035,49 @@ impl WindowMetadata for TestMetadata {
             return false;
         }
         if let Some(p) = matcher.process.as_deref()
-            && !process.is_some_and(|s| crate::config::pattern_matches(p, s))
+            && !process.is_some_and(|s| crate::core::pattern_matches(p, s))
         {
             return false;
         }
         if let Some(p) = matcher.title.as_deref()
-            && !title.is_some_and(|t| crate::config::pattern_matches(p, t))
+            && !title.is_some_and(|t| crate::core::pattern_matches(p, t))
         {
             return false;
         }
         matcher.process.is_some() || matcher.title.is_some()
     }
 
-    fn to_window_matcher(&self) -> crate::config::WindowMatcher {
-        crate::config::WindowMatcher {
+    fn to_window_matcher(&self) -> WindowMatcher {
+        WindowMatcher {
             title: self.title.clone(),
             process: self.process.clone(),
             ..Default::default()
         }
     }
+}
+
+/// Evaluates an exported `layout.lua` back into the layout vocabulary. Core
+/// cannot call the config loader, so an export round-trip parses the file here.
+pub(crate) fn parse_exported_layout(path: &str) -> Vec<PreferredWorkspace> {
+    use mlua::LuaSerdeExt;
+
+    #[derive(serde::Deserialize)]
+    struct Exported {
+        #[serde(default)]
+        workspace: Vec<PreferredWorkspace>,
+    }
+
+    let src = std::fs::read_to_string(path).expect("exported layout.lua is readable");
+    let lua = mlua::Lua::new();
+    let value: mlua::Value = lua
+        .load(&src)
+        .set_name(path)
+        .eval()
+        .expect("exported layout.lua evaluates as Lua");
+    let exported: Exported = lua
+        .from_value(value)
+        .expect("exported layout.lua deserializes to the layout vocabulary");
+    exported.workspace
 }
 
 /// Rect for test inserts where geometry is not under assertion. Tiling ignores it.

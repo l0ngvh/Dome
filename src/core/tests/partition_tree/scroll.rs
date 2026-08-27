@@ -1,11 +1,8 @@
 use insta::assert_snapshot;
 
-use crate::{
-    config::SizeConstraint,
-    core::{
-        Length, LimitObservation, LimitUpdate, Pixels, WindowRestrictions,
-        tests::{LayoutConfigBuilder, default_rect, setup, snapshot, titled},
-    },
+use crate::core::{
+    Length, LimitObservation, LimitUpdate, Pixels, SizeConstraint, WindowRestrictions,
+    tests::{LayoutConfigBuilder, default_rect, setup, snapshot, titled},
 };
 
 #[test]

@@ -4,11 +4,11 @@ use std::time::Instant;
 use super::Dome;
 use super::display_from_process;
 use super::events::{FloatOverlayAction, PendingPlacement, PlacementAction};
-use crate::config::{WindowMatcher, pattern_matches};
 use crate::core::{
     FloatWindowPlacement, LimitObservation, MonitorId, Physical, PixelRect, Pixels,
     TilingWindowPlacement, WindowId, WindowRestrictions,
 };
+use crate::core::{WindowMatcher, pattern_matches};
 use crate::platform::windows::external::{ManageExternalWindow, ShowCmd, ZOrder};
 use crate::platform::windows::handle::OFFSCREEN_POS;
 

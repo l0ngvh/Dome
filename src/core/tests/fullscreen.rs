@@ -1,5 +1,5 @@
-use crate::action::MonitorTarget;
-use crate::core::GlobalLayoutConfig;
+use crate::core::LayoutOptions;
+use crate::core::MonitorSelector;
 use crate::core::node::PixelRect;
 use crate::core::node::WindowRestrictions;
 use crate::core::tests::{
@@ -9,7 +9,7 @@ use crate::core::tests::{
 use insta::assert_snapshot;
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
+fn layout_floating(titles: &[&str]) -> LayoutOptions {
     LayoutConfigBuilder::new()
         .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
         .build()
@@ -640,10 +640,10 @@ fn block_all_blocks_user_commands() {
     hub.move_focused_to_workspace("1", None);
     assert_eq!(snapshot(&hub), before);
 
-    hub.move_focused_to_monitor(&MonitorTarget::Right);
+    hub.move_focused_to_monitor(&MonitorSelector::Right);
     assert_eq!(snapshot(&hub), before);
 
-    hub.focus_monitor(&MonitorTarget::Right);
+    hub.focus_monitor(&MonitorSelector::Right);
     assert_eq!(snapshot(&hub), before);
 
     hub.focus_next_tab();
@@ -977,12 +977,12 @@ fn block_all_on_unfocused_window_does_not_block() {
         1.0,
     ));
     // Put a tiling window on the second monitor's workspace.
-    hub.focus_monitor(&MonitorTarget::Right);
+    hub.focus_monitor(&MonitorSelector::Right);
     let w0 = hub
         .insert_window(titled("w30"), default_rect(), WindowRestrictions::None)
         .unwrap();
     // Switch back and insert the BlockAll fullscreen on workspace 0.
-    hub.focus_monitor(&MonitorTarget::Left);
+    hub.focus_monitor(&MonitorSelector::Left);
     hub.insert_window(titled("w31"), default_rect(), WindowRestrictions::BlockAll)
         .unwrap();
     // set_focus is a lifecycle op not guarded by restrictions, so it can
@@ -1134,7 +1134,7 @@ fn protect_fullscreen_blocks_display_mode_and_monitor_move() {
     hub.toggle_float();
     assert_eq!(snapshot(&hub), before);
 
-    hub.move_focused_to_monitor(&MonitorTarget::Right);
+    hub.move_focused_to_monitor(&MonitorSelector::Right);
     assert_eq!(snapshot(&hub), before);
 }
 

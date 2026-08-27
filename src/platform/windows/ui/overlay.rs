@@ -5,7 +5,7 @@ use dome_auxiliary_window::{
     Point, Size, WindowAttributes, WindowLevel,
 };
 
-use crate::config::Config;
+use crate::config::Appearance;
 use crate::platform::render::{Compositor, Renderer, WgpuContext};
 use crate::platform::tab_bar::{TabBarMessage, TabBarWidget};
 use crate::platform::windows::{HubEvent, HubSender};
@@ -102,7 +102,7 @@ impl TilingOverlay {
     pub(in crate::platform::windows) fn new(
         gpu: &WgpuContext,
         dcomp_device: &IDCompositionDevice,
-        config: Config,
+        appearance: Appearance,
         monitor: PixelRect,
         scale: f32,
         hub_sender: HubSender,
@@ -126,8 +126,8 @@ impl TilingOverlay {
             Box::new(compositor),
             init_w,
             init_h,
-            config.theme,
-            &config.font,
+            appearance.theme,
+            &appearance.font,
             Box::new(crate::platform::windows::font::resolve_system_font),
         )?;
         aux.set_content_visual(dcomp_device, &dcomp_visual)?;
@@ -238,9 +238,9 @@ impl TilingOverlayApi for TilingOverlay {
         self.rerender();
     }
 
-    fn set_config(&mut self, config: &Config) {
+    fn set_appearance(&mut self, appearance: &Appearance) {
         // Borders only, no text, so the font is not applied.
-        self.renderer.set_theme(config.theme);
+        self.renderer.set_theme(appearance.theme);
     }
 
     fn focus(&self) {
@@ -261,7 +261,7 @@ pub(in crate::platform::windows) trait FloatOverlayApi {
         border_thickness: Pixels<Physical>,
     );
     fn hide(&mut self);
-    fn set_config(&mut self, config: &Config);
+    fn set_appearance(&mut self, appearance: &Appearance);
 }
 
 pub(in crate::platform::windows) trait TilingOverlayApi {
@@ -274,7 +274,7 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
         border_thickness: Pixels<Physical>,
     );
     fn clear(&mut self);
-    fn set_config(&mut self, config: &Config);
+    fn set_appearance(&mut self, appearance: &Appearance);
     /// The Win32 close-time focus walk lands here when the user closes a
     /// managed window with no obvious successor on the same monitor, replacing
     /// the process-wide focus-sink window the platform shell used to keep below
@@ -300,7 +300,7 @@ impl FloatOverlay {
     fn new(
         gpu: &WgpuContext,
         dcomp_device: &IDCompositionDevice,
-        config: Config,
+        appearance: Appearance,
         x: i32,
         y: i32,
         width_phys: u32,
@@ -321,8 +321,8 @@ impl FloatOverlay {
             Box::new(compositor),
             width_phys,
             height_phys,
-            config.theme,
-            &config.font,
+            appearance.theme,
+            &appearance.font,
             Box::new(crate::platform::windows::font::resolve_system_font),
         )?;
         aux.set_content_visual(dcomp_device, &dcomp_visual)?;
@@ -399,9 +399,9 @@ impl FloatOverlayApi for FloatOverlay {
         unsafe { ShowWindow(self.aux.hwnd(), SW_HIDE).ok().ok() };
     }
 
-    fn set_config(&mut self, config: &Config) {
+    fn set_appearance(&mut self, appearance: &Appearance) {
         // Borders only, no text, so the font is not applied.
-        self.renderer.set_theme(config.theme);
+        self.renderer.set_theme(appearance.theme);
     }
 }
 
@@ -431,14 +431,14 @@ impl WgpuOverlayFactory {
 impl CreateOverlay for WgpuOverlayFactory {
     fn create_tiling_overlay(
         &self,
-        config: Config,
+        appearance: Appearance,
         monitor: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
         Ok(TilingOverlay::new(
             &self.gpu,
             &self.dcomp_device,
-            config,
+            appearance,
             monitor,
             scale,
             self.hub_sender.clone(),
@@ -446,7 +446,7 @@ impl CreateOverlay for WgpuOverlayFactory {
     }
     fn create_float_overlay(
         &self,
-        config: Config,
+        appearance: Appearance,
         _scale: f32,
         visible_border_box: PixelRect,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
@@ -454,7 +454,7 @@ impl CreateOverlay for WgpuOverlayFactory {
         Ok(FloatOverlay::new(
             &self.gpu,
             &self.dcomp_device,
-            config,
+            appearance,
             x_phys,
             y_phys,
             w_phys,
@@ -463,7 +463,7 @@ impl CreateOverlay for WgpuOverlayFactory {
     }
     fn create_tab_bar(
         &self,
-        config: Config,
+        appearance: Appearance,
         container_id: ContainerId,
         rect: PixelRect,
         scale: f32,
@@ -471,7 +471,7 @@ impl CreateOverlay for WgpuOverlayFactory {
         Ok(TabBarOverlay::new(
             &self.gpu,
             &self.dcomp_device,
-            config,
+            appearance,
             container_id,
             rect,
             scale,
@@ -542,7 +542,7 @@ pub(in crate::platform::windows) trait TabBarOverlayApi {
         reason = "hide() is invoked when a tabbed container's active window minimizes. Wired up in the follow-up minimize/restore pass."
     )]
     fn hide(&mut self);
-    fn set_config(&mut self, config: &Config);
+    fn set_appearance(&mut self, appearance: &Appearance);
 }
 
 /// The bar must not raise itself on click. The crate declines click-activation for every
@@ -615,7 +615,7 @@ impl TabBarOverlay {
     pub(in crate::platform::windows) fn new(
         gpu: &WgpuContext,
         dcomp_device: &IDCompositionDevice,
-        config: Config,
+        appearance: Appearance,
         container_id: ContainerId,
         rect: PixelRect,
         scale: f32,
@@ -636,8 +636,8 @@ impl TabBarOverlay {
             Box::new(compositor),
             w_phys,
             h_phys,
-            config.theme,
-            &config.font,
+            appearance.theme,
+            &appearance.font,
             Box::new(crate::platform::windows::font::resolve_system_font),
         )?;
         let widget = TabBarWidget::new(renderer, container_id, scale, (w_phys, h_phys));
@@ -684,10 +684,10 @@ impl TabBarOverlayApi for TabBarOverlay {
         unsafe { ShowWindow(self.aux.hwnd(), SW_HIDE).ok().ok() };
     }
 
-    fn set_config(&mut self, config: &Config) {
+    fn set_appearance(&mut self, appearance: &Appearance) {
         self.aux.deliver(Box::new(TabBarMessage::Style {
-            theme: config.theme,
-            font: config.font.clone(),
+            theme: appearance.theme,
+            font: appearance.font.clone(),
         }));
     }
 }

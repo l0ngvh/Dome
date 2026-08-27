@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, ensure};
 
@@ -10,15 +10,15 @@ const STYLES_CSS: &str = include_str!("../../resources/integrations/zebar/worksp
 /// state, so no dome need be running. It bakes dome's own path into the widget,
 /// so the pack calls the binary that generated it, and overwrites its own three
 /// files so a re-run refreshes that path. Other files in the pack stay.
-pub(crate) fn generate(out: Option<&str>) -> anyhow::Result<()> {
+pub(crate) fn generate() -> anyhow::Result<()> {
+    generate_into(&default_pack_dir()?)
+}
+
+fn generate_into(root: &Path) -> anyhow::Result<()> {
     let dome = std::env::current_exe().context("resolve dome's own path")?;
     let dome = dome.to_string_lossy().into_owned();
     let (zpack, index) = bake(ZPACK_JSON, INDEX_HTML, &dome)?;
 
-    let root = match out {
-        Some(p) => PathBuf::from(p),
-        None => default_pack_dir()?,
-    };
     let workspaces = root.join("workspaces");
     std::fs::create_dir_all(&workspaces)
         .with_context(|| format!("create {}", workspaces.display()))?;
@@ -74,7 +74,9 @@ fn js_string(value: &str) -> String {
 fn default_pack_dir() -> anyhow::Result<PathBuf> {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
-        .context("USERPROFILE is not set. Pass --out with the Zebar pack directory.")?;
+        .context(
+            "neither USERPROFILE nor HOME is set, so the Zebar pack location cannot be resolved",
+        )?;
     Ok(PathBuf::from(home).join(".glzr").join("zebar").join("dome"))
 }
 
@@ -115,7 +117,7 @@ mod tests {
         std::fs::write(root.join("keep.txt"), "mine").unwrap();
         std::fs::write(root.join("zpack.json"), "stale").unwrap();
 
-        generate(Some(root.to_str().unwrap())).unwrap();
+        generate_into(&root).unwrap();
 
         assert_eq!(
             std::fs::read_to_string(root.join("keep.txt")).unwrap(),

@@ -1,9 +1,9 @@
-use crate::config::{SplitMode, TreeLayoutNode, WindowMatcher};
 use crate::core::node::WindowRestrictions;
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, titled,
 };
+use crate::core::{SplitMode, TreeLayoutNode, WindowMatcher};
 
 #[test]
 fn export_empty_workspace_returns_empty_export() {

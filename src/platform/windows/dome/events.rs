@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::action::WorkspaceInfo;
-use crate::config::Config;
+use crate::config::Appearance;
 use crate::core::{
     ContainerPlacement, FloatWindowPlacement, MonitorId, Physical, PixelRect, Pixels,
     TilingWindowPlacement, WindowId,
@@ -11,7 +11,7 @@ use crate::platform::windows::external::{ManageExternalWindow, ShowCmd, ZOrder};
 pub(in crate::platform::windows) enum HubMessage {
     Scene(RenderScene),
     MonitorsChanged(MonitorSetChange),
-    ConfigChanged(Box<Config>),
+    AppearanceChanged(Appearance),
     Placements(Vec<PendingPlacement>),
 }
 

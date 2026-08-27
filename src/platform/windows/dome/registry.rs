@@ -15,7 +15,7 @@ pub(super) struct ManagedWindow {
     pub(super) monitor: isize,
 }
 
-pub(super) struct WindowRegistry {
+pub(in crate::platform::windows) struct WindowRegistry {
     by_hwnd: HashMap<HwndId, WindowId>,
     by_id: HashMap<WindowId, ManagedWindow>,
 }
@@ -41,6 +41,13 @@ impl WindowRegistry {
 
     pub(super) fn get(&self, id: WindowId) -> Option<&ManagedWindow> {
         self.by_id.get(&id)
+    }
+
+    pub(in crate::platform::windows) fn close_window(&self, window_id: WindowId) {
+        let Some(entry) = self.get(window_id) else {
+            return;
+        };
+        entry.ext.close();
     }
 
     pub(super) fn get_mut(&mut self, id: WindowId) -> Option<&mut ManagedWindow> {

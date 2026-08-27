@@ -4,11 +4,12 @@ mod core;
 mod font;
 mod integrations;
 mod ipc;
-mod keymap;
+mod keybinding;
 mod log_dedup;
 mod logging;
 mod overlay;
 mod platform;
+mod scripting;
 mod theme;
 
 #[expect(

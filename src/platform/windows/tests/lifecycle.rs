@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::config::{Config, LayoutConfig, PartitionTreeConfig, WindowMatcher};
-use crate::core::GlobalLayoutConfig;
+use crate::config::{Config, PreferredLayouts};
+use crate::core::{LayoutOptions, PartitionTreeConfig, WindowMatcher};
 
 /// Count minimized windows tracked by the daemon by parsing the same JSON
 /// blob external launchers consume via `Query::MinimizedWindows`.
@@ -25,7 +25,7 @@ fn window_destroyed_fills_screen() {
     assert_h_tiled(
         &[env.dim(w2)],
         default_monitor().work_area,
-        env.config.border_size,
+        env.config.layout.border_size,
     );
 }
 
@@ -40,7 +40,7 @@ fn window_minimized_removes_from_tiling() {
     assert_h_tiled(
         &[env.dim(w1)],
         default_monitor().work_area,
-        env.config.border_size,
+        env.config.layout.border_size,
     );
     // w2 stays tracked as a minimized window (not deleted), reachable
     // via the external launcher query surface.
@@ -61,7 +61,7 @@ fn user_minimize_then_restore() {
     assert_h_tiled(
         &[env.dim(w1), env.dim(w2)],
         default_monitor().work_area,
-        env.config.border_size,
+        env.config.layout.border_size,
     );
 }
 
@@ -192,7 +192,7 @@ fn unmanageable_window_is_ignored() {
 #[test]
 fn ignored_window_rule_prevents_insertion() {
     let mut config = Config::default();
-    config.ignore.push(WindowMatcher {
+    config.layout.ignore.push(WindowMatcher {
         process: Some("bloat.exe".to_string()),
         ..Default::default()
     });
@@ -206,7 +206,7 @@ fn ignored_window_rule_prevents_insertion() {
 #[test]
 fn ignored_window_rule_by_class_prevents_insertion() {
     let mut config = Config::default();
-    config.ignore.push(WindowMatcher {
+    config.layout.ignore.push(WindowMatcher {
         class: Some("Shell_TrayWnd".to_string()),
         ..Default::default()
     });
@@ -241,7 +241,7 @@ fn title_changed_manages_unknown_window() {
     assert_h_tiled(
         &[env.dim(w1)],
         default_monitor().work_area,
-        env.config.border_size,
+        env.config.layout.border_size,
     );
 }
 
@@ -257,7 +257,7 @@ fn delete_currently_displayed_window() {
     assert_h_tiled(
         &[env.dim(w2)],
         default_monitor().work_area,
-        env.config.border_size,
+        env.config.layout.border_size,
     );
 
     // Second apply_layout proves displayed state was cleaned up
@@ -317,12 +317,12 @@ fn focus_parent_focuses_overlay() {
 fn focus_child_after_parent_does_not_focus_overlay() {
     let mut env = TestEnv::new_with_layout_settings(
         Config::default(),
-        GlobalLayoutConfig {
+        LayoutOptions {
             partition_tree: PartitionTreeConfig {
                 automatic_tiling: false,
                 tab_bar_height: Pixels::new(24),
             },
-            ..GlobalLayoutConfig::default()
+            ..LayoutOptions::default()
         },
         Vec::new(),
     );
@@ -362,24 +362,9 @@ fn multi_action_sequence_applies_each_hub_action() {
         "focus workspace 0".parse().unwrap(),
     ]);
     for action in &actions {
-        match action {
-            Action::Focus { target: t } => {
-                env.dome.apply_focus(t);
-                env.dome.apply_layout();
-            }
-            Action::Move { target: t } => {
-                env.dome.apply_move(t);
-                env.dome.apply_layout();
-            }
-            Action::Toggle { target: t } => {
-                env.dome.apply_toggle(t);
-                env.dome.apply_layout();
-            }
-            Action::Master { target: t } => {
-                env.dome.apply_master(t);
-                env.dome.apply_layout();
-            }
-            _ => {}
+        if let Some(tiling) = crate::platform::tiling_action(action) {
+            env.dome.handle_tiling_action(tiling);
+            env.dome.apply_layout();
         }
     }
 
@@ -478,7 +463,7 @@ fn dpi_change_then_apply_layout_places_at_new_scale() {
 
     let after = env.dim(w);
     // Frames are physical pixels: a DPI change scales the border but not the work area.
-    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
+    let border = Length::from_pixels(env.config.layout.border_size).to_unit(1.0);
     let expected_x = before.x * 1.5;
     let expected_y = before.y * 1.5;
     let expected_w = before.width - border;
@@ -496,7 +481,7 @@ fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
     second.scale = 1.0;
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
-        LayoutConfig::default(),
+        PreferredLayouts::default(),
         vec![default_monitor(), second],
     );
 
@@ -521,7 +506,7 @@ fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
 
     // Frames are physical pixels: a DPI change scales the border but not the work area.
     let after_b = env.dim(w_b);
-    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
+    let border = Length::from_pixels(env.config.layout.border_size).to_unit(1.0);
     let expected_x = before_b.x + border;
     let expected_y = before_b.y + border;
     let expected_w = before_b.width - border * 2.0;
