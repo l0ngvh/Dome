@@ -191,7 +191,6 @@ impl MasterStrategy {
             return Some(sid);
         }
 
-        // No slot matched.
         if Self::pane_len(hub, master) < effective_count {
             Self::push_to_pane(hub, master, window_id);
         } else {

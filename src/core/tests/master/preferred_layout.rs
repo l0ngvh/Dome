@@ -1641,7 +1641,7 @@ fn both_panes_tabbed() {
     hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
-    // Master holds W0 and W1, secondary holds W2 and W3. Both panes tabbed.
+    // Master holds W0 and W1, secondary holds W2 and W3.
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

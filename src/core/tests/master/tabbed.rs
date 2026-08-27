@@ -12,8 +12,8 @@ use insta::assert_snapshot;
 
 #[test]
 fn tabbed_pane_keeps_min_height_when_tab_bar_exceeds_screen() {
-    // A tab bar taller than the screen leaves zero content height. Each window must
-    // still keep its min height, so snapshot's validate pass sees no zero-height window.
+    // snapshot() runs validate_hub, which asserts each window keeps its min height.
+    // That invariant, not the rendered text, is what this test guards.
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()

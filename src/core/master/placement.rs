@@ -242,8 +242,8 @@ impl MasterStrategy {
         let band = self.tab_bar_length(scale);
         let content_h = (screen_height - band).max(Length::ZERO);
         // Every tab shares the content box, so all windows get a dimension even
-        // though only the active one renders. Each honors its own min height, so a
-        // tab bar taller than the screen cannot collapse a window to zero height.
+        // though only the active one renders. The content box has zero height when
+        // the tab bar is taller than the screen, so each window keeps its min height.
         for &wid in ids {
             let c = window_constraints(hub, &self.size_constraints, wid);
             let adjusted_w = c.min_width.max(pane_width);

@@ -25,7 +25,7 @@ use crate::core::strategy::{
 /// XMonad-style tiling: a master area on the left and a stack on the right.
 /// Each pane scrolls vertically and independently when per-window min heights push the
 /// pane's total content past the screen height. Horizontal scroll does not exist in master,
-/// so per-window min width is not honored: the split follows master_ratio and each pane
+/// so per-window min width is not honored. The split follows master_ratio and each pane
 /// fills its share.
 #[derive(Debug)]
 pub(crate) struct MasterStrategy {
