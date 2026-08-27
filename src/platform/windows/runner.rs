@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -30,7 +29,6 @@ pub(super) struct Runner {
     timers: TimerRegistry,
     main_thread_id: u32,
     keymap_state: Arc<RwLock<KeymapState>>,
-    constraint_read_monitor: HashMap<HwndId, isize>,
 }
 
 impl Runner {
@@ -49,7 +47,6 @@ impl Runner {
             timers,
             main_thread_id,
             keymap_state,
-            constraint_read_monitor: HashMap::new(),
         }
     }
 
@@ -276,7 +273,6 @@ impl Runner {
                     runner.dome.capture_bar(ext.id(), monitor, rect);
                 }
                 CreatedWindow::Manageable(new, rect, monitor) => {
-                    runner.constraint_read_monitor.insert(new.ext.id(), monitor);
                     runner.dome.add_window(new, rect, monitor);
                 }
                 CreatedWindow::Skip => {}
@@ -299,20 +295,14 @@ impl Runner {
                 let Some((rect, monitor)) = observation else {
                     return;
                 };
-                runner
+                if runner
                     .dome
-                    .handle_window_moved(hwnd_id, rect, monitor, observed_at);
-                runner.refresh_constraints_if_monitor_changed(hwnd_id, monitor);
+                    .handle_window_moved(hwnd_id, rect, monitor, observed_at)
+                {
+                    runner.dispatch_constraint_read(hwnd_id);
+                }
             },
         );
-    }
-
-    // Constraints from WM_GETMINMAXINFO answer in the anchor monitor's units,
-    // so a move onto another monitor invalidates the stored read until redone.
-    fn refresh_constraints_if_monitor_changed(&mut self, hwnd_id: HwndId, monitor: isize) {
-        if self.constraint_read_monitor.insert(hwnd_id, monitor) != Some(monitor) {
-            self.dispatch_constraint_read(hwnd_id);
-        }
     }
 
     pub(super) fn handle_display_change(&mut self) {
@@ -332,10 +322,11 @@ impl Runner {
     }
 
     pub(super) fn handle_dpi_change(&mut self, handle: isize, dpi: u32) {
-        self.dome.monitor_dpi_changed(handle, dpi);
-        // apply_layout is idempotent: runs even when monitor_dpi_changed
-        // early-returns on same-scale, because stored targets are physical
-        // and Hub state is unchanged so positions match.
+        for hwnd_id in self.dome.monitor_dpi_changed(handle, dpi) {
+            self.dispatch_constraint_read(hwnd_id);
+        }
+        // apply_layout runs even on an unchanged scale (empty result): Hub state
+        // is unchanged and stored targets are physical, so positions match.
         self.dome.apply_layout();
     }
 

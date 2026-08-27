@@ -10,6 +10,9 @@ pub(super) struct ManagedWindow {
     pub(super) ext: Arc<dyn ManageExternalWindow>,
     pub(super) state: WindowState,
     pub(super) is_minimized: bool,
+    /// Monitor the window last settled on. A move to a different one triggers a
+    /// size-constraint re-read, because WM_GETMINMAXINFO answers in its units.
+    pub(super) monitor: isize,
 }
 
 pub(super) struct WindowRegistry {

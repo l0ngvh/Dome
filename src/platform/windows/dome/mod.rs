@@ -388,6 +388,7 @@ impl Dome {
                 ext,
                 state,
                 is_minimized: false,
+                monitor,
             },
         );
         self.pending_created.push(id);
@@ -824,18 +825,26 @@ impl Dome {
         self.tab_bars.retain(|id, _| active.contains(id));
     }
 
+    /// Returns `true` when the window settled on a different monitor than
+    /// before, the signal to re-read its size constraints.
     pub(super) fn handle_window_moved(
         &mut self,
         id_key: HwndId,
         new_placement: PixelRect<Physical>,
         monitor_handle: isize,
         observed_at: Instant,
-    ) {
+    ) -> bool {
         let Some(id) = self.registry.get_id(id_key) else {
-            return;
+            return false;
         };
+        let monitor_changed = self.registry.get_mut(id).is_some_and(|entry| {
+            let changed = entry.monitor != monitor_handle;
+            entry.monitor = monitor_handle;
+            changed
+        });
         self.window_moved(id, new_placement, monitor_handle, observed_at);
         self.apply_layout();
+        monitor_changed
     }
 
     pub(super) fn update_titles(&mut self, titles: Vec<(HwndId, Option<String>)>) {
@@ -937,15 +946,22 @@ impl Dome {
         }
     }
 
-    /// Updates the DPI scale for a monitor identified by its Win32 HMONITOR handle.
-    /// Called from the dome-thread message loop when WM_APP_DPI_CHANGE arrives.
-    ///
-    /// Early-returns silently when the computed scale equals the stored value.
-    /// This absorbs duplicate posts from multiple Dome-owned wnd-procs on the
-    /// same monitor (all four HWNDs default to the primary monitor, so a
-    /// primary-monitor DPI change posts WM_APP_DPI_CHANGE four times).
-    pub(super) fn monitor_dpi_changed(&mut self, handle: isize, dpi: u32) {
-        self.monitors.apply_dpi_change(handle, dpi, &mut self.hub);
+    /// Applies the DPI scale change for the monitor with this HMONITOR handle
+    /// and returns the windows on it whose size constraints need re-reading,
+    /// since WM_GETMINMAXINFO normalizes by monitor scale for legacy apps.
+    pub(super) fn monitor_dpi_changed(&mut self, handle: isize, dpi: u32) -> Vec<HwndId> {
+        if !self.monitors.apply_dpi_change(handle, dpi, &mut self.hub) {
+            return Vec::new();
+        }
+        self.registry
+            .iter()
+            .filter(|(_, id)| {
+                self.registry.get(*id).is_some_and(|e| {
+                    e.monitor == handle && !matches!(e.state, WindowState::ExclusiveFullscreen)
+                })
+            })
+            .map(|(hwnd_id, _)| hwnd_id)
+            .collect()
     }
 
     pub(super) fn retry_drifted_windows(&mut self) {

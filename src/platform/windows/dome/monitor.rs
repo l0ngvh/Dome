@@ -234,14 +234,15 @@ impl MonitorRegistry {
         MonitorChange { added, removed }
     }
 
-    pub(super) fn apply_dpi_change(&mut self, handle: isize, dpi: u32, hub: &mut Hub) {
+    /// Returns `true` when the scale changed and was applied.
+    pub(super) fn apply_dpi_change(&mut self, handle: isize, dpi: u32, hub: &mut Hub) -> bool {
         let Some(id) = self.id_for_handle(handle) else {
             tracing::warn!(handle, dpi, "DPI change for unknown monitor handle");
-            return;
+            return false;
         };
         let scale = dpi as f32 / BASE_DPI;
         if self.monitors.get(&id).is_some_and(|ms| ms.scale == scale) {
-            return;
+            return false;
         }
         let previous = self.monitors.get_mut(&id).map(|ms| {
             let prev = ms.scale;
@@ -251,6 +252,7 @@ impl MonitorRegistry {
         let dim = self.monitors[&id].work_area;
         hub.update_monitor(id, dim, scale);
         tracing::info!(%id, dpi, scale, ?previous, "Monitor scale updated via DPI change");
+        true
     }
 }
 

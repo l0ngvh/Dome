@@ -37,6 +37,27 @@ use crate::platform::windows::foreground::force_set_foreground;
 // Unlike macOS, we are allowed to move windows completely offscreen on Windows
 pub(crate) const OFFSCREEN_POS: Pixels = Pixels::new(-32000);
 
+const MSG_TIMEOUT_MS: u32 = 100;
+
+/// A buggy WndProc can return garbage from WM_GETTEXTLENGTH.
+const MAX_WINDOW_TITLE_U16: usize = 32 * 1024;
+
+const MAX_VERSION_INFO_BYTES: usize = 1 << 20;
+
+const MAX_FILE_DESCRIPTION_U16: usize = 1024;
+
+pub(crate) struct ExternalHwnd(HWND);
+
+unsafe impl Send for ExternalHwnd {}
+
+unsafe impl Sync for ExternalHwnd {}
+
+impl ExternalHwnd {
+    pub(crate) fn new(hwnd: HWND) -> Self {
+        Self(hwnd)
+    }
+}
+
 /// Because Dome is Per-Monitor v2 DPI-aware (see `resources/windows/dome.manifest`),
 /// GetWindowRect returns physical pixels regardless of the target HWND's own DPI
 /// awareness. Windows virtualizes the return based on the CALLER's awareness, not the
@@ -93,95 +114,6 @@ pub(crate) fn move_window_offscreen(hwnd: HWND) {
     }
 }
 
-/// Returns the invisible border widths (left, top, right, bottom) as raw i32 in physical pixels.
-/// Used internally by `set_position` for border compensation and by `get_size_constraints`
-/// for track-size adjustment.
-fn get_invisible_border(hwnd: HWND) -> (i32, i32, i32, i32) {
-    let mut window_rect = RECT::default();
-    let mut frame_rect = RECT::default();
-    unsafe {
-        if GetWindowRect(hwnd, &mut window_rect).is_err() {
-            return (0, 0, 0, 0);
-        }
-        if DwmGetWindowAttribute(
-            hwnd,
-            DWMWA_EXTENDED_FRAME_BOUNDS,
-            &mut frame_rect as *mut _ as *mut _,
-            std::mem::size_of::<RECT>() as u32,
-        )
-        .is_err()
-        {
-            return (0, 0, 0, 0);
-        }
-    }
-    (
-        frame_rect.left - window_rect.left,
-        frame_rect.top - window_rect.top,
-        window_rect.right - frame_rect.right,
-        window_rect.bottom - frame_rect.bottom,
-    )
-}
-
-const MSG_TIMEOUT_MS: u32 = 100;
-
-/// A buggy WndProc can return garbage from WM_GETTEXTLENGTH.
-const MAX_WINDOW_TITLE_U16: usize = 32 * 1024;
-
-const MAX_VERSION_INFO_BYTES: usize = 1 << 20;
-
-const MAX_FILE_DESCRIPTION_U16: usize = 1024;
-
-/// Scale from the units WM_GETMINMAXINFO answers in to Dome's physical pixels.
-// SAFETY: GetWindowDpiAwarenessContext and AreDpiAwarenessContextsEqual both
-// accept HWNDs from other processes.
-fn target_has_context(hwnd: HWND, ctx: DPI_AWARENESS_CONTEXT) -> bool {
-    let target = unsafe { GetWindowDpiAwarenessContext(hwnd) };
-    unsafe { AreDpiAwarenessContextsEqual(target, ctx) }.as_bool()
-}
-
-///
-/// MINMAXINFO fields are filled by the target HWND's wndproc under the
-/// awareness context the HWND was created with. A PMv2 target matches Dome's
-/// caller context and reports physical pixels already. System-aware targets
-/// report in system-DPI units, scaled via GetDpiForWindow. Unaware targets
-/// report in their virtualized space, scaled via the monitor they occupy.
-fn target_scale_to_physical(hwnd: HWND) -> f32 {
-    if target_has_context(hwnd, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) {
-        return 1.0;
-    }
-    if !target_has_context(hwnd, DPI_AWARENESS_CONTEXT_UNAWARE) {
-        let dpi = unsafe { GetDpiForWindow(hwnd) };
-        return if dpi == 0 {
-            // this means an invalid hwnd was passed in
-            1.0
-        } else {
-            dpi as f32 / 96.0
-        };
-    }
-    // An unaware wndproc fills MINMAXINFO in its virtualized space, which
-    // Windows re-materializes at the landing monitor's scale (the seam
-    // behavior placement_coords corrects). GetDpiForWindow reports a constant
-    // 96 there regardless of location, so scale by the monitor the window
-    // currently sits on.
-    let mut rect = RECT::default();
-    if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
-        return 1.0;
-    }
-    monitor_effective_dpi(&rect).map_or(1.0, |dpi| dpi as f32 / 96.0)
-}
-
-/// Converts one MINMAXINFO track size into core's limit vocabulary.
-/// Win32 reports a zero track size when the app set no limit on that axis. A positive
-/// track size that does not exceed the invisible frame has no content-box equivalent, so
-/// it is reported as no limit rather than as a zero-sized one.
-fn scaled_track_limit(track: i32, border: i32, scale: f32) -> LimitUpdate {
-    let track = (track as f32 * scale) as i32;
-    if track <= 0 || track <= border {
-        return LimitUpdate::Cleared;
-    }
-    LimitUpdate::Set(Length::new((track - border) as f32))
-}
-
 pub(crate) fn enum_windows<F>(mut callback: F) -> windows::core::Result<()>
 where
     F: FnMut(HWND),
@@ -197,59 +129,6 @@ where
             Some(enum_proc::<F>),
             LPARAM(&mut callback as *mut _ as isize),
         )
-    }
-}
-
-fn is_cloaked(hwnd: HWND) -> bool {
-    let mut cloaked = 0u32;
-    let result = unsafe {
-        DwmGetWindowAttribute(
-            hwnd,
-            DWMWA_CLOAKED,
-            std::ptr::from_mut(&mut cloaked).cast(),
-            std::mem::size_of::<u32>() as u32,
-        )
-    };
-    result.is_ok() && cloaked != 0
-}
-
-fn for_each_owned<F: FnMut(HWND)>(hwnd: HWND, callback: F) {
-    let thread_id = unsafe { GetWindowThreadProcessId(hwnd, None) };
-    if thread_id == 0 {
-        return;
-    }
-
-    unsafe extern "system" fn enum_proc<F: FnMut(HWND)>(child: HWND, lparam: LPARAM) -> BOOL {
-        let (owner, callback) = unsafe { &mut *(lparam.0 as *mut (HWND, F)) };
-        let root_owner = unsafe { GetAncestor(child, GA_ROOTOWNER) };
-        if root_owner == *owner && child != *owner {
-            callback(child);
-        }
-        BOOL(1)
-    }
-
-    let mut data = (hwnd, callback);
-    // BOOL is FALSE when the callback returns FALSE or no windows are found,
-    // neither of which is an error condition.
-    unsafe {
-        EnumThreadWindows(
-            thread_id,
-            Some(enum_proc::<F>),
-            LPARAM(&mut data as *mut _ as isize),
-        )
-        .ok()
-        .ok();
-    }
-}
-
-pub(crate) struct ExternalHwnd(HWND);
-
-unsafe impl Send for ExternalHwnd {}
-unsafe impl Sync for ExternalHwnd {}
-
-impl ExternalHwnd {
-    pub(crate) fn new(hwnd: HWND) -> Self {
-        Self(hwnd)
     }
 }
 
@@ -273,7 +152,6 @@ impl ManageExternalWindow for ExternalHwnd {
     /// Compensates for invisible borders (the gap between `GetWindowRect` and
     /// `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`) and moves any thread-owned
     /// child windows by the same delta.
-    ///
     fn set_position(&self, z: ZOrder, rect: PixelRect) {
         let hwnd = self.0;
         let old = get_pixel_rect(hwnd);
@@ -289,16 +167,18 @@ impl ManageExternalWindow for ExternalHwnd {
             flags |= SWP_NOZORDER;
         }
 
-        let ((x, y, cx, cy), _guard) = placement_coords(hwnd, x, y, cx, cy);
+        let ((x, y, cx, cy), restore_ctx) = enter_placement_context(hwnd, x, y, cx, cy);
         if let Err(e) = unsafe { SetWindowPos(hwnd, insert_after, x, y, cx, cy, flags) } {
             tracing::trace!(?hwnd, rect = ?(x, y, cx, cy), "SetWindowPos failed: {e}");
         }
-        // Restore Dome's PMv2 context before the child propagation below, whose
-        // GetWindowRect reads assume physical pixels.
-        drop(_guard);
+        if let Some(previous) = restore_ctx {
+            // Restore Dome's PMv2 context before the child propagation below,
+            // whose GetWindowRect reads assume physical pixels.
+            unsafe { SetThreadDpiAwarenessContext(previous) };
+        }
 
         // Propagate the position delta to owned child windows so they stay anchored
-        // relative to the parent. Short-circuits on windows with no owned children.
+        // relative to the parent.
         let dx = x - old.x().value();
         let dy = y - old.y().value();
         if dx != 0 || dy != 0 {
@@ -748,6 +628,127 @@ impl InspectExternalWindow for ExternalHwnd {
     }
 }
 
+/// Returns the invisible border widths (left, top, right, bottom) as raw i32 in physical pixels.
+/// Used internally by `set_position` for border compensation and by `get_size_constraints`
+/// for track-size adjustment.
+fn get_invisible_border(hwnd: HWND) -> (i32, i32, i32, i32) {
+    let mut window_rect = RECT::default();
+    let mut frame_rect = RECT::default();
+    unsafe {
+        if GetWindowRect(hwnd, &mut window_rect).is_err() {
+            return (0, 0, 0, 0);
+        }
+        if DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut frame_rect as *mut _ as *mut _,
+            std::mem::size_of::<RECT>() as u32,
+        )
+        .is_err()
+        {
+            return (0, 0, 0, 0);
+        }
+    }
+    (
+        frame_rect.left - window_rect.left,
+        frame_rect.top - window_rect.top,
+        window_rect.right - frame_rect.right,
+        window_rect.bottom - frame_rect.bottom,
+    )
+}
+
+// SAFETY: GetWindowDpiAwarenessContext and AreDpiAwarenessContextsEqual both
+// accept HWNDs from other processes.
+fn target_has_context(hwnd: HWND, ctx: DPI_AWARENESS_CONTEXT) -> bool {
+    let target = unsafe { GetWindowDpiAwarenessContext(hwnd) };
+    unsafe { AreDpiAwarenessContextsEqual(target, ctx) }.as_bool()
+}
+
+/// Scale from the units WM_GETMINMAXINFO answers in to Dome's physical pixels.
+///
+/// MINMAXINFO fields are filled by the target HWND's wndproc under the
+/// awareness context the HWND was created with. A PMv2 target matches Dome's
+/// caller context and reports physical pixels already. System-aware targets
+/// report in system-DPI units, scaled via GetDpiForWindow. Unaware targets
+/// report in their virtualized space, scaled via the monitor they occupy.
+fn target_scale_to_physical(hwnd: HWND) -> f32 {
+    if target_has_context(hwnd, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) {
+        return 1.0;
+    }
+    if !target_has_context(hwnd, DPI_AWARENESS_CONTEXT_UNAWARE) {
+        let dpi = unsafe { GetDpiForWindow(hwnd) };
+        return if dpi == 0 {
+            // this means an invalid hwnd was passed in
+            1.0
+        } else {
+            dpi as f32 / 96.0
+        };
+    }
+    // An unaware wndproc fills MINMAXINFO in its virtualized space, which
+    // Windows re-materializes at the landing monitor's scale. GetDpiForWindow
+    // reports a constant 96 there regardless of location, so scale by the
+    // monitor the window currently sits on.
+    let mut rect = RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
+        return 1.0;
+    }
+    monitor_effective_dpi(&rect).map_or(1.0, |dpi| dpi as f32 / 96.0)
+}
+
+/// Converts one MINMAXINFO track size into core's limit vocabulary.
+/// Win32 reports a zero track size when the app set no limit on that axis. A positive
+/// track size that does not exceed the invisible frame has no content-box equivalent, so
+/// it is reported as no limit rather than as a zero-sized one.
+fn scaled_track_limit(track: i32, border: i32, scale: f32) -> LimitUpdate {
+    let track = (track as f32 * scale) as i32;
+    if track <= 0 || track <= border {
+        return LimitUpdate::Cleared;
+    }
+    LimitUpdate::Set(Length::new((track - border) as f32))
+}
+
+fn is_cloaked(hwnd: HWND) -> bool {
+    let mut cloaked = 0u32;
+    let result = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAKED,
+            std::ptr::from_mut(&mut cloaked).cast(),
+            std::mem::size_of::<u32>() as u32,
+        )
+    };
+    result.is_ok() && cloaked != 0
+}
+
+fn for_each_owned<F: FnMut(HWND)>(hwnd: HWND, callback: F) {
+    let thread_id = unsafe { GetWindowThreadProcessId(hwnd, None) };
+    if thread_id == 0 {
+        return;
+    }
+
+    unsafe extern "system" fn enum_proc<F: FnMut(HWND)>(child: HWND, lparam: LPARAM) -> BOOL {
+        let (owner, callback) = unsafe { &mut *(lparam.0 as *mut (HWND, F)) };
+        let root_owner = unsafe { GetAncestor(child, GA_ROOTOWNER) };
+        if root_owner == *owner && child != *owner {
+            callback(child);
+        }
+        BOOL(1)
+    }
+
+    let mut data = (hwnd, callback);
+    // BOOL is FALSE when the callback returns FALSE or no windows are found,
+    // neither of which is an error condition.
+    unsafe {
+        EnumThreadWindows(
+            thread_id,
+            Some(enum_proc::<F>),
+            LPARAM(&mut data as *mut _ as isize),
+        )
+        .ok()
+        .ok();
+    }
+}
+
 /// Clamps `desc_len` so the returned slice cannot read past `buf`. `desc_len`
 /// from VerQueryValueW counts the trailing null u16, hence the `-1`.
 fn clamp_desc_len(desc_ptr: usize, buf_ptr: usize, buf_len: usize, desc_len: u32) -> usize {
@@ -762,41 +763,15 @@ fn clamp_desc_len(desc_ptr: usize, buf_ptr: usize, buf_len: usize, desc_len: u32
 /// Effective DPI of the nearest monitor to `rect`, or None when either query
 /// fails.
 fn monitor_effective_dpi(rect: &RECT) -> Option<u32> {
-    // SAFETY: rect outlives the call; MONITOR_DEFAULTTONEAREST always returns
-    // a monitor on a non-empty desktop.
     let hmonitor = unsafe { MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST) };
     if hmonitor.0.is_null() {
         return None;
     }
     let mut dpi = 0u32;
-    // SAFETY: out-params are plain u32s owned by this call.
     if unsafe { GetDpiForMonitor(hmonitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut dpi) }.is_err() {
         return None;
     }
     (dpi > 0).then_some(dpi)
-}
-
-struct ThreadDpiGuard {
-    previous: DPI_AWARENESS_CONTEXT,
-}
-
-impl ThreadDpiGuard {
-    fn enter(ctx: DPI_AWARENESS_CONTEXT) -> Option<Self> {
-        // SAFETY: swapping the calling thread's context is documented and
-        // reversible; null means the swap failed and no guard should exist.
-        let previous = unsafe { SetThreadDpiAwarenessContext(ctx) };
-        if previous.0.is_null() {
-            None
-        } else {
-            Some(Self { previous })
-        }
-    }
-}
-
-impl Drop for ThreadDpiGuard {
-    fn drop(&mut self) {
-        unsafe { SetThreadDpiAwarenessContext(self.previous) };
-    }
 }
 
 /// Scales a physical rect into logical units of a display at `dpi`, rounding
@@ -812,8 +787,11 @@ fn to_logical_rect(dpi: u32, x: i32, y: i32, cx: i32, cy: i32) -> (i32, i32, i32
     (left, top, right - left, bottom - top)
 }
 
-/// Returns the coordinates to hand SetWindowPos for this target plus a guard
-/// holding the thread in the target's awareness context across the call.
+/// Enters the target's own DPI awareness context for a placement and returns
+/// the coordinates to hand SetWindowPos plus the previous context the caller
+/// must restore once the call and any physical-pixel reads are done. Returns
+/// identity coordinates and no restore context for an aware target, or when
+/// the context swap fails.
 ///
 /// A DPI-unaware target receiving a cross-process SetWindowPos gets its rect
 /// translated per edge, each edge using the scale of the edge's own monitor,
@@ -823,18 +801,20 @@ fn to_logical_rect(dpi: u32, x: i32, y: i32, cx: i32, cy: i32) -> (i32, i32, i32
 /// 3204; a requested left edge 4px onto a 125% monitor from a 100% anchor
 /// pulls half a kilopixel sideways). Issuing pre-converted coordinates from
 /// inside the target's own context skips the translation entirely, so the
-/// guard is taken for every unaware target and the conversion is the only
+/// swap is taken for every unaware target and the conversion is the only
 /// scale-dependent part.
-fn placement_coords(
+fn enter_placement_context(
     hwnd: HWND,
     x: i32,
     y: i32,
     cx: i32,
     cy: i32,
-) -> ((i32, i32, i32, i32), Option<ThreadDpiGuard>) {
+) -> ((i32, i32, i32, i32), Option<DPI_AWARENESS_CONTEXT>) {
     if !target_has_context(hwnd, DPI_AWARENESS_CONTEXT_UNAWARE) {
         return ((x, y, cx, cy), None);
     }
+    // Resolve the landing monitor before the swap, so MonitorFromRect reads the
+    // rect in Dome's physical-pixel context.
     let rect = RECT {
         left: x,
         top: y,
@@ -845,12 +825,13 @@ fn placement_coords(
         Some(dpi) if dpi != 96 => to_logical_rect(dpi, x, y, cx, cy),
         _ => (x, y, cx, cy),
     };
-    match ThreadDpiGuard::enter(DPI_AWARENESS_CONTEXT_UNAWARE) {
-        Some(guard) => (coords, Some(guard)),
-        // Without the guard the OS translates the rect per edge and distorts
-        // it; identity coords are the best available fallback.
-        None => ((x, y, cx, cy), None),
+    let previous = unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE) };
+    if previous.0.is_null() {
+        // The swap failed, so the OS would translate the rect per edge; issue
+        // identity coords rather than the pre-converted ones.
+        return ((x, y, cx, cy), None);
     }
+    (coords, Some(previous))
 }
 
 #[cfg(test)]
