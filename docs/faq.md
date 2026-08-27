@@ -35,7 +35,7 @@ is out of range, or uses an unrecognized value, Dome defaults that single field
 and loads the rest of your config normally.
 
 If `dome.log` shows that Dome fell back to defaults entirely, you likely have a
-TOML syntax error (missing quotes, unmatched brackets).
+Lua syntax error (a missing quote or an unmatched bracket).
 
 ## A random window got focused when the focused window closed
 

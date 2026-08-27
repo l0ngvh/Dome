@@ -85,17 +85,17 @@ some popular status bars. See [Status bar integrations](docs/integration.md).
 
 ## Configuring Dome
 
-Dome is configured by editing two TOML files. The default locations are:
+Dome is configured by editing two files. The default locations are:
 
-- macOS: `~/.config/dome/config.toml` and `~/.config/dome/layout.toml` (or under `$XDG_CONFIG_HOME/dome/`).
-- Windows: `%APPDATA%\dome\config.toml` and `%APPDATA%\dome\layout.toml`.
+- macOS: `~/.config/dome/config.lua` and `~/.config/dome/layout.jsonc` (or under `$XDG_CONFIG_HOME/dome/`).
+- Windows: `%APPDATA%\dome\config.lua` and `%APPDATA%\dome\layout.jsonc`.
 
-`config.toml` covers general settings, keybindings, and window rules. `layout.toml` covers tiling strategy, window-size constraints, and per-strategy parameters. Changes take effect when you save.
+`config.lua` is a Luau script for settings, keybindings, window rules, and the tiling strategy. `layout.jsonc` is JSONC data for per-workspace preferred layout. Changes take effect when you save.
 
 ## Documentation
 
 - [Configuration](docs/configuration.md): config file reference, window rules, and keybindings
-- [Layout](docs/layout.md): layout strategy, window-size constraints, and per-strategy parameters
+- [Preferred layout](docs/preferred-layout.md): per-workspace window arrangement
 - [Commands](docs/commands.md): full command reference
 - [CLI](docs/cli.md): command-line interface usage
 - [FAQ](docs/faq.md): answers to common questions and gotchas

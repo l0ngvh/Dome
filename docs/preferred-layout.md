@@ -1,28 +1,39 @@
 # Preferred layout
 
-The preferred layout defines how windows are arranged on each workspace
-when they first appear. Once placed, you can still move and resize them
-with normal tiling actions.
+The preferred layout defines how windows are arranged on each workspace when they
+first appear. Once placed, you can still move and resize them with normal tiling
+actions.
 
 Dome reads the layout from:
-- macOS: `~/.config/dome/layout.toml` (or `$XDG_CONFIG_HOME/dome/layout.toml`).
-- Windows: `%APPDATA%\dome\layout.toml`.
+- macOS: `~/.config/dome/layout.jsonc` (or `$XDG_CONFIG_HOME/dome/layout.jsonc`).
+- Windows: `%APPDATA%\dome\layout.jsonc`.
 
-The file is hot reloaded on save. Currently, only moving windows within
-a workspace is supported during hot reload.
+The file is [JSONC](https://github.com/microsoft/node-jsonc-parser), JSON with
+comments and trailing commas. It is hot reloaded on save. Only moving windows
+within a workspace is supported during hot reload.
+
+`dome export` rewrites this file from the current window state (see
+[commands.md](commands.md)). It edits the file in place and keeps your comments,
+indentation, and trailing commas. A comment inside a workspace entry is lost when
+that entry changes.
 
 ## Defining a workspace
 
-Each `[[workspace]]` block defines the window layout for a workspace. It
-overrides the global defaults in `config.toml`, with any unset fields falling
-back to their global values.
+The file is one object with a `workspace` array. Each entry defines the window
+layout for one workspace. It overrides the global defaults in `config.lua`, and an
+unset field falls back to its global value.
 
-```toml
-[[workspace]]
-name = "3"
-strategy = "master"
-float = [{ process = "calc.exe" }]
-fullscreen = [{ process = "player.exe" }]
+```jsonc
+{
+  "workspace": [
+    {
+      "name": "3",
+      "strategy": "master",
+      "float": [{ "process": "calc.exe" }],
+      "fullscreen": [{ "process": "player.exe" }]
+    }
+  ]
+}
 ```
 
 | Field | Type | Description |
@@ -38,13 +49,13 @@ All window matcher arrays use the same per-platform fields as
 
 ## Master and secondary placement
 
-When `strategy = "master"`, you can pin specific windows to the master or
-secondary area. Windows are placed in the order they appear in each array.
-When no entry matches a window, it goes to the master stack if there is still
-room, and to the secondary stack otherwise.
+When `"strategy": "master"`, you can pin specific windows to the master or
+secondary area. Windows are placed in the order they appear in each array. When no
+entry matches a window, it goes to the master stack if there is still room, and to
+the secondary stack otherwise.
 
-You can also override the strategy defaults per workspace using
-`master_ratio` and `master_count`.
+You can also override the strategy defaults per workspace with `master_ratio` and
+`master_count`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -53,53 +64,66 @@ You can also override the strategy defaults per workspace using
 | `master` | array of matchers | Place matching windows in the master area. |
 | `secondary` | array of matchers | Place matching windows in the secondary area. |
 
-```toml
-[[workspace]]
-name = "code"
-strategy = "master"
-master_ratio = 0.65
-master = [{ process = "code.exe" }]
-secondary = [
-  { process = "terminal.exe", title = "build" },
-  { process = "terminal.exe", title = "test" },
-]
+```jsonc
+{
+  "workspace": [
+    {
+      "name": "code",
+      "strategy": "master",
+      "master_ratio": 0.65,
+      "master": [{ "process": "code.exe" }],
+      "secondary": [
+        { "process": "terminal.exe", "title": "build" },
+        { "process": "terminal.exe", "title": "test" }
+      ]
+    }
+  ]
+}
 ```
 
 ## Defining a tree layout
 
-When `strategy = "partition_tree"`, you can define a predictable window
-arrangement using a `tree` field.
+When `"strategy": "partition_tree"`, you can define a predictable window
+arrangement with a `tree` field.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `tree` | object or array | Preferred window arrangement. |
 
-```toml
-[[workspace]]
-name = "code"
-strategy = "partition_tree"
-tree = { split = "horizontal", children = [
-  { process = "editor.exe" },
-  { split = "vertical", children = [
-    { process = "terminal.exe" },
-    { process = "logs.exe" },
-  ]},
-  [
-    { process = "editor.exe" },
-    { process = "terminal.exe" },
-  ],
-]}
+```jsonc
+{
+  "workspace": [
+    {
+      "name": "code",
+      "strategy": "partition_tree",
+      "tree": {
+        "split": "horizontal",
+        "children": [
+          { "process": "editor.exe" },
+          {
+            "split": "vertical",
+            "children": [
+              { "process": "terminal.exe" },
+              { "process": "logs.exe" }
+            ]
+          },
+          [
+            { "process": "editor.exe" },
+            { "process": "terminal.exe" }
+          ]
+        ]
+      }
+    }
+  ]
+}
 ```
 
-Here, an array `[...]` groups children into a container with the split
-direction decided by Dome. To control the split direction yourself, use the `{
-split = "horizontal" | "vertical" | "tabbed", children = [...] }` syntax. Note
-that, when a parent and child share the same split direction, the child will be
-flipped.
+An array `[...]` groups children into a container with the split direction decided
+by Dome. To control the split direction yourself, use an object `{ "split":
+"horizontal" | "vertical" | "tabbed", "children": [...] }`. When a parent and child
+share the same split direction, the child is flipped.
 
-Containers with a single child are collapsed.
+A container with a single child is collapsed.
 
-The preferred tree is built incrementally as windows are inserted. This means
-no gaps on screen, but the tree does not match the preferred layout until all
-windows have been inserted.
-
+The preferred tree is built as windows are inserted. There are no gaps on screen,
+but the tree does not match the preferred layout until every window is inserted.

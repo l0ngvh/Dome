@@ -1,0 +1,35 @@
+{
+  // Dome rewrites this file on `dome export`. Comments and formatting survive,
+  // but a comment inside a workspace entry is lost when that entry changes.
+  "workspace": [
+    {
+      "name": "3",
+      "strategy": "master",
+      "master_ratio": 0.5,
+      "master_count": 3,
+      "float": [{ "process": "calculator.exe" }],
+      "fullscreen": [{ "process": "slides.exe" }]
+    },
+    {
+      "name": "code",
+      "strategy": "partition_tree",
+      "tree": {
+        "split": "horizontal",
+        "children": [
+          { "process": "editor.exe" },
+          {
+            "split": "vertical",
+            "children": [
+              { "process": "terminal.exe" },
+              { "process": "logs.exe" }
+            ]
+          },
+          [
+            { "process": "terminal.exe" },
+            { "process": "logs.exe" }
+          ]
+        ]
+      }
+    }
+  ]
+}
