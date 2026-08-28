@@ -82,14 +82,6 @@ pub(super) struct Monitor {
 }
 
 impl Monitor {
-    #[expect(
-        dead_code,
-        reason = "read by the monitor-name selector filter for --monitor targeting"
-    )]
-    pub(super) fn name(&self) -> &str {
-        &self.name
-    }
-
     pub(super) fn work_area(&self) -> PixelRect {
         self.work_area
     }

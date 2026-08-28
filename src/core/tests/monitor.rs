@@ -325,7 +325,6 @@ fn parked_workspace_is_not_reachable_by_name() {
     hub.insert_window(titled("b3"), default_rect(), WindowRestrictions::None);
     hub.remove_monitor(b);
 
-    // Focus back to primary, then resolve "1" by name.
     hub.focus_monitor(&MonitorTarget::Name("primary".to_string()));
     hub.focus_workspace("1", None);
 
@@ -1000,7 +999,6 @@ fn move_float_to_monitor() {
 
 #[test]
 fn monitor_noop_cases() {
-    // Single monitor: focus_monitor is no-op
     {
         let mut hub = setup();
         hub.insert_window(titled("w13"), default_rect(), WindowRestrictions::None);
@@ -1323,7 +1321,6 @@ fn move_focused_to_workspace_targets_named_monitor() {
 
     hub.move_focused_to_workspace("2", Some("external"));
 
-    // The window is now on external's "2", shown by focusing that workspace.
     hub.focus_workspace("2", Some("external"));
     assert_snapshot!(snapshot(&hub), @r#"
     Hub(focused=WindowId(0))

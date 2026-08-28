@@ -27,16 +27,16 @@ pub(super) struct Workspace {
     pub(super) name: String,
     pub(super) monitor: MonitorId,
     pub(super) attachment: Attachment,
-    /// When true, the focused window is float_windows.last().
-    /// Wouldn't have any effect when any fullscreen window is present, but for consistency would be
-    /// set to false in that case
+    /// When true, the focused window is `float_windows.last()`.
+    /// A present fullscreen window overrides this. The flag is set false in that
+    /// case for consistency.
     pub(super) is_float_focused: bool,
     /// Float ids in this workspace, ordered by z-index (last is topmost).
     /// Each id's screen-absolute rect lives on the window itself, in
     /// `DisplayMode::Float`. Focusing a float moves it to the end.
     pub(super) float_windows: Vec<WindowId>,
-    /// All fullscreen windows in this workspace, order by z-index with the last is the top most
-    /// window. Only the top most fullscreen window is displayed.
+    /// All fullscreen windows in this workspace, ordered by z-index. The last is
+    /// the topmost. Only the topmost fullscreen window is displayed.
     pub(super) fullscreen_windows: Vec<WindowId>,
     pub(super) float_matchers: Vec<FloatFullscreenMatcherId>,
     pub(super) fullscreen_matchers: Vec<FloatFullscreenMatcherId>,

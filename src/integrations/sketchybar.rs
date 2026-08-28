@@ -100,7 +100,7 @@ fn compose_dome_sh(
         );
     }
 
-    let setup = build_setup(monitors, dome_path, dome_sh_path);
+    let setup = build_setup(monitors);
     Ok(DOME_SH
         .replace("__DOME__", &sh_quote(dome_path))
         .replace("__PLUGIN__", &sh_quote(dome_sh_path))
@@ -128,18 +128,13 @@ fn connected_monitors(monitors: &[MonitorDetails]) -> Vec<(&str, String)> {
 }
 
 /// Build the item setup lines. Pure over the queried data, so the tests pin the
-/// emitted items without SketchyBar. Emits one `sketchybar` command per line.
-/// Styling values reference the plugin's color variables, so no color literal
-/// comes from here.
-fn build_setup(monitors: &[MonitorDetails], dome_path: &str, dome_sh_path: &str) -> String {
-    let dome = sh_quote(dome_path);
-    let plugin = sh_quote(dome_sh_path);
-
+/// emitted items without SketchyBar.
+fn build_setup(monitors: &[MonitorDetails]) -> String {
     let mut out = String::new();
     out.push_str("sketchybar --add event dome_update\n");
 
-    // The parked popup container. The tick creates its heading and entry rows as
-    // parked workspaces appear, so nothing per-origin is baked here.
+    // The tick fills the parked popup's heading and entry rows as parked
+    // workspaces appear, so nothing per-origin is baked here.
     out.push_str(
         "sketchybar --add item dome.parked left --set dome.parked drawing=off label=parked \
          click_script=\"sketchybar --set dome.parked popup.drawing=toggle\" \
@@ -152,36 +147,32 @@ fn build_setup(monitors: &[MonitorDetails], dome_path: &str, dome_sh_path: &str)
          padding_left=4 padding_right=4\n",
     );
 
-    // One cell per number on every monitor, keyed by the monitor's stable slug,
-    // so the number row keeps a fixed order. The cells reference WORKSPACE_STYLE,
-    // defined at the top of the plugin, so the tick styles the cells it adds the
-    // same way. The tick resolves display= live, so a monitor reorder needs no
+    // Bake the numbered cells so the row keeps a fixed order. The tick adds named
+    // cells lazily and resolves display= live, so a monitor reorder needs no
     // regenerate.
+    let numbers = WORKSPACES.join(" ");
     for (name, s) in connected_monitors(monitors) {
-        out.push_str(&format!("# dome: {name}\n"));
-        for ws_name in WORKSPACES {
-            let item = format!("dome.{s}.ws.{ws_name}");
-            // Triggering the event repaints the clicked workspace at once rather than
-            // leaving its old color until the next tick.
-            let click = format!(
-                "{dome} focus workspace {} --monitor {}; sketchybar --trigger dome_update",
-                sh_quote(ws_name),
-                sh_quote(name)
-            );
-            out.push_str(&format!(
-                "sketchybar --add item {item} left --set {item} drawing=off \
-                 script=\"{plugin}\" click_script=\"{click}\" $WORKSPACE_STYLE \
-                 --subscribe {item} mouse.entered mouse.exited\n"
-            ));
-        }
+        // The trailing event trigger repaints the clicked cell at once instead of
+        // waiting for the next tick.
+        out.push_str(&format!(
+            "# dome: {name}\n\
+             for n in {numbers}; do\n  \
+             item=\"dome.{s}.ws.$n\"\n  \
+             sketchybar --add item \"$item\" left --set \"$item\" drawing=off \
+             script=\"'$PLUGIN'\" \
+             click_script=\"'$DOME' focus workspace '$n' --monitor {name_q}; \
+             sketchybar --trigger dome_update\" $WORKSPACE_STYLE \
+             --subscribe \"$item\" mouse.entered mouse.exited\ndone\n",
+            name_q = sh_quote(name),
+        ));
     }
 
     // One driver polls dome and repaints every monitor's items each tick. It
     // draws nothing, so it needs no display.
-    out.push_str(&format!(
+    out.push_str(
         "sketchybar --add item dome.driver left --set dome.driver drawing=off update_freq=1 \
-         script=\"{plugin}\" --subscribe dome.driver dome_update\n"
-    ));
+         script=\"'$PLUGIN'\" --subscribe dome.driver dome_update\n",
+    );
 
     out
 }
@@ -196,8 +187,6 @@ fn install(dome_sh: &Path, rc: &Path, content: &str) -> anyhow::Result<()> {
     }
     std::fs::write(dome_sh, content).with_context(|| format!("write {}", dome_sh.display()))?;
 
-    // A missing sketchybarrc bootstraps to a new file with just the source line.
-    // There is no original to back up in that case.
     let existing = match std::fs::read_to_string(rc) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -209,7 +198,6 @@ fn install(dome_sh: &Path, rc: &Path, content: &str) -> anyhow::Result<()> {
             let mut bak = rc.as_os_str().to_owned();
             bak.push(".bak");
             let bak = PathBuf::from(bak);
-            // Back up once, so a re-run never overwrites the pristine original.
             if !bak.exists() {
                 std::fs::copy(rc, &bak).with_context(|| format!("back up {}", rc.display()))?;
             }
@@ -273,8 +261,7 @@ mod tests {
         // The plugin path is baked so the tick can set script= on a cell it adds.
         assert!(s.contains("PLUGIN='/opt/cfg/dome/dome.sh'"));
         assert!(s.contains("sketchybar --add event dome_update"));
-        // The cells and the driver run dome.sh with no argv.
-        assert!(s.contains("script=\"'/opt/cfg/dome/dome.sh'\""));
+        assert!(s.contains("script=\"'$PLUGIN'\""));
         assert!(s.contains("--add item dome.driver left"));
         assert!(s.contains("--subscribe dome.driver dome_update"));
     }
@@ -282,9 +269,7 @@ mod tests {
     #[test]
     fn compose_setup_uses_color_vars_not_rust_literals() {
         let monitors = vec![mon("DELL SE2416H", Some(3))];
-        let setup = build_setup(&monitors, "/opt/dome", "/p/dome.sh");
-        // The parked container references color vars and the cells reference the
-        // shared WORKSPACE_STYLE var, so no color literal comes from Rust.
+        let setup = build_setup(&monitors);
         assert!(setup.contains("popup.background.color=$POPUP_BG"));
         assert!(setup.contains("label.color=$PARKED_FG"));
         assert!(setup.contains("$WORKSPACE_STYLE"));
@@ -294,28 +279,54 @@ mod tests {
     #[test]
     fn compose_creates_items_per_monitor_without_baked_display() {
         let monitors = vec![mon("DELL SE2416H", Some(3))];
-        let s = build_setup(&monitors, "/opt/dome", "/p/dome.sh");
-        assert!(s.contains("--add item dome.dell-se2416h.ws.0 left"));
-        assert!(s.contains("--add item dome.dell-se2416h.ws.9 left"));
-        // No positional display= is baked. The tick sets it live.
+        let s = build_setup(&monitors);
+        assert!(s.contains("for n in 0 1 2 3 4 5 6 7 8 9; do"));
+        assert!(s.contains("item=\"dome.dell-se2416h.ws.$n\""));
+        assert!(s.contains("--add item \"$item\" left"));
+        // display= is not baked. The tick sets it live.
         assert!(!s.contains("display="));
 
-        // A monitor with no name gets no items.
+        // A monitor with no name gets no loop.
         let unnamed = vec![mon("", Some(7))];
-        let s2 = build_setup(&unnamed, "/opt/dome", "/p/dome.sh");
-        assert!(!s2.contains(".ws.0 left"));
+        let s2 = build_setup(&unnamed);
+        assert!(!s2.contains("for n in"));
+    }
+
+    #[test]
+    fn compose_loop_body_is_one_sketchybar_line() {
+        let monitors = vec![mon("DELL SE2416H", Some(3))];
+        let s = build_setup(&monitors);
+        assert!(s.lines().any(|l| l == "for n in 0 1 2 3 4 5 6 7 8 9; do"));
+        assert!(s.lines().any(|l| l == "done"));
+        // The whole sketchybar invocation is one physical line, so the semicolon
+        // inside click_script stays a literal and does not split it in two.
+        let sb = s
+            .lines()
+            .find(|l| {
+                l.trim_start()
+                    .starts_with("sketchybar --add item \"$item\"")
+            })
+            .expect("loop emits a sketchybar line");
+        assert!(sb.contains(
+            "click_script=\"'$DOME' focus workspace '$n' --monitor 'DELL SE2416H'; \
+             sketchybar --trigger dome_update\""
+        ));
+        assert!(
+            sb.trim_end()
+                .ends_with("--subscribe \"$item\" mouse.entered mouse.exited")
+        );
     }
 
     #[test]
     fn compose_bakes_parked_container_not_rows() {
         let monitors = vec![mon("DELL SE2416H", Some(3))];
-        let s = build_setup(&monitors, "/opt/dome", "/p/dome.sh");
+        let s = build_setup(&monitors);
         // The popup container is baked. The tick fills its heading and entry rows.
         assert!(s.contains("--add item dome.parked left"));
         assert!(!s.contains("dome.parked.heading."));
         assert!(!s.contains("--add item dome.parked.dell-se2416h"));
         // A cell click focuses by the monitor's unique name and repaints at once.
-        assert!(s.contains("focus workspace '0' --monitor 'DELL SE2416H'"));
+        assert!(s.contains("'$DOME' focus workspace '$n' --monitor 'DELL SE2416H'"));
         assert!(s.contains("; sketchybar --trigger dome_update"));
     }
 
