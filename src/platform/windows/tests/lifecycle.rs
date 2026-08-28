@@ -96,6 +96,7 @@ fn monitors_changed_updates_layout() {
     let new_monitor = MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
+        gdi_device: "\\\\.\\DISPLAY1".to_string(),
         work_area: PixelRect::new(0, 0, 1280, 720),
         bounds: Dimension::new(
             Length::ZERO,
@@ -117,6 +118,52 @@ fn monitors_changed_updates_layout() {
     assert!(
         after.height < before.height,
         "window should be shorter after monitor shrink"
+    );
+}
+
+#[test]
+fn parked_monitor_windows_hide_on_unplug() {
+    let mut env = TestEnv::new();
+    env.add_monitor(second_monitor());
+    let w = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.run_actions("move monitor right");
+    assert!(
+        !env.is_offscreen(w),
+        "window should be visible on the second monitor before unplug"
+    );
+
+    env.remove_monitor(second_monitor().handle);
+
+    assert!(
+        env.is_offscreen(w),
+        "parked workspace's window rides the hide diff after unplug, no workspace switch"
+    );
+}
+
+#[test]
+fn parked_monitor_windows_unhide_on_visit() {
+    let mut env = TestEnv::new();
+    env.add_monitor(second_monitor());
+    let w = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.run_actions("move monitor right");
+    assert!(
+        !env.is_offscreen(w),
+        "window should be visible on the second monitor before unplug"
+    );
+
+    env.remove_monitor(second_monitor().handle);
+    assert!(
+        env.is_offscreen(w),
+        "parked workspace's window rides the hide diff after unplug"
+    );
+
+    // Visiting the parked workspace by its name plus origin monitor points the
+    // primary's active workspace at it, so the window surfaces on the primary
+    // with no reattach to a monitor.
+    env.run_actions("focus workspace 0 --monitor External");
+    assert!(
+        !env.is_offscreen(w),
+        "visiting the parked workspace surfaces its window on the primary"
     );
 }
 
@@ -440,6 +487,40 @@ fn monitor_dpi_changed_same_scale_is_noop() {
 }
 
 #[test]
+fn dpi_change_after_a_rename_keeps_the_new_name() {
+    let mut env = TestEnv::new();
+
+    // Rename the display in place through a reconcile, then change its DPI. The
+    // DPI path has no MonitorInfo, so it reads the current name from the
+    // registry mirror. A stale mirror would revert the rename.
+    let mut renamed = default_monitor();
+    renamed.name = "Renamed".to_string();
+    *env.monitors.lock().unwrap() = vec![renamed];
+    env.dome.handle_display_change();
+
+    // 144 DPI is scale 1.5, different from the fixture default.
+    env.dome.monitor_dpi_changed(1, 144);
+
+    let monitors = env.dome.query_monitors_json();
+    assert!(
+        monitors.contains("\"unique_name\":\"Renamed\""),
+        "{monitors}"
+    );
+}
+
+#[test]
+fn dpi_change_keeps_the_gdi_device() {
+    let mut env = TestEnv::new();
+
+    // The DPI path must carry the stamped gdi_device rather than clear the
+    // published value.
+    env.dome.monitor_dpi_changed(1, 144);
+
+    let monitors = env.dome.query_monitors_json();
+    assert!(monitors.contains("DISPLAY1"), "{monitors}");
+}
+
+#[test]
 fn dpi_change_then_apply_layout_places_at_new_scale() {
     let mut env = TestEnv::new();
     let w = env.open(1, "App", "app.exe", SPAWN_DIM);
@@ -590,4 +671,56 @@ fn tab_click_focuses_tab_index() {
         .unwrap()
         .active_index;
     assert_eq!(after_active, 0);
+}
+
+#[test]
+fn primary_monitor_answers_to_its_display_name() {
+    let env = TestEnv::new();
+
+    let monitors = env.dome.query_monitors_json();
+    assert!(monitors.contains("\"unique_name\":\"Test\""), "{monitors}");
+
+    let workspaces = env.dome.query_workspaces_json();
+    assert!(workspaces.contains("\"monitor\":\"Test\""), "{workspaces}");
+    assert!(!workspaces.contains("primary"), "{workspaces}");
+}
+
+#[test]
+fn primary_change_to_a_new_display_carries_the_workspaces() {
+    let mut env = TestEnv::new();
+
+    let mut demoted = default_monitor();
+    demoted.is_primary = false;
+    let mut promoted = second_monitor();
+    promoted.is_primary = true;
+    *env.monitors.lock().unwrap() = vec![demoted, promoted];
+    env.dome.handle_display_change();
+    env.dome.apply_layout();
+
+    let workspaces = env.dome.query_workspaces_json();
+    assert!(
+        workspaces.contains("\"monitor\":\"External\""),
+        "{workspaces}"
+    );
+}
+
+#[test]
+fn primary_change_to_a_tracked_display_parks_the_displaced_workspaces() {
+    let mut env = TestEnv::new();
+    env.add_monitor(second_monitor());
+
+    let mut demoted = default_monitor();
+    demoted.is_primary = false;
+    let mut promoted = second_monitor();
+    promoted.is_primary = true;
+    *env.monitors.lock().unwrap() = vec![demoted, promoted];
+    env.dome.handle_display_change();
+    env.dome.apply_layout();
+
+    let workspaces = env.dome.query_workspaces_json();
+    assert!(workspaces.contains("\"state\":\"Parked\""), "{workspaces}");
+    assert!(
+        workspaces.contains("\"monitor\":\"External\""),
+        "{workspaces}"
+    );
 }

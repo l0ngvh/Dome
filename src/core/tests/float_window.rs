@@ -116,7 +116,7 @@ fn move_float_to_workspace() {
         WindowRestrictions::None,
     )
     .unwrap();
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -442,7 +442,7 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
 
     hub.insert_window(titled("w13"), default_rect(), WindowRestrictions::None);
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let f1 = hub
         .insert_window(
             titled("w14"),
@@ -493,7 +493,7 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     ******************************************************************************************************************************************************
     ");
 
-    hub.focus_workspace("0");
+    hub.focus_workspace("0", None);
 
     hub.delete_window(w2);
 
@@ -620,7 +620,7 @@ fn delete_float_keeps_workspace_alive() {
     // Scenario 2: non-current workspace kept because tiling exists
     {
         let mut hub = setup_with_layout(layout_floating(&["w20"]));
-        hub.focus_workspace("1");
+        hub.focus_workspace("1", None);
         hub.insert_window(titled("w19"), default_rect(), WindowRestrictions::None);
         let f0 = hub
             .insert_window(
@@ -629,7 +629,7 @@ fn delete_float_keeps_workspace_alive() {
                 WindowRestrictions::None,
             )
             .unwrap();
-        hub.focus_workspace("0");
+        hub.focus_workspace("0", None);
         hub.delete_window(f0);
         assert_eq!(snapshot(&hub), canonical);
         assert_eq!(
@@ -642,7 +642,7 @@ fn delete_float_keeps_workspace_alive() {
     // Scenario 3: non-current workspace kept because other float exists
     {
         let mut hub = setup_with_layout(layout_floating(&["w21", "w22"]));
-        hub.focus_workspace("1");
+        hub.focus_workspace("1", None);
         let f0 = hub
             .insert_window(
                 titled("w21"),
@@ -656,7 +656,7 @@ fn delete_float_keeps_workspace_alive() {
             WindowRestrictions::None,
         )
         .unwrap();
-        hub.focus_workspace("0");
+        hub.focus_workspace("0", None);
         hub.delete_window(f0);
         assert_eq!(snapshot(&hub), canonical);
         assert_eq!(
@@ -668,7 +668,7 @@ fn delete_float_keeps_workspace_alive() {
 
     {
         let mut hub = setup_with_layout(layout_floating(&["w23"]));
-        hub.focus_workspace("1");
+        hub.focus_workspace("1", None);
         let f0 = hub
             .insert_window(
                 titled("w23"),
@@ -676,7 +676,7 @@ fn delete_float_keeps_workspace_alive() {
                 WindowRestrictions::None,
             )
             .unwrap();
-        hub.focus_workspace("0");
+        hub.focus_workspace("0", None);
         hub.delete_window(f0);
         assert_eq!(snapshot(&hub), canonical);
         assert_eq!(

@@ -10,14 +10,13 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, HICON, IMAGE_ICON, LR_DEFAULTSIZE,
-    LR_SHARED, LoadImageW, MENU_ITEM_FLAGS, MF_CHECKED, MF_SEPARATOR, MF_STRING, PostMessageW,
-    SetForegroundWindow, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_APP,
-    WM_NULL,
+    LR_SHARED, LoadImageW, MENU_ITEM_FLAGS, MF_CHECKED, MF_POPUP, MF_SEPARATOR, MF_STRING,
+    PostMessageW, SetForegroundWindow, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+    TrackPopupMenu, WM_APP, WM_NULL,
 };
 use windows::core::PCWSTR;
 
-use crate::action::{Action, Actions, FocusTarget};
-use crate::core::WorkspaceInfo;
+use crate::action::{Action, Actions, FocusTarget, WorkspaceInfo, WorkspaceState};
 use crate::platform::windows::HubSender;
 use crate::platform::windows::dome::HubEvent;
 
@@ -115,22 +114,56 @@ impl TrayIndicator {
         };
 
         let workspaces = self.workspaces.borrow();
-        for (i, ws) in workspaces.iter().enumerate() {
-            let flags: MENU_ITEM_FLAGS = if ws.is_focused {
-                MF_STRING | MF_CHECKED
-            } else {
-                MF_STRING
+        for group in group_by_monitor(&workspaces) {
+            let submenu = match unsafe { CreatePopupMenu() } {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::warn!(?e, "CreatePopupMenu (submenu) failed");
+                    continue;
+                }
             };
-            let name_wide = to_wide_null(&ws.name);
+            for (idx, ws) in &group.rows {
+                let flags: MENU_ITEM_FLAGS = if ws.is_focused {
+                    MF_STRING | MF_CHECKED
+                } else {
+                    MF_STRING
+                };
+                let name_wide = to_wide_null(&ws.name);
+                if let Err(e) = unsafe {
+                    AppendMenuW(
+                        submenu,
+                        flags,
+                        (TRAY_CMD_WORKSPACE_BASE + *idx as u32) as usize,
+                        PCWSTR(name_wide.as_ptr()),
+                    )
+                } {
+                    tracing::warn!(?e, "AppendMenuW workspace failed");
+                }
+            }
+            let mut title = group.monitor.to_string();
+            if group.detached {
+                // The origin monitor is gone. Clicking an entry surfaces the
+                // parked workspace on the primary. The popup parent stays
+                // enabled: an MF_GRAYED popup will not expand on Win32, which
+                // would strand the parked rows out of reach.
+                title.push_str(" (detached)");
+            }
+            let title_wide = to_wide_null(&title);
+            // The MF_POPUP id is the child HMENU handle. A child attached this
+            // way is freed by the root DestroyMenu, so only the failed-attach
+            // branch must free the orphaned child itself.
             if let Err(e) = unsafe {
                 AppendMenuW(
                     menu,
-                    flags,
-                    (TRAY_CMD_WORKSPACE_BASE + i as u32) as usize,
-                    PCWSTR(name_wide.as_ptr()),
+                    MF_POPUP,
+                    submenu.0 as usize,
+                    PCWSTR(title_wide.as_ptr()),
                 )
             } {
-                tracing::warn!(?e, "AppendMenuW workspace failed");
+                tracing::warn!(?e, "AppendMenuW submenu failed");
+                if let Err(e2) = unsafe { DestroyMenu(submenu) } {
+                    tracing::warn!(?e2, "DestroyMenu (orphaned submenu) failed");
+                }
             }
         }
         if let Err(e) = unsafe { AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null()) } {
@@ -242,10 +275,46 @@ pub(super) fn command_to_action(cmd: u32, workspaces: &[WorkspaceInfo]) -> Optio
         if let Some(ws) = workspaces.get(idx) {
             return Some(Action::Focus(FocusTarget::Workspace {
                 name: ws.name.clone(),
+                monitor: Some(ws.monitor.clone()),
             }));
         }
     }
     None
+}
+
+struct MonitorGroup<'a> {
+    monitor: &'a str,
+    detached: bool,
+    rows: Vec<(usize, &'a WorkspaceInfo)>,
+}
+
+// Buckets rows by their disambiguated `monitor` string, preserving
+// first-appearance order so the rendered submenus are deterministic (a
+// `HashMap` would leak iteration-order nondeterminism into the menu). Each row
+// carries its original index into `workspaces` so the command id stays
+// `TRAY_CMD_WORKSPACE_BASE + original_index` regardless of grouping. A group is
+// detached when it holds no Attached rows: a present monitor contributes
+// Attached rows, while a gone origin contributes only Parked rows.
+fn group_by_monitor(workspaces: &[WorkspaceInfo]) -> Vec<MonitorGroup<'_>> {
+    let mut groups: Vec<MonitorGroup> = Vec::new();
+    for (i, ws) in workspaces.iter().enumerate() {
+        let slot = match groups.iter_mut().find(|g| g.monitor == ws.monitor) {
+            Some(g) => g,
+            None => {
+                groups.push(MonitorGroup {
+                    monitor: &ws.monitor,
+                    detached: true,
+                    rows: Vec::new(),
+                });
+                groups.last_mut().unwrap()
+            }
+        };
+        slot.rows.push((i, ws));
+        if ws.state == WorkspaceState::Attached {
+            slot.detached = false;
+        }
+    }
+    groups
 }
 
 fn to_wide_null(s: &str) -> Vec<u16> {
@@ -258,9 +327,17 @@ fn to_wide_null(s: &str) -> Vec<u16> {
 mod tests {
     use super::*;
 
-    fn ws(name: &str, focused: bool, visible: bool) -> WorkspaceInfo {
+    fn ws(
+        name: &str,
+        monitor: &str,
+        state: WorkspaceState,
+        focused: bool,
+        visible: bool,
+    ) -> WorkspaceInfo {
         WorkspaceInfo {
             name: name.into(),
+            monitor: monitor.into(),
+            state,
             is_focused: focused,
             is_visible: visible,
             window_count: 0,
@@ -288,13 +365,16 @@ mod tests {
 
     #[test]
     fn focused_tooltip_none() {
-        let list = vec![ws("1", false, true)];
+        let list = vec![ws("1", "1", WorkspaceState::Attached, false, true)];
         assert_eq!(focused_tooltip(&list), "");
     }
 
     #[test]
     fn focused_tooltip_picks() {
-        let list = vec![ws("1", false, true), ws("2", true, true)];
+        let list = vec![
+            ws("1", "1", WorkspaceState::Attached, false, true),
+            ws("2", "2", WorkspaceState::Attached, true, true),
+        ];
         assert_eq!(focused_tooltip(&list), "2");
     }
 
@@ -330,10 +410,45 @@ mod tests {
 
     #[test]
     fn cmd_workspace() {
-        let list = vec![ws("Alpha", false, true), ws("Beta", true, true)];
+        let list = vec![
+            ws("Alpha", "Alpha", WorkspaceState::Attached, false, true),
+            ws("Beta", "Beta", WorkspaceState::Attached, true, true),
+        ];
         let action = command_to_action(TRAY_CMD_WORKSPACE_BASE + 1, &list).unwrap();
         match action {
-            Action::Focus(FocusTarget::Workspace { name }) => assert_eq!(name, "Beta"),
+            Action::Focus(FocusTarget::Workspace { name, .. }) => assert_eq!(name, "Beta"),
+            other => panic!("wrong variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cmd_attached_focus_carries_monitor() {
+        let list = vec![
+            ws("Alpha", "Mon1", WorkspaceState::Attached, false, true),
+            ws("Beta", "Mon2", WorkspaceState::Attached, true, true),
+        ];
+        let action = command_to_action(TRAY_CMD_WORKSPACE_BASE + 1, &list).unwrap();
+        match action {
+            Action::Focus(FocusTarget::Workspace { name, monitor }) => {
+                assert_eq!(name, "Beta");
+                assert_eq!(monitor, Some("Mon2".to_string()));
+            }
+            other => panic!("wrong variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cmd_parked_emits_unified_monitor() {
+        let list = vec![
+            ws("Alpha", "Mon1", WorkspaceState::Attached, true, true),
+            ws("Ghost", "GoneOrigin", WorkspaceState::Parked, false, false),
+        ];
+        let action = command_to_action(TRAY_CMD_WORKSPACE_BASE + 1, &list).unwrap();
+        match action {
+            Action::Focus(FocusTarget::Workspace { name, monitor }) => {
+                assert_eq!(name, "Ghost");
+                assert_eq!(monitor, Some("GoneOrigin".to_string()));
+            }
             other => panic!("wrong variant: {other:?}"),
         }
     }
@@ -341,5 +456,56 @@ mod tests {
     #[test]
     fn cmd_workspace_out_of_range() {
         assert!(command_to_action(TRAY_CMD_WORKSPACE_BASE + 5, &[]).is_none());
+    }
+
+    #[test]
+    fn group_by_monitor_splits_by_monitor() {
+        let list = vec![
+            ws("1", "A", WorkspaceState::Attached, false, true),
+            ws("1", "B", WorkspaceState::Attached, false, true),
+            ws("2", "A", WorkspaceState::Attached, false, true),
+        ];
+        let groups = group_by_monitor(&list);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].monitor, "A");
+        assert_eq!(
+            groups[0].rows.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+            vec![0, 2]
+        );
+        assert_eq!(groups[1].monitor, "B");
+        assert_eq!(
+            groups[1].rows.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn group_by_monitor_preserves_original_index() {
+        let list = vec![
+            ws("a", "A", WorkspaceState::Attached, false, true),
+            ws("b", "B", WorkspaceState::Attached, false, true),
+            ws("c", "A", WorkspaceState::Attached, false, true),
+            ws("d", "C", WorkspaceState::Attached, false, true),
+        ];
+        let groups = group_by_monitor(&list);
+        for group in &groups {
+            for (idx, row) in &group.rows {
+                assert_eq!(list[*idx].name, row.name);
+            }
+        }
+    }
+
+    #[test]
+    fn group_by_monitor_detached_when_no_attached() {
+        let list = vec![
+            ws("live", "Present", WorkspaceState::Attached, true, true),
+            ws("ghost1", "Gone", WorkspaceState::Parked, false, false),
+            ws("ghost2", "Gone", WorkspaceState::Parked, false, false),
+        ];
+        let groups = group_by_monitor(&list);
+        let present = groups.iter().find(|g| g.monitor == "Present").unwrap();
+        let gone = groups.iter().find(|g| g.monitor == "Gone").unwrap();
+        assert!(!present.detached);
+        assert!(gone.detached);
     }
 }

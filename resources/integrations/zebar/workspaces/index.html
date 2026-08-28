@@ -14,7 +14,7 @@
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
-      import React, { useState, useEffect } from 'https://esm.sh/react@18?dev';
+      import React, { useState, useEffect, useRef } from 'https://esm.sh/react@18?dev';
       import { createRoot } from 'https://esm.sh/react-dom@18/client?dev';
       import * as zebar from 'https://esm.sh/zebar@3.0';
 
@@ -27,27 +27,103 @@
         weather: { type: 'weather' },
       });
 
+      const isNumericName = (value) => /^[+-]?\d+$/.test(value);
+
+      function byName(left, right) {
+        const leftIsNumeric = isNumericName(left.name);
+        const rightIsNumeric = isNumericName(right.name);
+        if (leftIsNumeric !== rightIsNumeric) return leftIsNumeric ? -1 : 1;
+        if (leftIsNumeric) return parseInt(left.name, 10) - parseInt(right.name, 10);
+        return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+      }
+
+      async function getDeviceName() {
+        try {
+          const widget =
+            typeof zebar.currentWidget === 'function'
+              ? zebar.currentWidget()
+              : zebar.currentWidget;
+          if (widget?.window?.tauri?.currentMonitor) {
+            const monitor = await widget.window.tauri.currentMonitor();
+            if (monitor?.name) return monitor.name;
+          }
+          if (widget?.tauriWindow?.currentMonitor) {
+            const monitor = await widget.tauriWindow.currentMonitor();
+            if (monitor?.name) return monitor.name;
+          }
+        } catch {}
+        try {
+          const { currentMonitor } = await import(
+            'https://esm.sh/@tauri-apps/api@2/window.mjs'
+          );
+          const monitor = await currentMonitor();
+          if (monitor?.name) return monitor.name;
+        } catch {}
+        return null;
+      }
+
+      function filterByMonitor(data, monitorName) {
+        if (!monitorName) {
+          return data.filter((entry) => entry.state === 'Attached').sort(byName);
+        }
+        return data
+          .filter((entry) => entry.state === 'Attached' && entry.monitor === monitorName)
+          .sort(byName);
+      }
+
       createRoot(document.getElementById('root')).render(<App />);
 
       function App() {
         const [output, setOutput] = useState(providers.outputMap);
         const [workspaces, setWorkspaces] = useState([]);
+        const [parked, setParked] = useState([]);
+        const monitorName = useRef(null);
+        const focusWorkspace = useRef(() => {});
 
         useEffect(() => {
           providers.onOutput(() => setOutput(providers.outputMap));
         }, []);
 
         useEffect(() => {
+          async function resolveMonitor() {
+            const device = await getDeviceName();
+            if (!device) return;
+            try {
+              const res = await zebar.shellExec('dome', ['query', 'monitors']);
+              const rows = JSON.parse(res.stdout.trim());
+              if (!Array.isArray(rows)) return;
+              const match = rows.find((row) => row.gdi_device === device);
+              monitorName.current = match ? match.unique_name : null;
+            } catch {}
+          }
+
           async function refresh() {
+            if (monitorName.current === null) await resolveMonitor();
             try {
               const res = await zebar.shellExec('dome', ['query', 'workspaces']);
               const data = JSON.parse(res.stdout.trim());
-              if (Array.isArray(data)) {
-                data.sort((a, b) => parseInt(a.name) - parseInt(b.name));
-                setWorkspaces(data);
+              if (!Array.isArray(data)) return;
+              let rows = filterByMonitor(data, monitorName.current);
+              if (monitorName.current !== null && rows.length === 0) {
+                await resolveMonitor();
+                rows = filterByMonitor(data, monitorName.current);
               }
+              setWorkspaces(rows);
+              setParked(
+                data
+                  .filter((entry) => entry.state === 'Parked' && entry.window_count > 0)
+                  .sort(byName),
+              );
             } catch {}
           }
+
+          focusWorkspace.current = async (name, monitor) => {
+            try {
+              await zebar.shellExec('dome', ['focus', 'workspace', name, '--monitor', monitor]);
+              await refresh();
+            } catch {}
+          };
+
           refresh();
           const id = setInterval(refresh, 1000);
           return () => clearInterval(id);
@@ -117,18 +193,34 @@
           <div className="app">
             <div className="left">
               <div className="workspaces">
-                {workspaces.map(ws => {
-                  if (!ws.is_focused && !ws.is_visible && ws.window_count === 0)
+                {workspaces.map((entry) => {
+                  if (!entry.is_focused && !entry.is_visible && entry.window_count === 0)
                     return null;
                   return (
                     <span
-                      key={ws.name}
-                      className={ws.is_focused ? 'ws focused' : 'ws'}
+                      key={entry.name}
+                      className={entry.is_focused ? 'ws focused' : 'ws'}
+                      onClick={() => focusWorkspace.current(entry.name, entry.monitor)}
                     >
-                      {ws.name}
+                      {entry.name}
                     </span>
                   );
                 })}
+                {parked.length > 0 && (
+                  <span className="parked-group">
+                    <span className="parked-label">parked</span>
+                    {parked.map((entry) => (
+                      <span
+                        key={`${entry.monitor}::${entry.name}`}
+                        className="ws parked"
+                        title={`return ${entry.name} to ${entry.monitor}`}
+                        onClick={() => focusWorkspace.current(entry.name, entry.monitor)}
+                      >
+                        {entry.name}
+                      </span>
+                    ))}
+                  </span>
+                )}
               </div>
             </div>
 

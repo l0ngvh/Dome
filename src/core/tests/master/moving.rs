@@ -237,7 +237,7 @@ fn move_window_to_workspace() {
         hub.insert_window(titled("w28"), default_rect(), WindowRestrictions::None); // W0 = master
         hub.insert_window(titled("w29"), default_rect(), WindowRestrictions::None); // W1 = stack (focused)
         hub.focus_left();
-        hub.move_focused_to_workspace("1");
+        hub.move_focused_to_workspace("1", None);
         assert_snapshot!(snapshot(&hub), @"
         Hub(focused=WindowId(1))
           Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -276,7 +276,7 @@ fn move_window_to_workspace() {
         ******************************************************************************************************************************************************
         ");
 
-        hub.focus_workspace("1");
+        hub.focus_workspace("1", None);
         assert_snapshot!(snapshot(&hub), @"
         Hub(focused=WindowId(0))
           Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -328,7 +328,7 @@ fn move_window_to_workspace() {
         hub.insert_window(titled("w30"), default_rect(), WindowRestrictions::None); // W0 = master
         hub.insert_window(titled("w31"), default_rect(), WindowRestrictions::None); // W1 = stack
         hub.insert_window(titled("w32"), default_rect(), WindowRestrictions::None); // W2 = stack (focused)
-        hub.move_focused_to_workspace("1");
+        hub.move_focused_to_workspace("1", None);
         assert_snapshot!(snapshot(&hub), @"
         Hub(focused=WindowId(1))
           Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -368,7 +368,7 @@ fn move_window_to_workspace() {
         +-------------------------------------------------------------------------+***************************************************************************
         ");
 
-        hub.focus_workspace("1");
+        hub.focus_workspace("1", None);
         assert_snapshot!(snapshot(&hub), @"
         Hub(focused=WindowId(2))
           Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -420,7 +420,7 @@ fn move_only_window_to_workspace() {
         .build();
     hub.insert_window(titled("w33"), default_rect(), WindowRestrictions::None); // W0
 
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
 
     // Source workspace: empty
     assert_snapshot!(snapshot(&hub), @"
@@ -428,7 +428,7 @@ fn move_only_window_to_workspace() {
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     // Target workspace: W0 fills screen
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -877,7 +877,7 @@ fn move_window_into_workspace_whose_synced_layout_matches_it_to_secondary() {
         )
         .build();
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_window(
         titled_process("Term", "terminal.exe"),
         default_rect(),
@@ -894,8 +894,8 @@ fn move_window_into_workspace_whose_synced_layout_matches_it_to_secondary() {
             .build(),
     ]);
 
-    hub.move_focused_to_workspace("0");
-    hub.focus_workspace("0");
+    hub.move_focused_to_workspace("0", None);
+    hub.focus_workspace("0", None);
 
     hub.insert_window(
         titled_process("browser", "browser.exe"),

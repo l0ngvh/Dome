@@ -73,11 +73,36 @@ body,
   border-radius: 2px;
   color: #cdd6f4;
   background: #313244;
+  cursor: pointer;
 }
 
 .ws.focused {
   color: #11111b;
   background: #cba6f7;
+}
+
+.ws.parked {
+  color: #f9e2af;
+  background: transparent;
+}
+
+.ws:hover {
+  filter: brightness(1.15);
+}
+
+.ws.parked:hover {
+  background: #313244;
+}
+
+.parked-group {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+}
+
+.parked-label {
+  color: #585b70;
+  margin-right: 6px;
 }
 
 .cpu .high-usage {

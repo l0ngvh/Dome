@@ -577,7 +577,7 @@ impl Dome {
                     .monitor_registry
                     .find_closest_monitor(new_placement.to_dimension())
                     .map(|m| m.id())
-                    .unwrap_or_else(|| self.monitor_registry.primary_monitor_id());
+                    .unwrap_or_else(|| self.hub.primary_monitor());
                 self.hub
                     .update_float_rect(window_id, new_placement, monitor_id);
             }
@@ -619,7 +619,7 @@ impl Dome {
             }
             WindowState::NativeFullscreen => {
                 if is_borderless_fullscreen {
-                    if self.monitor_registry.is_displayed(window_id) {
+                    if self.displayed_windows.contains(&window_id) {
                         window.state = WindowState::BorderlessFullscreen;
                     } else {
                         // Window exited native fullscreen on an unfocused workspace.

@@ -3,7 +3,8 @@ use crate::core::GlobalLayoutConfig;
 use crate::core::node::PixelRect;
 use crate::core::node::WindowRestrictions;
 use crate::core::tests::{
-    LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
+    LayoutConfigBuilder, default_rect, reported_monitor, setup, setup_with_layout, snapshot,
+    titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
@@ -566,7 +567,7 @@ fn move_fullscreen_to_workspace_sets_focus() {
     hub.insert_window(titled("w19"), default_rect(), WindowRestrictions::None);
     hub.toggle_fullscreen();
 
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
@@ -633,10 +634,10 @@ fn block_all_blocks_user_commands() {
     hub.toggle_spawn_mode();
     assert_eq!(snapshot(&hub), before);
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_eq!(snapshot(&hub), before);
 
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
     assert_eq!(snapshot(&hub), before);
 
     hub.move_focused_to_monitor(&MonitorTarget::Right);
@@ -970,7 +971,11 @@ fn block_all_does_not_persist_after_delete() {
 #[test]
 fn block_all_on_unfocused_window_does_not_block() {
     let mut hub = setup();
-    hub.add_monitor("second".into(), PixelRect::new(150, 0, 150, 30), 1.0);
+    hub.add_monitor(reported_monitor(
+        "second".into(),
+        PixelRect::new(150, 0, 150, 30),
+        1.0,
+    ));
     // Put a tiling window on the second monitor's workspace.
     hub.focus_monitor(&MonitorTarget::Right);
     let w0 = hub
@@ -984,12 +989,12 @@ fn block_all_on_unfocused_window_does_not_block() {
     // escape the BlockAll workspace and focus the tiling window.
     hub.set_focus(w0);
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r#"
     Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Fullscreen(id=WindowId(1))
       )
-      Monitor(id=MonitorId(1), screen=(x=150.00 y=0.00 w=150.00 h=30.00),
+      Monitor(id=MonitorId(1), name="second", screen=(x=150.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=150.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
 
@@ -1023,15 +1028,15 @@ fn block_all_on_unfocused_window_does_not_block() {
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    ");
+    "#);
 
     hub.toggle_float();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r#"
     Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Fullscreen(id=WindowId(1))
       )
-      Monitor(id=MonitorId(1), screen=(x=150.00 y=0.00 w=150.00 h=30.00),
+      Monitor(id=MonitorId(1), name="second", screen=(x=150.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=150.00, y=0.00, w=150.00, h=30.00, float, highlighted)
       )
 
@@ -1065,13 +1070,17 @@ fn block_all_on_unfocused_window_does_not_block() {
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    ");
+    "#);
 }
 
 #[test]
 fn protect_fullscreen_blocks_display_mode_and_monitor_move() {
     let mut hub = setup();
-    hub.add_monitor("second".into(), PixelRect::new(150, 0, 150, 30), 1.0);
+    hub.add_monitor(reported_monitor(
+        "second".into(),
+        PixelRect::new(150, 0, 150, 30),
+        1.0,
+    ));
     let w0 = hub
         .insert_window(titled("w32"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -1080,12 +1089,12 @@ fn protect_fullscreen_blocks_display_mode_and_monitor_move() {
     hub.set_focus(w0);
 
     let before = snapshot(&hub);
-    assert_snapshot!(before, @"
+    assert_snapshot!(before, @r#"
     Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Fullscreen(id=WindowId(0))
       )
-      Monitor(id=MonitorId(1), screen=(x=150.00 y=0.00 w=150.00 h=30.00))
+      Monitor(id=MonitorId(1), name="second", screen=(x=150.00 y=0.00 w=150.00 h=30.00))
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -1117,7 +1126,7 @@ fn protect_fullscreen_blocks_display_mode_and_monitor_move() {
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    ");
+    "#);
 
     hub.toggle_fullscreen();
     assert_eq!(snapshot(&hub), before);
@@ -1176,17 +1185,17 @@ fn protect_fullscreen_allows_workspace_move_and_navigation() {
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let empty_state = snapshot(&hub);
     assert_snapshot!(empty_state, @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 
-    hub.focus_workspace("0");
+    hub.focus_workspace("0", None);
     assert_eq!(snapshot(&hub), fullscreen_state);
 
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
     assert_eq!(snapshot(&hub), empty_state);
 }
 
@@ -1236,13 +1245,13 @@ fn upgrade_protect_to_block_all() {
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
 
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 
-    hub.move_focused_to_workspace("0");
+    hub.move_focused_to_workspace("0", None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
@@ -1251,7 +1260,7 @@ fn upgrade_protect_to_block_all() {
     hub.set_fullscreen(w0, WindowRestrictions::BlockAll);
 
     let before = snapshot(&hub);
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
     assert_eq!(snapshot(&hub), before);
 }
 
@@ -1302,12 +1311,12 @@ fn downgrade_block_all_to_protect() {
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
 
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
     assert_eq!(snapshot(&hub), before);
 
     hub.set_fullscreen(w1, WindowRestrictions::ProtectFullscreen);
 
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

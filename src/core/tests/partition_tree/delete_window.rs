@@ -129,7 +129,7 @@ fn delete_all_windows_cleanup_unfocused_workspace() {
     let w1 = hub
         .insert_window(titled("w9"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.delete_window(w0);
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @"

@@ -1,79 +1,78 @@
 use std::collections::HashMap;
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
+use anyhow::Context;
 use objc2_core_graphics::CGDirectDisplayID;
 
 use crate::core::{Dimension, Length};
 
 use super::MonitorInfo;
 
+const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
+const PROBE_POLL_STEP: Duration = Duration::from_millis(20);
+
 pub(in crate::platform::macos) struct ExternalBarProbe;
 
 impl ExternalBarProbe {
-    /// `Ok(None)` means no known bar is running or the probe failed, which the
-    /// caller treats as reserve nothing.
-    pub(in crate::platform::macos) fn query() -> anyhow::Result<Option<BarGeometry>> {
-        if let Some(geo) = Self::query_sketchybar()? {
-            return Ok(Some(geo));
-        }
-        Ok(None)
-    }
+    /// `Err` means the bar could not be asked. A hidden bar is `Ok` with zero
+    /// height.
+    ///
+    /// Spawns rather than runs to completion because a deadline needs a handle
+    /// to kill, and `Command::output` consumes the child.
+    pub(in crate::platform::macos) fn query() -> anyhow::Result<BarGeometry> {
+        let mut child = Command::new("sketchybar")
+            .args(["--query", "bar"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .context("spawn sketchybar --query bar")?;
 
-    /// No per-call timeout: the caller runs this off the dome thread on the GCD
-    /// worker, so a slow bar cannot block the AppKit loop.
-    fn query_sketchybar() -> anyhow::Result<Option<BarGeometry>> {
-        let output = match Command::new("sketchybar").args(["--query", "bar"]).output() {
-            Ok(output) => output,
-            Err(e) => {
-                crate::log_dedup::warn_once!(
-                    key: "sketchybar-probe",
-                    "SketchyBar probe failed, reserving no space: {e}"
-                );
-                return Ok(None);
+        let deadline = Instant::now() + PROBE_TIMEOUT;
+        let status = loop {
+            if let Some(status) = child.try_wait().context("wait on sketchybar")? {
+                break status;
             }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                anyhow::bail!("sketchybar --query bar did not answer within {PROBE_TIMEOUT:?}");
+            }
+            std::thread::sleep(PROBE_POLL_STEP);
         };
-        if !output.status.success() {
-            crate::log_dedup::warn_once!(
-                key: "sketchybar-probe",
-                "SketchyBar probe returned non-success status, reserving no space"
-            );
-            return Ok(None);
+        if !status.success() {
+            anyhow::bail!("sketchybar --query bar exited with {status}");
         }
-        let Ok(stdout) = std::str::from_utf8(&output.stdout) else {
-            crate::log_dedup::warn_once!(
-                key: "sketchybar-probe",
-                "SketchyBar probe returned non-UTF8 output, reserving no space"
-            );
-            return Ok(None);
-        };
-        let query: BarQuery = match serde_json::from_str(stdout) {
-            Ok(query) => query,
-            Err(e) => {
-                crate::log_dedup::warn_once!(
-                    key: "sketchybar-probe",
-                    "SketchyBar probe output did not parse, reserving no space: {e}"
-                );
-                return Ok(None);
-            }
-        };
-        Ok(query.into_geometry())
+
+        // Draining only after exit would deadlock a child whose output exceeds
+        // the pipe buffer. One small JSON object stays far under it.
+        let mut stdout = String::new();
+        child
+            .stdout
+            .take()
+            .context("sketchybar stdout was not captured")?
+            .read_to_string(&mut stdout)
+            .context("read sketchybar bar query")?;
+        let query: BarQuery = serde_json::from_str(&stdout).context("parse bar query")?;
+        query.into_geometry()
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub(in crate::platform::macos) struct BarGeometry {
-    height: Option<f64>,
+    height: f64,
     position: Option<String>,
-    y_offset: Option<f64>,
-    margin: Option<f64>,
+    y_offset: f64,
+    margin: f64,
 }
 
 impl BarGeometry {
     pub(in crate::platform::macos) fn new(
-        height: Option<f64>,
+        height: f64,
         position: Option<String>,
-        y_offset: Option<f64>,
-        margin: Option<f64>,
+        y_offset: f64,
+        margin: f64,
     ) -> Self {
         Self {
             height,
@@ -91,10 +90,7 @@ pub(in crate::platform::macos) fn reserved_rects(
     monitors: &[MonitorInfo],
 ) -> HashMap<CGDirectDisplayID, Dimension> {
     let mut rects = HashMap::new();
-    let Some(height) = geo.height else {
-        return rects;
-    };
-    let h = Length::new((height + geo.y_offset.unwrap_or(0.0) + geo.margin.unwrap_or(0.0)) as f32);
+    let h = Length::new((geo.height + geo.y_offset + geo.margin) as f32);
     let bottom = geo.position.as_deref() == Some("bottom");
     for m in monitors {
         let y = if bottom {
@@ -119,24 +115,26 @@ struct BarQuery {
     // SketchyBar reports hidden as the strings "on"/"off", not JSON bools.
     hidden: Option<String>,
     // A wedged query answers {"error":...}, which parses as an otherwise-empty
-    // BarQuery. Guard on it so an error envelope reserves nothing.
+    // BarQuery.
     error: Option<String>,
 }
 
 impl BarQuery {
-    fn into_geometry(self) -> Option<BarGeometry> {
-        if self.error.is_some() {
-            return None;
+    fn into_geometry(self) -> anyhow::Result<BarGeometry> {
+        if let Some(error) = self.error {
+            anyhow::bail!("bar query answered an error envelope: {error}");
         }
         if self.hidden.as_deref() == Some("on") {
-            return None;
+            // Dropping the position keeps every zero geometry equal, so moving
+            // a hidden bar cannot trigger a re-apply.
+            return Ok(BarGeometry::new(0.0, None, 0.0, 0.0));
         }
-        self.height?;
-        Some(BarGeometry::new(
-            self.height,
+        let height = self.height.context("bar query carried no height")?;
+        Ok(BarGeometry::new(
+            height,
             self.position,
-            self.y_offset,
-            self.margin,
+            self.y_offset.unwrap_or(0.0),
+            self.margin.unwrap_or(0.0),
         ))
     }
 }
@@ -219,14 +217,14 @@ mod tests {
             error: None,
         };
         let geo = query.into_geometry().expect("visible bar yields geometry");
-        assert_eq!(geo.height, Some(25.0));
+        assert_eq!(geo.height, 25.0);
         assert_eq!(geo.position.as_deref(), Some("top"));
-        assert_eq!(geo.y_offset, Some(2.0));
-        assert_eq!(geo.margin, Some(3.0));
+        assert_eq!(geo.y_offset, 2.0);
+        assert_eq!(geo.margin, 3.0);
     }
 
     #[test]
-    fn hidden_bar_yields_no_geometry() {
+    fn hidden_bar_yields_zero_geometry() {
         let query = BarQuery {
             height: Some(25.0),
             position: Some("top".into()),
@@ -235,7 +233,8 @@ mod tests {
             hidden: Some("on".into()),
             error: None,
         };
-        assert!(query.into_geometry().is_none());
+        let geo = query.into_geometry().expect("hidden bar yields geometry");
+        assert_eq!(geo, BarGeometry::new(0.0, None, 0.0, 0.0));
     }
 
     #[test]
@@ -244,12 +243,12 @@ mod tests {
         let geo = query
             .into_geometry()
             .expect("visible bar with drawing off yields geometry");
-        assert_eq!(geo.height, Some(25.0));
+        assert_eq!(geo.height, 25.0);
         assert_eq!(geo.position.as_deref(), Some("top"));
     }
 
     #[test]
-    fn missing_height_yields_no_geometry() {
+    fn missing_height_is_an_error() {
         let query = BarQuery {
             height: None,
             position: Some("top".into()),
@@ -258,20 +257,20 @@ mod tests {
             hidden: Some("off".into()),
             error: None,
         };
-        assert!(query.into_geometry().is_none());
+        assert!(query.into_geometry().is_err());
     }
 
     #[test]
-    fn error_envelope_yields_no_geometry() {
+    fn error_envelope_is_an_error() {
         let query: BarQuery = serde_json::from_str(r#"{"error":"query timed out"}"#).unwrap();
-        assert!(query.into_geometry().is_none());
+        assert!(query.into_geometry().is_err());
     }
 
     #[test]
     fn top_bar_reserves_same_strip_on_every_monitor() {
         let a = monitor(1, 0.0, 0.0, 1920.0, 1080.0);
         let b = monitor(2, 1920.0, 0.0, 2560.0, 1440.0);
-        let geo = BarGeometry::new(Some(20.0), Some("top".into()), Some(5.0), Some(5.0));
+        let geo = BarGeometry::new(20.0, Some("top".into()), 5.0, 5.0);
 
         let rects = reserved_rects(&geo, &[a.clone(), b.clone()]);
 
@@ -300,7 +299,7 @@ mod tests {
     #[test]
     fn bottom_bar_anchors_at_monitor_bottom() {
         let a = monitor(1, 0.0, 0.0, 1920.0, 1080.0);
-        let geo = BarGeometry::new(Some(30.0), Some("bottom".into()), None, None);
+        let geo = BarGeometry::new(30.0, Some("bottom".into()), 0.0, 0.0);
 
         let rects = reserved_rects(&geo, std::slice::from_ref(&a));
 
@@ -317,9 +316,16 @@ mod tests {
     }
 
     #[test]
-    fn absent_height_reserves_nothing() {
+    fn hidden_bar_shrinks_nothing() {
         let a = monitor(1, 0.0, 0.0, 1920.0, 1080.0);
-        let geo = BarGeometry::new(None, Some("top".into()), None, None);
-        assert!(reserved_rects(&geo, &[a]).is_empty());
+        let geo = BarGeometry::new(0.0, None, 0.0, 0.0);
+
+        let rects = reserved_rects(&geo, std::slice::from_ref(&a));
+
+        let bar = rects.get(&1).copied().expect("zero geometry still maps");
+        assert_eq!(
+            reserve_for_bar(a.bounds, a.work_area.to_dimension(), bar),
+            a.work_area.to_dimension()
+        );
     }
 }

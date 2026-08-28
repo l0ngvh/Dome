@@ -317,21 +317,7 @@ fn multi_monitor_per_display() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
 
-    let second_monitor = MonitorInfo {
-        display_id: 2,
-        name: "External".to_string(),
-        work_area: PixelRect::new(1920, 0, 2560, 1440),
-        bounds: Dimension::new(
-            Length::new(1920.0),
-            Length::ZERO,
-            Length::new(2560.0),
-            Length::new(1440.0),
-        ),
-        full_height: 1440.0,
-        is_primary: false,
-        scale: 2.0,
-    };
-    dome.monitors_changed(vec![default_monitor(), second_monitor]);
+    dome.monitors_changed(vec![default_monitor(), second_monitor()]);
 
     let win1 = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win1)], &[], &[]);
@@ -356,16 +342,11 @@ fn set_reserved_bar_shrinks_and_restores_work_area() {
     macos.settle(&mut dome, 10);
     assert_eq!(macos.window_frame(win), (4, 4, 1912, 1072));
 
-    dome.set_reserved_bar(Some(BarGeometry::new(
-        Some(30.0),
-        Some("top".into()),
-        None,
-        None,
-    )));
+    dome.set_reserved_bar(Ok(BarGeometry::new(30.0, Some("top".into()), 0.0, 0.0)));
     macos.settle(&mut dome, 10);
     assert_eq!(macos.window_frame(win), (4, 34, 1912, 1042));
 
-    dome.set_reserved_bar(None);
+    dome.set_reserved_bar(Ok(BarGeometry::new(0.0, None, 0.0, 0.0)));
     macos.settle(&mut dome, 10);
     assert_eq!(macos.window_frame(win), (4, 4, 1912, 1072));
 }
@@ -389,11 +370,11 @@ fn a_fractional_reserved_bar_keeps_the_window_inside_the_reserved_area() {
     dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);
     macos.settle(&mut dome, 10);
 
-    dome.set_reserved_bar(Some(BarGeometry::new(
-        Some(BAR_HEIGHT),
+    dome.set_reserved_bar(Ok(BarGeometry::new(
+        BAR_HEIGHT,
         Some("top".into()),
-        None,
-        None,
+        0.0,
+        0.0,
     )));
     macos.settle(&mut dome, 10);
 
@@ -405,4 +386,43 @@ fn a_fractional_reserved_bar_keeps_the_window_inside_the_reserved_area() {
         SCREEN_HEIGHT - bar_height,
     );
     assert_inside_work_area(macos.window_frame(win), reserved);
+}
+
+#[test]
+fn display_added_after_probe_is_inset() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    dome.set_reserved_bar(Ok(BarGeometry::new(30.0, Some("top".into()), 0.0, 0.0)));
+    dome.monitors_changed(vec![default_monitor(), second_monitor()]);
+
+    let win1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win1)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    send(&mut dome, "focus monitor right");
+    let win2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win2)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(macos.window_frame(win1), (4, 34, 1912, 1042));
+    assert_eq!(macos.window_frame(win2), (1924, 34, 2552, 1402));
+}
+
+#[test]
+fn failed_probe_keeps_previous_reservation() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let win = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    dome.set_reserved_bar(Ok(BarGeometry::new(30.0, Some("top".into()), 0.0, 0.0)));
+    macos.settle(&mut dome, 10);
+    assert_eq!(macos.window_frame(win), (4, 34, 1912, 1042));
+
+    dome.set_reserved_bar(Err(anyhow::anyhow!("probe failed")));
+    macos.settle(&mut dome, 10);
+    assert_eq!(macos.window_frame(win), (4, 34, 1912, 1042));
 }

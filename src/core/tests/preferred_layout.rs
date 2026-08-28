@@ -21,7 +21,7 @@ fn sync_preferred_layout_creates_new_workspace() {
             .build(),
     ]);
 
-    hub.focus_workspace("dev");
+    hub.focus_workspace("dev", None);
     hub.insert_window(
         process_meta("float.exe"),
         PixelRect::new(10, 5, 30, 20),
@@ -84,7 +84,7 @@ fn float_matcher_routes_to_float() {
         PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
-    hub.focus_workspace("3");
+    hub.focus_workspace("3", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -142,7 +142,7 @@ fn fullscreen_matcher_routes_to_fullscreen() {
         PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
-    hub.focus_workspace("3");
+    hub.focus_workspace("3", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -205,7 +205,7 @@ fn fullscreen_beats_float_when_both_match() {
         PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
-    hub.focus_workspace("3");
+    hub.focus_workspace("3", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -333,7 +333,7 @@ fn matchers_on_partition_tree_variant() {
         PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
-    hub.focus_workspace("ws2");
+    hub.focus_workspace("ws2", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -504,7 +504,7 @@ fn per_workspace_override_beats_global() {
         PixelRect::new(10, 5, 30, 20),
         WindowRestrictions::None,
     );
-    hub.focus_workspace("3");
+    hub.focus_workspace("3", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -620,7 +620,7 @@ fn tiling_matcher_routes_to_workspace() {
         WindowRestrictions::None,
     )
     .unwrap();
-    hub.focus_workspace("dev");
+    hub.focus_workspace("dev", None);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
@@ -689,7 +689,7 @@ fn float_beats_tiling() {
         WindowRestrictions::None,
     )
     .unwrap();
-    hub.focus_workspace("dev");
+    hub.focus_workspace("dev", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -755,7 +755,7 @@ fn config_order_first_match_wins() {
         WindowRestrictions::None,
     )
     .unwrap();
-    hub.focus_workspace("code");
+    hub.focus_workspace("code", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -880,7 +880,7 @@ fn sync_preferred_layout_reemits_matched_float_when_matcher_survives() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("dev");
+    hub.focus_workspace("dev", None);
     let ws_id = hub.current_workspace();
 
     hub.insert_window(
@@ -920,7 +920,7 @@ fn sync_preferred_layout_synthesises_float_when_matcher_removed() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("dev");
+    hub.focus_workspace("dev", None);
     let ws_id = hub.current_workspace();
 
     hub.insert_window(
@@ -950,7 +950,7 @@ fn sync_preferred_layout_adopts_manual_float_when_matcher_added() {
         .with_layout(LayoutConfigBuilder::new().build())
         .with_preferred_layout(vec![LayoutWorkspaceConfigBuilder::new("dev").build()])
         .build();
-    hub.focus_workspace("dev");
+    hub.focus_workspace("dev", None);
     let ws_id = hub.current_workspace();
 
     let window_id = hub
@@ -1007,7 +1007,7 @@ fn tiling_insert_routes_against_post_export_state() {
         ])
         .build();
 
-    hub.focus_workspace("dev");
+    hub.focus_workspace("dev", None);
     let dev = hub
         .access
         .workspaces
@@ -1029,7 +1029,7 @@ fn tiling_insert_routes_against_post_export_state() {
 
     hub.export_workspace(dev);
 
-    hub.focus_workspace("0");
+    hub.focus_workspace("0", None);
     let new_window = hub
         .insert_window(
             process_meta("other.exe"),
@@ -1067,8 +1067,8 @@ fn tiling_routes_to_current_workspace_when_it_can_house() {
 
     // "a" has the smaller id, so sorted order alone would pick it. Visit it,
     // then move to "b": the current workspace must win.
-    hub.focus_workspace("a");
-    hub.focus_workspace("b");
+    hub.focus_workspace("a", None);
+    hub.focus_workspace("b", None);
 
     hub.insert_window(
         process_meta("editor.exe"),
@@ -1146,7 +1146,7 @@ fn tiling_falls_back_to_first_workspace_when_current_cannot_house() {
     )
     .expect("routed window inserted");
 
-    hub.focus_workspace("a");
+    hub.focus_workspace("a", None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -1206,8 +1206,8 @@ fn float_routes_to_current_workspace_when_it_can_house() {
 
     // "a" has the smaller id, so sorted order alone would pick it. Visit it,
     // then move to "b": the current workspace must win.
-    hub.focus_workspace("a");
-    hub.focus_workspace("b");
+    hub.focus_workspace("a", None);
+    hub.focus_workspace("b", None);
 
     hub.insert_window(
         process_meta("chat.exe"),

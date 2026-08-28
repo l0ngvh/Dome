@@ -1,14 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
+use anyhow::Context;
 use objc2::MainThreadMarker;
 use objc2_app_kit::NSScreen;
 use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
 use objc2_foundation::{NSNumber, NSString};
 
-use crate::core::{Dimension, Hub, Length, MonitorId, PixelRect, Pixels, WindowId};
+use crate::core::{Dimension, Hub, Length, MonitorId, PixelRect, Pixels, ReportedMonitor};
 use crate::platform::reserve_for_bar;
 
-use super::Dome;
+use super::{Dome, external_bar};
 
 #[derive(Clone, Debug)]
 pub(in crate::platform::macos) struct MonitorInfo {
@@ -29,6 +30,19 @@ pub(in crate::platform::macos) struct MonitorInfo {
     pub(in crate::platform::macos) scale: f64,
 }
 
+impl From<&MonitorInfo> for ReportedMonitor {
+    /// Core scale is always `1.0` on macOS, never the backing factor in `scale`.
+    fn from(info: &MonitorInfo) -> Self {
+        ReportedMonitor {
+            device_name: info.name.clone(),
+            work_area: info.work_area,
+            scale: 1.0,
+            cg_display_id: Some(info.display_id),
+            gdi_device: None,
+        }
+    }
+}
+
 impl std::fmt::Display for MonitorInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -39,13 +53,15 @@ impl std::fmt::Display for MonitorInfo {
     }
 }
 
-pub(in crate::platform::macos) fn get_all_monitors(mtm: MainThreadMarker) -> Vec<MonitorInfo> {
+pub(in crate::platform::macos) fn get_all_monitors(
+    mtm: MainThreadMarker,
+) -> anyhow::Result<Vec<MonitorInfo>> {
     let primary_id = CGMainDisplayID();
 
     NSScreen::screens(mtm)
         .iter()
         .map(|screen| {
-            let display_id = get_display_id(&screen);
+            let display_id = get_display_id(&screen)?;
             let name = screen.localizedName().to_string();
             let bounds = CGDisplayBounds(display_id);
             let frame = screen.frame();
@@ -55,7 +71,7 @@ pub(in crate::platform::macos) fn get_all_monitors(mtm: MainThreadMarker) -> Vec
                 (frame.origin.y + frame.size.height) - (visible.origin.y + visible.size.height);
             let bottom_inset = visible.origin.y - frame.origin.y;
 
-            MonitorInfo {
+            Ok(MonitorInfo {
                 display_id,
                 name,
                 work_area: PixelRect::from_dimension_inward(Dimension::new(
@@ -73,20 +89,21 @@ pub(in crate::platform::macos) fn get_all_monitors(mtm: MainThreadMarker) -> Vec
                 full_height: bounds.size.height as f32,
                 is_primary: display_id == primary_id,
                 scale: screen.backingScaleFactor(),
-            }
+            })
         })
         .collect()
 }
 
-fn get_display_id(screen: &NSScreen) -> CGDirectDisplayID {
+fn get_display_id(screen: &NSScreen) -> anyhow::Result<CGDirectDisplayID> {
     let desc = screen.deviceDescription();
     let key = NSString::from_str("NSScreenNumber");
-    desc.objectForKey(&key)
-        .and_then(|obj| {
-            let num: Option<&NSNumber> = obj.downcast_ref();
-            num.map(|n| n.unsignedIntValue())
-        })
-        .unwrap_or(0)
+    let object = desc
+        .objectForKey(&key)
+        .context("NSScreen deviceDescription is missing NSScreenNumber")?;
+    let number: &NSNumber = object
+        .downcast_ref()
+        .context("NSScreenNumber is not an NSNumber")?;
+    Ok(number.unsignedIntValue())
 }
 
 type DisplayId = u32;
@@ -97,7 +114,6 @@ type DisplayId = u32;
 pub(in crate::platform::macos) struct Monitor {
     id: MonitorId,
     info: MonitorInfo,
-    displayed_windows: HashSet<WindowId>,
 }
 
 impl Monitor {
@@ -111,10 +127,6 @@ impl Monitor {
 
     pub(in crate::platform::macos) fn egui_scale(&self) -> f64 {
         self.info.scale
-    }
-
-    pub(in crate::platform::macos) fn displayed(&self) -> &HashSet<WindowId> {
-        &self.displayed_windows
     }
 }
 
@@ -133,7 +145,6 @@ impl MonitorRegistry {
             Monitor {
                 id: primary_monitor_id,
                 info: primary.clone(),
-                displayed_windows: HashSet::new(),
             },
         );
         reverse.insert(primary_monitor_id, primary.display_id);
@@ -148,10 +159,6 @@ impl MonitorRegistry {
         self.map.contains_key(&display_id)
     }
 
-    pub(super) fn get(&self, display_id: DisplayId) -> Option<MonitorId> {
-        self.map.get(&display_id).map(|e| e.id)
-    }
-
     pub(in crate::platform::macos) fn monitor(&self, monitor_id: MonitorId) -> &Monitor {
         self.reverse
             .get(&monitor_id)
@@ -159,26 +166,10 @@ impl MonitorRegistry {
             .expect("monitor not found in registry")
     }
 
-    pub(in crate::platform::macos) fn set_displayed_windows(
-        &mut self,
-        monitor_id: MonitorId,
-        displayed: HashSet<WindowId>,
-    ) {
-        self.reverse
-            .get(&monitor_id)
-            .and_then(|d| self.map.get_mut(d))
-            .expect("monitor not found in registry")
-            .displayed_windows = displayed;
-    }
-
     pub(super) fn primary_monitor(&self) -> &Monitor {
         self.map
             .get(&self.primary_display_id)
             .expect("primary monitor present")
-    }
-
-    pub(super) fn primary_monitor_id(&self) -> MonitorId {
-        self.get(self.primary_display_id).unwrap()
     }
 
     pub(in crate::platform::macos) fn primary_full_height(&self) -> f32 {
@@ -189,12 +180,13 @@ impl MonitorRegistry {
             .full_height
     }
 
-    pub(super) fn set_primary_display_id(&mut self, display_id: DisplayId) {
-        self.primary_display_id = display_id;
-    }
-
-    pub(super) fn replace_primary(&mut self, new_info: &MonitorInfo) {
-        debug_assert!(!self.map.contains_key(&new_info.display_id));
+    /// Returns the monitor displaced from the incoming primary display, if this
+    /// registry already tracked one there.
+    pub(super) fn replace_primary(&mut self, new_info: &MonitorInfo) -> Option<MonitorId> {
+        let displaced = self.map.get(&new_info.display_id).map(|m| m.id);
+        if let Some(displaced_id) = displaced {
+            self.reverse.remove(&displaced_id);
+        }
         if let Some(mut entry) = self.map.remove(&self.primary_display_id) {
             let old = self.primary_display_id;
             let monitor_id = entry.id;
@@ -204,6 +196,7 @@ impl MonitorRegistry {
             self.primary_display_id = new_info.display_id;
             tracing::info!(old, new = new_info.display_id, "Primary monitor replaced");
         }
+        displaced
     }
 
     pub(super) fn insert(&mut self, monitor: &MonitorInfo, monitor_id: MonitorId) {
@@ -212,22 +205,9 @@ impl MonitorRegistry {
             Monitor {
                 id: monitor_id,
                 info: monitor.clone(),
-                displayed_windows: HashSet::new(),
             },
         );
         self.reverse.insert(monitor_id, monitor.display_id);
-    }
-
-    pub(super) fn remove_displayed_window(&mut self, window_id: WindowId) {
-        for entry in self.map.values_mut() {
-            entry.displayed_windows.remove(&window_id);
-        }
-    }
-
-    pub(super) fn is_displayed(&self, window_id: WindowId) -> bool {
-        self.map
-            .values()
-            .any(|entry| entry.displayed_windows.contains(&window_id))
     }
 
     fn remove_by_id(&mut self, monitor_id: MonitorId) {
@@ -326,29 +306,32 @@ impl MonitorRegistry {
     pub(super) fn reconcile(&mut self, hub: &mut Hub, monitors: &[MonitorInfo]) {
         let current_keys: HashSet<_> = monitors.iter().map(|s| s.display_id).collect();
 
-        // Special handling for when the primary monitor got replaced, i.e. due to mirroring to prevent
-        // disruption due to removal and addition of workspaces.
-        if let Some(new_primary) = monitors.iter().find(|s| s.is_primary) {
-            if !self.contains(new_primary.display_id) {
-                self.replace_primary(new_primary);
-                hub.update_monitor(self.primary_monitor_id(), new_primary.work_area, 1.0);
-            } else {
-                self.set_primary_display_id(new_primary.display_id);
-            }
+        // Mirroring moves the primary role between displays, and the workspaces
+        // follow the role instead of parking.
+        if let Some(new_primary) = monitors.iter().find(|s| s.is_primary)
+            && new_primary.display_id != self.primary_display_id
+        {
+            let occupant = self.replace_primary(new_primary);
+            let primary_monitor_id = hub.primary_monitor();
+            hub.update_monitor(primary_monitor_id, new_primary.into(), occupant);
         }
 
         // Add new monitors first to prevent exhausting all monitors
         for monitor in monitors {
             if !self.contains(monitor.display_id) {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, 1.0);
+                let id = hub.add_monitor(monitor.into());
                 self.insert(monitor, id);
                 tracing::info!(%monitor, "Monitor added");
             }
         }
 
-        for monitor_id in self.remove_stale(&current_keys) {
-            hub.remove_monitor(monitor_id, self.primary_monitor_id());
-            tracing::info!(%monitor_id, fallback = %self.primary_monitor_id(), "Monitor removed");
+        let removed = self.remove_stale(&current_keys);
+        if !removed.is_empty() {
+            for monitor_id in &removed {
+                hub.remove_monitor(*monitor_id);
+            }
+            let primary = hub.primary_monitor();
+            tracing::info!(?removed, %primary, "Monitors removed");
         }
 
         for monitor in monitors {
@@ -361,40 +344,41 @@ impl MonitorRegistry {
                         "Monitor work area changed"
                     );
                 }
-                hub.update_monitor(monitor_id, monitor.work_area, 1.0);
+                hub.update_monitor(monitor_id, monitor.into(), None);
             }
         }
     }
 }
 
 impl Dome {
-    pub(super) fn update_monitors(&mut self, monitors: &[MonitorInfo]) {
-        // Cache the unshrunk list. Re-shrinking an already-shrunk cache would
-        // compound the reservation on each call.
-        self.monitors = monitors.to_vec();
-        if self.status_bars.is_empty() {
-            self.monitor_registry.reconcile(&mut self.hub, monitors);
-        } else {
-            let shrunk: Vec<MonitorInfo> = monitors
-                .iter()
-                .map(|m| {
-                    // Bar-edge math is f32 and shared with Windows, so the work area
-                    // leaves pixel space and comes back.
-                    let work_area = match self.status_bars.rect_for(m.display_id) {
-                        Some(bar) => PixelRect::from_dimension_inward(reserve_for_bar(
-                            m.bounds,
-                            m.work_area.to_dimension(),
-                            bar,
-                        )),
-                        None => m.work_area,
-                    };
-                    MonitorInfo {
-                        work_area,
-                        ..m.clone()
-                    }
-                })
-                .collect();
-            self.monitor_registry.reconcile(&mut self.hub, &shrunk);
+    pub(super) fn reconcile_monitors(&mut self) {
+        match &self.bar_geometry {
+            None => self
+                .monitor_registry
+                .reconcile(&mut self.hub, &self.monitors),
+            Some(geo) => {
+                let rects = external_bar::reserved_rects(geo, &self.monitors);
+                let shrunk: Vec<MonitorInfo> = self
+                    .monitors
+                    .iter()
+                    .map(|m| {
+                        // Bar-edge math is f32 and shared with Windows.
+                        let work_area = match rects.get(&m.display_id) {
+                            Some(bar) => PixelRect::from_dimension_inward(reserve_for_bar(
+                                m.bounds,
+                                m.work_area.to_dimension(),
+                                *bar,
+                            )),
+                            None => m.work_area,
+                        };
+                        MonitorInfo {
+                            work_area,
+                            ..m.clone()
+                        }
+                    })
+                    .collect();
+                self.monitor_registry.reconcile(&mut self.hub, &shrunk);
+            }
         }
         self.primary_full_height = self.monitor_registry.primary_full_height();
     }

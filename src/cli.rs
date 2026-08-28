@@ -50,6 +50,10 @@ enum CliCommand {
         #[command(subcommand)]
         query: CliQuery,
     },
+    Generate {
+        #[command(subcommand)]
+        bar: CliGenerate,
+    },
     #[command(name = "unminimize-window")]
     UnminimizeWindow {
         id: u64,
@@ -69,6 +73,8 @@ enum CliFocus {
     },
     Workspace {
         name: String,
+        #[arg(long)]
+        monitor: Option<String>,
     },
     Monitor {
         #[arg(value_parser = parse_monitor_target)]
@@ -84,6 +90,8 @@ enum CliMove {
     Right,
     Workspace {
         name: String,
+        #[arg(long)]
+        monitor: Option<String>,
     },
     Monitor {
         #[arg(value_parser = parse_monitor_target)]
@@ -119,6 +127,23 @@ enum CliQuery {
     Workspaces,
     #[command(name = "minimized")]
     MinimizedWindows,
+    Monitors,
+}
+
+#[derive(Subcommand, Debug)]
+enum CliGenerate {
+    Yasb {
+        /// YASB config.yaml to edit. Defaults to the YASB config location.
+        #[arg(long)]
+        config: Option<String>,
+    },
+    Sketchybar,
+    Zebar {
+        /// Directory to scaffold the widget pack into. Defaults to the Zebar
+        /// pack location.
+        #[arg(long)]
+        out: Option<String>,
+    },
 }
 
 #[derive(Debug)]
@@ -130,6 +155,7 @@ enum Dispatch {
     Action(Action),
     Query(Query),
     Export,
+    Generate(CliGenerate),
 }
 
 impl From<CliFocus> for FocusTarget {
@@ -143,7 +169,7 @@ impl From<CliFocus> for FocusTarget {
             CliFocus::Tab { direction } => FocusTarget::Tab {
                 direction: direction.into(),
             },
-            CliFocus::Workspace { name } => FocusTarget::Workspace { name },
+            CliFocus::Workspace { name, monitor } => FocusTarget::Workspace { name, monitor },
             CliFocus::Monitor { target } => FocusTarget::Monitor { target },
         }
     }
@@ -156,7 +182,7 @@ impl From<CliMove> for MoveTarget {
             CliMove::Down => MoveTarget::Down,
             CliMove::Left => MoveTarget::Left,
             CliMove::Right => MoveTarget::Right,
-            CliMove::Workspace { name } => MoveTarget::Workspace { name },
+            CliMove::Workspace { name, monitor } => MoveTarget::Workspace { name, monitor },
             CliMove::Monitor { target } => MoveTarget::Monitor { target },
         }
     }
@@ -187,6 +213,7 @@ impl From<CliQuery> for Query {
         match cq {
             CliQuery::Workspaces => Query::Workspaces,
             CliQuery::MinimizedWindows => Query::MinimizedWindows,
+            CliQuery::Monitors => Query::Monitors,
         }
     }
 }
@@ -215,6 +242,7 @@ impl From<CliCommand> for Dispatch {
             CliCommand::Mode { name } => Dispatch::Action(Action::Mode { name }),
             CliCommand::Export => Dispatch::Export,
             CliCommand::Query { query } => Dispatch::Query(query.into()),
+            CliCommand::Generate { bar } => Dispatch::Generate(bar),
             CliCommand::UnminimizeWindow { id } => {
                 // WindowId's tuple-struct constructor is pub(crate) in core, so round-trip
                 // through serde instead. Its Deserialize impl accepts a bare integer, and
@@ -249,6 +277,15 @@ pub fn run() -> anyhow::Result<()> {
         Dispatch::Export => {
             crate::DomeClient.send_export_layout()?;
         }
+        Dispatch::Generate(CliGenerate::Yasb { config }) => {
+            crate::integrations::yasb::generate(config.as_deref())?;
+        }
+        Dispatch::Generate(CliGenerate::Sketchybar) => {
+            crate::integrations::sketchybar::generate()?;
+        }
+        Dispatch::Generate(CliGenerate::Zebar { out }) => {
+            crate::integrations::zebar::generate(out.as_deref())?;
+        }
     }
     Ok(())
 }
@@ -275,6 +312,20 @@ mod tests {
         }
     }
 
+    fn focus_target(argv: &[&str]) -> FocusTarget {
+        match dispatch_from_argv(argv) {
+            Dispatch::Action(Action::Focus(t)) => t,
+            other => panic!("{argv:?} produced {other:?}, expected Focus"),
+        }
+    }
+
+    fn move_target(argv: &[&str]) -> MoveTarget {
+        match dispatch_from_argv(argv) {
+            Dispatch::Action(Action::Move(t)) => t,
+            other => panic!("{argv:?} produced {other:?}, expected Move"),
+        }
+    }
+
     #[test]
     fn cli_focus_subcommands() {
         assert_action(&["dome", "focus", "up"], "focus up");
@@ -297,6 +348,57 @@ mod tests {
         assert_action(&["dome", "move", "right"], "move right");
         assert_action(&["dome", "move", "workspace", "3"], "move workspace 3");
         assert_action(&["dome", "move", "monitor", "left"], "move monitor left");
+    }
+
+    #[test]
+    fn cli_focus_workspace_without_monitor() {
+        match focus_target(&["dome", "focus", "workspace", "3"]) {
+            FocusTarget::Workspace { name, monitor } => {
+                assert_eq!(name, "3");
+                assert_eq!(monitor, None);
+            }
+            other => panic!("expected Workspace, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_focus_workspace_with_monitor() {
+        match focus_target(&[
+            "dome",
+            "focus",
+            "workspace",
+            "3",
+            "--monitor",
+            "DELL U2720Q #1",
+        ]) {
+            FocusTarget::Workspace { name, monitor } => {
+                assert_eq!(name, "3");
+                assert_eq!(monitor.as_deref(), Some("DELL U2720Q #1"));
+            }
+            other => panic!("expected Workspace, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_move_workspace_without_monitor() {
+        match move_target(&["dome", "move", "workspace", "3"]) {
+            MoveTarget::Workspace { name, monitor } => {
+                assert_eq!(name, "3");
+                assert_eq!(monitor, None);
+            }
+            other => panic!("expected Workspace, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_move_workspace_with_monitor() {
+        match move_target(&["dome", "move", "workspace", "2", "--monitor", "B"]) {
+            MoveTarget::Workspace { name, monitor } => {
+                assert_eq!(name, "2");
+                assert_eq!(monitor.as_deref(), Some("B"));
+            }
+            other => panic!("expected Workspace, got {other:?}"),
+        }
     }
 
     #[test]
@@ -349,6 +451,15 @@ mod tests {
     }
 
     #[test]
+    fn cli_query_monitors() {
+        let d = dispatch_from_argv(&["dome", "query", "monitors"]);
+        match d {
+            Dispatch::Query(Query::Monitors) => {}
+            other => panic!("expected Query(Monitors), got {other:?}"),
+        }
+    }
+
+    #[test]
     fn cli_query_minimized() {
         let d = dispatch_from_argv(&["dome", "query", "minimized"]);
         match d {
@@ -364,6 +475,42 @@ mod tests {
         match d {
             Dispatch::Action(Action::UnminimizeWindow(id)) if id == expected => {}
             other => panic!("expected Action(UnminimizeWindow(7)), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_generate_yasb() {
+        let d = dispatch_from_argv(&["dome", "generate", "yasb"]);
+        match d {
+            Dispatch::Generate(CliGenerate::Yasb { config: None }) => {}
+            other => panic!("expected Generate(Yasb) with no config, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_generate_sketchybar() {
+        let d = dispatch_from_argv(&["dome", "generate", "sketchybar"]);
+        match d {
+            Dispatch::Generate(CliGenerate::Sketchybar) => {}
+            other => panic!("expected Generate(Sketchybar), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_generate_zebar() {
+        let d = dispatch_from_argv(&["dome", "generate", "zebar"]);
+        match d {
+            Dispatch::Generate(CliGenerate::Zebar { out: None }) => {}
+            other => panic!("expected Generate(Zebar) with no out, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_generate_zebar_with_out() {
+        let d = dispatch_from_argv(&["dome", "generate", "zebar", "--out", "/tmp/pack"]);
+        match d {
+            Dispatch::Generate(CliGenerate::Zebar { out: Some(ref p) }) if p == "/tmp/pack" => {}
+            other => panic!("expected Generate(Zebar) with out, got {other:?}"),
         }
     }
 

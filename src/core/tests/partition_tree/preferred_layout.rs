@@ -30,7 +30,7 @@ fn insert_first_preferred_window_next_to_focused_window() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
@@ -130,7 +130,7 @@ fn insert_second_preferred_window_forming_lowest_common_ancestor() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub
         .insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
@@ -241,7 +241,7 @@ fn insert_three_preferred_window_to_lowest_common_ancestor() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub
         .insert_window(titled("DDD"), default_rect(), WindowRestrictions::None)
@@ -338,7 +338,7 @@ fn insert_nested_preferred_layout_tree() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub
         .insert_window(titled("DDD"), default_rect(), WindowRestrictions::None)
@@ -445,7 +445,7 @@ fn delete_and_reinsert_the_same_matching_window() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub
         .insert_window(titled("DDD"), default_rect(), WindowRestrictions::None)
@@ -602,7 +602,7 @@ fn clean_up_and_reforming_preferred_contaner() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub
         .insert_window(titled("DDD"), default_rect(), WindowRestrictions::None)
@@ -753,7 +753,7 @@ fn attach_window_after_moving_preferred_window_out_of_preferred_container_reform
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub
         .insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
@@ -897,7 +897,7 @@ fn move_preferred_root_to_another_workspace() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub
         .insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
@@ -906,7 +906,7 @@ fn move_preferred_root_to_another_workspace() {
         .insert_window(titled("AAA"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.focus_parent();
-    hub.move_focused_to_workspace("10");
+    hub.move_focused_to_workspace("10", None);
     let _w2 = hub
         .insert_window(titled("CCC"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -994,7 +994,7 @@ fn move_preferred_container_to_another_workspace() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub
         .insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
@@ -1012,7 +1012,7 @@ fn move_preferred_container_to_another_workspace() {
         .insert_window(titled("TTT"), default_rect(), WindowRestrictions::None)
         .unwrap();
     hub.focus_parent();
-    hub.move_focused_to_workspace("10");
+    hub.move_focused_to_workspace("10", None);
     let _w5 = hub
         .insert_window(titled("CCC"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -1099,7 +1099,7 @@ fn reloading_preferred_layout_puts_matched_windows_to_place() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub
         .insert_window(titled("TTT"), default_rect(), WindowRestrictions::None)
@@ -1231,7 +1231,7 @@ fn reset_to_empty_preferred_layout_dont_disturb_layout() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("BBB"), default_rect(), WindowRestrictions::None);
@@ -1348,7 +1348,7 @@ fn insert_preferred_window_to_non_focused_workspace() {
     ******************************************************************************************************************************************************
     ");
 
-    hub.focus_workspace("10");
+    hub.focus_workspace("10", None);
     assert_eq!(prev_snapshot, snapshot(&hub));
 }
 
@@ -1397,7 +1397,7 @@ fn insert_same_slot_windows_as_sibling() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let w0 = hub
         .insert_window(titled("ABC"), default_rect(), WindowRestrictions::None)
@@ -1587,7 +1587,7 @@ fn same_slot_windows_share_container_with_other_window_slot_under_same_preferred
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub
         .insert_window(titled("BCD"), default_rect(), WindowRestrictions::None)
@@ -1701,7 +1701,7 @@ fn single_window_slot_in_container_slot() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub
         .insert_window(titled("ABC"), default_rect(), WindowRestrictions::None)
@@ -1806,7 +1806,7 @@ fn bare_window_slot() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub
         .insert_window(titled("ABC"), default_rect(), WindowRestrictions::None)
@@ -1931,7 +1931,7 @@ fn sync_preferred_layout_preserves_siblings_order() {
         .with_layout(LayoutConfigBuilder::new().build())
         .with_preferred_layout(layout.clone())
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub
         .insert_window(titled("EEE"), default_rect(), WindowRestrictions::None)
@@ -2033,7 +2033,7 @@ fn export_container_with_single_multi_matched_slot() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub
         .insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
@@ -2111,7 +2111,7 @@ fn matches_tiling_leaf_matcher() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws = hub.current_workspace();
     let strategy = hub.strategies.for_workspace(ws);
     assert!(strategy.matches_tiling(ws, titled("editor").as_ref()));
@@ -2157,7 +2157,7 @@ fn sync_preferred_layout_keeps_focus_history() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     // Out of tree order on purpose: children_dfs yields siblings in reverse, so an
     // insert order of AAA, BBB, CCC rebuilds the recency order by accident.
@@ -2193,7 +2193,7 @@ fn sync_preferred_layout_focuses_window_inside_previously_highlighted_container(
     let mut hub = TestHubBuilder::new()
         .with_layout(LayoutConfigBuilder::new().build())
         .build();
-    hub.focus_workspace("3");
+    hub.focus_workspace("3", None);
     hub.insert_window(titled("AAA"), default_rect(), WindowRestrictions::None)
         .unwrap();
     let bbb = hub

@@ -12,12 +12,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::action::{Action, Actions};
+use crate::action::{Action, Actions, WorkspaceInfo};
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Length, LimitObservation, LimitUpdate, Logical,
-    Physical, PixelRect, Pixels, TilingWindowPlacement, WindowId, WorkspaceInfo,
+    Physical, PixelRect, Pixels, TilingWindowPlacement, WindowId,
 };
 use crate::font::FontConfig;
 use crate::platform::windows::dome::MonitorInfo;
@@ -132,6 +132,7 @@ fn default_monitor() -> MonitorInfo {
     MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
+        gdi_device: "\\\\.\\DISPLAY1".to_string(),
         work_area: PixelRect::from_dimension(Dimension::new(
             Length::ZERO,
             Length::ZERO,
@@ -148,6 +149,7 @@ fn second_monitor() -> MonitorInfo {
     MonitorInfo {
         handle: 2,
         name: "External".to_string(),
+        gdi_device: "\\\\.\\DISPLAY2".to_string(),
         work_area: PixelRect::from_dimension(Dimension::new(
             SCREEN_WIDTH,
             Length::ZERO,
@@ -563,6 +565,12 @@ impl TestEnv {
 
     fn add_monitor(&mut self, monitor: MonitorInfo) {
         self.monitors.lock().unwrap().push(monitor);
+        self.dome.handle_display_change();
+        self.dome.apply_layout();
+    }
+
+    fn remove_monitor(&mut self, handle: isize) {
+        self.monitors.lock().unwrap().retain(|m| m.handle != handle);
         self.dome.handle_display_change();
         self.dome.apply_layout();
     }

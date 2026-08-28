@@ -133,32 +133,10 @@ impl Runner {
                 hwnd_id,
                 observed_at,
             } => {
-                if self.dome.is_tracked_bar(hwnd_id) {
-                    let inspect: Arc<dyn InspectExternalWindow> =
-                        Arc::new(ExternalHwnd::new(hwnd_id.into()));
-                    self.dispatcher.dispatch(
-                        move || Some((inspect.get_visible_rect(), inspect.get_monitor())),
-                        move |observation, runner| {
-                            let Some((rect, monitor)) = observation else {
-                                return;
-                            };
-                            runner.dome.bar_moved(hwnd_id, monitor, rect);
-                        },
-                    );
-                } else if self.dome.location_changed(hwnd_id) {
-                    self.timers
-                        .schedule_move_settle(hwnd_id, observed_at, DEBOUNCE_INTERVAL);
-                }
+                self.dispatch_location_changed(hwnd_id, observed_at);
             }
             HubEvent::WindowTitleChanged(hwnd_id) => {
-                let inspect: Arc<dyn InspectExternalWindow> =
-                    Arc::new(ExternalHwnd::new(hwnd_id.into()));
-                self.dispatcher.dispatch(
-                    move || inspect.get_window_title(),
-                    move |title, runner| {
-                        runner.dome.update_titles(vec![(hwnd_id, title)]);
-                    },
-                );
+                self.dispatch_title_changed(hwnd_id);
             }
             HubEvent::Action(a) => {
                 self.handle_actions(&a);
@@ -169,6 +147,7 @@ impl Runner {
                     crate::action::Query::MinimizedWindows => {
                         self.dome.query_minimized_windows_json()
                     }
+                    crate::action::Query::Monitors => self.dome.query_monitors_json(),
                 };
                 if sender.send(json).is_err() {
                     tracing::debug!("Query response dropped -- receiver gone");
@@ -231,14 +210,7 @@ impl Runner {
         let manage: Arc<dyn ManageExternalWindow> = ext;
         self.dispatcher.dispatch(
             move || {
-                let metadata = WindowsMetadata {
-                    title: inspect.get_window_title(),
-                    process: inspect.get_process_name().unwrap_or_default(),
-                    process_path: inspect.get_process_path().ok(),
-                    class: inspect.get_class_name(),
-                    aumid: inspect.get_aumid(),
-                    app_name: inspect.get_app_display_name(),
-                };
+                let metadata = read_metadata(&*inspect);
                 if Dome::is_known_bar(&metadata) {
                     let rect = inspect.get_visible_rect();
                     let monitor = inspect.get_monitor();
@@ -305,6 +277,72 @@ impl Runner {
         );
     }
 
+    fn dispatch_location_changed(&mut self, hwnd_id: HwndId, observed_at: Instant) {
+        let is_tracked = self.dome.is_tracked_bar(hwnd_id);
+        let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
+        self.dispatcher.dispatch(
+            move || {
+                if is_tracked {
+                    return Some((inspect.get_visible_rect(), inspect.get_monitor()));
+                }
+                let metadata = read_metadata(&*inspect);
+                if !Dome::is_known_bar(&metadata) {
+                    return None;
+                }
+                Some((inspect.get_visible_rect(), inspect.get_monitor()))
+            },
+            move |observation, runner| {
+                if is_tracked {
+                    let Some((rect, monitor)) = observation else {
+                        return;
+                    };
+                    runner.dome.bar_moved(hwnd_id, monitor, rect);
+                    return;
+                }
+                if let Some((rect, monitor)) = observation {
+                    runner.dome.capture_bar(hwnd_id, monitor, rect);
+                } else if runner.dome.location_changed(hwnd_id) {
+                    runner
+                        .timers
+                        .schedule_move_settle(hwnd_id, observed_at, DEBOUNCE_INTERVAL);
+                }
+            },
+        );
+    }
+
+    fn dispatch_title_changed(&mut self, hwnd_id: HwndId) {
+        let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
+        self.dispatcher.dispatch(
+            move || {
+                let metadata = read_metadata(&*inspect);
+                let is_bar = Dome::is_known_bar(&metadata);
+                (
+                    metadata.title,
+                    is_bar,
+                    inspect.get_visible_rect(),
+                    inspect.get_monitor(),
+                )
+            },
+            move |(title, is_bar, rect, monitor), runner| {
+                let is_tracked = runner.dome.is_tracked_bar(hwnd_id);
+                match (is_tracked, is_bar) {
+                    (true, false) => {
+                        runner.dome.remove_bar(hwnd_id);
+                    }
+                    (false, true) => {
+                        if runner.dome.is_managed(hwnd_id) {
+                            runner.dome.window_destroyed(hwnd_id);
+                        }
+                        runner.dome.capture_bar(hwnd_id, monitor, rect);
+                        return;
+                    }
+                    _ => {}
+                }
+                runner.dome.update_titles(vec![(hwnd_id, title)]);
+            },
+        );
+    }
+
     pub(super) fn handle_display_change(&mut self) {
         let to_refresh = self.dome.handle_display_change();
         for hwnd_id in to_refresh {
@@ -339,6 +377,17 @@ impl Runner {
                 runner.dome.apply_layout();
             },
         );
+    }
+}
+
+fn read_metadata(inspect: &dyn InspectExternalWindow) -> WindowsMetadata {
+    WindowsMetadata {
+        title: inspect.get_window_title(),
+        process: inspect.get_process_name().unwrap_or_default(),
+        process_path: inspect.get_process_path().ok(),
+        class: inspect.get_class_name(),
+        aumid: inspect.get_aumid(),
+        app_name: inspect.get_app_display_name(),
     }
 }
 

@@ -27,7 +27,8 @@ use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
 use crate::core::node::{Direction, Logical, Pixels, WindowId};
 use crate::core::strategy::TilingAction;
 use crate::core::{
-    ContainerPlacement, FloatWindowPlacement, PixelRect, TilingWindowPlacement, WindowMetadata,
+    ContainerPlacement, FloatWindowPlacement, PixelRect, ReportedMonitor, TilingWindowPlacement,
+    WindowMetadata,
 };
 
 const ASCII_WIDTH: usize = 150;
@@ -135,6 +136,8 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
         None => "focused=None".to_string(),
     };
     let mut s = format!("Hub({focused})\n");
+    // Gated behind 2+ monitors so pre-existing single-monitor snapshots stay byte-identical.
+    let monitor_count = vp.monitors.len();
     for mp in &vp.monitors {
         // `{:.2}` is a no-op on integer Display, so the printed screen goes through
         // `to_dimension` to keep the snapshot format stable.
@@ -144,6 +147,14 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
             .get(mp.monitor_id)
             .work_area
             .to_dimension();
+        let name_seg = if monitor_count > 1 {
+            format!(
+                ", name={:?}",
+                hub.access.monitors.get(mp.monitor_id).unique_name
+            )
+        } else {
+            String::new()
+        };
         match &mp.layout {
             MonitorLayout::Normal {
                 tiling_windows,
@@ -152,13 +163,13 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
             } => {
                 if tiling_windows.is_empty() && float_windows.is_empty() && containers.is_empty() {
                     s.push_str(&format!(
-                        "  Monitor(id={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}))\n",
-                        mp.monitor_id, screen.x, screen.y, screen.width, screen.height
+                        "  Monitor(id={}{}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}))\n",
+                        mp.monitor_id, name_seg, screen.x, screen.y, screen.width, screen.height
                     ));
                 } else {
                     s.push_str(&format!(
-                        "  Monitor(id={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
-                        mp.monitor_id, screen.x, screen.y, screen.width, screen.height
+                        "  Monitor(id={}{}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
+                        mp.monitor_id, name_seg, screen.x, screen.y, screen.width, screen.height
                     ));
                     for wp in tiling_windows {
                         s.push_str(&fmt_tiling_placement(wp));
@@ -174,8 +185,8 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
             }
             MonitorLayout::Fullscreen(id) => {
                 s.push_str(&format!(
-                    "  Monitor(id={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
-                    mp.monitor_id, screen.x, screen.y, screen.width, screen.height
+                    "  Monitor(id={}{}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
+                    mp.monitor_id, name_seg, screen.x, screen.y, screen.width, screen.height
                 ));
                 s.push_str(&format!("    Fullscreen(id={})\n", id));
                 s.push_str("  )\n");
@@ -680,8 +691,13 @@ impl TestHubBuilder {
 
     fn build(self) -> Hub {
         Hub::new(
-            PixelRect::new(0, 0, ASCII_WIDTH as i32, ASCII_HEIGHT as i32),
-            self.scale,
+            ReportedMonitor {
+                device_name: "primary".to_string(),
+                work_area: PixelRect::new(0, 0, ASCII_WIDTH as i32, ASCII_HEIGHT as i32),
+                scale: self.scale,
+                cg_display_id: None,
+                gdi_device: None,
+            },
             self.layout,
             self.preferred_layout,
         )
@@ -1045,6 +1061,33 @@ pub(crate) fn default_rect() -> PixelRect {
     PixelRect::new(0, 0, 100, 100)
 }
 
+/// Convenience: a 100x30 monitor work area at the given origin.
+pub(super) fn work_area_at(x: i32, y: i32) -> PixelRect {
+    PixelRect::new(x, y, 100, 30)
+}
+
+/// Convenience: a `ReportedMonitor` with no platform identifiers, for the common
+/// add path in tests.
+pub(super) fn reported_monitor(name: String, work_area: PixelRect, scale: f32) -> ReportedMonitor {
+    ReportedMonitor {
+        device_name: name,
+        work_area,
+        scale,
+        cg_display_id: None,
+        gdi_device: None,
+    }
+}
+
+/// Name of the monitor whose active workspace currently holds focus.
+pub(super) fn focused_monitor_name(hub: &Hub) -> String {
+    hub.query_workspaces()
+        .into_iter()
+        .find(|w| w.is_focused)
+        .expect("a focused workspace")
+        .monitor
+}
+
+/// Convenience: create a boxed `TestMetadata` with the given title.
 pub(crate) fn titled(t: &str) -> Box<dyn WindowMetadata> {
     Box::new(TestMetadata {
         title: Some(t.to_owned()),

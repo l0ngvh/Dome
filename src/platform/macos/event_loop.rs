@@ -83,10 +83,7 @@ pub(super) fn run_dome(
         .expect("Failed to insert channel source");
 
     dispatch_reconcile_all(&mut runner);
-    runner.dispatcher.dispatch(
-        move |_marker| ExternalBarProbe::query(),
-        |result, runner| runner.dome.set_reserved_bar(result.ok().flatten()),
-    );
+    dispatch_bar_probe(&mut runner);
     event_loop
         .run(None, &mut runner, |runner| {
             if SIGNAL_RECEIVED.load(Ordering::Relaxed) {
@@ -113,6 +110,7 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
         }
         HubEvent::Sync => {
             dispatch_reconcile_all(runner);
+            dispatch_bar_probe(runner);
         }
         HubEvent::Shutdown => {
             tracing::info!("Shutdown requested");
@@ -140,6 +138,7 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
                 crate::action::Query::MinimizedWindows => {
                     runner.dome.query_minimized_windows_json()
                 }
+                crate::action::Query::Monitors => runner.dome.query_monitors_json(),
             };
             if sender.send(json).is_err() {
                 tracing::debug!("Query response dropped -- receiver gone");
@@ -163,10 +162,7 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
                 )
                 .expect("Failed to insert settle timer");
             runner.settle_token = Some(token);
-            runner.dispatcher.dispatch(
-                move |_marker| ExternalBarProbe::query(),
-                |result, runner| runner.dome.set_reserved_bar(result.ok().flatten()),
-            );
+            dispatch_bar_probe(runner);
         }
         HubEvent::MirrorClicked(cg_id) => {
             runner.dome.mirror_clicked(cg_id);
@@ -397,6 +393,13 @@ fn dispatch_space_changed(runner: &mut DomeRunner) {
                 runner.dome.exit_native_fullscreen(cg_id, pos, size);
             }
         },
+    );
+}
+
+fn dispatch_bar_probe(runner: &mut DomeRunner) {
+    runner.dispatcher.dispatch(
+        move |_marker| ExternalBarProbe::query(),
+        |result, runner| runner.dome.set_reserved_bar(result),
     );
 }
 

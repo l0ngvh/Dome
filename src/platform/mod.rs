@@ -12,8 +12,8 @@ use crate::core::{Dimension, Length};
 /// Intrusion is measured against the CURRENT work area, not the bounds, to
 /// prevent a double subtract: a bar the OS already excludes (an AppBar, or one
 /// inside the macOS menu-bar inset) intrudes by zero and the shrink is a no-op.
-/// A bar hugging no edge (a centered floating island) leaves the work area
-/// unchanged. Island bars are out of scope for v1.
+/// A bar not at a screen edge (a centered placeholder) leaves the work area
+/// unchanged. Non-edge bars are out of scope for v1.
 ///
 /// Does no scaling. The caller owns unit conversion, so macOS feeds logical
 /// rects and Windows feeds physical rects.
@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn island_bar_leaves_work_area_unchanged() {
+    fn non_edge_bar_leaves_work_area_unchanged() {
         let bounds = dim(0.0, 0.0, 1920.0, 1080.0);
         let work_area = dim(0.0, 0.0, 1920.0, 1080.0);
         let bar = dim(800.0, 500.0, 320.0, 40.0);

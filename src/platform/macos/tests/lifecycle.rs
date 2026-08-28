@@ -1,9 +1,17 @@
 use std::sync::Arc;
 
 use crate::action::{Action, Actions};
+use crate::core::ReportedMonitor;
 use crate::platform::macos::dome::{ExtRefresh, MacOSMetadata, NewWindow, PendingAdd};
 
 use super::*;
+
+#[test]
+fn core_scale_is_one_despite_the_backing_factor() {
+    // `MonitorInfo.scale` is the NSScreen backing factor, 2.0 in the harness.
+    // Core scale is always 1.0 on macOS, so the conversion must not carry it.
+    assert_eq!(ReportedMonitor::from(&default_monitor()).scale, 1.0);
+}
 
 #[test]
 fn discover_native_fullscreen_window() {
@@ -72,21 +80,7 @@ fn monitor_change_rehides_offscreen_windows() {
     let offscreen_before = macos.window_frame(cg1);
     assert!(macos.is_offscreen(cg1));
 
-    let second_monitor = MonitorInfo {
-        display_id: 2,
-        name: "External".to_string(),
-        work_area: PixelRect::new(1920, 0, 2560, 1440),
-        bounds: Dimension::new(
-            Length::new(1920.0),
-            Length::new(0.0),
-            Length::new(2560.0),
-            Length::new(1440.0),
-        ),
-        full_height: 1440.0,
-        is_primary: false,
-        scale: 2.0,
-    };
-    dome.monitors_changed(vec![default_monitor(), second_monitor]);
+    dome.monitors_changed(vec![default_monitor(), second_monitor()]);
     macos.settle(&mut dome, 10);
 
     assert!(macos.is_offscreen(cg1));
@@ -240,21 +234,7 @@ fn render_frame_focused_none_on_empty_workspace() {
 fn render_frame_focused_monitor_changes_on_focus_monitor() {
     let macos = MacOS::new();
     let mut dome = macos.setup_dome();
-    let second_monitor = MonitorInfo {
-        display_id: 2,
-        name: "External".to_string(),
-        work_area: PixelRect::new(1920, 0, 2560, 1440),
-        bounds: Dimension::new(
-            Length::new(1920.0),
-            Length::ZERO,
-            Length::new(2560.0),
-            Length::new(1440.0),
-        ),
-        full_height: 1440.0,
-        is_primary: false,
-        scale: 2.0,
-    };
-    dome.monitors_changed(vec![default_monitor(), second_monitor]);
+    dome.monitors_changed(vec![default_monitor(), second_monitor()]);
 
     let before = macos.last_frame_state();
     send(&mut dome, "focus monitor right");
@@ -477,5 +457,122 @@ fn reconcile_fullscreen_guard_is_per_pid() {
     assert!(
         dome.tracked_window(cg2).is_some(),
         "PID-200's fullscreen window must remain tracked"
+    );
+}
+
+#[test]
+fn parked_monitor_windows_hide_on_unplug() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    dome.monitors_changed(vec![default_monitor(), second_monitor()]);
+
+    send(&mut dome, "focus monitor right");
+    let win = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);
+    macos.settle(&mut dome, 10);
+    assert_eq!(
+        macos.window_frame(win),
+        (1924, 4, 2552, 1432),
+        "window should be tiled on the second monitor before unplug"
+    );
+
+    dome.monitors_changed(vec![default_monitor()]);
+    macos.settle(&mut dome, 10);
+
+    // Dome parks a hidden window one pixel inside the furthest monitor's bottom-right
+    // corner, which is (1919, 1079) once only the primary remains. Asserting the exact
+    // spot separates a parked window from one left behind at the departed monitor's
+    // coordinates, where it would still read as offscreen.
+    let (x, y, _, _) = macos.window_frame(win);
+    assert_eq!(
+        (x, y),
+        (1919, 1079),
+        "parked workspace's window rides the hide diff after unplug, no workspace switch"
+    );
+}
+
+#[test]
+fn parked_monitor_windows_unhide_on_visit() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    dome.monitors_changed(vec![default_monitor(), second_monitor()]);
+
+    send(&mut dome, "focus monitor right");
+    let win = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    dome.monitors_changed(vec![default_monitor()]);
+    macos.settle(&mut dome, 10);
+    let (x, y, _, _) = macos.window_frame(win);
+    assert_eq!((x, y), (1919, 1079), "window parks offscreen on unplug");
+
+    // Visiting by name plus origin points the primary's active workspace at the parked
+    // workspace, so the window surfaces without reattaching to a monitor.
+    send(&mut dome, "focus workspace 0 --monitor External");
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(
+        macos.window_frame(win),
+        (4, 4, 1912, 1072),
+        "visiting the parked workspace tiles its window on the primary"
+    );
+}
+
+#[test]
+fn primary_monitor_answers_to_its_display_name() {
+    let macos = MacOS::new();
+    let dome = macos.setup_dome();
+
+    let monitors = dome.query_monitors_json();
+    assert!(monitors.contains("\"unique_name\":\"Test\""), "{monitors}");
+
+    let workspaces = dome.query_workspaces_json();
+    assert!(workspaces.contains("\"monitor\":\"Test\""), "{workspaces}");
+    assert!(!workspaces.contains("primary"), "{workspaces}");
+}
+
+#[test]
+fn primary_change_to_a_new_display_carries_the_workspaces() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    let mut incoming = default_monitor();
+    incoming.display_id = 3;
+    incoming.name = "Studio".to_string();
+    dome.monitors_changed(vec![incoming]);
+    macos.settle(&mut dome, 10);
+
+    let workspaces = dome.query_workspaces_json();
+    assert!(
+        workspaces.contains("\"monitor\":\"Studio\""),
+        "{workspaces}"
+    );
+    assert!(!workspaces.contains("Parked"), "{workspaces}");
+}
+
+#[test]
+fn primary_change_to_a_tracked_display_parks_the_displaced_workspaces() {
+    let macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    dome.monitors_changed(vec![default_monitor(), second_monitor()]);
+    macos.settle(&mut dome, 10);
+
+    let mut demoted = default_monitor();
+    demoted.is_primary = false;
+    let mut promoted = second_monitor();
+    promoted.is_primary = true;
+    dome.monitors_changed(vec![demoted, promoted]);
+    macos.settle(&mut dome, 10);
+
+    let workspaces = dome.query_workspaces_json();
+    assert!(workspaces.contains("\"state\":\"Parked\""), "{workspaces}");
+    assert!(
+        workspaces.contains("\"monitor\":\"External\""),
+        "{workspaces}"
     );
 }

@@ -2,6 +2,7 @@ use crate::config::{
     LayoutWorkspaceConfig, MasterConfig, PaneConfig, SplitMode, Strategy, TreeLayoutNode,
 };
 use crate::core::GlobalLayoutConfig;
+use crate::core::ReportedMonitor;
 use crate::core::hub::Hub;
 use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::setup_logger_with_level;
@@ -36,7 +37,17 @@ fn layout(
 }
 
 fn setup_hub_with_layout(layout: GlobalLayoutConfig, overrides: Vec<LayoutWorkspaceConfig>) -> Hub {
-    Hub::new(PixelRect::new(0, 0, 150, 30), 1.0, layout, overrides)
+    Hub::new(
+        ReportedMonitor {
+            device_name: "primary".to_string(),
+            work_area: PixelRect::new(0, 0, 150, 30),
+            scale: 1.0,
+            cg_display_id: None,
+            gdi_device: None,
+        },
+        layout,
+        overrides,
+    )
 }
 
 #[test]
@@ -339,7 +350,7 @@ fn sync_config_swap_iterates_every_active_workspace() {
     hub.insert_window(titled("w17"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w18"), default_rect(), WindowRestrictions::None);
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_window(titled("w19"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w20"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w21"), default_rect(), WindowRestrictions::None);
@@ -350,7 +361,7 @@ fn sync_config_swap_iterates_every_active_workspace() {
         .unwrap();
 
     // Go back to workspace "0" so post-swap snapshot shows it.
-    hub.focus_workspace("0");
+    hub.focus_workspace("0", None);
 
     let l = layout(Strategy::Master, 0.5, 1, &["w23"], &[]);
     hub.sync_configuration(l);
@@ -397,7 +408,7 @@ fn sync_config_swap_iterates_every_active_workspace() {
     +-------------------------------------------------------------------------+***************************************************************************
     ");
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(8))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -459,7 +470,7 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
     hub.insert_window(titled("w26"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w27"), default_rect(), WindowRestrictions::None);
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_window(titled("w28"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w29"), default_rect(), WindowRestrictions::None);
 
@@ -508,7 +519,7 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
     ");
 
     // Workspace "0" still uses partition-tree (equal horizontal split).
-    hub.focus_workspace("0");
+    hub.focus_workspace("0", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -677,9 +688,9 @@ fn moving_a_highlighted_container_into_master_flattens_it() {
     hub.insert_window(titled("w36"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
 
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -729,8 +740,8 @@ fn master_focuses_its_master_pane_after_a_container_arrives() {
         .unwrap();
     hub.focus_parent();
 
-    hub.move_focused_to_workspace("1");
-    hub.focus_workspace("1");
+    hub.move_focused_to_workspace("1", None);
+    hub.focus_workspace("1", None);
 
     // The dissolve hands over w38 first, so the single master slot takes it and w37,
     // attached last, lands in the stack. Focusing the last attachment would pick w37, so
