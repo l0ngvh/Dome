@@ -1,14 +1,12 @@
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
 use std::sync::mpsc::SyncSender;
 use std::time::Duration;
 
-use interprocess::local_socket::{
-    GenericFilePath, ListenerOptions, ToFsName,
-    traits::{Listener, Stream},
-};
+use interprocess::local_socket::{ListenerOptions, traits::Listener};
 
-use crate::action::{Actions, IpcMessage, Query};
+use dome_ipc::DomeClient;
+use dome_ipc::action::{Actions, IpcMessage, Query};
+use dome_ipc::socket::socket_name;
 
 pub(crate) enum IpcEvent {
     Action(Actions),
@@ -22,52 +20,6 @@ pub(crate) enum IpcEvent {
 
 const QUERY_TIMEOUT: Duration = Duration::from_secs(1);
 const QUERY_TIMEOUT_JSON: &str = r#"{"error":"query timed out"}"#;
-
-fn socket_path() -> PathBuf {
-    #[cfg(unix)]
-    {
-        std::env::temp_dir().join("dome.sock")
-    }
-    #[cfg(windows)]
-    {
-        PathBuf::from(r"\\.\pipe\dome")
-    }
-}
-
-fn socket_name() -> interprocess::local_socket::Name<'static> {
-    socket_path().to_fs_name::<GenericFilePath>().unwrap()
-}
-
-#[derive(Default)]
-pub struct DomeClient;
-
-impl DomeClient {
-    pub fn ping(&self) -> bool {
-        interprocess::local_socket::Stream::connect(socket_name()).is_ok()
-    }
-
-    fn send(&self, msg: &IpcMessage) -> std::io::Result<String> {
-        let mut stream = interprocess::local_socket::Stream::connect(socket_name())?;
-        let json = serde_json::to_string(msg).map_err(std::io::Error::other)?;
-        writeln!(stream, "{json}")?;
-
-        let mut response = String::new();
-        BufReader::new(&stream).read_line(&mut response)?;
-        Ok(response.trim().to_string())
-    }
-
-    pub fn send_action(&self, action: &crate::action::Action) -> std::io::Result<String> {
-        self.send(&IpcMessage::Action(action.clone()))
-    }
-
-    pub fn send_query(&self, query: &crate::action::Query) -> std::io::Result<String> {
-        self.send(&IpcMessage::Query(query.clone()))
-    }
-
-    pub fn send_export_layout(&self) -> std::io::Result<String> {
-        self.send(&IpcMessage::ExportLayout)
-    }
-}
 
 pub(crate) fn start_server<F>(export_layout_path: String, dispatch: F) -> anyhow::Result<()>
 where
@@ -109,7 +61,7 @@ where
             }
             // Stale socket file (Unix only, Windows named pipes auto-cleanup)
             #[cfg(unix)]
-            std::fs::remove_file(socket_path())?;
+            std::fs::remove_file(dome_ipc::socket::socket_path())?;
             ListenerOptions::new().name(name).create_sync()?
         }
         Err(e) => return Err(e.into()),

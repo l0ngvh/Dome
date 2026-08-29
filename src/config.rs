@@ -11,7 +11,7 @@ use crate::action::{
 };
 use crate::core::{Length, Logical, PaneDisplay, Pixels, Unit};
 use crate::font::{FontConfig, MAX_FONT_SIZE, MIN_FONT_SIZE, default_text_size};
-use crate::theme::{Flavor, Theme};
+use crate::theme::Flavor;
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1219,10 +1219,6 @@ impl Default for Config {
 }
 
 impl Config {
-    pub(crate) fn theme(&self) -> Theme {
-        Theme::from_flavor(self.theme)
-    }
-
     #[cfg(target_os = "windows")]
     pub(crate) fn default_path() -> String {
         let config_dir = std::env::var("APPDATA").unwrap_or_else(|_| {
@@ -1544,19 +1540,6 @@ mod tests {
     fn font_deserializes_via_config() {
         let config: Config = toml::from_str("[font]\ntext_size = 18.0").unwrap();
         assert_eq!(config.font.text_size, 18.0);
-    }
-
-    #[test]
-    fn config_theme_method_returns_correct_theme() {
-        use crate::theme::Theme;
-        let config = Config {
-            theme: Flavor::Latte,
-            ..Config::default()
-        };
-        assert_eq!(
-            config.theme().focused_border,
-            Theme::from_flavor(Flavor::Latte).focused_border
-        );
     }
 
     #[test]

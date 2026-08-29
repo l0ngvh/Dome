@@ -150,6 +150,37 @@ pub(crate) fn paint_window_border(
     );
 }
 
+/// The window's canvas is exactly the visible frame, so the border draws at local
+/// origin. `layer_painter` skips egui's Area sizing pass, which would blank the first
+/// frame.
+pub(crate) fn paint_float_border(
+    ctx: &egui::Context,
+    frame: Dimension<Logical>,
+    visible_frame: Dimension<Logical>,
+    is_highlighted: bool,
+    theme: &Theme,
+    border: BorderMetrics,
+) {
+    let painter = ctx.layer_painter(LayerId::new(Order::Middle, Id::new("border")));
+    let clip = Rect::from_min_size(
+        pos2(0.0, 0.0),
+        vec2(
+            visible_frame.width.logical(),
+            visible_frame.height.logical(),
+        ),
+    );
+    paint_window_border(
+        &painter.with_clip_rect(clip),
+        frame,
+        visible_frame,
+        is_highlighted,
+        None,
+        theme,
+        border,
+        vec2(0.0, 0.0),
+    );
+}
+
 /// `tab_bar_frame` is the tab bar's rect in window-local logical points.
 #[expect(
     clippy::too_many_arguments,

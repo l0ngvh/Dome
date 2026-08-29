@@ -4,6 +4,12 @@ pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) mod render;
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) mod tab_bar;
+
 use crate::core::{Dimension, Length};
 
 /// Subtract an observed status-bar rect from a monitor's work area so tiled

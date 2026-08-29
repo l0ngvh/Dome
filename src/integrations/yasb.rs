@@ -59,7 +59,7 @@ pub(crate) fn generate(config_path: Option<&str>) -> anyhow::Result<()> {
     );
 
     let json = DomeClient
-        .send_query(&Query::Monitors)
+        .query(&Query::Monitors)
         .context("query monitors (is dome running?)")?;
     let monitors: Vec<MonitorDetails> = serde_json::from_str(&json)
         .with_context(|| format!("dome query monitors did not return a monitor array: {json}"))?;

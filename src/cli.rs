@@ -268,14 +268,14 @@ pub fn run() -> anyhow::Result<()> {
     match dispatch {
         Dispatch::Launch { config, layout } => crate::run_app(config, layout)?,
         Dispatch::Action(action) => {
-            crate::DomeClient.send_action(&action)?;
+            crate::DomeClient.action(&action)?;
         }
         Dispatch::Query(query) => {
-            let response = crate::DomeClient.send_query(&query)?;
+            let response = crate::DomeClient.query(&query)?;
             println!("{response}");
         }
         Dispatch::Export => {
-            crate::DomeClient.send_export_layout()?;
+            crate::DomeClient.export()?;
         }
         Dispatch::Generate(CliGenerate::Yasb { config }) => {
             crate::integrations::yasb::generate(config.as_deref())?;

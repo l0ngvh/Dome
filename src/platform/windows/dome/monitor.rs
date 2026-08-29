@@ -202,8 +202,7 @@ impl MonitorRegistry {
 
     /// Mirrors `monitor` into the tracked entry and returns its id with the
     /// previous work area and scale. Windows can move a szDevice or rename a
-    /// display with no geometry change, so the mirror is unconditional and
-    /// `apply_dpi_change`, which has no `MonitorInfo`, reads current values.
+    /// display with no geometry change, so the mirror is unconditional.
     fn update_monitor(&mut self, monitor: &MonitorInfo) -> Option<(MonitorId, PixelRect, f32)> {
         let entry = self
             .monitors
@@ -293,26 +292,6 @@ impl MonitorRegistry {
         }
 
         MonitorChange { added, removed }
-    }
-
-    /// Returns `true` when the scale changed and was applied.
-    pub(super) fn apply_dpi_change(&mut self, handle: isize, dpi: u32, hub: &mut Hub) -> bool {
-        let Some(id) = self.id_for_handle(handle) else {
-            tracing::warn!(handle, dpi, "DPI change for unknown monitor handle");
-            return false;
-        };
-        let scale = dpi as f32 / BASE_DPI;
-        if self.monitors.get(&id).is_some_and(|ms| ms.scale == scale) {
-            return false;
-        }
-        let previous = self.monitors.get_mut(&id).map(|ms| {
-            let prev = ms.scale;
-            ms.scale = scale;
-            prev
-        });
-        hub.update_monitor(id, ReportedMonitor::from(&self.monitors[&id]), None);
-        tracing::info!(%id, dpi, scale, ?previous, "Monitor scale updated via DPI change");
-        true
     }
 }
 

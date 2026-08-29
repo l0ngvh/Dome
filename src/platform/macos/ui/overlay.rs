@@ -1,127 +1,96 @@
-// Coordinate system: logical points throughout (AppKit, AX, and Core Graphics are all
-// logical-point-native). Renderer::render passes pixels_per_point = backingScaleFactor; shell
-// passes core Dimension (= Dimension<Logical> on macOS) directly with no
-// physical-to-logical division at any boundary.
-
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use calloop::channel::Sender as CalloopSender;
+use dome_auxiliary_window::{
+    AuxiliaryWindow, AuxiliaryWindowExtMacOs, AuxiliaryWindowHandler, MouseButton,
+    PhysicalPosition, PhysicalSize, WindowAttributes, WindowLevel,
+};
+use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
-use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSEvent, NSFloatingWindowLevel, NSNormalWindowLevel, NSResponder,
-    NSView, NSWindow, NSWindowCollectionBehavior, NSWindowLevel, NSWindowStyleMask,
-};
+use objc2_application_services::AXUIElement;
+use objc2_core_foundation::kCFBooleanTrue;
 use objc2_core_graphics::CGWindowID;
-use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
+use objc2_foundation::NSRect;
 use objc2_io_surface::IOSurface;
-use objc2_quartz_core::{
-    CAAutoresizingMask, CALayer, CAMetalLayer, CATransaction, kCAGravityResize,
-};
+use objc2_quartz_core::{CAAutoresizingMask, CALayer, CATransaction, kCAGravityResize};
 
 use super::super::dome::{ContainerShow, HubEvent};
-use super::renderer::{Renderer, WgpuFactory};
+use super::compositor::{MacOsCompositor, physical_size};
 use crate::config::Config;
 use crate::core::{
     ContainerId, Dimension, FloatWindowPlacement, Length, Logical, TilingWindowPlacement,
 };
 use crate::font::FontConfig;
 use crate::overlay::{self, BorderMetrics, LogicalTiledContainer, LogicalTiledWindow};
+use crate::platform::macos::objc2_wrapper::{kAXFrontmostAttribute, set_attribute_value};
+use crate::platform::render::{Renderer, WgpuContext};
+use crate::platform::tab_bar::TabBarWidget;
 use crate::theme::Flavor;
 
-define_class!(
-    #[unsafe(super(NSWindow, NSResponder, NSObject))]
-    #[thread_kind = MainThreadOnly]
-    struct KeyableWindow;
+fn frame_attrs(frame: NSRect) -> (PhysicalPosition, PhysicalSize) {
+    (
+        PhysicalPosition {
+            x: frame.origin.x.round() as i32,
+            y: frame.origin.y.round() as i32,
+        },
+        PhysicalSize {
+            width: frame.size.width.round() as u32,
+            height: frame.size.height.round() as u32,
+        },
+    )
+}
 
-    unsafe impl NSObjectProtocol for KeyableWindow {}
+struct FloatHandler {
+    hub_sender: CalloopSender<HubEvent>,
+    cg_id: CGWindowID,
+}
 
-    impl KeyableWindow {
-        #[unsafe(method(canBecomeKeyWindow))]
-        fn can_become_key_window(&self) -> bool {
-            true
-        }
-    }
-);
-
-impl KeyableWindow {
-    fn new(mtm: MainThreadMarker, frame: NSRect, style: NSWindowStyleMask) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(());
-        unsafe {
-            msg_send![
-                super(this),
-                initWithContentRect: frame,
-                styleMask: style,
-                backing: NSBackingStoreType::Buffered,
-                defer: false,
-            ]
-        }
+impl AuxiliaryWindowHandler for FloatHandler {
+    fn on_mouse_down(&mut self, _at: PhysicalPosition, _button: MouseButton) {
+        self.hub_sender
+            .send(HubEvent::MirrorClicked(self.cg_id))
+            .ok();
     }
 }
 
-const FLOAT_OVERLAY_LEVEL: NSWindowLevel = NSFloatingWindowLevel;
-
 pub(super) struct FloatOverlay {
-    window: Retained<NSWindow>,
+    window: AuxiliaryWindow,
     renderer: Renderer,
     mirror_layer: Retained<CALayer>,
-    is_focused: Cell<bool>,
+    is_focused: bool,
     placement: Option<FloatWindowPlacement>,
     scale: f64,
     border_thickness: Length<Logical>,
-    config: Config,
 }
 
 impl FloatOverlay {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "font added for font config plumbing; restructuring FloatOverlay::new is out of scope"
-    )]
     pub(super) fn new(
-        mtm: MainThreadMarker,
+        _mtm: MainThreadMarker,
         frame: NSRect,
         cg_id: CGWindowID,
         hub_sender: CalloopSender<HubEvent>,
-        wgpu_factory: Rc<WgpuFactory>,
-        config: Config,
+        gpu: &WgpuContext,
         flavor: Flavor,
         font: &FontConfig,
     ) -> Self {
-        let window = unsafe {
-            NSWindow::initWithContentRect_styleMask_backing_defer(
-                NSWindow::alloc(mtm),
-                frame,
-                NSWindowStyleMask::Borderless,
-                NSBackingStoreType::Buffered,
-                false,
-            )
-        };
-        window.setBackgroundColor(Some(&NSColor::clearColor()));
-        window.setOpaque(false);
-        window.setLevel(FLOAT_OVERLAY_LEVEL);
-        window.setCollectionBehavior(
-            NSWindowCollectionBehavior::Auxiliary
-                | NSWindowCollectionBehavior::Default
-                | NSWindowCollectionBehavior::Transient
-                | NSWindowCollectionBehavior::FullScreenNone
-                | NSWindowCollectionBehavior::FullScreenDisallowsTiling
-                | NSWindowCollectionBehavior::IgnoresCycle,
-        );
-        unsafe { window.setReleasedWhenClosed(false) };
-
-        let scale = window.backingScaleFactor();
+        // No window exists to read backingScaleFactor from yet. render() sets the real
+        // scale before the first present.
+        let scale = 1.0;
+        let compositor = MacOsCompositor::new(scale, None);
+        let metal_layer = compositor.layer();
+        let (init_w, init_h) = physical_size(frame.size.width, frame.size.height, scale);
         let renderer = Renderer::new(
-            &wgpu_factory,
-            scale,
-            frame.size.width,
-            frame.size.height,
+            gpu,
+            Box::new(compositor),
+            init_w,
+            init_h,
             flavor,
             font,
-            None,
-        );
-        let metal_layer = renderer.layer();
+            Box::new(crate::platform::macos::font::resolve_system_font),
+        )
+        .expect("float overlay renderer init");
 
         let root_layer = CALayer::layer();
         let mirror_layer = CALayer::layer();
@@ -135,24 +104,28 @@ impl FloatOverlay {
             root_layer.addSublayer(&metal_layer);
         }
 
-        let view = FloatOverlayView::new(
-            mtm,
-            NSRect::new(NSPoint::new(0.0, 0.0), frame.size),
-            root_layer.clone(),
-            hub_sender,
-            cg_id,
-        );
-        window.setContentView(Some(&view));
+        let (position, size) = frame_attrs(frame);
+        let window = AuxiliaryWindow::new(
+            &WindowAttributes {
+                position,
+                size,
+                click_through: true,
+                focusable: false,
+            },
+            Box::new(FloatHandler { hub_sender, cg_id }),
+        )
+        .expect("auxiliary window on main thread");
+        window.set_level(WindowLevel::Floating);
+        window.set_content_layer(&root_layer);
 
         Self {
             window,
             renderer,
             mirror_layer,
-            is_focused: Cell::new(false),
+            is_focused: false,
             placement: None,
             scale: 1.0,
             border_thickness: Length::new(0.0),
-            config,
         }
     }
 
@@ -167,99 +140,58 @@ impl FloatOverlay {
         self.placement = Some(*placement);
         self.scale = scale;
         self.border_thickness = border_thickness;
-        self.is_focused.set(is_focused);
+        self.is_focused = is_focused;
 
-        self.window.setFrame_display(cocoa_frame, true);
-        self.renderer
-            .resize(scale, cocoa_frame.size.width, cocoa_frame.size.height);
+        let (position, size) = frame_attrs(cocoa_frame);
+        self.window.set_frame(position, size);
+        let (pw, ph) = physical_size(cocoa_frame.size.width, cocoa_frame.size.height, scale);
+        self.renderer.resize(scale as f32, pw, ph);
         self.mirror_layer.setContentsScale(scale);
 
         if !is_focused {
-            self.window.setIgnoresMouseEvents(false);
+            self.window.set_click_through(false);
             self.mirror_layer.setHidden(false);
         } else {
-            self.window.setIgnoresMouseEvents(true);
+            self.window.set_click_through(true);
             self.mirror_layer.setHidden(true);
         }
 
-        let config = &self.config;
         let border = BorderMetrics::from_thickness(self.border_thickness);
-        let theme = config.theme();
+        let theme = self.renderer.theme();
         self.renderer.render(scale as f32, Vec::new(), |ui| {
-            // layer_painter bypasses egui's Area sizing pass, avoiding
-            // black/invisible borders on the first frame.
-            let painter = ui.ctx().layer_painter(egui::LayerId::new(
-                egui::Order::Middle,
-                egui::Id::new("border"),
-            ));
-            let visible_border_box = placement.visible_border_box.to_dimension();
-            let clip = egui::Rect::from_min_size(
-                egui::pos2(0.0, 0.0),
-                egui::vec2(
-                    visible_border_box.width.logical(),
-                    visible_border_box.height.logical(),
-                ),
-            );
-            overlay::paint_window_border(
-                &painter.with_clip_rect(clip),
+            overlay::paint_float_border(
+                ui.ctx(),
                 placement.border_box.to_dimension(),
-                visible_border_box,
+                placement.visible_border_box.to_dimension(),
                 placement.is_highlighted,
-                None,
                 &theme,
                 border,
-                egui::Vec2::ZERO,
             );
         });
-        self.window.setIsVisible(true);
+        self.window.set_visible(true);
     }
 
     pub(super) fn set_config(&mut self, config: &Config) {
-        if self.config.theme != config.theme {
-            self.renderer.apply_theme(config.theme);
-        }
-        if self.config.font != config.font {
-            if self.config.font.family != config.font.family {
-                self.renderer.reinstall_fonts(config.font.family.as_deref());
-            }
-            self.renderer.apply_font(&config.font);
-        }
-        self.config = config.clone();
+        // Borders only, no text, so the font is not applied.
+        self.renderer.set_theme(config.theme);
         if let Some(placement) = self.placement {
-            let config = &self.config;
-            // The stored thickness is one frame stale after a config change. The
-            // following flush_layout carries the new one.
             let border = BorderMetrics::from_thickness(self.border_thickness);
-            let theme = config.theme();
+            let theme = self.renderer.theme();
             self.renderer.render(self.scale as f32, Vec::new(), |ui| {
-                let painter = ui.ctx().layer_painter(egui::LayerId::new(
-                    egui::Order::Middle,
-                    egui::Id::new("border"),
-                ));
-                let visible_border_box = placement.visible_border_box.to_dimension();
-                let clip = egui::Rect::from_min_size(
-                    egui::pos2(0.0, 0.0),
-                    egui::vec2(
-                        visible_border_box.width.logical(),
-                        visible_border_box.height.logical(),
-                    ),
-                );
-                overlay::paint_window_border(
-                    &painter.with_clip_rect(clip),
+                overlay::paint_float_border(
+                    ui.ctx(),
                     placement.border_box.to_dimension(),
-                    visible_border_box,
+                    placement.visible_border_box.to_dimension(),
                     placement.is_highlighted,
-                    None,
                     &theme,
                     border,
-                    egui::Vec2::ZERO,
                 );
             });
         }
     }
 
     pub(super) fn apply_frame(&mut self, surface: &IOSurface) {
-        if self.is_focused.get() {
+        if self.is_focused {
             return;
         }
         // Core Animation applies a 0.25s implicit crossfade when contents changes.
@@ -276,264 +208,130 @@ impl FloatOverlay {
     }
 }
 
-impl Drop for FloatOverlay {
-    fn drop(&mut self) {
-        self.window.close();
-    }
-}
+struct TilingHandler;
+
+impl AuxiliaryWindowHandler for TilingHandler {}
 
 pub(super) struct TilingOverlay {
-    window: Retained<KeyableWindow>,
-    view: Retained<TilingOverlayView>,
+    window: AuxiliaryWindow,
+    renderer: Renderer,
+    monitor: Dimension,
+    windows: Vec<TilingWindowPlacement>,
+    containers: Vec<ContainerShow>,
+    border_thickness: Length<Logical>,
+    scale: f64,
 }
 
 impl TilingOverlay {
     pub(super) fn new(
-        mtm: MainThreadMarker,
-        wgpu_factory: Rc<WgpuFactory>,
+        _mtm: MainThreadMarker,
+        gpu: &WgpuContext,
         config: Config,
         cocoa_frame: NSRect,
         scale: f64,
     ) -> Self {
         let flavor = config.theme;
         let font = config.font.clone();
-        let window = KeyableWindow::new(mtm, cocoa_frame, NSWindowStyleMask::Borderless);
-        window.setBackgroundColor(Some(&NSColor::clearColor()));
-        window.setOpaque(false);
-        window.setLevel(NSNormalWindowLevel - 1);
-        window.setCollectionBehavior(
-            NSWindowCollectionBehavior::Default
-                | NSWindowCollectionBehavior::FullScreenNone
-                | NSWindowCollectionBehavior::FullScreenDisallowsTiling
-                | NSWindowCollectionBehavior::IgnoresCycle,
-        );
-        unsafe { window.setReleasedWhenClosed(false) };
-        // Click-through so mouse events fall through to the application
-        // window beneath. Tab clicks land on the per-container TabBarOverlay,
-        // which is hosted as a sibling NSWindow at the same level.
-        window.setIgnoresMouseEvents(true);
+        let compositor = MacOsCompositor::new(scale, None);
+        let metal_layer = compositor.layer();
+        let (init_w, init_h) = physical_size(0.0, 0.0, scale);
+        let renderer = Renderer::new(
+            gpu,
+            Box::new(compositor),
+            init_w,
+            init_h,
+            flavor,
+            &font,
+            Box::new(crate::platform::macos::font::resolve_system_font),
+        )
+        .expect("tiling overlay renderer init");
 
-        let view = TilingOverlayView::new(mtm, wgpu_factory, config, scale, flavor, &font);
-        window.setContentView(Some(&view));
-        window.setFrame_display(cocoa_frame, false);
-        window.orderFront(None);
+        // Click-through so mouse events reach the application window beneath. Tab
+        // clicks land on the sibling TabBarOverlay instead.
+        let (position, size) = frame_attrs(cocoa_frame);
+        let window = AuxiliaryWindow::new(
+            &WindowAttributes {
+                position,
+                size,
+                click_through: true,
+                focusable: true,
+            },
+            Box::new(TilingHandler),
+        )
+        .expect("auxiliary window on main thread");
+        window.set_level(WindowLevel::Bottom);
+        window.set_content_layer(&metal_layer);
+        window.set_visible(true);
 
-        Self { window, view }
+        Self {
+            window,
+            renderer,
+            monitor: Dimension::default(),
+            windows: Vec::new(),
+            containers: Vec::new(),
+            border_thickness: Length::new(0.0),
+            scale,
+        }
     }
 
     pub(super) fn render(
-        &self,
+        &mut self,
         cocoa_frame: NSRect,
         scale: f64,
         monitor: Dimension,
         windows: &[TilingWindowPlacement],
         containers: &[ContainerShow],
     ) {
-        self.window.setFrame_display(cocoa_frame, false);
-        self.view.update(monitor, windows, containers, scale);
+        let (position, size) = frame_attrs(cocoa_frame);
+        self.window.set_frame(position, size);
+        self.update(monitor, windows, containers, scale);
     }
 
-    pub(super) fn set_border_thickness(&self, t: Length<Logical>) {
-        self.view.ivars().border_thickness.set(t);
+    pub(super) fn set_border_thickness(&mut self, t: Length<Logical>) {
+        self.border_thickness = t;
     }
 
-    pub(super) fn clear(&self) {
-        self.view.clear();
-        self.view.render_now();
+    pub(super) fn clear(&mut self) {
+        self.windows.clear();
+        self.containers.clear();
+        self.render_now();
     }
 
-    // macOS 14+ "cooperative activation" silently ignores NSApplication.activate() for
-    // self-activation. The AX API bypasses this via the privileged accessibility subsystem.
     pub(super) fn focus(&self, _mtm: MainThreadMarker) {
-        super::activate_self();
-        self.window.makeKeyAndOrderFront(None);
+        activate_self();
+        self.window.focus();
     }
 
-    pub(super) fn set_config(&self, config: &Config) {
-        self.view.set_config(config);
-    }
-}
-
-impl Drop for TilingOverlay {
-    fn drop(&mut self) {
-        self.window.close();
-    }
-}
-
-pub(super) struct FloatOverlayViewIvars {
-    root_layer: Retained<CALayer>,
-    hub_sender: CalloopSender<HubEvent>,
-    cg_id: Cell<CGWindowID>,
-}
-
-define_class!(
-    #[unsafe(super(NSView, NSResponder, NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[ivars = FloatOverlayViewIvars]
-    pub(super) struct FloatOverlayView;
-
-    unsafe impl NSObjectProtocol for FloatOverlayView {}
-
-    impl FloatOverlayView {
-        #[unsafe(method(isFlipped))]
-        fn is_flipped(&self) -> bool {
-            true
-        }
-
-        #[unsafe(method(wantsLayer))]
-        fn wants_layer(&self) -> bool {
-            true
-        }
-
-        #[unsafe(method(makeBackingLayer))]
-        fn make_backing_layer(&self) -> *mut objc2_quartz_core::CALayer {
-            Retained::into_raw(self.ivars().root_layer.clone())
-        }
-
-        #[unsafe(method(mouseDown:))]
-        fn mouse_down(&self, _event: &NSEvent) {
-            self.ivars()
-                .hub_sender
-                .send(HubEvent::MirrorClicked(self.ivars().cg_id.get()))
-                .ok();
-        }
-
-        #[unsafe(method(acceptsFirstMouse:))]
-        fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
-            true
-        }
-    }
-);
-
-impl FloatOverlayView {
-    fn new(
-        mtm: MainThreadMarker,
-        frame: NSRect,
-        root_layer: Retained<CALayer>,
-        hub_sender: CalloopSender<HubEvent>,
-        cg_id: CGWindowID,
-    ) -> Retained<Self> {
-        let ivars = FloatOverlayViewIvars {
-            root_layer,
-            hub_sender,
-            cg_id: Cell::new(cg_id),
-        };
-        let this = Self::alloc(mtm).set_ivars(ivars);
-        unsafe { msg_send![super(this), initWithFrame: frame] }
-    }
-}
-
-pub(super) struct TilingOverlayViewIvars {
-    #[expect(dead_code, reason = "retains CAMetalLayer to prevent deallocation")]
-    layer: Retained<CAMetalLayer>,
-    renderer: RefCell<Renderer>,
-    monitor: Cell<Dimension>,
-    windows: RefCell<Vec<TilingWindowPlacement>>,
-    containers: RefCell<Vec<ContainerShow>>,
-    config: RefCell<Config>,
-    border_thickness: Cell<Length<Logical>>,
-    scale: Cell<f64>,
-}
-
-define_class!(
-    #[unsafe(super(NSView, NSResponder, NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[ivars = TilingOverlayViewIvars]
-    pub(super) struct TilingOverlayView;
-
-    unsafe impl NSObjectProtocol for TilingOverlayView {}
-
-    impl TilingOverlayView {
-        #[unsafe(method(isFlipped))]
-        fn is_flipped(&self) -> bool {
-            true
-        }
-    }
-);
-
-impl TilingOverlayView {
-    fn new(
-        mtm: MainThreadMarker,
-        wgpu_factory: Rc<WgpuFactory>,
-        config: Config,
-        scale: f64,
-        flavor: Flavor,
-        font: &FontConfig,
-    ) -> Retained<Self> {
-        let renderer = Renderer::new(&wgpu_factory, scale, 0.0, 0.0, flavor, font, None);
-        let layer = renderer.layer();
-        let ivars = TilingOverlayViewIvars {
-            layer: layer.clone(),
-            renderer: RefCell::new(renderer),
-            monitor: Cell::new(Dimension::default()),
-            windows: RefCell::new(Vec::new()),
-            containers: RefCell::new(Vec::new()),
-            config: RefCell::new(config),
-            border_thickness: Cell::new(Length::new(0.0)),
-            scale: Cell::new(scale),
-        };
-        let this = Self::alloc(mtm).set_ivars(ivars);
-        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
-        let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
-        view.setLayer(Some(&layer));
-        view.setWantsLayer(true);
-        view
+    pub(super) fn set_config(&mut self, config: &Config) {
+        // Borders only, no text, so the font is not applied.
+        self.renderer.set_theme(config.theme);
+        self.render_now();
     }
 
     fn update(
-        &self,
+        &mut self,
         monitor: Dimension,
         windows: &[TilingWindowPlacement],
         containers: &[ContainerShow],
         scale: f64,
     ) {
-        let ivars = self.ivars();
-        ivars.monitor.set(monitor);
-        ivars.scale.set(scale);
-        *ivars.windows.borrow_mut() = windows.to_vec();
-        *ivars.containers.borrow_mut() = containers.to_vec();
-        ivars.renderer.borrow_mut().resize(
-            scale,
+        self.monitor = monitor;
+        self.scale = scale;
+        self.windows = windows.to_vec();
+        self.containers = containers.to_vec();
+        let (pw, ph) = physical_size(
             monitor.width.logical() as f64,
             monitor.height.logical() as f64,
+            scale,
         );
+        self.renderer.resize(scale as f32, pw, ph);
         self.render_now();
     }
 
-    fn clear(&self) {
-        let ivars = self.ivars();
-        ivars.windows.borrow_mut().clear();
-        ivars.containers.borrow_mut().clear();
-    }
-
-    fn set_config(&self, config: &Config) {
-        let prev = self.ivars().config.borrow().clone();
-        if prev.theme != config.theme {
-            self.ivars().renderer.borrow_mut().apply_theme(config.theme);
-        }
-        if prev.font != config.font {
-            if prev.font.family != config.font.family {
-                self.ivars()
-                    .renderer
-                    .borrow_mut()
-                    .reinstall_fonts(config.font.family.as_deref());
-            }
-            self.ivars().renderer.borrow_mut().apply_font(&config.font);
-        }
-        *self.ivars().config.borrow_mut() = config.clone();
-        self.render_now();
-    }
-
-    fn render_now(&self) {
-        let ivars = self.ivars();
-        let windows = ivars.windows.borrow();
-        let containers = ivars.containers.borrow();
-        let monitor = ivars.monitor.get();
-        let config = ivars.config.borrow();
-        let scale = ivars.scale.get();
-
-        let monitor_logical = monitor;
-        let windows_logical: Vec<LogicalTiledWindow> = windows
+    fn render_now(&mut self) {
+        let monitor_logical = self.monitor;
+        let windows_logical: Vec<LogicalTiledWindow> = self
+            .windows
             .iter()
             .map(|wp| LogicalTiledWindow {
                 id: wp.id,
@@ -543,7 +341,8 @@ impl TilingOverlayView {
                 spawn_indicator: wp.spawn_indicator,
             })
             .collect();
-        let containers_logical: Vec<LogicalTiledContainer> = containers
+        let containers_logical: Vec<LogicalTiledContainer> = self
+            .containers
             .iter()
             .map(|cs| LogicalTiledContainer {
                 id: cs.placement.id,
@@ -556,306 +355,148 @@ impl TilingOverlayView {
                 titles: cs.placement.titles.clone(),
             })
             .collect();
-        let border = BorderMetrics::from_thickness(ivars.border_thickness.get());
-        let theme = config.theme();
+        let border = BorderMetrics::from_thickness(self.border_thickness);
+        let theme = self.renderer.theme();
+        let scale = self.scale;
 
-        ivars
-            .renderer
-            .borrow_mut()
-            .render(scale as f32, Vec::new(), |ui| {
-                overlay::paint_tiling_overlay(
-                    ui.ctx(),
-                    monitor_logical,
-                    &windows_logical,
-                    &containers_logical,
-                    &theme,
-                    border,
-                )
-            });
+        self.renderer.render(scale as f32, Vec::new(), |ui| {
+            overlay::paint_tiling_overlay(
+                ui.ctx(),
+                monitor_logical,
+                &windows_logical,
+                &containers_logical,
+                &theme,
+                border,
+            )
+        });
     }
 }
 
-/// Per-tabbed-container overlay window. One instance per `ContainerId` while
-/// the container is tabbed and on the active workspace, reconciled per-frame
-/// in the UI thread's frame callback. Owns its own borderless window and
-/// receives mouse events directly so a tab click never has to traverse the
-/// per-monitor `TilingOverlay` (which is click-through).
+struct TabBarHandler {
+    widget: Rc<RefCell<TabBarWidget>>,
+    hub_sender: CalloopSender<HubEvent>,
+}
+
+impl AuxiliaryWindowHandler for TabBarHandler {
+    // macOS pointer positions arrive already in logical points, so no scale
+    // divide. Rendering on the press edge keeps the press queued for the click
+    // TabBarWidget::render resolves on release.
+    fn on_mouse_down(&mut self, at: PhysicalPosition, _button: MouseButton) {
+        let mut widget = self.widget.borrow_mut();
+        widget.push_pointer_button(egui::pos2(at.x as f32, at.y as f32), true);
+        widget.render();
+    }
+
+    fn on_mouse_up(&mut self, at: PhysicalPosition, _button: MouseButton) {
+        let clicked = {
+            let mut widget = self.widget.borrow_mut();
+            widget.push_pointer_button(egui::pos2(at.x as f32, at.y as f32), false);
+            widget.render()
+        };
+        if let Some((cid, tab_idx)) = clicked {
+            self.hub_sender
+                .send(HubEvent::TabClicked(cid, tab_idx))
+                .ok();
+        }
+    }
+}
+
+/// A separate borderless window per tabbed container, so a tab click lands here
+/// directly instead of traversing the click-through `TilingOverlay`.
 pub(super) struct TabBarOverlay {
-    window: Retained<NSWindow>,
-    view: Retained<TabBarOverlayView>,
+    window: AuxiliaryWindow,
+    widget: Rc<RefCell<TabBarWidget>>,
 }
 
 impl TabBarOverlay {
     pub(super) fn new(
-        mtm: MainThreadMarker,
-        wgpu_factory: Rc<WgpuFactory>,
+        _mtm: MainThreadMarker,
+        gpu: &WgpuContext,
         config: Config,
         container_id: ContainerId,
         cocoa_frame: NSRect,
         scale: f64,
         hub_sender: CalloopSender<HubEvent>,
     ) -> Self {
-        let flavor = config.theme;
-        let font = config.font.clone();
-        let window = unsafe {
-            NSWindow::initWithContentRect_styleMask_backing_defer(
-                NSWindow::alloc(mtm),
-                cocoa_frame,
-                NSWindowStyleMask::Borderless,
-                NSBackingStoreType::Buffered,
-                false,
-            )
-        };
-        window.setBackgroundColor(Some(&NSColor::clearColor()));
-        window.setOpaque(false);
+        let compositor = MacOsCompositor::new(scale, None);
+        let metal_layer = compositor.layer();
+        let (init_w, init_h) = physical_size(0.0, 0.0, scale);
+        let renderer = Renderer::new(
+            gpu,
+            Box::new(compositor),
+            init_w,
+            init_h,
+            config.theme,
+            &config.font,
+            Box::new(crate::platform::macos::font::resolve_system_font),
+        )
+        .expect("tab bar renderer init");
+        let widget = Rc::new(RefCell::new(TabBarWidget::new(
+            renderer,
+            container_id,
+            scale as f32,
+            (init_w, init_h),
+        )));
+
         // Same level as the per-monitor tiling overlay. Stacking against
         // sibling same-level windows is fine because the tiling overlay is
-        // mouse-transparent and visually empty in the strip the tab bar
-        // covers.
-        window.setLevel(NSNormalWindowLevel - 1);
-        window.setCollectionBehavior(
-            NSWindowCollectionBehavior::Auxiliary
-                | NSWindowCollectionBehavior::Default
-                | NSWindowCollectionBehavior::Transient
-                | NSWindowCollectionBehavior::FullScreenNone
-                | NSWindowCollectionBehavior::FullScreenDisallowsTiling
-                | NSWindowCollectionBehavior::IgnoresCycle,
-        );
-        unsafe { window.setReleasedWhenClosed(false) };
-        window.setIgnoresMouseEvents(false);
+        // mouse-transparent and visually empty in the strip the tab bar covers.
+        let (position, size) = frame_attrs(cocoa_frame);
+        let window = AuxiliaryWindow::new(
+            &WindowAttributes {
+                position,
+                size,
+                click_through: false,
+                focusable: false,
+            },
+            Box::new(TabBarHandler {
+                widget: Rc::clone(&widget),
+                hub_sender,
+            }),
+        )
+        .expect("auxiliary window on main thread");
+        window.set_level(WindowLevel::Bottom);
+        window.set_content_layer(&metal_layer);
+        window.set_visible(true);
 
-        let view = TabBarOverlayView::new(
-            mtm,
-            wgpu_factory,
-            config,
-            container_id,
-            scale,
-            hub_sender,
-            flavor,
-            &font,
-        );
-        window.setContentView(Some(&view));
-        window.setFrame_display(cocoa_frame, false);
-        window.orderFront(None);
-
-        Self { window, view }
+        Self { window, widget }
     }
 
     pub(super) fn render(&self, cs: &ContainerShow, scale: f64, border_thickness: Length<Logical>) {
-        self.window.setFrame_display(cs.tab_bar_cocoa_frame, false);
-        self.view.update(
-            scale,
-            cs.tab_bar_dim,
-            border_thickness,
-            cs.placement.titles.clone(),
-            cs.placement.active_tab_index,
-            cs.placement.is_highlighted,
-        );
-        self.window.setIsVisible(true);
+        let (position, size) = frame_attrs(cs.tab_bar_cocoa_frame);
+        self.window.set_frame(position, size);
+        let bar = cs.tab_bar_dim;
+        {
+            let mut widget = self.widget.borrow_mut();
+            widget.set_content(
+                scale as f32,
+                (bar.width, bar.height),
+                border_thickness,
+                cs.placement.titles.clone(),
+                cs.placement.active_tab_index,
+                cs.placement.is_highlighted,
+            );
+            widget.render();
+        }
+        self.window.set_visible(true);
     }
 
     pub(super) fn set_config(&self, config: &Config) {
-        self.view.set_config(config);
+        let mut widget = self.widget.borrow_mut();
+        widget.set_config(config);
+        widget.render();
     }
 }
 
-impl Drop for TabBarOverlay {
-    fn drop(&mut self) {
-        self.window.close();
-    }
-}
-
-pub(super) struct TabBarOverlayViewIvars {
-    #[expect(dead_code, reason = "retains CAMetalLayer to prevent deallocation")]
-    layer: Retained<CAMetalLayer>,
-    events: RefCell<Vec<egui::Event>>,
-    renderer: RefCell<Renderer>,
-    bar: Cell<Dimension<Logical>>,
-    border_thickness: Cell<Length<Logical>>,
-    titles: RefCell<Vec<String>>,
-    active_tab_index: Cell<usize>,
-    is_highlighted: Cell<bool>,
-    scale: Cell<f64>,
-    container_id: ContainerId,
-    hub_sender: CalloopSender<HubEvent>,
-    config: RefCell<Config>,
-}
-
-define_class!(
-    #[unsafe(super(NSView, NSResponder, NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[ivars = TabBarOverlayViewIvars]
-    pub(super) struct TabBarOverlayView;
-
-    unsafe impl NSObjectProtocol for TabBarOverlayView {}
-
-    impl TabBarOverlayView {
-        #[unsafe(method(isFlipped))]
-        fn is_flipped(&self) -> bool {
-            true
-        }
-
-        // Both mouseDown: and mouseUp: are required: paint_tab_bar's
-        // Sense::click() fires response.clicked() only on press-then-release,
-        // so render_now must run on both edges to observe the second event.
-        #[unsafe(method(mouseDown:))]
-        fn mouse_down(&self, event: &NSEvent) {
-            let pos = self.event_pos(event);
-            self.ivars().events.borrow_mut().push(egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers: egui::Modifiers::NONE,
-            });
-            self.render_now();
-        }
-
-        #[unsafe(method(mouseUp:))]
-        fn mouse_up(&self, event: &NSEvent) {
-            let pos = self.event_pos(event);
-            self.ivars().events.borrow_mut().push(egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed: false,
-                modifiers: egui::Modifiers::NONE,
-            });
-            self.render_now();
-        }
-
-        #[unsafe(method(acceptsFirstMouse:))]
-        fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
-            true
-        }
-    }
-);
-
-impl TabBarOverlayView {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "all parameters are needed for overlay initialization"
-    )]
-    fn new(
-        mtm: MainThreadMarker,
-        wgpu_factory: Rc<WgpuFactory>,
-        config: Config,
-        container_id: ContainerId,
-        scale: f64,
-        hub_sender: CalloopSender<HubEvent>,
-        flavor: Flavor,
-        font: &FontConfig,
-    ) -> Retained<Self> {
-        let renderer = Renderer::new(&wgpu_factory, scale, 0.0, 0.0, flavor, font, None);
-        let layer = renderer.layer();
-        let ivars = TabBarOverlayViewIvars {
-            layer: layer.clone(),
-            events: RefCell::new(Vec::new()),
-            renderer: RefCell::new(renderer),
-            bar: Cell::new(Dimension::default()),
-            border_thickness: Cell::new(Length::new(0.0)),
-            titles: RefCell::new(Vec::new()),
-            active_tab_index: Cell::new(0),
-            is_highlighted: Cell::new(false),
-            scale: Cell::new(scale),
-            container_id,
-            hub_sender,
-            config: RefCell::new(config),
-        };
-        let this = Self::alloc(mtm).set_ivars(ivars);
-        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
-        let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
-        view.setLayer(Some(&layer));
-        view.setWantsLayer(true);
-        view
-    }
-
-    fn update(
-        &self,
-        scale: f64,
-        bar: Dimension<Logical>,
-        border_thickness: Length<Logical>,
-        titles: Vec<String>,
-        active_tab_index: usize,
-        is_highlighted: bool,
-    ) {
-        let ivars = self.ivars();
-        ivars.bar.set(bar);
-        ivars.border_thickness.set(border_thickness);
-        ivars.scale.set(scale);
-        *ivars.titles.borrow_mut() = titles;
-        ivars.active_tab_index.set(active_tab_index);
-        ivars.is_highlighted.set(is_highlighted);
-        ivars.renderer.borrow_mut().resize(
-            scale,
-            bar.width.logical() as f64,
-            bar.height.logical() as f64,
-        );
-        self.render_now();
-    }
-
-    fn set_config(&self, config: &Config) {
-        let prev = self.ivars().config.borrow().clone();
-        if prev.theme != config.theme {
-            self.ivars().renderer.borrow_mut().apply_theme(config.theme);
-        }
-        if prev.font != config.font {
-            if prev.font.family != config.font.family {
-                self.ivars()
-                    .renderer
-                    .borrow_mut()
-                    .reinstall_fonts(config.font.family.as_deref());
-            }
-            self.ivars().renderer.borrow_mut().apply_font(&config.font);
-        }
-        *self.ivars().config.borrow_mut() = config.clone();
-        self.render_now();
-    }
-
-    fn render_now(&self) {
-        let ivars = self.ivars();
-        let bar = ivars.bar.get();
-        let titles = ivars.titles.borrow().clone();
-        let active_tab_index = ivars.active_tab_index.get();
-        let is_highlighted = ivars.is_highlighted.get();
-        let config = ivars.config.borrow();
-        let events = std::mem::take(&mut *ivars.events.borrow_mut());
-        let scale = ivars.scale.get();
-        let container_id = ivars.container_id;
-
-        let border = BorderMetrics::from_thickness(ivars.border_thickness.get());
-        let theme = config.theme();
-
-        // The tab-bar window's canvas is exactly the bar, so paint at the
-        // canvas-local origin (0, 0) and let `paint_tab_bar` size its egui
-        // Area to the bar's width and height.
-        let canvas_local =
-            Dimension::<Logical>::new(Length::ZERO, Length::ZERO, bar.width, bar.height);
-
-        let clicked = ivars
-            .renderer
-            .borrow_mut()
-            .render(scale as f32, events, |ui| {
-                overlay::paint_tab_bar(
-                    ui.ctx(),
-                    container_id,
-                    canvas_local,
-                    &titles,
-                    active_tab_index,
-                    is_highlighted,
-                    border,
-                    &theme,
-                )
-            });
-        if let Some((cid, tab_idx)) = clicked {
-            ivars
-                .hub_sender
-                .send(HubEvent::TabClicked(cid, tab_idx))
-                .ok();
-        }
-    }
-
-    fn event_pos(&self, event: &NSEvent) -> egui::Pos2 {
-        let loc = event.locationInWindow();
-        let view_loc = self.convertPoint_fromView(loc, None);
-        egui::pos2(view_loc.x as f32, view_loc.y as f32)
-    }
+/// macOS 14+ "cooperative activation" silently ignores `NSApplication::activate()` for
+/// self-activation.
+/// Without this, `makeKeyAndOrderFront` only makes a Dome-owned window key inside Dome's
+/// AppKit context while the OS-level foreground app stays elsewhere.
+fn activate_self() {
+    let pid = std::process::id() as i32;
+    let ax_app = unsafe { AXUIElement::new_application(pid) };
+    set_attribute_value(&ax_app, &kAXFrontmostAttribute(), unsafe {
+        kCFBooleanTrue.unwrap()
+    })
+    .ok();
 }
