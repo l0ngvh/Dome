@@ -22,7 +22,6 @@ use crate::config::{
 };
 use crate::core::GlobalLayoutConfig;
 use crate::core::PaneDisplay;
-use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
 use crate::core::node::{Direction, Logical, Pixels, WindowId};
 use crate::core::strategy::TilingAction;

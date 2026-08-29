@@ -1,147 +1,85 @@
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::System::Threading::GetCurrentThreadId;
-use windows::Win32::UI::WindowsAndMessaging::{
-    ChangeWindowMessageFilterEx, DefWindowProcW, GWLP_USERDATA, GetWindowLongPtrW, MSGFLT_ALLOW,
-    PostThreadMessageW, RegisterWindowMessageW, SPI_SETWORKAREA, SetWindowLongPtrW, WM_DESTROY,
-    WM_DISPLAYCHANGE, WM_SETTINGCHANGE,
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use dome_auxiliary_window::{
+    AuxiliaryWindow, AuxiliaryWindowExtWindows, AuxiliaryWindowHandler, MenuEntry,
+    PhysicalPosition, PhysicalSize, WindowAttributes,
 };
-use windows::core::{PCWSTR, w};
 
-use crate::action::WorkspaceInfo;
-use crate::platform::windows::dome::overlay::OwnedHwnd;
-use crate::platform::windows::dome::tray::{TRAY_CALLBACK_MSG, TrayIndicator};
-use crate::platform::windows::{HubSender, WM_APP_DISPLAY_CHANGE, WM_APP_WORKAREA_CHANGE};
-
-pub(in crate::platform::windows) const APP_WINDOW_CLASS: PCWSTR = w!("DomeAppWindow");
+use crate::action::{Actions, WorkspaceInfo};
+use crate::platform::windows::dome::tray::{
+    build_menu, command_to_action, focused_tooltip, load_tray_icon,
+};
+use crate::platform::windows::{HubEvent, HubSender};
 
 pub(in crate::platform::windows) trait AppWindowApi {
     fn update_tray(&self, workspaces: &[WorkspaceInfo]);
 }
 
+struct AppWindowHandler {
+    hub_sender: HubSender,
+    workspaces: Rc<RefCell<Vec<WorkspaceInfo>>>,
+}
+
+impl AuxiliaryWindowHandler for AppWindowHandler {
+    fn on_display_changed(&mut self) {
+        self.hub_sender.send(HubEvent::DisplayChanged);
+    }
+
+    fn on_work_area_changed(&mut self) {
+        self.hub_sender.send(HubEvent::WorkAreaChanged);
+    }
+
+    fn tray_menu(&mut self) -> Vec<MenuEntry> {
+        build_menu(&self.workspaces.borrow())
+    }
+
+    fn on_tray_menu_selected(&mut self, id: u32) {
+        let action = command_to_action(id, &self.workspaces.borrow());
+        if let Some(action) = action {
+            self.hub_sender
+                .send(HubEvent::Action(Actions::new(vec![action])));
+        }
+    }
+}
+
 pub(in crate::platform::windows) struct AppWindow {
-    // Tray field precedes hwnd so NIM_DELETE runs while the callback HWND is still alive.
-    // Option only bridges construction. After new() returns it is Some for the object's life.
-    tray: Option<Box<TrayIndicator>>,
-    hwnd: OwnedHwnd,
-    taskbar_created_msg: u32,
+    // Shared with the handler so the menu, its selection handling, and update_tray all
+    // read the same workspace list.
+    workspaces: Rc<RefCell<Vec<WorkspaceInfo>>>,
+    // aux owns the window and its tray icon. Its Drop removes the icon, then destroys the
+    // window, so no manual ordering is needed here.
+    aux: AuxiliaryWindow,
 }
 
 impl AppWindow {
-    pub(in crate::platform::windows) fn new(
-        instance: HINSTANCE,
-        hub_sender: HubSender,
-    ) -> anyhow::Result<Box<Self>> {
-        let hwnd = OwnedHwnd::new_hidden_top_level(APP_WINDOW_CLASS, instance)?;
+    pub(in crate::platform::windows) fn new(hub_sender: HubSender) -> anyhow::Result<Box<Self>> {
+        let workspaces: Rc<RefCell<Vec<WorkspaceInfo>>> = Rc::new(RefCell::new(Vec::new()));
+        let handler = AppWindowHandler {
+            hub_sender,
+            workspaces: Rc::clone(&workspaces),
+        };
+        let attributes = WindowAttributes {
+            position: PhysicalPosition { x: 0, y: 0 },
+            size: PhysicalSize {
+                width: 0,
+                height: 0,
+            },
+            click_through: false,
+            focusable: false,
+        };
+        let aux = AuxiliaryWindow::new(&attributes, Box::new(handler))?;
 
-        let mut app = Box::new(Self {
-            tray: None,
-            hwnd,
-            taskbar_created_msg: 0,
-        });
+        let icon = load_tray_icon()?;
+        aux.install_tray_icon(icon, "")?;
 
-        // Install GWLP_USERDATA before TrayIndicator::new so shell callbacks after NIM_ADD see an initialized AppWindow.
-        unsafe {
-            SetWindowLongPtrW(
-                app.hwnd.hwnd(),
-                GWLP_USERDATA,
-                app.as_ref() as *const AppWindow as isize,
-            );
-        }
-
-        let msg = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
-        if msg == 0 {
-            tracing::warn!(
-                "RegisterWindowMessageW(TaskbarCreated) returned 0, tray will not survive explorer restart"
-            );
-        } else {
-            app.taskbar_created_msg = msg;
-            if let Err(e) =
-                unsafe { ChangeWindowMessageFilterEx(app.hwnd.hwnd(), msg, MSGFLT_ALLOW, None) }
-            {
-                tracing::warn!(?e, "ChangeWindowMessageFilterEx(TaskbarCreated) failed");
-            }
-        }
-
-        let tray = TrayIndicator::new(hub_sender, app.hwnd.hwnd())?;
-        app.tray = Some(tray);
-        Ok(app)
+        Ok(Box::new(AppWindow { workspaces, aux }))
     }
 }
 
 impl AppWindowApi for AppWindow {
     fn update_tray(&self, workspaces: &[WorkspaceInfo]) {
-        if let Some(tray) = self.tray.as_ref() {
-            tray.update(workspaces);
-        }
-    }
-}
-
-pub(in crate::platform::windows) unsafe extern "system" fn app_wnd_proc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    if let Some(lr) = crate::platform::windows::dome_wnd_proc_common(hwnd, msg, wparam, lparam) {
-        return lr;
-    }
-
-    if msg == WM_SETTINGCHANGE && wparam.0 == SPI_SETWORKAREA.0 as usize {
-        unsafe {
-            PostThreadMessageW(
-                GetCurrentThreadId(),
-                WM_APP_WORKAREA_CHANGE,
-                WPARAM(0),
-                LPARAM(0),
-            )
-            .ok()
-        };
-        return LRESULT(0);
-    }
-    if msg == WM_DISPLAYCHANGE {
-        unsafe {
-            PostThreadMessageW(
-                GetCurrentThreadId(),
-                WM_APP_DISPLAY_CHANGE,
-                WPARAM(0),
-                LPARAM(0),
-            )
-            .ok()
-        };
-        return LRESULT(0);
-    }
-
-    if let Some(app) = unsafe { app_from_hwnd(hwnd) } {
-        // AppWindow::new installs GWLP_USERDATA and finishes tray construction
-        // before returning, so any wnd-proc callback observed here has tray = Some.
-        let tray = app
-            .tray
-            .as_ref()
-            .expect("tray populated for wnd proc's live lifetime");
-        if msg == TRAY_CALLBACK_MSG {
-            tray.show_menu(hwnd);
-            return LRESULT(0);
-        }
-        if app.taskbar_created_msg != 0 && msg == app.taskbar_created_msg {
-            if let Err(e) = tray.add_icon() {
-                tracing::warn!(?e, "failed to re-add tray icon after taskbar restart");
-            }
-            return LRESULT(0);
-        }
-    }
-
-    if msg == WM_DESTROY {
-        unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) };
-    }
-
-    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
-}
-
-unsafe fn app_from_hwnd<'a>(hwnd: HWND) -> Option<&'a AppWindow> {
-    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
-    if ptr == 0 {
-        None
-    } else {
-        Some(unsafe { &*(ptr as *const AppWindow) })
+        *self.workspaces.borrow_mut() = workspaces.to_vec();
+        self.aux.set_tray_tooltip(&focused_tooltip(workspaces));
     }
 }

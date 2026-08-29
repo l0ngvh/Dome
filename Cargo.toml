@@ -1,3 +1,13 @@
+[workspace]
+resolver = "3"
+members = [".", "crates/dome-bar", "crates/dome-ipc", "crates/dome-auxiliary-window"]
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.148"
+anyhow = "1.0.103"
+interprocess = "2.2.3"
+
 [package]
 name = "dome"
 version = "0.1.0"
@@ -5,19 +15,22 @@ edition = "2024"
 build = "build.rs"
 
 [dependencies]
-anyhow = "1.0.103"
+dome-ipc = { path = "crates/dome-ipc" }
+dome-auxiliary-window = { path = "crates/dome-auxiliary-window" }
+raw-window-handle = "0.6"
+anyhow = { workspace = true }
 backtrace = "0.3.76"
 tracing = "0.1.41"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 toml = "0.9.8"
 toml_edit = { version = "0.23", features = ["serde"] }
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true }
 bitflags = "2.10.0"
 clap = { version = "4.5.53", features = ["derive"] }
-serde_json = "1.0.148"
+serde_json = { workspace = true }
 regex = "1.12.2"
-interprocess = "2.2.3"
+interprocess = { workspace = true }
 notify = "8.2.0"
 egui = "0.34"
 egui-wgpu = "0.34"

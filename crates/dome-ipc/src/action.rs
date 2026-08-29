@@ -3,7 +3,24 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-use crate::core::WindowId;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct WindowId(usize);
+
+impl WindowId {
+    pub fn new(raw: usize) -> Self {
+        Self(raw)
+    }
+
+    pub fn get(self) -> usize {
+        self.0
+    }
+}
+
+impl fmt::Display for WindowId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "WindowId({})", self.0)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IpcMessage {
@@ -19,8 +36,7 @@ pub enum Query {
     Monitors,
 }
 
-/// Wire DTO for `Query::MinimizedWindows`. `bundle_id` is populated on
-/// macOS, `executable_path` on Windows.
+/// `bundle_id` is populated on macOS, `executable_path` on Windows.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinimizedWindow {
     pub id: WindowId,
@@ -44,8 +60,7 @@ pub struct MonitorDetails {
     pub work_area: MonitorFrame,
 }
 
-/// The monitor work area. Core's `PixelRect` is generic over a unit tag, so it
-/// does not serialize.
+/// Core's `PixelRect` is generic over a unit tag, so it does not serialize.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MonitorFrame {
     pub x: i32,
@@ -63,10 +78,7 @@ pub struct WorkspaceInfo {
     /// The owning monitor's stored `unique_name`, the position-ranked name
     /// shown to the user. For a Parked workspace this is the ORIGIN
     /// monitor's stored `unique_name`, frozen at unplug, which is NOT
-    /// currently connected -- that is exactly why the workspace is not
-    /// Attached. Consumers derive "origin detached" from `state != Attached`,
-    /// there is no separate bool. A consumer can further derive "visiting" as
-    /// a Parked row that is also its host monitor's active workspace.
+    /// currently connected.
     pub monitor: String,
     pub state: WorkspaceState,
     pub is_focused: bool,
@@ -80,20 +92,16 @@ pub enum WorkspaceState {
     Parked,
 }
 
-/// Every user-visible action Dome can perform. This is the single source of
-/// truth for the action set. CLI (`src/cli.rs`), IPC JSON, and TOML keymap
-/// strings all parse into this enum. Adding a new action requires editing only
-/// this enum and its `Display`/`FromStr` impls. IPC wire format uses the
-/// variant name as its tag, so a rename is a wire-format break.
+/// The IPC wire format uses the variant name as its tag, so renaming a variant breaks
+/// the wire format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Action {
     Focus(FocusTarget),
     Move(MoveTarget),
     Toggle(ToggleTarget),
     Master(MasterTarget),
-    /// Restore a specific minimized window. Not bindable in keymaps and lacks
-    /// `FromStr` because `WindowId`s are not stable across daemon restarts, so a
-    /// bound id would have no meaning after a reload.
+    /// Lacks `FromStr` and is not bindable in a keymap because a `WindowId` is not stable
+    /// across daemon restarts, so a bound id would mean nothing after a reload.
     UnminimizeWindow(WindowId),
     Exec {
         command: String,
@@ -322,15 +330,13 @@ impl FromStr for Action {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        // Handle exec specially since command can contain spaces
+        // strip_prefix rather than a match arm, because the argument can contain spaces.
         if let Some(command) = s.strip_prefix("exec ") {
             return Ok(Action::Exec {
                 command: command.to_string(),
             });
         }
 
-        // Uses strip_prefix (like exec) instead of the match-arm shape so mode
-        // names with spaces work and parsing stays consistent across free-form args.
         if let Some(name) = s.strip_prefix("mode ") {
             let name = name.trim();
             if !name.is_empty() {
@@ -340,10 +346,9 @@ impl FromStr for Action {
             }
         }
 
-        // Workspace names and monitor names can both contain spaces, so the
-        // split_whitespace slice match below cannot carry the optional
-        // --monitor selector. Parse the tail with a monitor-pinned-last split
-        // before the slice match, mirroring exec and mode above.
+        // Parsed before the slice match because the optional --monitor selector needs
+        // the monitor-pinned-last split in parse_workspace_selector, which a
+        // split_whitespace match cannot express.
         if let Some(rest) = s.strip_prefix("focus workspace ") {
             let (name, monitor) = parse_workspace_selector(rest);
             return Ok(Action::Focus(FocusTarget::Workspace { name, monitor }));
@@ -392,12 +397,9 @@ impl FromStr for Action {
     }
 }
 
-// MonitorTarget is parsed here instead of using clap's Subcommand derive.
-// Deriving Subcommand would require nested subcommands (e.g., `dome focus monitor up`
-// becoming `dome focus monitor up` with `up` as its own subcommand), which is overly
-// complex. Since actions are primarily parsed from config files and IPC strings anyway,
-// manual parsing is simpler and more flexible.
-pub(crate) fn parse_monitor_target(s: &str) -> Result<MonitorTarget> {
+// Parsed by hand rather than through clap's `Subcommand` derive, which would force each
+// target word into a nested subcommand of its own.
+pub fn parse_monitor_target(s: &str) -> Result<MonitorTarget> {
     match s {
         "up" => Ok(MonitorTarget::Up),
         "down" => Ok(MonitorTarget::Down),
@@ -507,10 +509,6 @@ mod tests {
 
     #[test]
     fn action_from_str_round_trip() {
-        // Every action string whose FromStr path takes no free-form argument
-        // must survive a parse -> Display -> compare cycle. This locks
-        // Display/FromStr symmetry and would have caught the old
-        // SpawnDirection round-trip bug.
         let cases = [
             "focus up",
             "focus down",
