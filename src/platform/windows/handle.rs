@@ -1,6 +1,6 @@
 use std::mem::size_of;
 
-use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT};
 use windows::Win32::Foundation::{LRESULT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
@@ -8,8 +8,15 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect, MonitorFromWindow,
 };
+use windows::Win32::Security::{
+    GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_ELEVATION,
+    TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenElevation, TokenIntegrityLevel,
+};
 use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+};
+use windows::Win32::System::Threading::{
+    OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::HiDpi::{
     AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT,
@@ -264,14 +271,18 @@ impl InspectExternalWindow for ExternalHwnd {
         let hwnd = self.0;
         let pid = self.pid();
         let title = self.get_window_title();
+        if is_silent_unmanageable_title(&title) {
+            return true;
+        }
+        let process_name = self.get_process_name().ok();
         if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
             // Those windows that shouldn't be managed have quite preditable title.
             // e.g. OLEChannelWnd or Default IME
             // Previous attempt to key by hwnd proved to be futile, those windows are spawned
-            // multiple times with different hwnd. windows with same title and pid should be rare
+            // multiple times with different hwnd. windows with same title and process should be rare
             crate::trace_once!(
-                key: (title.clone(), pid),
-                ?title, ?pid, "not manageable: not visible"
+                key: (title.clone(), process_name.clone()),
+                ?title, ?pid, ?process_name, "not manageable: not visible"
             );
             return true;
         }
@@ -282,22 +293,22 @@ impl InspectExternalWindow for ExternalHwnd {
             // tiling-vs-float state. Picked back up by the standard create path
             // when the user restores the window via WM_RESTORE / unminimize.
             crate::trace_once!(
-                key: (title.clone(), pid),
-                ?title, ?pid, "not manageable: iconic"
+                key: (title.clone(), process_name.clone()),
+                ?title, ?pid, ?process_name, "not manageable: iconic"
             );
             return true;
         }
         if is_cloaked(hwnd) {
             crate::trace_once!(
-                key: (title.clone(), pid),
-                ?title, ?pid, "not manageable: cloaked"
+                key: (title.clone(), process_name.clone()),
+                ?title, ?pid, ?process_name, "not manageable: cloaked"
             );
             return true;
         }
         if unsafe { GetAncestor(hwnd, GA_ROOT) } != hwnd {
             crate::trace_once!(
-                key: (title.clone(), pid),
-                ?title, ?pid, "not manageable: not top-level ancestor"
+                key: (title.clone(), process_name.clone()),
+                ?title, ?pid, ?process_name, "not manageable: not top-level ancestor"
             );
             return true;
         }
@@ -305,36 +316,36 @@ impl InspectExternalWindow for ExternalHwnd {
         let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
         if style & WS_CHILD.0 != 0 {
             crate::trace_once!(
-                key: (title.clone(), pid),
-                ?title, ?pid, "not manageable: WS_CHILD"
+                key: (title.clone(), process_name.clone()),
+                ?title, ?pid, ?process_name, "not manageable: WS_CHILD"
             );
             return true;
         }
         if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
             crate::trace_once!(
-                key: (title.clone(), pid),
-                ?title, ?pid, "not manageable: WS_EX_TOOLWINDOW"
+                key: (title.clone(), process_name.clone()),
+                ?title, ?pid, ?process_name, "not manageable: WS_EX_TOOLWINDOW"
             );
             return true;
         }
         if ex_style & WS_EX_NOACTIVATE.0 != 0 {
             crate::trace_once!(
-                key: (title.clone(), pid),
-                ?title, ?pid, "not manageable: WS_EX_NOACTIVATE"
+                key: (title.clone(), process_name.clone()),
+                ?title, ?pid, ?process_name, "not manageable: WS_EX_NOACTIVATE"
             );
             return true;
         }
         if ex_style & WS_EX_TRANSPARENT.0 != 0 {
             crate::trace_once!(
-                key: (title.clone(), pid),
-                ?title, ?pid, "not manageable: WS_EX_TRANSPARENT"
+                key: (title.clone(), process_name.clone()),
+                ?title, ?pid, ?process_name, "not manageable: WS_EX_TRANSPARENT"
             );
             return true;
         }
         if ex_style & WS_EX_DLGMODALFRAME.0 != 0 {
             crate::trace_once!(
-                key: (title.clone(), pid),
-                ?title, ?pid, "not manageable: WS_EX_DLGMODALFRAME"
+                key: (title.clone(), process_name.clone()),
+                ?title, ?pid, ?process_name, "not manageable: WS_EX_DLGMODALFRAME"
             );
             return true;
         }
@@ -366,8 +377,8 @@ impl InspectExternalWindow for ExternalHwnd {
             };
             if !fullscreen {
                 crate::trace_once!(
-                    key: (title.clone(), pid),
-                    ?title, ?pid, "not manageable: WS_POPUP without frame"
+                    key: (title.clone(), process_name.clone()),
+                    ?title, ?pid, ?process_name, "not manageable: WS_POPUP without frame"
                 );
                 return true;
             }
@@ -388,16 +399,23 @@ impl InspectExternalWindow for ExternalHwnd {
         );
         if has_owner && ex_style & WS_EX_APPWINDOW.0 == 0 {
             crate::trace_once!(
-                key: (title.clone(), pid),
-                ?title, ?pid, "not manageable: owned window without WS_EX_APPWINDOW"
+                key: (title.clone(), process_name.clone()),
+                ?title, ?pid, ?process_name, "not manageable: owned window without WS_EX_APPWINDOW"
+            );
+            return true;
+        }
+        if is_process_elevated(pid) {
+            crate::trace_once!(
+                key: (title.clone(), process_name.clone()),
+                ?title, ?pid, ?process_name, "not manageable: elevated"
             );
             return true;
         }
         let rect = get_pixel_rect(hwnd);
         if rect.width() == Pixels::ZERO || rect.height() == Pixels::ZERO {
             crate::trace_once!(
-                key: (title.clone(), pid),
-                ?title, ?pid, "not manageable: zero dimension"
+                key: (title.clone(), process_name.clone()),
+                ?title, ?pid, ?process_name, "not manageable: zero dimension"
             );
             return true;
         }
@@ -707,6 +725,16 @@ fn scaled_track_limit(track: i32, border: i32, scale: f32) -> LimitUpdate {
     LimitUpdate::Set(Length::new((track - border) as f32))
 }
 
+fn is_silent_unmanageable_title(title: &Option<String>) -> bool {
+    let Some(t) = title.as_deref() else {
+        return false;
+    };
+    matches!(
+        t,
+        "OleMainThreadWndName" | "OLEChannelWnd" | "Default IME" | "MSCTFIME UI"
+    )
+}
+
 fn is_cloaked(hwnd: HWND) -> bool {
     let mut cloaked = 0u32;
     let result = unsafe {
@@ -718,6 +746,87 @@ fn is_cloaked(hwnd: HWND) -> bool {
         )
     };
     result.is_ok() && cloaked != 0
+}
+
+fn is_process_elevated(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) })
+    else {
+        return false;
+    };
+    let mut token = windows::Win32::Foundation::HANDLE::default();
+    let token_ok = unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) }.is_ok();
+    let elevated = if token_ok {
+        is_token_elevated_or_high_integrity(token)
+    } else {
+        false
+    };
+    unsafe {
+        let _ = CloseHandle(process);
+        if token_ok {
+            let _ = CloseHandle(token);
+        }
+    }
+    elevated
+}
+
+fn is_token_elevated_or_high_integrity(token: windows::Win32::Foundation::HANDLE) -> bool {
+    let mut elevation = TOKEN_ELEVATION::default();
+    let mut ret_len = 0u32;
+    if unsafe {
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            Some(&mut elevation as *mut _ as *mut _),
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &mut ret_len,
+        )
+    }
+    .is_ok()
+        && elevation.TokenIsElevated != 0
+    {
+        return true;
+    }
+    let mut needed = 0u32;
+    let _ = unsafe { GetTokenInformation(token, TokenIntegrityLevel, None, 0, &mut needed) };
+    if needed == 0 {
+        return false;
+    }
+    let mut buf = vec![0u8; needed as usize];
+    if unsafe {
+        GetTokenInformation(
+            token,
+            TokenIntegrityLevel,
+            Some(buf.as_mut_ptr() as *mut _),
+            needed,
+            &mut needed,
+        )
+    }
+    .is_err()
+    {
+        return false;
+    }
+    let label = unsafe { &*(buf.as_ptr() as *const TOKEN_MANDATORY_LABEL) };
+    let sid = label.Label.Sid;
+    if sid.is_invalid() {
+        return false;
+    }
+    let count = unsafe { GetSidSubAuthorityCount(sid) };
+    if count.is_null() {
+        return false;
+    }
+    let sub_count = unsafe { *count };
+    if sub_count == 0 {
+        return false;
+    }
+    let rid_ptr = unsafe { GetSidSubAuthority(sid, u32::from(sub_count - 1)) };
+    if rid_ptr.is_null() {
+        return false;
+    }
+    let rid = unsafe { *rid_ptr };
+    rid > 0x2000
 }
 
 fn for_each_owned<F: FnMut(HWND)>(hwnd: HWND, callback: F) {
@@ -877,6 +986,35 @@ mod tests {
             scaled_track_limit(17, 18, 1.0),
             LimitUpdate::Cleared
         ));
+    }
+
+    #[test]
+    fn silent_title_filter_covers_known_hidden_windows() {
+        assert!(super::is_silent_unmanageable_title(&Some(
+            "OleMainThreadWndName".to_string()
+        )));
+        assert!(super::is_silent_unmanageable_title(&Some(
+            "Default IME".to_string()
+        )));
+        assert!(super::is_silent_unmanageable_title(&Some(
+            "MSCTFIME UI".to_string()
+        )));
+        assert!(super::is_silent_unmanageable_title(&Some(
+            "OLEChannelWnd".to_string()
+        )));
+        assert!(!super::is_silent_unmanageable_title(&Some(
+            ".NET-BroadcastEventWindow.bf7771.0".to_string()
+        )));
+        assert!(!super::is_silent_unmanageable_title(&Some(
+            "GDI+ Window (ProtonDrive.exe)".to_string()
+        )));
+        assert!(!super::is_silent_unmanageable_title(&Some(
+            "C:\\LDPlayer\\LDPlayer14\\adb.exe".to_string()
+        )));
+        assert!(!super::is_silent_unmanageable_title(&Some(
+            "Notepad".to_string()
+        )));
+        assert!(!super::is_silent_unmanageable_title(&None));
     }
 
     #[test]
