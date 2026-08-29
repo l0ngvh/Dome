@@ -91,7 +91,7 @@ echo "For specific type: malloc_history $PID NSRunningApplication"
 
 [tasks.setup]
 description = "Install all development tools"
-dependencies = ["setup-rustup", "setup-cargo-tools", "setup-mdbook"]
+dependencies = ["setup-rustup", "setup-cargo-tools"]
 
 [tasks.setup-rustup]
 private = true
@@ -114,37 +114,6 @@ cargo install cargo-deny --locked
 cargo install cargo-llvm-cov --locked
 cargo install cargo-wix --locked
 cargo install cargo-insta --locked
-'''
-
-[tasks.setup-mdbook]
-private = true
-description = "Install mdbook"
-script_runner = "@shell"
-script = '''
-cargo install mdbook --locked
-'''
-
-[tasks.docs]
-clear = true
-description = "Build and test documentation site"
-script_runner = "@shell"
-script = '''
-mdbook build docs/
-mdbook test docs/
-'''
-
-[tasks.docs-test]
-description = "Run documentation tests"
-script_runner = "@shell"
-script = '''
-mdbook test docs/
-'''
-
-[tasks.docs-serve]
-description = "Serve documentation site with live reload"
-script_runner = "@shell"
-script = '''
-mdbook serve docs/
 '''
 
 [tasks.bundle]
