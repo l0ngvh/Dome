@@ -16,7 +16,7 @@ file. Without them, Dome reads the platform defaults documented in
 ## Actions
 
 Every action listed in [commands.md](commands.md) is also a `dome` subcommand,
-with the same word-for-word syntax used in `[keymaps]` bindings:
+with the same word-for-word syntax used in `keymaps` bindings:
 
 ```bash
 dome focus right
@@ -34,8 +34,8 @@ the main case, since its command string is taken verbatim:
 dome exec "open -a Terminal"
 ```
 
-The same payload in a `[keymaps]` entry lives in a TOML string and needs no
-extra quoting (`"meta+return" = ["exec open -a Terminal"]`).
+The same payload in a `keymaps` entry is a Lua string and needs no
+extra quoting (`["meta+return"] = "exec open -a Terminal"`).
 
 ## `dome query workspaces`
 

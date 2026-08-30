@@ -69,3 +69,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  luau-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install luau-lsp
+        run: |
+          curl -sSL -o luau-lsp.zip https://github.com/JohnnyMorganz/luau-lsp/releases/download/1.69.0/luau-lsp-linux-x86_64.zip
+          unzip -q luau-lsp.zip
+          chmod +x luau-lsp
+      - name: Typecheck config.lua against dome.d.luau
+        run: ./luau-lsp analyze --definitions=resources/dome.d.luau examples/config.lua resources/default.lua

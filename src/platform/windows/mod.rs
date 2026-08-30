@@ -45,11 +45,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::BOOL;
 
 use crate::config::{
-    Config, LayoutConfig, LayoutWorkspaceConfig, layout_default_path, load_or_default,
-    start_config_watcher,
+    Config, LayoutConfig, LayoutWorkspaceConfig, ModalKeymaps, layout_default_path,
+    load_or_default, start_config_watcher, start_file_watcher,
 };
 use crate::ipc;
 use crate::keymap::KeymapState;
+use crate::lua_runtime::{self, RuntimeMsg, RuntimeOut};
 use dome::app_window::{APP_WINDOW_CLASS, AppWindow, app_wnd_proc};
 use dome::overlay::{
     FLOAT_OVERLAY_CLASS, TAB_BAR_OVERLAY_CLASS, TILING_OVERLAY_CLASS, WgpuOverlayFactory,
@@ -170,9 +171,6 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
     let logger = Logger::init();
 
     let config_path = config_path.unwrap_or_else(Config::default_path);
-    let config = load_or_default(&config_path, Config::load);
-    logger.set_level(config.log_level);
-    tracing::info!(%config_path, "Loaded config");
 
     let layout_path = layout_path.unwrap_or_else(|| {
         layout_default_path(std::path::Path::new(&config_path))
@@ -181,8 +179,6 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
     });
     let layout = load_or_default(&layout_path, LayoutConfig::load);
     tracing::info!(path = %layout_path, "Loaded layout");
-
-    login_item::sync_login_item(config.start_at_login);
 
     std::panic::set_hook(Box::new(|panic_info| {
         let backtrace = backtrace::Backtrace::new();
@@ -203,7 +199,48 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
 
     let dome_thread_id = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let barrier = Arc::new(std::sync::Barrier::new(2));
-    let keymap_state = Arc::new(RwLock::new(KeymapState::new(config.keymaps.clone())));
+    // KeymapState starts empty and is filled from the runtime thread's initial
+    // config below, before the keyboard hook and watchers that read it start.
+    let keymap_state = Arc::new(RwLock::new(KeymapState::new(ModalKeymaps::default())));
+
+    // The hub sender is built per call because the dome thread id is not known
+    // until the barrier below has passed.
+    let out: Box<dyn Fn(RuntimeOut) + Send> = {
+        let keymap_state = Arc::clone(&keymap_state);
+        let logger = logger.clone();
+        let tid = Arc::clone(&dome_thread_id);
+        Box::new(move |event| {
+            let hub = HubSender {
+                thread_id: tid.load(std::sync::atomic::Ordering::Acquire),
+            };
+            match event {
+                RuntimeOut::Actions(actions) => hub.send(HubEvent::Action(actions)),
+                RuntimeOut::SwitchMode(name) => {
+                    if let Ok(mut ks) = keymap_state.write() {
+                        ks.switch_mode(&name);
+                    }
+                }
+                RuntimeOut::Reloaded(config) => {
+                    logger.set_level(config.log_level);
+                    if let Ok(mut ks) = keymap_state.write() {
+                        ks.update_keymaps(config.keymaps.clone());
+                    }
+                    let start_at_login = config.start_at_login;
+                    hub.send(HubEvent::ConfigChanged(config));
+                    login_item::sync_login_item(start_at_login);
+                }
+            }
+        })
+    };
+
+    let (runtime_handle, runtime_tx, config) = lua_runtime::spawn(config_path.clone(), out)?;
+    logger.set_level(config.log_level);
+    tracing::info!(%config_path, "Loaded config");
+    keymap_state
+        .write()
+        .unwrap()
+        .update_keymaps(config.keymaps.clone());
+    login_item::sync_login_item(config.start_at_login);
 
     let config_clone = config.clone();
     let layout_clone = layout.workspace.clone();
@@ -233,7 +270,11 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
         thread_id: dome_thread_id.load(std::sync::atomic::Ordering::Acquire),
     };
 
-    let keyboard_hook = install_keyboard_hook(hub_sender.clone(), Arc::clone(&keymap_state))?;
+    let keyboard_hook = install_keyboard_hook(
+        hub_sender.clone(),
+        Arc::clone(&keymap_state),
+        runtime_tx.clone(),
+    )?;
     let _event_hooks = install_event_hooks(hub_sender.clone())?;
 
     ipc::start_server(layout_path.clone(), {
@@ -251,18 +292,10 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
         }
     })?;
 
-    let _config_watcher = start_config_watcher(&config_path, Config::load, {
-        let sender = hub_sender.clone();
-        let keymap_state = Arc::clone(&keymap_state);
-        move |cfg| {
-            logger.set_level(cfg.log_level);
-            keymap_state
-                .write()
-                .unwrap()
-                .update_keymaps(cfg.keymaps.clone());
-            let start_at_login = cfg.start_at_login;
-            sender.send(HubEvent::ConfigChanged(Box::new(cfg)));
-            login_item::sync_login_item(start_at_login);
+    let _config_watcher = start_file_watcher(&config_path, {
+        let runtime_tx = runtime_tx.clone();
+        move || {
+            runtime_tx.send(RuntimeMsg::Reload).ok();
         }
     })
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))
@@ -287,6 +320,8 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
     }
 
     hub_sender.send(HubEvent::Shutdown);
+    runtime_tx.send(RuntimeMsg::Shutdown).ok();
+    runtime_handle.join().ok();
     dome_thread.join().ok();
     uninstall_keyboard_hook(keyboard_hook);
 
