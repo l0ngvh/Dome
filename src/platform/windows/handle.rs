@@ -390,9 +390,6 @@ impl InspectExternalWindow for ExternalHwnd {
         // used (not GA_ROOTOWNER) because it returns the direct owner, matching the
         // Shell's documented rule
         // (https://learn.microsoft.com/en-us/windows/win32/shell/taskbar#managing-taskbar-buttons).
-        // Treat both Err and Ok(invalid) as ownerless:
-        // upstream gates (IsWindowVisible, is_cloaked, GetAncestor(GA_ROOT) == hwnd)
-        // already established a valid top-level HWND.
         let has_owner = matches!(
             unsafe { GetWindow(hwnd, GW_OWNER) },
             Ok(h) if !h.is_invalid(),
@@ -896,22 +893,25 @@ fn to_logical_rect(dpi: u32, x: i32, y: i32, cx: i32, cy: i32) -> (i32, i32, i32
     (left, top, right - left, bottom - top)
 }
 
-/// Enters the target's own DPI awareness context for a placement and returns
-/// the coordinates to hand SetWindowPos plus the previous context the caller
-/// must restore once the call and any physical-pixel reads are done. Returns
-/// identity coordinates and no restore context for an aware target, or when
-/// the context swap fails.
+/// Call before SetWindowPos on an unaware target. Enters the target's DPI
+/// awareness context and returns the coordinates converted for it, plus the
+/// previous context.
 ///
-/// A DPI-unaware target receiving a cross-process SetWindowPos gets its rect
-/// translated per edge, each edge using the scale of the edge's own monitor,
-/// and the result re-materialized at the anchor monitor's scale. An outer
-/// rect crossing onto a differently-scaled monitor is thus distorted in both
-/// directions (a requested right edge of 2563 beside a 100% monitor lands at
-/// 3204; a requested left edge 4px onto a 125% monitor from a 100% anchor
-/// pulls half a kilopixel sideways). Issuing pre-converted coordinates from
-/// inside the target's own context skips the translation entirely, so the
-/// swap is taken for every unaware target and the conversion is the only
-/// scale-dependent part.
+/// When a window declares itself DPI unaware, Windows rewrites every
+/// SetWindowPos call on it. It first divides each edge by the scale of the
+/// monitor that edge sits on, converting the rect to logical units. It then
+/// multiplies the whole rect by the scale of the monitor the rect mostly sits
+/// on, the anchor monitor, converting back to physical pixels. An edge that
+/// sits on a monitor other than the anchor is therefore net rescaled by the
+/// ratio between the two.
+///
+/// A right edge that sits on a 100% monitor while the rect anchors on a 125%
+/// monitor divides by 1.0 and multiplies by 1.25, so a requested 2563 lands at
+/// 3204. A left edge that sits on a 125% monitor while the rect anchors on a
+/// 100% monitor divides by 1.25 and multiplies by 1.0, so a requested 2565
+/// lands at 2052, dragging the whole window about 500px sideways. Converting
+/// into the target's context and issuing the converted coordinates skips the
+/// rewrite.
 fn enter_placement_context(
     hwnd: HWND,
     x: i32,
