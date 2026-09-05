@@ -12,35 +12,32 @@ mod spawn;
 mod taskbar;
 mod throttle;
 mod timer_registry;
+mod ui;
 
 #[cfg(test)]
 mod tests;
 
 use std::rc::Rc;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
 use crate::logging::Logger;
 use anyhow::Result;
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
-use windows::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, MONITOR_DEFAULTTONEAREST, MonitorFromWindow, PAINTSTRUCT,
-};
+use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::System::Console::{
     CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, SetConsoleCtrlHandler,
 };
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentThreadId};
 use windows::Win32::UI::HiDpi::{
     AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     GetDpiAwarenessContextForProcess, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, IDC_ARROW, LoadCursorW,
-    MA_NOACTIVATE, MSG, PostThreadMessageW, RegisterClassW, TranslateMessage, WM_APP,
-    WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW,
+    DispatchMessageW, GetMessageW, MSG, PostThreadMessageW, TranslateMessage, WM_APP, WM_QUIT,
+    WM_TIMER,
 };
 use windows::core::BOOL;
 
@@ -50,25 +47,21 @@ use crate::config::{
 };
 use crate::ipc;
 use crate::keymap::KeymapState;
-use dome::app_window::{APP_WINDOW_CLASS, AppWindow, app_wnd_proc};
-use dome::overlay::{
-    FLOAT_OVERLAY_CLASS, TAB_BAR_OVERLAY_CLASS, TILING_OVERLAY_CLASS, WgpuOverlayFactory,
-    tab_bar_overlay_wnd_proc, tiling_overlay_wnd_proc,
-};
+use crate::platform::render::WgpuContext;
+use dome::app_window::AppWindow;
+use dome::events::{HubMessage, SceneSender};
 use dome::{Dome, HubEvent};
+use dome_auxiliary_window::{AuxiliaryLoopHandler, EventLoop, LoopWaker};
 use event_listener::install_event_hooks;
 use external::HwndId;
+use ui::WindowThread;
+use ui::overlay::WgpuOverlayFactory;
 
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
 use taskbar::Taskbar;
 
-/// Verifies the process is running at Per-Monitor V2 DPI awareness.
-///
-/// Tries to set PMv2 via `SetProcessDpiAwarenessContext`. On success, returns Ok.
-/// On error (e.g. awareness already pinned by a manifest, compat shim, or prior call),
-/// probes the current process awareness and accepts it if it is already PMv2.
-/// Aborts with an error otherwise, because every downstream geometry and rendering
-/// assumption requires PMv2. See BRD risk #6.
+/// Verifies the process runs at Per-Monitor V2 DPI awareness, aborting otherwise because
+/// every downstream geometry and rendering assumption requires PMv2. See BRD risk #6.
 fn ensure_per_monitor_v2_awareness() -> anyhow::Result<()> {
     let result =
         unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
@@ -77,12 +70,9 @@ fn ensure_per_monitor_v2_awareness() -> anyhow::Result<()> {
     }
     let err = result.unwrap_err();
 
-    // Probe-and-compare: if something else already set awareness to PMv2
-    // (manifest, user compat-shim dialog, prior call), that is fine.
-    // GetDpiAwarenessContextForProcess + AreDpiAwarenessContextsEqual require
-    // Windows 10 1803+ (build 17134). On older builds this path is unreachable
-    // because PMv2 itself requires 1703+, and the Set call would have succeeded
-    // unless awareness was pinned -- which only happens via manifest/shim on 1803+.
+    // GetDpiAwarenessContextForProcess + AreDpiAwarenessContextsEqual require Windows 10
+    // 1803+. This path is only reachable there anyway, because PMv2 needs 1703+ and a
+    // failed Set means awareness was pinned, which only a manifest or shim does on 1803+.
     let current_ctx = unsafe { GetDpiAwarenessContextForProcess(GetCurrentProcess()) };
     let is_pmv2 = unsafe {
         AreDpiAwarenessContextsEqual(current_ctx, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
@@ -107,19 +97,7 @@ fn ensure_per_monitor_v2_awareness() -> anyhow::Result<()> {
 }
 
 pub(super) const WM_APP_HUBEVENT: u32 = WM_APP;
-pub(super) const WM_APP_DISPLAY_CHANGE: u32 = WM_APP + 1;
-pub(super) const WM_APP_DISPATCH_RESULT: u32 = WM_APP + 2;
-/// Thread-message for live DPI changes. WPARAM = new DPI (u32 as usize),
-/// LPARAM = HMONITOR handle (isize). Posted by every Dome-owned wnd-proc
-/// on WM_DPICHANGED; decoded by the dome-thread message loop.
-pub(super) const WM_APP_DPI_CHANGE: u32 = WM_APP + 3;
-pub(super) const WM_APP_WORKAREA_CHANGE: u32 = WM_APP + 4;
-/// Not exported by the `windows` crate as of v0.62. Defined in WinUser.h.
-/// Sent before WM_DPICHANGED; the handler writes the desired scaled window
-/// size into the SIZE* at lparam and returns TRUE.
-/// Remove this constant if the `windows` crate adds `WM_GETDPISCALEDSIZE`.
-/// Revisit after next `windows` crate minor bump; target check: 2026-11.
-pub(super) const WM_GETDPISCALEDSIZE: u32 = 0x02E4;
+pub(super) const WM_APP_DISPATCH_RESULT: u32 = WM_APP + 1;
 
 static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
@@ -137,9 +115,44 @@ impl HubSender {
     }
 }
 
+/// The window thread's `EventLoop` owns the receiver, so a failed send means it is
+/// gone during shutdown and there is nothing to wake.
+struct SceneThreadSender {
+    scenes: Sender<HubMessage>,
+    waker: LoopWaker,
+}
+
+impl SceneSender for SceneThreadSender {
+    fn send(&mut self, msg: HubMessage) {
+        if self.scenes.send(msg).is_ok() {
+            self.waker.wake();
+        }
+    }
+}
+
+/// Handed from the window thread to the domain thread once the window loop is built.
+struct WindowThreadReady {
+    scenes: Sender<HubMessage>,
+    waker: LoopWaker,
+    thread_id: u32,
+}
+
+/// Drives `WindowThread` from the auxiliary window crate's loop.
+struct WindowLoopHandler {
+    window_thread: WindowThread,
+    scenes: Receiver<HubMessage>,
+}
+
+impl AuxiliaryLoopHandler for WindowLoopHandler {
+    fn on_wake(&mut self) {
+        while let Ok(scene) = self.scenes.try_recv() {
+            self.window_thread.send(scene);
+        }
+    }
+}
+
 /// Handles Ctrl+C, Ctrl+Break, and console close by posting WM_QUIT to the main
 /// thread, triggering the existing graceful shutdown path (Dome drop -> recovery).
-/// Reinstated after accidental removal in commit efb409e.
 unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
     match ctrl_type {
         CTRL_C_EVENT | CTRL_BREAK_EVENT | CTRL_CLOSE_EVENT => {
@@ -293,185 +306,51 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
     Ok(())
 }
 
-/// Returns the current window size unchanged. Called from every Dome-owned
-/// wnd-proc's WM_GETDPISCALEDSIZE handler to suppress Windows 11's automatic
-/// DPI resize. By reporting the current size as the "desired scaled size",
-/// Windows' auto-resize becomes a no-op.
-///
-/// Dome's HWNDs are borderless WS_POPUP with no non-client area, so
-/// GetClientRect == window size. Future window classes with a title bar or
-/// border must NOT copy this pattern without adding the non-client delta.
-pub(super) fn wm_getdpiscaledsize_reply(
-    current: windows::Win32::Foundation::SIZE,
-) -> windows::Win32::Foundation::SIZE {
-    current
-}
-
-/// Universal prologue for every Dome-owned wnd-proc.
-///
-/// Returns `Some(LRESULT)` when the message was handled and the per-class
-/// proc should return that value immediately. Returns `None` when the
-/// per-class proc should continue processing.
-///
-/// Centralising these arms turns AGENTS.md's wnd-proc maintenance rule
-/// (every Dome class must handle WM_DPICHANGED + WM_GETDPISCALEDSIZE) into a
-/// structural invariant: any class whose proc calls this helper as its
-/// prologue automatically satisfies the rule.
-///
-/// WM_DPICHANGED is per-window. Duplicate posts from multiple Dome wnd-procs
-/// on the same monitor are absorbed by monitor_dpi_changed.
-pub(super) fn dome_wnd_proc_common(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> Option<LRESULT> {
-    match msg {
-        WM_ERASEBKGND => Some(LRESULT(1)),
-        WM_DPICHANGED => {
-            let dpi = (wparam.0 & 0xFFFF) as u32;
-            let handle = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) }.0 as isize;
-            unsafe {
-                PostThreadMessageW(
-                    GetCurrentThreadId(),
-                    WM_APP_DPI_CHANGE,
-                    WPARAM(dpi as usize),
-                    LPARAM(handle),
-                )
-                .ok()
-            };
-            Some(LRESULT(0))
-        }
-        WM_GETDPISCALEDSIZE => {
-            let mut rect = RECT::default();
-            unsafe { GetClientRect(hwnd, &mut rect).ok() };
-            let size = SIZE {
-                cx: rect.right - rect.left,
-                cy: rect.bottom - rect.top,
-            };
-            let out = lparam.0 as *mut SIZE;
-            unsafe { *out = wm_getdpiscaledsize_reply(size) };
-            Some(LRESULT(1))
-        }
-        _ => None,
-    }
-}
-
-unsafe extern "system" fn float_overlay_wnd_proc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    if let Some(lr) = dome_wnd_proc_common(hwnd, msg, wparam, lparam) {
-        return lr;
-    }
-    match msg {
-        WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
-        WM_PAINT => {
-            let mut ps = PAINTSTRUCT::default();
-            unsafe { BeginPaint(hwnd, &mut ps) };
-            // EndPaint always succeeds; .ok().ok() silences the unused Result lint.
-            unsafe { EndPaint(hwnd, &ps).ok().ok() };
-            LRESULT(0)
-        }
-        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
-    }
-}
-
 fn run_dome(
     config: Config,
     workspace_overrides: Vec<LayoutWorkspaceConfig>,
     main_thread_id: u32,
     keymap_state: Arc<RwLock<KeymapState>>,
 ) {
-    let hinstance = unsafe { GetModuleHandleW(None) }.expect("GetModuleHandleW failed");
-    // https://devblogs.microsoft.com/oldnewthing/20250424-00/?p=111114
-    let arrow = unsafe { LoadCursorW(None, IDC_ARROW) }.expect("LoadCursorW failed");
+    let domain_thread_id = unsafe { GetCurrentThreadId() };
 
-    let wc_window = WNDCLASSW {
-        lpfnWndProc: Some(float_overlay_wnd_proc),
-        hInstance: hinstance.into(),
-        lpszClassName: FLOAT_OVERLAY_CLASS,
-        hCursor: arrow,
-        ..Default::default()
+    let (handshake_tx, handshake_rx) = std::sync::mpsc::channel::<WindowThreadReady>();
+    let wt_config = config.clone();
+    let window_thread = thread::spawn(move || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_window_thread(domain_thread_id, handshake_tx, wt_config);
+        }));
+        if result.is_err() {
+            tracing::error!("Window thread panicked");
+        }
+        // Bring the domain thread down so recovery runs and the process exits.
+        unsafe { PostThreadMessageW(domain_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+    });
+
+    // Blocks until the window thread has built its windows and loop. The window exists by
+    // then, so the thread's message queue exists and the first waker post is not dropped.
+    let ready = match handshake_rx.recv() {
+        Ok(ready) => ready,
+        Err(_) => {
+            // The window thread exited before signaling ready, e.g. wgpu init panicked. It
+            // already posted WM_QUIT to bring us down, so there is nothing left to run.
+            window_thread.join().ok();
+            return;
+        }
     };
-    unsafe { RegisterClassW(&wc_window) };
-
-    let wc_tiling = WNDCLASSW {
-        lpfnWndProc: Some(tiling_overlay_wnd_proc),
-        hInstance: hinstance.into(),
-        lpszClassName: TILING_OVERLAY_CLASS,
-        hCursor: arrow,
-        ..Default::default()
-    };
-    unsafe { RegisterClassW(&wc_tiling) };
-
-    let wc_tab_bar = WNDCLASSW {
-        lpfnWndProc: Some(tab_bar_overlay_wnd_proc),
-        hInstance: hinstance.into(),
-        lpszClassName: TAB_BAR_OVERLAY_CLASS,
-        hCursor: arrow,
-        ..Default::default()
-    };
-    unsafe { RegisterClassW(&wc_tab_bar) };
-
-    let wc_app = WNDCLASSW {
-        lpfnWndProc: Some(app_wnd_proc),
-        hInstance: hinstance.into(),
-        lpszClassName: APP_WINDOW_CLASS,
-        hCursor: arrow,
-        ..Default::default()
-    };
-    unsafe { RegisterClassW(&wc_app) };
-
-    // DX12 is the only backend we target. All other descriptor fields (flags, memory
-    // budget thresholds, backend options, display) stay at their defaults. wgpu 29
-    // dropped Default on InstanceDescriptor and now exposes explicit constructors
-    // instead. new_without_display_handle is the right one for a headless overlay
-    // that never presents to a winit display.
-    let mut instance_descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-    instance_descriptor.backends = wgpu::Backends::DX12;
-    let instance = wgpu::Instance::new(instance_descriptor);
-    let adapter = pollster::block_on(instance.request_adapter(
-        // No power-preference hint (system picks the DX12 adapter), no compatible_surface
-        // required before surface creation, force_fallback_adapter = false.
-        &wgpu::RequestAdapterOptions::default(),
-    ))
-    .expect("No DX12 adapter");
-    let (device, queue) = pollster::block_on(adapter.request_device(
-        // No required features. Default (downlevel) limits are more than enough for
-        // 2D egui rendering. No memory hints, no trace path.
-        &wgpu::DeviceDescriptor::default(),
-    ))
-    .expect("Failed to create wgpu device");
-    let device = Arc::new(device);
-    let queue = Arc::new(queue);
+    let window_thread_id = ready.thread_id;
 
     let taskbar = Taskbar::new().expect("Failed to create Taskbar");
-
-    let hub_sender = HubSender {
-        thread_id: unsafe { GetCurrentThreadId() },
-    };
-
-    let overlays = WgpuOverlayFactory {
-        instance,
-        adapter,
-        device,
-        queue,
-        hub_sender: hub_sender.clone(),
-    };
-
-    let app_window =
-        AppWindow::new(hinstance.into(), hub_sender.clone()).expect("Failed to create app window");
 
     let dome = Dome::new(
         config.clone(),
         workspace_overrides,
         Rc::new(taskbar),
-        Box::new(overlays),
         Box::new(dome::Win32Display),
-        app_window,
+        Box::new(SceneThreadSender {
+            scenes: ready.scenes,
+            waker: ready.waker,
+        }),
     )
     .expect("Failed to initialize Dome");
 
@@ -482,12 +361,7 @@ fn run_dome(
         tracing::warn!("Failed to enumerate windows: {e}");
     }
 
-    let mut runner = runner::Runner::new(
-        dome,
-        unsafe { GetCurrentThreadId() },
-        main_thread_id,
-        keymap_state,
-    );
+    let mut runner = runner::Runner::new(dome, domain_thread_id, main_thread_id, keymap_state);
 
     for hwnd_id in initial_hwnds {
         runner.dispatch_window_created(hwnd_id);
@@ -500,17 +374,6 @@ fn run_dome(
                 WM_APP_HUBEVENT => {
                     let event = *Box::from_raw(msg.wParam.0 as *mut HubEvent);
                     runner.handle_event(event);
-                }
-                WM_APP_DISPLAY_CHANGE => {
-                    runner.handle_display_change();
-                }
-                WM_APP_DPI_CHANGE => {
-                    let dpi = msg.wParam.0 as u32;
-                    let handle = msg.lParam.0;
-                    runner.handle_dpi_change(handle, dpi);
-                }
-                WM_APP_WORKAREA_CHANGE => {
-                    runner.handle_work_area_change();
                 }
                 WM_APP_DISPATCH_RESULT => {
                     let apply = *Box::from_raw(msg.wParam.0 as *mut runner::ApplyFn);
@@ -526,4 +389,68 @@ fn run_dome(
             }
         }
     }
+
+    // Domain pump exited on shutdown. Quit the window thread and wait for it to
+    // destroy its overlays on its own thread before recovery runs at scope exit.
+    unsafe { PostThreadMessageW(window_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+    window_thread.join().ok();
+}
+
+fn run_window_thread(domain_thread_id: u32, handshake: Sender<WindowThreadReady>, config: Config) {
+    unsafe {
+        CoInitializeEx(None, COINIT_APARTMENTTHREADED)
+            .ok()
+            .expect("CoInitializeEx failed");
+    }
+
+    // wgpu 29 dropped Default on InstanceDescriptor for explicit constructors.
+    // new_without_display_handle suits a headless overlay that never presents to a
+    // winit display.
+    let mut instance_descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    instance_descriptor.backends = wgpu::Backends::DX12;
+    let instance = wgpu::Instance::new(instance_descriptor);
+    let adapter =
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .expect("No DX12 adapter");
+    let (device, queue) =
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+            .expect("Failed to create wgpu device");
+    let device = Arc::new(device);
+    let queue = Arc::new(queue);
+
+    let hub_sender = HubSender {
+        thread_id: domain_thread_id,
+    };
+
+    let overlay_factory = WgpuOverlayFactory::new(
+        WgpuContext::new(instance, adapter, device, queue),
+        hub_sender.clone(),
+    )
+    .expect("DirectComposition device init");
+
+    let app_window = AppWindow::new(hub_sender.clone()).expect("Failed to create app window");
+
+    let window_thread = WindowThread::new(
+        config,
+        Box::new(overlay_factory),
+        app_window,
+        Box::new(handle::Win32ZOrder),
+    );
+
+    let (scene_tx, scene_rx) = std::sync::mpsc::channel::<HubMessage>();
+    let event_loop = EventLoop::new(Box::new(WindowLoopHandler {
+        window_thread,
+        scenes: scene_rx,
+    }));
+    // The domain can post scenes the moment it holds these. The window already exists, so
+    // the queue exists and a waker post cannot be dropped.
+    handshake
+        .send(WindowThreadReady {
+            scenes: scene_tx,
+            waker: event_loop.waker(),
+            thread_id: unsafe { GetCurrentThreadId() },
+        })
+        .ok();
+
+    event_loop.run();
 }

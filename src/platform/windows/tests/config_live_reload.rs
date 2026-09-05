@@ -55,33 +55,3 @@ fn config_reload_dispatches_apply_theme_on_flavor_change() {
         assert_eq!(f.flavor, crate::theme::Flavor::Latte);
     }
 }
-
-#[test]
-fn config_reload_dispatches_apply_font_on_font_change() {
-    let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    env.run_actions("toggle float");
-
-    let new_font = crate::font::FontConfig {
-        text_size: 18.0,
-        family: None,
-    };
-    // Sanity: overlays start at the default font (different from `new_font`).
-    let tiling = env.tiling_overlays();
-    assert_ne!(tiling[0].font, new_font);
-    for f in &env.float_overlays() {
-        assert_ne!(f.font, new_font);
-    }
-
-    let mut new_config = env.config.clone();
-    new_config.font = new_font.clone();
-    env.dome.config_changed(new_config);
-
-    // After a font change, both overlays must hold the new font.
-    let tiling = env.tiling_overlays();
-    assert_eq!(tiling[0].font, new_font);
-    for f in &env.float_overlays() {
-        assert_eq!(f.font, new_font);
-    }
-}

@@ -557,7 +557,7 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
 }
 
 #[test]
-fn monitor_dpi_changed_reruns_layout_with_new_scale() {
+fn dpi_reconcile_reruns_layout_with_new_scale() {
     let monitor = MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
@@ -582,10 +582,10 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
     config.size_constraints = layout.size_constraints;
     config.float = layout.float;
     config.fullscreen = layout.fullscreen;
-    let mut env = TestEnv::new_with_monitors(config, LayoutConfig::default(), vec![monitor]);
+    let mut env =
+        TestEnv::new_with_monitors(config, LayoutConfig::default(), vec![monitor.clone()]);
     let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    // Put into a tabbed container so tab_bar_height participates in layout
     env.run_actions("toggle layout");
     env.settle(10);
 
@@ -594,9 +594,10 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
     let tab_h_1x = Length::new(30.0);
     assert_eq!(d_before.y, (border + tab_h_1x));
 
-    // 192 DPI is scale 2.0.
-    let handle = 1_isize;
-    env.dome.monitor_dpi_changed(handle, 192);
+    let mut scaled = monitor;
+    scaled.scale = 2.0;
+    *env.monitors.lock().unwrap() = vec![scaled];
+    env.dome.handle_dpi_change();
     env.dome.apply_layout();
     env.settle(10);
 
@@ -649,34 +650,6 @@ fn handle_window_moved_signals_monitor_change() {
             Instant::now(),
         ),
         "unknown window must not signal a constraint re-read"
-    );
-}
-
-#[test]
-fn monitor_dpi_changed_returns_only_windows_on_that_monitor() {
-    let mut env = TestEnv::new_with_monitors(
-        Config::default(),
-        LayoutConfig::default(),
-        vec![default_monitor(), second_monitor()],
-    );
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    env.settle(10);
-
-    // Unchanged scale (96 DPI == 1.0) absorbs the duplicate posts: no re-read.
-    assert!(
-        env.dome.monitor_dpi_changed(1, 96).is_empty(),
-        "unchanged scale must not request a re-read"
-    );
-    // A scale change on monitor 2, which holds no windows, re-reads nothing.
-    assert!(
-        env.dome.monitor_dpi_changed(2, 144).is_empty(),
-        "a monitor with no windows must not request a re-read"
-    );
-    // A scale change on monitor 1 re-reads the window that lives there.
-    assert_eq!(
-        env.dome.monitor_dpi_changed(1, 144),
-        vec![w1],
-        "the window on the changed monitor re-reads"
     );
 }
 

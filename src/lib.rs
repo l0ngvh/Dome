@@ -1,4 +1,3 @@
-mod action;
 pub mod cli;
 mod config;
 mod core;
@@ -18,11 +17,11 @@ mod theme;
 )]
 pub(crate) use log_dedup::{debug_once, trace_once, warn_once};
 
-pub use action::{
-    Action, FocusTarget, IpcMessage, MasterTarget, MonitorTarget, MoveTarget, Query, TabDirection,
-    ToggleTarget,
+pub use dome_ipc::action;
+pub use dome_ipc::{
+    Action, DomeClient, FocusTarget, IpcMessage, MasterTarget, MonitorTarget, MoveTarget, Query,
+    TabDirection, ToggleTarget, WindowId,
 };
-pub use ipc::DomeClient;
 
 #[cfg(target_os = "macos")]
 pub use platform::macos::run_app;

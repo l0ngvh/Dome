@@ -24,14 +24,14 @@ use windows::Win32::UI::HiDpi::{
     GetDpiForWindow, GetWindowDpiAwarenessContext, MDT_EFFECTIVE_DPI, SetThreadDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GW_OWNER, GWL_EXSTYLE, GWL_STYLE,
-    GetAncestor, GetClassNameW, GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
-    HWND_BOTTOM, IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO, PostMessageW, SMTO_ABORTIFHUNG,
-    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE,
-    SWP_NOZORDER, SendMessageTimeoutW, SetWindowPos, ShowWindow, ShowWindowAsync, WM_CLOSE,
-    WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CHILD, WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
-    WS_POPUP, WS_THICKFRAME,
+    EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GW_HWNDPREV, GW_OWNER, GWL_EXSTYLE,
+    GWL_STYLE, GetAncestor, GetClassNameW, GetWindow, GetWindowLongW, GetWindowRect,
+    GetWindowThreadProcessId, HWND_BOTTOM, IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO,
+    PostMessageW, SMTO_ABORTIFHUNG, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, SetWindowPos,
+    ShowWindow, ShowWindowAsync, WM_CLOSE, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH,
+    WS_CHILD, WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -45,6 +45,38 @@ use crate::platform::windows::foreground::force_set_foreground;
 pub(crate) const OFFSCREEN_POS: Pixels = Pixels::new(-32000);
 
 const MSG_TIMEOUT_MS: u32 = 100;
+
+pub(in crate::platform::windows) trait ManageZOrder {
+    fn window_above(&self, hwnd: HwndId) -> Option<HwndId>;
+    /// `overlay` belongs to the window thread, so this call only completes while that
+    /// thread pumps messages.
+    fn demote_below(&self, overlay: HwndId, managed: HwndId);
+}
+
+pub(in crate::platform::windows) struct Win32ZOrder;
+
+impl ManageZOrder for Win32ZOrder {
+    fn window_above(&self, hwnd: HwndId) -> Option<HwndId> {
+        let prev = unsafe { GetWindow(hwnd.into(), GW_HWNDPREV) }.ok();
+        prev.map(HwndId::from)
+    }
+
+    fn demote_below(&self, overlay: HwndId, managed: HwndId) {
+        let target: HWND = managed.into();
+        unsafe {
+            SetWindowPos(
+                overlay.into(),
+                Some(target),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+            .ok();
+        }
+    }
+}
 
 /// A buggy WndProc can return garbage from WM_GETTEXTLENGTH.
 const MAX_WINDOW_TITLE_U16: usize = 32 * 1024;
@@ -85,7 +117,6 @@ pub(crate) fn get_pixel_rect(hwnd: HWND) -> PixelRect {
 }
 
 /// Converts a Win32 `RECT` (left, top, right, bottom edges) into (x, y, width, height).
-/// The single site for the `RECT` crossing, so callers do not hand-roll the edge arithmetic.
 pub(crate) fn rect_to_pixel_rect(rect: RECT) -> PixelRect {
     PixelRect::new(
         rect.left,
@@ -99,10 +130,7 @@ pub(crate) fn rect_to_dimension(rect: RECT) -> Dimension {
     rect_to_pixel_rect(rect).to_dimension()
 }
 
-/// Positions `hwnd` at `OFFSCREEN_POS` with z-order HWND_BOTTOM.
-///
-/// Uses `SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS` and deliberately
-/// omits `SWP_NOZORDER` so the z-drop to HWND_BOTTOM takes effect. This ensures
+/// Deliberately omits `SWP_NOZORDER` so the z-drop to HWND_BOTTOM takes effect. This ensures
 /// offscreen windows cannot occlude visible windows and the reposition does not
 /// steal foreground activation.
 pub(crate) fn move_window_offscreen(hwnd: HWND) {
@@ -146,8 +174,8 @@ impl ManageExternalWindow for ExternalHwnd {
 
     fn pid(&self) -> u32 {
         let mut pid = 0u32;
-        // Non-blocking thread/process-map lookup; safe on external HWNDs.
-        // Returns 0 on a zombie HWND (window already destroyed); 0 is never a
+        // Non-blocking thread/process-map lookup, safe on external HWNDs.
+        // Returns 0 on a zombie HWND (window already destroyed). 0 is never a
         // valid Windows pid, so callers can use it as an unambiguous sentinel.
         unsafe { GetWindowThreadProcessId(self.0, Some(&mut pid)) };
         if pid == 0 {
@@ -647,8 +675,6 @@ impl InspectExternalWindow for ExternalHwnd {
 }
 
 /// Returns the invisible border widths (left, top, right, bottom) as raw i32 in physical pixels.
-/// Used internally by `set_position` for border compensation and by `get_size_constraints`
-/// for track-size adjustment.
 fn get_invisible_border(hwnd: HWND) -> (i32, i32, i32, i32) {
     let mut window_rect = RECT::default();
     let mut frame_rect = RECT::default();
@@ -907,7 +933,7 @@ fn to_logical_rect(dpi: u32, x: i32, y: i32, cx: i32, cy: i32) -> (i32, i32, i32
 /// and the result re-materialized at the anchor monitor's scale. An outer
 /// rect crossing onto a differently-scaled monitor is thus distorted in both
 /// directions (a requested right edge of 2563 beside a 100% monitor lands at
-/// 3204; a requested left edge 4px onto a 125% monitor from a 100% anchor
+/// 3204. A requested left edge 4px onto a 125% monitor from a 100% anchor
 /// pulls half a kilopixel sideways). Issuing pre-converted coordinates from
 /// inside the target's own context skips the translation entirely, so the
 /// swap is taken for every unaware target and the conversion is the only
@@ -936,7 +962,7 @@ fn enter_placement_context(
     };
     let previous = unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE) };
     if previous.0.is_null() {
-        // The swap failed, so the OS would translate the rect per edge; issue
+        // The swap failed, so the OS would translate the rect per edge. Issue
         // identity coords rather than the pre-converted ones.
         return ((x, y, cx, cy), None);
     }

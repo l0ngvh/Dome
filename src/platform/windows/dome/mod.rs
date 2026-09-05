@@ -1,7 +1,7 @@
 pub(super) mod app_window;
+pub(super) mod events;
 mod external_bar;
 pub(super) mod monitor;
-pub(super) mod overlay;
 mod placement_tracker;
 mod recovery;
 mod registry;
@@ -10,7 +10,7 @@ pub(super) mod window;
 
 pub(super) use self::monitor::{MonitorInfo, QueryDisplay, Win32Display};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -22,21 +22,23 @@ use crate::action::{
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
-    ContainerId, ContainerPlacement, Direction, FloatWindowPlacement, Hub, LimitObservation,
-    MonitorId, MonitorLayout, Physical, PixelRect, Pixels, TilingAction, TilingWindowPlacement,
-    WindowId, WindowRestrictions,
+    ContainerId, Direction, Hub, LimitObservation, MonitorId, MonitorLayout, Physical, PixelRect,
+    TilingAction, WindowId, WindowRestrictions,
 };
 
-use self::app_window::AppWindowApi;
-use self::overlay::{FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi};
 use self::placement_tracker::PlacementTracker;
 use self::recovery::Recovery;
 use self::registry::{ManagedWindow, WindowRegistry};
 use self::window::{PositionedState, WindowState};
+use crate::platform::windows::ui::overlay::{FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi};
 
 pub(super) use self::window::NewWindow;
 pub(super) use self::window::WindowsMetadata;
 
+use self::events::{
+    FloatOverlayAction, HubMessage, MonitorScene, MonitorSetChange, NewTilingOverlay,
+    PendingPlacement, PlacementAction, RenderScene, SceneSender,
+};
 use self::external_bar::StatusBars;
 use crate::platform::reserve_for_bar;
 
@@ -72,19 +74,16 @@ pub(super) enum HubEvent {
     LayoutConfigChanged(Box<LayoutConfig>),
     ExportLayout(String),
     TabClicked(ContainerId, usize),
+    /// A monitor's effective DPI changed (WM_DPICHANGED).
+    DpiChanged,
+    /// The desktop work area changed (SPI_SETWORKAREA).
+    WorkAreaChanged,
+    /// A monitor was added, removed, or reconfigured (WM_DISPLAYCHANGE).
+    DisplayChanged,
     Shutdown,
 }
 
-struct MonitorPositionData {
-    monitor_id: MonitorId,
-    work_area: PixelRect,
-    border_thickness: Pixels<Physical>,
-    tiling_windows: Vec<TilingWindowPlacement>,
-    float_windows: Vec<FloatWindowPlacement>,
-    containers: Vec<(ContainerPlacement, Vec<String>)>,
-}
-
-pub(super) trait CreateOverlay {
+pub(in crate::platform::windows) trait CreateOverlay {
     fn create_tiling_overlay(
         &self,
         config: Config,
@@ -107,8 +106,8 @@ pub(super) trait CreateOverlay {
 }
 
 /// Platform-specific state machine that bridges Win32 window events with the core tree
-/// model. Event-loop–facing methods accept `HwndId` rather than `WindowId` because callers
-/// may dispatch work to background threads — by the time results arrive the window may
+/// model. Event-loop-facing methods accept `HwndId` rather than `WindowId` because callers
+/// may dispatch work to background threads -- by the time results arrive the window may
 /// have been removed, so resolution to `WindowId` happens here where the registry can be
 /// checked.
 pub(super) struct Dome {
@@ -120,17 +119,13 @@ pub(super) struct Dome {
     displayed_windows: HashSet<WindowId>,
     config: Config,
     taskbar: Rc<dyn ManageTaskbar>,
-    overlay_factory: Box<dyn CreateOverlay>,
     display: Box<dyn QueryDisplay>,
-    tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>>,
-    tab_bars: HashMap<ContainerId, Box<dyn TabBarOverlayApi>>,
-    float_overlays: HashMap<WindowId, Box<dyn FloatOverlayApi>>,
+    window: Box<dyn SceneSender>,
     last_focused: Option<WindowId>,
     last_focused_monitor: Option<MonitorId>,
     pending_created: Vec<WindowId>,
     placement_tracker: PlacementTracker,
     recovery: Recovery,
-    app_window: Box<dyn AppWindowApi>,
     status_bars: StatusBars,
 }
 
@@ -145,9 +140,8 @@ impl Dome {
         config: Config,
         workspace_overrides: Vec<LayoutWorkspaceConfig>,
         taskbar: Rc<dyn ManageTaskbar>,
-        overlay_factory: Box<dyn CreateOverlay>,
         display: Box<dyn QueryDisplay>,
-        app_window: Box<dyn AppWindowApi>,
+        mut window: Box<dyn SceneSender>,
     ) -> anyhow::Result<Self> {
         let monitors = display.get_all_monitors()?;
         anyhow::ensure!(!monitors.is_empty(), "No monitors detected");
@@ -162,7 +156,7 @@ impl Dome {
         );
         let primary_monitor_id = hub.primary_monitor();
         let mut monitors_reg = MonitorRegistry::new();
-        let mut tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>> = HashMap::new();
+        let mut new_overlays: Vec<NewTilingOverlay> = Vec::new();
         monitors_reg.insert(
             primary.handle,
             primary_monitor_id,
@@ -171,11 +165,11 @@ impl Dome {
             primary.work_area,
             primary.scale,
         );
-        if let Ok(overlay) =
-            overlay_factory.create_tiling_overlay(config.clone(), primary.work_area, primary.scale)
-        {
-            tiling_overlays.insert(primary_monitor_id, overlay);
-        }
+        new_overlays.push(NewTilingOverlay {
+            monitor_id: primary_monitor_id,
+            work_area: primary.work_area,
+            scale: primary.scale,
+        });
         tracing::info!(
             name = %primary.name,
             handle = ?primary.handle,
@@ -194,13 +188,11 @@ impl Dome {
                     monitor.work_area,
                     monitor.scale,
                 );
-                if let Ok(overlay) = overlay_factory.create_tiling_overlay(
-                    config.clone(),
-                    monitor.work_area,
-                    monitor.scale,
-                ) {
-                    tiling_overlays.insert(id, overlay);
-                }
+                new_overlays.push(NewTilingOverlay {
+                    monitor_id: id,
+                    work_area: monitor.work_area,
+                    scale: monitor.scale,
+                });
                 tracing::info!(
                     name = %monitor.name,
                     handle = ?monitor.handle,
@@ -210,45 +202,34 @@ impl Dome {
             }
         }
 
+        window.send(HubMessage::MonitorsChanged(MonitorSetChange {
+            added: new_overlays,
+            removed: Vec::new(),
+        }));
+
         Ok(Self {
             hub,
             registry: WindowRegistry::new(),
             monitors: monitors_reg,
             config,
             taskbar: taskbar.clone(),
-            overlay_factory,
             display,
-            tiling_overlays,
-            tab_bars: HashMap::new(),
-            float_overlays: HashMap::new(),
+            window,
             last_focused: None,
             last_focused_monitor: None,
             pending_created: Vec::new(),
             placement_tracker: PlacementTracker::new(),
             displayed_windows: HashSet::new(),
             recovery: Recovery::new(taskbar),
-            app_window,
             status_bars: StatusBars::default(),
         })
-    }
-
-    fn refresh_tray(&self) {
-        self.app_window.update_tray(&self.query_workspaces());
     }
 
     pub(super) fn config_changed(&mut self, new_config: Config) {
         self.hub
             .sync_configuration(GlobalLayoutConfig::from(&new_config));
         self.config = new_config;
-        for overlay in self.tiling_overlays.values_mut() {
-            overlay.set_config(&self.config);
-        }
-        for overlay in self.float_overlays.values_mut() {
-            overlay.set_config(&self.config);
-        }
-        for overlay in self.tab_bars.values_mut() {
-            overlay.set_config(&self.config);
-        }
+        self.dispatch(HubMessage::ConfigChanged(Box::new(self.config.clone())));
         tracing::info!("Config reloaded");
         self.apply_layout();
     }
@@ -269,7 +250,6 @@ impl Dome {
         self.recovery.untrack(id_key);
         if let Some(id) = self.registry.remove_by_hwnd(id_key) {
             tracing::info!(%id, "Window removed");
-            self.float_overlays.remove(&id);
             self.displayed_windows.remove(&id);
             self.hub.delete_window(id);
             self.apply_layout();
@@ -351,6 +331,19 @@ impl Dome {
             }
             Err(e) => {
                 tracing::warn!("Failed to enumerate monitors on work area change: {e}");
+                Vec::new()
+            }
+        }
+    }
+
+    pub(super) fn handle_dpi_change(&mut self) -> Vec<HwndId> {
+        match self.display.get_all_monitors() {
+            Ok(monitors) => {
+                tracing::info!("DPI changed, refreshing monitor scale");
+                self.monitors_changed(monitors)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to enumerate monitors on DPI change: {e}");
                 Vec::new()
             }
         }
@@ -583,8 +576,10 @@ impl Dome {
         let focused_monitor = result.focused_monitor;
         let focused = focused_window;
 
-        let mut per_monitor: Vec<MonitorPositionData> = Vec::new();
+        let mut per_monitor: Vec<MonitorScene> = Vec::new();
         let mut new_window_ids: HashSet<WindowId> = HashSet::new();
+        let mut placements: Vec<PendingPlacement> = Vec::new();
+        let mut float_actions: Vec<FloatOverlayAction> = Vec::new();
 
         for mp in result.monitors {
             let work_area = self.monitors.monitor(mp.monitor_id).work_area();
@@ -594,7 +589,7 @@ impl Dome {
             match &mp.layout {
                 MonitorLayout::Fullscreen(id) => {
                     window_ids.insert(*id);
-                    self.show_fullscreen_window(*id, work_area, mp.monitor_id);
+                    placements.extend(self.show_fullscreen_window(*id, work_area, mp.monitor_id));
                 }
                 MonitorLayout::Normal {
                     tiling_windows,
@@ -618,7 +613,9 @@ impl Dome {
                                 border_box = ?wp.border_box,
                                 "Content box entirely border, hiding window"
                             );
-                            self.hide_window(wp.id);
+                            let (placement, float_action) = self.hide_window(wp.id);
+                            placements.extend(placement);
+                            float_actions.extend(float_action);
                             continue;
                         }
                         placed_tiling.push(*wp);
@@ -634,7 +631,9 @@ impl Dome {
                                 border_box = ?wp.border_box,
                                 "Float content box entirely border, hiding window"
                             );
-                            self.hide_window(wp.id);
+                            let (placement, float_action) = self.hide_window(wp.id);
+                            placements.extend(placement);
+                            float_actions.extend(float_action);
                             continue;
                         }
                         placed_floats.push(*wp);
@@ -643,13 +642,13 @@ impl Dome {
                         if !cp.is_tabbed && !cp.is_highlighted {
                             continue;
                         }
-                        let titles = cp.titles.clone();
-                        container_data.push((cp.clone(), titles));
+                        container_data.push(cp.clone());
                     }
 
-                    per_monitor.push(MonitorPositionData {
+                    per_monitor.push(MonitorScene {
                         monitor_id: mp.monitor_id,
                         work_area,
+                        scale: self.monitors.monitor(mp.monitor_id).scale(),
                         border_thickness: mp.border_thickness,
                         tiling_windows: placed_tiling,
                         float_windows: placed_floats,
@@ -681,23 +680,22 @@ impl Dome {
             {
                 self.taskbar.delete_tab(entry.ext.id());
             }
-            self.hide_window(id);
+            let (placement, float_action) = self.hide_window(id);
+            placements.extend(placement);
+            float_actions.extend(float_action);
         }
 
         for &id in &created {
             if !self.displayed_windows.contains(&id) {
-                self.hide_window(id);
+                let (placement, float_action) = self.hide_window(id);
+                placements.extend(placement);
+                float_actions.extend(float_action);
             }
         }
 
-        self.position_windows(&per_monitor, focused);
-
-        let current_float_ids: HashSet<WindowId> = per_monitor
-            .iter()
-            .flat_map(|m| m.float_windows.iter().map(|wp| wp.id))
-            .collect();
-        self.float_overlays
-            .retain(|id, _| current_float_ids.contains(id));
+        let (positioned, positioned_floats) = self.position_windows(&per_monitor, focused);
+        placements.extend(positioned);
+        float_actions.extend(positioned_floats);
 
         for &id in &tabs_to_add {
             if let Some(entry) = self.registry.get(id) {
@@ -710,25 +708,47 @@ impl Dome {
             .last_focused_monitor
             .is_some_and(|m| m != current_monitor);
 
+        let mut focus_monitor = None;
         if focused != self.last_focused || monitor_changed {
             self.last_focused = focused;
             if let Some(id) = focused {
                 if let Some(entry) = self.registry.get(id)
                     && !matches!(entry.state, WindowState::ExclusiveFullscreen)
                 {
-                    entry.ext.set_foreground_window();
+                    placements.push(PendingPlacement {
+                        ext: entry.ext.clone(),
+                        action: PlacementAction::SetForegroundWindow,
+                    });
                 }
-            } else if let Some(overlay) = self.tiling_overlays.get(&focused_monitor) {
-                overlay.focus();
+            } else {
+                focus_monitor = Some(focused_monitor);
             }
         }
         self.last_focused_monitor = Some(current_monitor);
-        self.refresh_tray();
+
+        let scene = RenderScene {
+            monitors: per_monitor,
+            float_overlays: float_actions,
+            focus_monitor,
+            workspaces: self.query_workspaces(),
+            placements,
+        };
+        self.dispatch(HubMessage::Scene(scene));
+    }
+
+    fn dispatch(&mut self, msg: HubMessage) {
+        self.window.send(msg);
     }
 
     #[tracing::instrument(level = "trace", skip_all)]
-    fn position_windows(&mut self, per_monitor: &[MonitorPositionData], focused: Option<WindowId>) {
+    fn position_windows(
+        &mut self,
+        per_monitor: &[MonitorScene],
+        focused: Option<WindowId>,
+    ) -> (Vec<PendingPlacement>, Vec<FloatOverlayAction>) {
         let focus_changed = focused != self.last_focused;
+        let mut placements: Vec<PendingPlacement> = Vec::new();
+        let mut float_actions: Vec<FloatOverlayAction> = Vec::new();
 
         for data in per_monitor {
             for wp in &data.float_windows {
@@ -740,22 +760,7 @@ impl Dome {
                 if self.placement_tracker.is_moving(hwnd_id) {
                     continue;
                 }
-                if !self.float_overlays.contains_key(&wp.id) {
-                    match self.overlay_factory.create_float_overlay(
-                        self.config.clone(),
-                        self.monitors.monitor(data.monitor_id).scale(),
-                        wp.visible_border_box,
-                    ) {
-                        Ok(o) => {
-                            self.float_overlays.insert(wp.id, o);
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to create float overlay: {e:#}");
-                            continue;
-                        }
-                    }
-                }
-                self.show_float(
+                let (placement, float_action) = self.show_float(
                     wp.id,
                     wp,
                     focus_changed,
@@ -763,80 +768,25 @@ impl Dome {
                     data.monitor_id,
                     data.border_thickness,
                 );
+                placements.extend(placement);
+                float_actions.extend(float_action);
             }
 
-            if !self.tiling_overlays.contains_key(&data.monitor_id) {
-                continue;
-            }
-            if data.tiling_windows.is_empty() && data.containers.is_empty() {
-                self.tiling_overlays
-                    .get_mut(&data.monitor_id)
-                    .unwrap()
-                    .clear();
-                continue;
-            }
             for wp in &data.tiling_windows {
                 let Some(entry) = self.registry.get(wp.id) else {
                     tracing::debug!(id = ?wp.id, "position_windows: tiling window missing from registry");
                     continue;
                 };
                 let hwnd_id = entry.ext.id();
-                // Mid-move: skip SetWindowPos but overlay still gets target rect below.
+                // Mid-move: skip SetWindowPos but the overlay still gets the target rect,
+                // which apply_scene applies unconditionally.
                 if self.placement_tracker.is_moving(hwnd_id) {
                     continue;
                 }
-                self.show_tiling(wp.id, wp, data.monitor_id);
-            }
-            let scale = self.monitors.monitor(data.monitor_id).scale();
-            self.tiling_overlays
-                .get_mut(&data.monitor_id)
-                .unwrap()
-                .update(
-                    data.work_area,
-                    &data.tiling_windows,
-                    &data.containers,
-                    scale,
-                    data.border_thickness,
-                );
-            for (placement, titles) in data.containers.iter().filter(|(p, _)| p.is_tabbed) {
-                let rect = placement.tab_bar_band;
-                let tab_bar = match self.tab_bars.entry(placement.id) {
-                    std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
-                    std::collections::hash_map::Entry::Vacant(e) => {
-                        match self.overlay_factory.create_tab_bar(
-                            self.config.clone(),
-                            placement.id,
-                            rect,
-                            scale,
-                        ) {
-                            Ok(o) => e.insert(o),
-                            Err(err) => {
-                                tracing::warn!(?err, "failed to create tab bar");
-                                continue;
-                            }
-                        }
-                    }
-                };
-                tab_bar.update(
-                    rect,
-                    titles.clone(),
-                    placement.active_tab_index,
-                    placement.is_highlighted,
-                    scale,
-                    data.border_thickness,
-                );
+                placements.extend(self.show_tiling(wp.id, wp, data.monitor_id));
             }
         }
-        let active: HashSet<ContainerId> = per_monitor
-            .iter()
-            .flat_map(|d| {
-                d.containers
-                    .iter()
-                    .filter(|(p, _)| p.is_tabbed)
-                    .map(|(p, _)| p.id)
-            })
-            .collect();
-        self.tab_bars.retain(|id, _| active.contains(id));
+        (placements, float_actions)
     }
 
     /// Returns `true` when the window settled on a different monitor than
@@ -856,7 +806,9 @@ impl Dome {
             entry.monitor = monitor_handle;
             changed
         });
-        self.window_moved(id, new_placement, monitor_handle, observed_at);
+        if let Some(placement) = self.window_moved(id, new_placement, monitor_handle, observed_at) {
+            self.dispatch(HubMessage::Placements(vec![placement]));
+        }
         self.apply_layout();
         monitor_changed
     }
@@ -869,7 +821,7 @@ impl Dome {
                 tracing::trace!(%window_id, ?hwnd_id, title = %title, "Title changed");
             }
         }
-        // TODO: full re-layout on every title change is expensive — we should
+        // TODO: full re-layout on every title change is expensive -- we should
         // selectively re-render only the affected tiling overlay instead.
         self.apply_layout();
     }
@@ -881,19 +833,22 @@ impl Dome {
         }
         self.status_bars.reserve(&mut monitors, &self.monitors);
         let change = self.monitors.reconcile(&mut self.hub, &monitors);
-        for id in change.added {
-            let m = self.monitors.monitor(id);
-            if let Ok(overlay) = self.overlay_factory.create_tiling_overlay(
-                self.config.clone(),
-                m.work_area(),
-                m.scale(),
-            ) {
-                self.tiling_overlays.insert(id, overlay);
-            }
-        }
-        for id in change.removed {
-            self.tiling_overlays.remove(&id);
-        }
+        let added: Vec<NewTilingOverlay> = change
+            .added
+            .iter()
+            .map(|&monitor_id| {
+                let m = self.monitors.monitor(monitor_id);
+                NewTilingOverlay {
+                    monitor_id,
+                    work_area: m.work_area(),
+                    scale: m.scale(),
+                }
+            })
+            .collect();
+        self.dispatch(HubMessage::MonitorsChanged(MonitorSetChange {
+            added,
+            removed: change.removed,
+        }));
 
         self.registry
             .iter()
@@ -986,29 +941,13 @@ impl Dome {
         }
     }
 
-    /// Applies the DPI scale change for the monitor with this HMONITOR handle
-    /// and returns the windows on it whose size constraints need re-reading,
-    /// since WM_GETMINMAXINFO normalizes by monitor scale for legacy apps.
-    pub(super) fn monitor_dpi_changed(&mut self, handle: isize, dpi: u32) -> Vec<HwndId> {
-        if !self.monitors.apply_dpi_change(handle, dpi, &mut self.hub) {
-            return Vec::new();
-        }
-        self.registry
-            .iter()
-            .filter(|(_, id)| {
-                self.registry.get(*id).is_some_and(|e| {
-                    e.monitor == handle && !matches!(e.state, WindowState::ExclusiveFullscreen)
-                })
-            })
-            .map(|(hwnd_id, _)| hwnd_id)
-            .collect()
-    }
-
     pub(super) fn retry_drifted_windows(&mut self) {
         let window_ids: Vec<(HwndId, WindowId)> = self.registry.iter().collect();
-        for (_hwnd_id, window_id) in window_ids {
-            self.retry_drift(window_id);
-        }
+        let placements: Vec<PendingPlacement> = window_ids
+            .into_iter()
+            .filter_map(|(_hwnd_id, window_id)| self.retry_drift(window_id))
+            .collect();
+        self.dispatch(HubMessage::Placements(placements));
     }
 
     pub(super) fn is_managed(&self, id_key: HwndId) -> bool {

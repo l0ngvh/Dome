@@ -6,6 +6,8 @@ use crate::config::WindowMatcher;
 use crate::core::allocator::{Node, NodeId};
 use crate::core::matcher::FloatFullscreenMatcherId;
 
+pub use dome_ipc::WindowId;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct MonitorId(usize);
 
@@ -809,21 +811,10 @@ impl<U> PixelRect<U> {
     }
 }
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-)]
-pub struct WindowId(usize);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ContainerId(usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct WorkspaceId(usize);
-
-impl std::fmt::Display for WindowId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "WindowId({})", self.0)
-    }
-}
 
 impl std::fmt::Display for ContainerId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -884,10 +875,10 @@ impl Container {
 
 impl NodeId for WindowId {
     fn new(id: usize) -> Self {
-        Self(id)
+        WindowId::new(id)
     }
     fn get(self) -> usize {
-        self.0
+        WindowId::get(self)
     }
 }
 

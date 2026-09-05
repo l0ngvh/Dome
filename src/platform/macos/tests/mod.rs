@@ -19,8 +19,8 @@ use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::{
-    BarGeometry, DebounceBurst, Dome, ExitNativeFullscreen, FrameSender, HubMessage, MacOSMetadata,
-    NewWindow, PendingAdd, WindowMove,
+    BarGeometry, DebounceBurst, Dome, ExitNativeFullscreen, HubMessage, MacOSMetadata, NewWindow,
+    PendingAdd, SceneSender, WindowMove,
 };
 
 const SCREEN_WIDTH: Length = Length::new(1920.0);
@@ -251,7 +251,7 @@ struct MacOS {
     windows: HashMap<CGWindowID, MockAXWindow>,
     moves: MoveLog,
     next_cg_id: u32,
-    frame_state: Arc<Mutex<FrameState>>,
+    scene_state: Arc<Mutex<SceneState>>,
 }
 
 impl MacOS {
@@ -260,7 +260,7 @@ impl MacOS {
             windows: HashMap::new(),
             moves: Rc::new(RefCell::new(Vec::new())),
             next_cg_id: 1,
-            frame_state: Arc::new(Mutex::new(FrameState {
+            scene_state: Arc::new(Mutex::new(SceneState {
                 focused_window: None,
                 focused_monitor_id: None,
                 floats: HashMap::new(),
@@ -466,7 +466,7 @@ impl MacOS {
 
     fn setup_dome_with_config(&self, config: Config) -> Dome {
         let sender = TestSender {
-            frame_state: self.frame_state.clone(),
+            scene_state: self.scene_state.clone(),
         };
         Dome::new(
             &[default_monitor()],
@@ -476,12 +476,12 @@ impl MacOS {
         )
     }
 
-    fn last_frame_state(&self) -> FrameState {
-        self.frame_state.lock().unwrap().clone()
+    fn last_scene_state(&self) -> SceneState {
+        self.scene_state.lock().unwrap().clone()
     }
 
     fn last_float_snapshot(&self, cg_id: CGWindowID) -> Option<FloatSnapshot> {
-        self.frame_state.lock().unwrap().floats.get(&cg_id).copied()
+        self.scene_state.lock().unwrap().floats.get(&cg_id).copied()
     }
 }
 
@@ -492,23 +492,23 @@ struct FloatSnapshot {
 }
 
 #[derive(Clone)]
-struct FrameState {
+struct SceneState {
     focused_window: Option<WindowId>,
     focused_monitor_id: Option<MonitorId>,
     floats: HashMap<CGWindowID, FloatSnapshot>,
 }
 
 struct TestSender {
-    frame_state: Arc<Mutex<FrameState>>,
+    scene_state: Arc<Mutex<SceneState>>,
 }
 
-impl FrameSender for TestSender {
+impl SceneSender for TestSender {
     fn send(&self, msg: HubMessage) {
-        if let HubMessage::Frame(frame) = &msg {
-            let mut state = self.frame_state.lock().unwrap();
-            state.focused_window = frame.focused_window;
-            state.focused_monitor_id = Some(frame.focused_monitor_id);
-            state.floats = frame
+        if let HubMessage::Scene(scene) = &msg {
+            let mut state = self.scene_state.lock().unwrap();
+            state.focused_window = scene.focused_window;
+            state.focused_monitor_id = Some(scene.focused_monitor_id);
+            state.floats = scene
                 .float_shows
                 .iter()
                 .map(|show| {

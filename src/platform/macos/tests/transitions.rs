@@ -892,7 +892,7 @@ fn native_fullscreen_state_preserved_through_user_minimize_round_trip() {
     let placed = macos.window_frame(cg1);
     // Grab WindowId from frame state while the window is focused (before minimize
     // clears focus).
-    let window_id = macos.last_frame_state().focused_window.unwrap();
+    let window_id = macos.last_scene_state().focused_window.unwrap();
 
     macos.user_minimize(&mut dome, cg1);
     macos.settle(&mut dome, 10);

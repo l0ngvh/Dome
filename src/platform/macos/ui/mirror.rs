@@ -3,18 +3,17 @@ use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{AnyThread, DefinedClass, define_class, msg_send};
-use objc2_app_kit::NSApplication;
 use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::{CGWindowID, kCGColorSpaceSRGB};
 use objc2_core_media::CMSampleBuffer;
-use objc2_foundation::{MainThreadMarker, NSError, NSObject, NSObjectProtocol};
+use objc2_foundation::{NSError, NSObject, NSObjectProtocol};
 use objc2_io_surface::IOSurface;
 use objc2_screen_capture_kit::{
     SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamOutput,
     SCStreamOutputType,
 };
 
-use super::AppDelegate;
+use super::{CaptureMessage, CaptureSender};
 use crate::core::{Dimension, Length};
 use crate::platform::macos::objc2_wrapper::dimension_to_cg_rect;
 
@@ -28,7 +27,6 @@ pub(super) struct WindowCapture {
 unsafe impl Send for WindowCapture {}
 
 impl WindowCapture {
-    /// Only used for float windows, where the entire content is visible (no viewport clipping).
     /// `content_dim` is the window content area (frame minus border).
     /// `scale` is passed separately because the original window may be hidden on a different monitor.
     pub(super) fn start(&mut self, cg_id: CGWindowID, content_dim: Dimension, scale: f64) {
@@ -114,6 +112,7 @@ impl Drop for WindowCapture {
 pub(super) fn create_captures_async(
     windows: Vec<CGWindowID>,
     queue: DispatchRetained<DispatchQueue>,
+    sender: CaptureSender,
 ) {
     let block = RcBlock::new(
         move |content: *mut SCShareableContent, error: *mut NSError| {
@@ -140,7 +139,7 @@ pub(super) fn create_captures_async(
                 let config = unsafe { SCStreamConfiguration::new() };
                 unsafe { config.setQueueDepth(3) };
 
-                let handler = StreamOutputHandler::new(cg_id);
+                let handler = StreamOutputHandler::new(cg_id, sender.clone());
 
                 let stream = unsafe {
                     SCStream::initWithFilter_configuration_delegate(
@@ -168,21 +167,7 @@ pub(super) fn create_captures_async(
                     handler,
                     running: false,
                 };
-                DispatchQueue::main().exec_async(move || {
-                    let delegate = app_delegate();
-                    if delegate
-                        .ivars()
-                        .float_overlays
-                        .borrow()
-                        .contains_key(&cg_id)
-                    {
-                        delegate
-                            .ivars()
-                            .captures
-                            .borrow_mut()
-                            .insert(cg_id, capture);
-                    }
-                });
+                sender.send(CaptureMessage::Ready { cg_id, capture });
             }
         },
     );
@@ -191,6 +176,7 @@ pub(super) fn create_captures_async(
 
 struct StreamOutputHandlerIvars {
     cg_id: CGWindowID,
+    sender: CaptureSender,
 }
 
 define_class!(
@@ -212,34 +198,18 @@ define_class!(
                 && let Some(surface) = extract_io_surface(buffer)
             {
                 let cg_id = self.ivars().cg_id;
-                DispatchQueue::main().exec_async(move || {
-                    let delegate = app_delegate();
-                    if let Some(overlay) =
-                        delegate.ivars().float_overlays.borrow_mut().get_mut(&cg_id)
-                    {
-                        overlay.apply_frame(&surface);
-                    }
-                });
+                self.ivars()
+                    .sender
+                    .send(CaptureMessage::Frame { cg_id, surface });
             }
         }
     }
 );
 
 impl StreamOutputHandler {
-    fn new(cg_id: CGWindowID) -> Retained<Self> {
-        let this = Self::alloc().set_ivars(StreamOutputHandlerIvars { cg_id });
+    fn new(cg_id: CGWindowID, sender: CaptureSender) -> Retained<Self> {
+        let this = Self::alloc().set_ivars(StreamOutputHandlerIvars { cg_id, sender });
         unsafe { msg_send![super(this), init] }
-    }
-}
-
-fn app_delegate() -> &'static AppDelegate {
-    // Safety: we are on the main thread (dispatched via DispatchQueue::main),
-    // and the app delegate is always our AppDelegate
-    unsafe {
-        let mtm = MainThreadMarker::new_unchecked();
-        let app = NSApplication::sharedApplication(mtm);
-        let delegate = app.delegate().unwrap();
-        &*(Retained::as_ptr(&delegate) as *const AppDelegate)
     }
 }
 

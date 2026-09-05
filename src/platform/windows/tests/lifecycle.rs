@@ -400,7 +400,7 @@ fn programmatic_echo_keeps_tiling_overlay() {
 
     env.dome.apply_layout();
 
-    // Overlay must remain visible with both tiling windows; an echo round-
+    // Overlay must remain visible with both tiling windows. An echo round-
     // trip must not blink the borders off.
     let TilingOverlayState::Visible { windows, .. } = env.tiling_overlays()[0].state.clone() else {
         panic!(
@@ -423,7 +423,7 @@ fn user_drag_keeps_tiling_overlay() {
     env.dome.apply_layout();
 
     assert_eq!(env.dim(w1), placed_w1);
-    // Overlay must remain visible with both tiling windows; w2's border
+    // Overlay must remain visible with both tiling windows -- w2's border
     // must survive the drag.
     let TilingOverlayState::Visible { windows, .. } = env.tiling_overlays()[0].state.clone() else {
         panic!(
@@ -447,12 +447,12 @@ fn empty_monitor_clears_tiling_overlay() {
 }
 
 #[test]
-fn monitor_dpi_changed_unknown_handle_noop() {
+fn dpi_reconcile_with_unchanged_scale_does_not_move_windows() {
     let mut env = TestEnv::new();
     let w = env.open(1, "App", "app.exe", SPAWN_DIM);
     let before = env.dim(w);
 
-    env.dome.monitor_dpi_changed(0xDEAD_BEEF_u64 as isize, 192);
+    env.dome.handle_dpi_change();
     env.dome.apply_layout();
 
     let after = env.dim(w);
@@ -463,64 +463,6 @@ fn monitor_dpi_changed_unknown_handle_noop() {
 }
 
 #[test]
-fn monitor_dpi_changed_same_scale_is_noop() {
-    let mut env = TestEnv::new();
-    let w = env.open(1, "App", "app.exe", SPAWN_DIM);
-    let before = env.dim(w);
-
-    // DPI 96 is scale 1.0, same as the fixture default.
-    env.dome.monitor_dpi_changed(1, 96);
-    env.dome.apply_layout();
-    let after1 = env.dim(w);
-    assert_eq!(after1.x, before.x);
-    assert_eq!(after1.y, before.y);
-    assert_eq!(after1.width, before.width);
-    assert_eq!(after1.height, before.height);
-
-    env.dome.monitor_dpi_changed(1, 96);
-    env.dome.apply_layout();
-    let after2 = env.dim(w);
-    assert_eq!(after2.x, before.x);
-    assert_eq!(after2.y, before.y);
-    assert_eq!(after2.width, before.width);
-    assert_eq!(after2.height, before.height);
-}
-
-#[test]
-fn dpi_change_after_a_rename_keeps_the_new_name() {
-    let mut env = TestEnv::new();
-
-    // Rename the display in place through a reconcile, then change its DPI. The
-    // DPI path has no MonitorInfo, so it reads the current name from the
-    // registry mirror. A stale mirror would revert the rename.
-    let mut renamed = default_monitor();
-    renamed.name = "Renamed".to_string();
-    *env.monitors.lock().unwrap() = vec![renamed];
-    env.dome.handle_display_change();
-
-    // 144 DPI is scale 1.5, different from the fixture default.
-    env.dome.monitor_dpi_changed(1, 144);
-
-    let monitors = env.dome.query_monitors_json();
-    assert!(
-        monitors.contains("\"unique_name\":\"Renamed\""),
-        "{monitors}"
-    );
-}
-
-#[test]
-fn dpi_change_keeps_the_gdi_device() {
-    let mut env = TestEnv::new();
-
-    // The DPI path must carry the stamped gdi_device rather than clear the
-    // published value.
-    env.dome.monitor_dpi_changed(1, 144);
-
-    let monitors = env.dome.query_monitors_json();
-    assert!(monitors.contains("DISPLAY1"), "{monitors}");
-}
-
-#[test]
 fn dpi_change_then_apply_layout_places_at_new_scale() {
     let mut env = TestEnv::new();
     let w = env.open(1, "App", "app.exe", SPAWN_DIM);
@@ -528,14 +470,14 @@ fn dpi_change_then_apply_layout_places_at_new_scale() {
     let before = env.dim(w);
     assert!(before.width > Length::new(0.0));
 
-    // 144 DPI is scale 1.5.
-    env.dome.monitor_dpi_changed(1, 144);
+    let mut scaled = default_monitor();
+    scaled.scale = 1.5;
+    *env.monitors.lock().unwrap() = vec![scaled];
+    env.dome.handle_dpi_change();
     env.dome.apply_layout();
 
     let after = env.dim(w);
-    // Hub delivers frames in physical pixels. A DPI change scales the border but not the
-    // physical monitor work area, so the content rect shrinks by the extra border the new
-    // scale adds. At this test's 1.5 that extra happens to equal one unscaled border.
+    // Frames are physical pixels: a DPI change scales the border but not the work area.
     let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
     let expected_x = before.x * 1.5;
     let expected_y = before.y * 1.5;
@@ -565,8 +507,10 @@ fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
     let w_b = env.open(2, "WinB", "b.exe", SPAWN_DIM);
     let before_b = env.dim(w_b);
 
-    // 192 DPI is scale 2.0.
-    env.dome.monitor_dpi_changed(2, 192);
+    let mut scaled = second_monitor();
+    scaled.scale = 2.0;
+    *env.monitors.lock().unwrap() = vec![default_monitor(), scaled];
+    env.dome.handle_dpi_change();
     env.dome.apply_layout();
 
     let after_a = env.dim(w_a);
@@ -575,9 +519,7 @@ fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
     assert_eq!(after_a.width, before_a.width);
     assert_eq!(after_a.height, before_a.height);
 
-    // Hub delivers frames in physical pixels. DPI change scales border but
-    // not the physical monitor work area, so the content rect shifts by
-    // border * (new_scale - old_scale) per axis and shrinks by 2 * that.
+    // Frames are physical pixels: a DPI change scales the border but not the work area.
     let after_b = env.dim(w_b);
     let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
     let expected_x = before_b.x + border;
@@ -604,20 +546,6 @@ fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
         "h: expected ~{expected_h}, got {}",
         after_b.height
     );
-}
-
-#[test]
-fn wm_getdpiscaledsize_reply_returns_current_size() {
-    use windows::Win32::Foundation::SIZE;
-    let input = SIZE { cx: 1920, cy: 1080 };
-    let output = crate::platform::windows::wm_getdpiscaledsize_reply(input);
-    assert_eq!(output.cx, 1920);
-    assert_eq!(output.cy, 1080);
-
-    let zero = SIZE { cx: 0, cy: 0 };
-    let out_zero = crate::platform::windows::wm_getdpiscaledsize_reply(zero);
-    assert_eq!(out_zero.cx, 0);
-    assert_eq!(out_zero.cy, 0);
 }
 
 #[test]
