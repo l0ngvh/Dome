@@ -41,6 +41,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::BOOL;
 
+use crate::action::{Actions, WorkspaceInfo};
 use crate::config::{
     Config, LayoutConfig, LayoutWorkspaceConfig, layout_default_path, load_or_default,
     start_config_watcher,
@@ -48,10 +49,10 @@ use crate::config::{
 use crate::ipc;
 use crate::keymap::KeymapState;
 use crate::platform::render::WgpuContext;
+use crate::platform::shell_menu::{build_menu, focused_tooltip, id_to_action};
 use dome::events::{HubMessage, SceneSender};
-use dome::shell::ShellHandle;
 use dome::{Dome, HubEvent};
-use dome_auxiliary_window::{AuxiliaryLoopHandler, EventLoop, LoopWaker};
+use dome_auxiliary_window::{App, AppHandler, Icon, LoopWaker, MenuEntry, Shell};
 use event_listener::install_event_hooks;
 use external::HwndId;
 use ui::WindowThread;
@@ -99,6 +100,10 @@ fn ensure_per_monitor_v2_awareness() -> anyhow::Result<()> {
 pub(super) const WM_APP_HUBEVENT: u32 = WM_APP;
 pub(super) const WM_APP_DISPATCH_RESULT: u32 = WM_APP + 1;
 
+/// The tray icon compiled into the executable's resources. Matches the id in the resource
+/// script the build embeds.
+const TRAY_ICON_RESOURCE_ID: u16 = 1;
+
 static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 #[derive(Clone)]
@@ -115,7 +120,7 @@ impl HubSender {
     }
 }
 
-/// The window thread's `EventLoop` owns the receiver, so a failed send means it is
+/// The window thread's `App` owns the receiver, so a failed send means it is
 /// gone during shutdown and there is nothing to wake.
 struct SceneThreadSender {
     scenes: Sender<HubMessage>,
@@ -137,17 +142,42 @@ struct WindowThreadReady {
     thread_id: u32,
 }
 
-/// Drives `WindowThread` from the auxiliary window crate's loop.
+/// Drives `WindowThread` and the shell from the auxiliary window crate's loop.
 struct WindowLoopHandler {
     window_thread: WindowThread,
     scenes: Receiver<HubMessage>,
+    workspaces: Vec<WorkspaceInfo>,
+    hub_sender: HubSender,
 }
 
-impl AuxiliaryLoopHandler for WindowLoopHandler {
-    fn on_wake(&mut self) {
-        while let Ok(scene) = self.scenes.try_recv() {
-            self.window_thread.send(scene);
+impl AppHandler for WindowLoopHandler {
+    fn on_wake(&mut self, shell: &Shell) {
+        while let Ok(msg) = self.scenes.try_recv() {
+            if let HubMessage::Scene(scene) = &msg {
+                self.workspaces = scene.workspaces.clone();
+                shell.set_tooltip(&focused_tooltip(&scene.workspaces));
+            }
+            self.window_thread.send(msg);
         }
+    }
+
+    fn menu(&mut self) -> Vec<MenuEntry> {
+        build_menu(&self.workspaces, false)
+    }
+
+    fn on_menu_selected(&mut self, id: u32) {
+        if let Some(action) = id_to_action(id, &self.workspaces) {
+            self.hub_sender
+                .send(HubEvent::Action(Actions::new(vec![action])));
+        }
+    }
+
+    fn on_display_changed(&mut self) {
+        self.hub_sender.send(HubEvent::DisplayChanged);
+    }
+
+    fn on_work_area_changed(&mut self) {
+        self.hub_sender.send(HubEvent::WorkAreaChanged);
     }
 }
 
@@ -428,29 +458,32 @@ fn run_window_thread(domain_thread_id: u32, handshake: Sender<WindowThreadReady>
     )
     .expect("DirectComposition device init");
 
-    let shell = ShellHandle::new(hub_sender.clone()).expect("Failed to create app shell");
-
     let window_thread = WindowThread::new(
         config,
         Box::new(overlay_factory),
-        shell,
         Box::new(handle::Win32ZOrder),
     );
 
     let (scene_tx, scene_rx) = std::sync::mpsc::channel::<HubMessage>();
-    let event_loop = EventLoop::new(Box::new(WindowLoopHandler {
-        window_thread,
-        scenes: scene_rx,
-    }));
+    let app = App::new(
+        Icon::from_resource_id(TRAY_ICON_RESOURCE_ID).expect("tray icon loads"),
+        Box::new(WindowLoopHandler {
+            window_thread,
+            scenes: scene_rx,
+            workspaces: Vec::new(),
+            hub_sender: hub_sender.clone(),
+        }),
+    )
+    .expect("app init");
     // The domain can post scenes the moment it holds these. The window already exists, so
     // the queue exists and a waker post cannot be dropped.
     handshake
         .send(WindowThreadReady {
             scenes: scene_tx,
-            waker: event_loop.waker(),
+            waker: app.waker(),
             thread_id: unsafe { GetCurrentThreadId() },
         })
         .ok();
 
-    event_loop.run();
+    app.run();
 }

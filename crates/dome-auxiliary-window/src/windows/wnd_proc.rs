@@ -2,30 +2,23 @@ use std::cell::RefCell;
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
-use windows::Win32::UI::Shell::{NIM_ADD, Shell_NotifyIconW};
 use windows::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, MA_NOACTIVATE,
-    SPI_SETWORKAREA, WM_APP, WM_CLOSE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND,
-    WM_GETDPISCALEDSIZE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
-    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_PAINT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETTINGCHANGE,
-    WM_SIZE,
+    SPI_SETWORKAREA, WM_CLOSE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_GETDPISCALEDSIZE,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE,
+    WM_PAINT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETTINGCHANGE, WM_SIZE,
 };
 
-use super::menu::{is_tray_context_menu, show_context_menu};
+use super::BASE_DPI;
 use super::window::WindowState;
-use super::{BASE_DPI, WM_APP_TRAY};
 use crate::{MouseButton, PhysicalPosition, PhysicalSize};
 
-pub(super) unsafe extern "system" fn aux_wnd_proc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    // Universal messages, handled before the per-window state lookup because they can
-    // arrive during creation while GWLP_USERDATA is still null.
+/// Universal messages handled before the per-window state lookup, because they can arrive
+/// during creation while `GWLP_USERDATA` is still null. Returns `Some` when handled.
+/// Every window class's wnd-proc calls this first.
+pub(super) fn wnd_proc_prologue(hwnd: HWND, msg: u32, lparam: LPARAM) -> Option<LRESULT> {
     match msg {
-        WM_ERASEBKGND => return LRESULT(1),
+        WM_ERASEBKGND => Some(LRESULT(1)),
         WM_GETDPISCALEDSIZE => {
             let mut rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut rect).ok() };
@@ -35,19 +28,36 @@ pub(super) unsafe extern "system" fn aux_wnd_proc(
             };
             let out = lparam.0 as *mut windows::Win32::Foundation::SIZE;
             unsafe { *out = wm_getdpiscaledsize_reply(size) };
-            return LRESULT(1);
+            Some(LRESULT(1))
         }
-        _ => {}
+        _ => None,
+    }
+}
+
+/// The reply for a message that arrives before the window's state is stored.
+/// `WM_MOUSEACTIVATE` can arrive during creation, and the crate never raises a window on
+/// click, so decline activation. Everything else defers to the default handler.
+pub(super) fn wnd_proc_no_state(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if msg == WM_MOUSEACTIVATE {
+        LRESULT(MA_NOACTIVATE as isize)
+    } else {
+        unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+    }
+}
+
+pub(super) unsafe extern "system" fn aux_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if let Some(reply) = wnd_proc_prologue(hwnd, msg, lparam) {
+        return reply;
     }
 
     let state_ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut RefCell<WindowState>;
     if state_ptr.is_null() {
-        // WM_MOUSEACTIVATE can arrive during creation before the state is stored.
-        // Decline activation rather than raise the window.
-        if msg == WM_MOUSEACTIVATE {
-            return LRESULT(MA_NOACTIVATE as isize);
-        }
-        return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
+        return wnd_proc_no_state(hwnd, msg, wparam, lparam);
     }
 
     // Borrowed fresh per arm. A window-mutating call inside a handler or a registered
@@ -146,39 +156,6 @@ pub(super) unsafe extern "system" fn aux_wnd_proc(
         WM_CLOSE => {
             state.borrow_mut().handler.on_close_requested();
             LRESULT(0)
-        }
-        // The tray icon's callback and its TaskbarCreated re-add both land at or above
-        // WM_APP. Any other high id, and every system message below it, falls through to
-        // the default handler.
-        _ if msg >= WM_APP => {
-            let mut st = state.borrow_mut();
-            match st.tray.as_ref().map(|t| t.taskbar_created) {
-                Some(_) if msg == WM_APP_TRAY => {
-                    if is_tray_context_menu(lparam) {
-                        // TrackPopupMenu pumps messages, so release the borrow before the
-                        // modal show. A frame update dispatched meanwhile re-borrows this
-                        // cell, and a held borrow would panic.
-                        let entries = st.handler.tray_menu();
-                        drop(st);
-                        if let Some(id) = show_context_menu(hwnd, &entries) {
-                            state.borrow_mut().handler.on_tray_menu_selected(id);
-                        }
-                    }
-                    LRESULT(0)
-                }
-                Some(taskbar_created) if msg == taskbar_created => {
-                    if let Some(tray) = st.tray.as_ref()
-                        && !unsafe { Shell_NotifyIconW(NIM_ADD, &tray.data) }.as_bool()
-                    {
-                        tracing::warn!("Shell_NotifyIconW(NIM_ADD) failed re-adding tray icon");
-                    }
-                    LRESULT(0)
-                }
-                _ => {
-                    drop(st);
-                    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
-                }
-            }
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }

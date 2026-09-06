@@ -2,16 +2,13 @@ mod compositor;
 mod mirror;
 mod overlay;
 
-use std::any::Any;
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, mpsc};
 
 use dispatch2::{DispatchQueue, DispatchRetained};
-use dome_auxiliary_window::{
-    AppShell, AppShellHandler, AuxiliaryLoopHandler, EventLoop, LoopWaker, MenuEntry,
-};
+use dome_auxiliary_window::{App, AppHandler, Icon, LoopWaker, MenuEntry, Shell};
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_app_kit::NSApplication;
 use objc2_core_graphics::CGWindowID;
@@ -23,7 +20,7 @@ use crate::action::{Actions, WorkspaceInfo};
 use crate::config::Config;
 use crate::core::{ContainerId, MonitorId, WindowId};
 use crate::platform::render::WgpuContext;
-use crate::platform::shell_menu::{ShellMessage, build_menu, focused_tooltip, id_to_action};
+use crate::platform::shell_menu::{build_menu, focused_tooltip, id_to_action};
 use mirror::{WindowCapture, create_captures_async};
 use overlay::{FloatOverlay, TabBarOverlay, TilingOverlay};
 
@@ -78,7 +75,7 @@ impl CaptureSender {
 }
 
 pub(super) struct Ui {
-    event_loop: EventLoop,
+    app: App,
 }
 
 impl Ui {
@@ -107,12 +104,16 @@ impl Ui {
             config,
             last_focused: None,
             last_focused_monitor_id: None,
-            app_shell: None,
+            workspaces: Vec::new(),
             hub_sender,
         };
 
-        let event_loop = EventLoop::new(Box::new(WindowLoopHandler { state }));
-        let waker = event_loop.waker();
+        let app = App::new(
+            Icon::from_png(STATUS_BAR_ICON_PNG).expect("status bar icon decodes"),
+            Box::new(WindowLoopHandler { state }),
+        )
+        .expect("app init");
+        let waker = app.waker();
         let sender = MessageSender {
             tx: scene_tx,
             waker: waker.clone(),
@@ -127,11 +128,11 @@ impl Ui {
             unreachable!("capture sender is set exactly once");
         }
 
-        (Self { event_loop }, sender)
+        (Self { app }, sender)
     }
 
     pub(super) fn run(self) {
-        self.event_loop.run();
+        self.app.run();
     }
 }
 
@@ -173,7 +174,7 @@ struct UiState {
     config: Config,
     last_focused: Option<WindowId>,
     last_focused_monitor_id: Option<MonitorId>,
-    app_shell: Option<AppShell>,
+    workspaces: Vec<WorkspaceInfo>,
     hub_sender: calloop::channel::Sender<HubEvent>,
 }
 
@@ -185,30 +186,29 @@ const STATUS_BAR_ICON_PNG: &[u8] = include_bytes!(concat!(
     "/resources/macos/status_bar_icon.png"
 ));
 
-struct ShellHandler {
-    hub_sender: calloop::channel::Sender<HubEvent>,
-    workspaces: Vec<WorkspaceInfo>,
+struct WindowLoopHandler {
+    state: UiState,
 }
 
-impl AppShellHandler for ShellHandler {
+impl AppHandler for WindowLoopHandler {
+    fn on_started(&mut self, _shell: &Shell) {
+        tracing::info!("Application did finish launching");
+    }
+
+    fn on_stopping(&mut self) {
+        self.state.hub_sender.send(HubEvent::Shutdown).ok();
+    }
+
     fn menu(&mut self) -> Vec<MenuEntry> {
-        build_menu(&self.workspaces, true)
+        build_menu(&self.state.workspaces, true)
     }
 
     fn on_menu_selected(&mut self, id: u32) {
-        if let Some(action) = id_to_action(id, &self.workspaces) {
-            self.hub_sender
+        if let Some(action) = id_to_action(id, &self.state.workspaces) {
+            self.state
+                .hub_sender
                 .send(HubEvent::Action(Actions::new(vec![action])))
                 .ok();
-        }
-    }
-
-    fn on_message(&mut self, message: Box<dyn Any>) {
-        let msg = message
-            .downcast::<ShellMessage>()
-            .expect("app shell received a non-ShellMessage payload");
-        match *msg {
-            ShellMessage::Workspaces(workspaces) => self.workspaces = workspaces,
         }
     }
 
@@ -217,47 +217,23 @@ impl AppShellHandler for ShellHandler {
             MainThreadMarker::new().expect("screen-change notification runs on the main thread");
         match get_all_monitors(mtm) {
             Ok(monitors) => {
-                self.hub_sender
+                self.state
+                    .hub_sender
                     .send(HubEvent::MonitorsChanged(monitors))
                     .ok();
             }
             Err(e) => tracing::error!(%e, "Failed to enumerate monitors on screen change"),
         }
     }
-}
 
-struct WindowLoopHandler {
-    state: UiState,
-}
-
-impl AuxiliaryLoopHandler for WindowLoopHandler {
-    fn on_started(&mut self) {
-        tracing::info!("Application did finish launching");
-        let handler = ShellHandler {
-            hub_sender: self.state.hub_sender.clone(),
-            workspaces: Vec::new(),
-        };
-        match AppShell::new(STATUS_BAR_ICON_PNG, Box::new(handler)) {
-            Ok(app_shell) => self.state.app_shell = Some(app_shell),
-            Err(e) => tracing::error!(%e, "Failed to create status item"),
-        }
-    }
-
-    fn on_stopping(&mut self) {
-        self.state.hub_sender.send(HubEvent::Shutdown).ok();
-    }
-
-    fn on_wake(&mut self) {
+    fn on_wake(&mut self, shell: &Shell) {
         let state = &mut self.state;
         let mtm = MainThreadMarker::new().expect("on_wake runs on the main thread");
         while let Ok(msg) = state.scene_rx.try_recv() {
             match msg {
                 HubMessage::Scene(scene) => {
-                    if let Some(app_shell) = &state.app_shell {
-                        app_shell
-                            .deliver(Box::new(ShellMessage::Workspaces(scene.workspaces.clone())));
-                        app_shell.set_tooltip(&focused_tooltip(&scene.workspaces));
-                    }
+                    state.workspaces = scene.workspaces.clone();
+                    shell.set_tooltip(&focused_tooltip(&scene.workspaces));
 
                     let config = state.config.clone();
                     let gpu = state.gpu.clone();

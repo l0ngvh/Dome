@@ -4,8 +4,6 @@ pub(super) mod monitor;
 mod placement_tracker;
 mod recovery;
 mod registry;
-pub(super) mod shell;
-pub(super) mod tray;
 pub(super) mod window;
 
 pub(super) use self::monitor::{MonitorInfo, QueryDisplay, Win32Display};

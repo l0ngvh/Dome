@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::action::{Action, Actions, WorkspaceInfo};
+use crate::action::{Action, Actions};
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
@@ -21,7 +21,6 @@ use crate::core::{
 };
 use crate::platform::windows::dome::MonitorInfo;
 use crate::platform::windows::dome::events::SceneSender;
-use crate::platform::windows::dome::shell::ShellApi;
 use crate::platform::windows::dome::{
     CreateOverlay, Dome, NewWindow, QueryDisplay, WindowsMetadata,
 };
@@ -255,7 +254,6 @@ impl TestEnv {
         let window: Box<dyn SceneSender> = Box::new(WindowThread::new(
             config.clone(),
             Box::new(overlays.clone()),
-            Box::new(NoopShell),
             Box::new(z_stack.clone()),
         ));
         let dome = Dome::new(
@@ -968,11 +966,6 @@ struct NoopTaskbar;
 impl ManageTaskbar for NoopTaskbar {
     fn add_tab(&self, _: HwndId) {}
     fn delete_tab(&self, _: HwndId) {}
-}
-
-struct NoopShell;
-impl ShellApi for NoopShell {
-    fn update(&self, _: &[WorkspaceInfo]) {}
 }
 
 #[derive(Clone)]

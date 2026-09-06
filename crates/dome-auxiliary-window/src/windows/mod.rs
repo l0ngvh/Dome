@@ -1,11 +1,12 @@
-mod app_shell;
-mod event_loop;
+mod app;
 mod menu;
+mod run_loop;
+mod tray;
 mod window;
 mod wnd_proc;
 
-pub(crate) use app_shell::AppShell;
-pub(crate) use event_loop::{EventLoop, LoopHandle, LoopWaker};
+pub(crate) use app::{App, Icon, Shell};
+pub(crate) use run_loop::{LoopHandle, LoopWaker};
 pub use window::AuxiliaryWindowExtWindows;
 pub(crate) use window::Window;
 
@@ -29,3 +30,6 @@ const TRAY_UID: u32 = 1;
 /// The single class every auxiliary window shares. Self-exclusion from window
 /// management keys on `WS_EX_TOOLWINDOW`, not the class name, so one class is enough.
 const CLASS_NAME: PCWSTR = w!("DomeAuxiliaryWindow");
+
+/// The tray's hidden window needs its own class, because a class binds one wnd-proc.
+const TRAY_CLASS_NAME: PCWSTR = w!("DomeTrayWindow");

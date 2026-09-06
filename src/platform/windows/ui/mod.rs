@@ -3,7 +3,6 @@ pub(in crate::platform::windows) mod overlay;
 use std::collections::{HashMap, HashSet};
 
 use self::overlay::{FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi};
-use crate::action::WorkspaceInfo;
 use crate::config::Config;
 use crate::core::{ContainerId, MonitorId, WindowId};
 use crate::platform::windows::dome::CreateOverlay;
@@ -11,7 +10,6 @@ use crate::platform::windows::dome::events::{
     FloatOverlayAction, HubMessage, MonitorSetChange, PendingPlacement, PlacementAction,
     RenderScene, SceneSender,
 };
-use crate::platform::windows::dome::shell::ShellApi;
 use crate::platform::windows::external::ZOrder;
 use crate::platform::windows::handle::ManageZOrder;
 
@@ -24,7 +22,6 @@ pub(in crate::platform::windows) struct WindowThread {
     tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>>,
     tab_bars: HashMap<ContainerId, Box<dyn TabBarOverlayApi>>,
     float_overlays: HashMap<WindowId, Box<dyn FloatOverlayApi>>,
-    shell: Box<dyn ShellApi>,
     z_order: Box<dyn ManageZOrder>,
 }
 
@@ -32,7 +29,6 @@ impl WindowThread {
     pub(in crate::platform::windows) fn new(
         config: Config,
         overlay_factory: Box<dyn CreateOverlay>,
-        shell: Box<dyn ShellApi>,
         z_order: Box<dyn ManageZOrder>,
     ) -> Self {
         Self {
@@ -41,7 +37,6 @@ impl WindowThread {
             tiling_overlays: HashMap::new(),
             tab_bars: HashMap::new(),
             float_overlays: HashMap::new(),
-            shell,
             z_order,
         }
     }
@@ -225,12 +220,6 @@ impl WindowThread {
         {
             overlay.focus();
         }
-
-        self.refresh_tray(&scene.workspaces);
-    }
-
-    fn refresh_tray(&self, workspaces: &[WorkspaceInfo]) {
-        self.shell.update(workspaces);
     }
 }
 

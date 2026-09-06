@@ -16,8 +16,6 @@ mod windows;
 #[cfg(target_os = "windows")]
 use crate::windows as imp;
 #[cfg(target_os = "windows")]
-use ::windows::Win32::UI::WindowsAndMessaging::HICON;
-#[cfg(target_os = "windows")]
 pub use windows::AuxiliaryWindowExtWindows;
 
 /// A point in physical pixels. The origin may be negative across multiple monitors.
@@ -78,77 +76,89 @@ pub trait AuxiliaryWindowHandler {
     /// A payload handed to this handler by `AuxiliaryWindow::deliver`. The crate treats it
     /// as opaque, so the handler downcasts it to its own message type.
     fn on_message(&mut self, _message: Box<dyn std::any::Any>) {}
-
-    /// The entries to show when the tray icon's context menu opens. Called on each open,
-    /// so it reflects current state.
-    #[cfg(target_os = "windows")]
-    fn tray_menu(&mut self) -> Vec<crate::MenuEntry> {
-        Vec::new()
-    }
-
-    /// A tray context-menu row was chosen. `id` is the `MenuItem::id` of the row.
-    #[cfg(target_os = "windows")]
-    fn on_tray_menu_selected(&mut self, _id: u32) {}
 }
 
-/// The loop's own lifecycle, distinct from any window.
-pub trait AuxiliaryLoopHandler {
-    fn on_started(&mut self) {}
+/// The app's whole main-thread lifecycle in one handler: the loop lifecycle, plus the
+/// shell's menu and display notifications. The menu is pulled on each open. Every method
+/// defaults to a no-op.
+pub trait AppHandler {
+    fn on_started(&mut self, _shell: &Shell) {}
     fn on_stopping(&mut self) {}
-    fn on_wake(&mut self) {}
-}
-
-/// The app's shell integration: the tray or menu-bar menu, and the shell's display
-/// notifications. Every method defaults to a no-op.
-pub trait AppShellHandler {
-    /// The entries to show when the menu opens. Called on each open, so it reflects
-    /// current state.
+    fn on_wake(&mut self, _shell: &Shell) {}
     fn menu(&mut self) -> Vec<MenuEntry> {
         Vec::new()
     }
-
-    /// A menu row was chosen. `id` is the `MenuItem::id` of the row.
     fn on_menu_selected(&mut self, _id: u32) {}
-
     fn on_display_changed(&mut self) {}
     fn on_work_area_changed(&mut self) {}
-
-    /// An opaque payload from `AppShell::deliver`, downcast by the handler. Mirrors
-    /// `AuxiliaryWindowHandler::on_message`.
-    fn on_message(&mut self, _message: Box<dyn std::any::Any>) {}
 }
 
-/// The app's presence in the desktop shell, one type across platforms: the system-tray
-/// icon on Windows and the menu-bar status item on macOS, each with a menu and the
-/// shell's display notifications. On Windows the host window lives entirely inside this
-/// type and is never exposed.
-pub struct AppShell {
-    inner: imp::AppShell,
+/// A menu-bar or tray icon, built before the loop runs. macOS decodes template PNG bytes.
+/// Windows loads a compiled icon resource by id.
+pub struct Icon {
+    inner: imp::Icon,
 }
 
-impl AppShell {
+impl Icon {
     #[cfg(target_os = "macos")]
-    pub fn new(icon_png: &[u8], handler: Box<dyn AppShellHandler>) -> anyhow::Result<Self> {
+    pub fn from_png(bytes: &[u8]) -> anyhow::Result<Self> {
         Ok(Self {
-            inner: imp::AppShell::new(icon_png, handler)?,
+            inner: imp::Icon::from_png(bytes)?,
         })
     }
 
     #[cfg(target_os = "windows")]
-    pub fn new(icon: HICON, handler: Box<dyn AppShellHandler>) -> anyhow::Result<Self> {
+    pub fn from_resource_id(id: u16) -> anyhow::Result<Self> {
         Ok(Self {
-            inner: imp::AppShell::new(icon, handler)?,
+            inner: imp::Icon::from_resource_id(id)?,
         })
+    }
+}
+
+/// A live handle to the app's shell presence, valid only for the callback it is passed to.
+/// The consumer reads it there and does not store it.
+pub struct Shell {
+    inner: imp::Shell,
+}
+
+impl Shell {
+    pub(crate) fn new(inner: imp::Shell) -> Self {
+        Self { inner }
     }
 
     pub fn set_tooltip(&self, tooltip: &str) {
         self.inner.set_tooltip(tooltip);
     }
+}
 
-    /// Hands an opaque payload to the shell's handler, synchronously. The handler borrow
-    /// lives and ends inside this call.
-    pub fn deliver(&self, message: Box<dyn std::any::Any>) {
-        self.inner.deliver(message);
+/// The app: the event loop that owns the main thread, holding the desktop-shell presence
+/// (the menu-bar status item on macOS, the system-tray icon on Windows). `run` blocks the
+/// calling thread until the loop stops.
+pub struct App {
+    inner: imp::App,
+}
+
+impl App {
+    pub fn new(icon: Icon, handler: Box<dyn AppHandler>) -> anyhow::Result<Self> {
+        Ok(Self {
+            inner: imp::App::new(icon.inner, handler)?,
+        })
+    }
+
+    pub fn waker(&self) -> LoopWaker {
+        LoopWaker {
+            inner: self.inner.waker(),
+        }
+    }
+
+    pub fn handle(&self) -> LoopHandle {
+        LoopHandle {
+            inner: self.inner.handle(),
+        }
+    }
+
+    pub fn run(self) {
+        self.inner.run();
     }
 }
 
@@ -187,37 +197,6 @@ impl AuxiliaryWindow {
     /// a window-mutating call such as `set_frame`.
     pub fn deliver(&self, message: Box<dyn std::any::Any>) {
         self.inner.deliver(message);
-    }
-}
-
-/// The window event loop, one type across platforms. `run` blocks the calling thread
-/// until the loop stops. Reach any platform-specific control through the platform
-/// extension trait (`EventLoopExtMacOs` on macOS).
-pub struct EventLoop {
-    inner: imp::EventLoop,
-}
-
-impl EventLoop {
-    pub fn new(handler: Box<dyn AuxiliaryLoopHandler>) -> Self {
-        Self {
-            inner: imp::EventLoop::new(handler),
-        }
-    }
-
-    pub fn waker(&self) -> LoopWaker {
-        LoopWaker {
-            inner: self.inner.waker(),
-        }
-    }
-
-    pub fn handle(&self) -> LoopHandle {
-        LoopHandle {
-            inner: self.inner.handle(),
-        }
-    }
-
-    pub fn run(self) {
-        self.inner.run();
     }
 }
 
