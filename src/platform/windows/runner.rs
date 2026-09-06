@@ -178,16 +178,16 @@ impl Runner {
     fn handle_actions(&mut self, actions: &Actions) {
         for action in actions {
             match action {
-                Action::Focus(t) => {
+                Action::Focus { target: t } => {
                     self.dome.apply_focus(t);
                 }
-                Action::Move(t) => {
+                Action::Move { target: t } => {
                     self.dome.apply_move(t);
                 }
-                Action::Toggle(t) => {
+                Action::Toggle { target: t } => {
                     self.dome.apply_toggle(t);
                 }
-                Action::Master(t) => {
+                Action::Master { target: t } => {
                     self.dome.apply_master(t);
                 }
                 Action::Exec { command } => {
@@ -204,7 +204,7 @@ impl Runner {
                 Action::Close => {
                     self.dome.close_focused_window();
                 }
-                Action::UnminimizeWindow(id) => {
+                Action::UnminimizeWindow { id } => {
                     self.dome.unminimize_window(*id);
                 }
                 Action::Mode { name } => {

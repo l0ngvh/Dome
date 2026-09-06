@@ -16,3 +16,13 @@ pub fn socket_path() -> PathBuf {
 pub fn socket_name() -> interprocess::local_socket::Name<'static> {
     socket_path().to_fs_name::<GenericFilePath>().unwrap()
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn socket_path_lives_under_temp_dir() {
+        assert!(socket_path().starts_with(std::env::temp_dir()));
+    }
+}

@@ -518,10 +518,10 @@ impl TestEnv {
     fn run_actions(&mut self, s: &str) {
         let action: Action = s.parse().unwrap();
         match &action {
-            Action::Focus(t) => self.dome.apply_focus(t),
-            Action::Move(t) => self.dome.apply_move(t),
-            Action::Toggle(t) => self.dome.apply_toggle(t),
-            Action::Master(t) => self.dome.apply_master(t),
+            Action::Focus { target: t } => self.dome.apply_focus(t),
+            Action::Move { target: t } => self.dome.apply_move(t),
+            Action::Toggle { target: t } => self.dome.apply_toggle(t),
+            Action::Master { target: t } => self.dome.apply_master(t),
             _ => {}
         }
         self.dome.apply_layout();

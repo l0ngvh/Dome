@@ -64,10 +64,10 @@
 
       function filterByMonitor(data, monitorName) {
         if (!monitorName) {
-          return data.filter((entry) => entry.state === 'Attached').sort(byName);
+          return data.filter((entry) => entry.state === 'attached').sort(byName);
         }
         return data
-          .filter((entry) => entry.state === 'Attached' && entry.monitor === monitorName)
+          .filter((entry) => entry.state === 'attached' && entry.monitor === monitorName)
           .sort(byName);
       }
 
@@ -111,7 +111,7 @@
               setWorkspaces(rows);
               setParked(
                 data
-                  .filter((entry) => entry.state === 'Parked' && entry.window_count > 0)
+                  .filter((entry) => entry.state === 'parked' && entry.window_count > 0)
                   .sort(byName),
               );
             } catch {}

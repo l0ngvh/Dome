@@ -5,7 +5,7 @@ use anyhow::{Context, anyhow, ensure};
 
 use super::slug;
 use crate::DomeClient;
-use crate::action::{MonitorDetails, Query};
+use crate::action::MonitorDetails;
 
 /// The self-dispatching plugin body. dome bakes its own path and the item setup
 /// into it, then writes the result as `dome.sh`.
@@ -52,13 +52,9 @@ pub(crate) fn generate() -> anyhow::Result<()> {
         .join("dome.sh");
     let dome_sh_str = dome_sh.to_string_lossy().into_owned();
 
-    let monitors: Vec<MonitorDetails> = {
-        let json = DomeClient
-            .query(&Query::Monitors)
-            .context("query monitors (is dome running?)")?;
-        serde_json::from_str(&json)
-            .with_context(|| format!("monitors query did not return an array: {json}"))?
-    };
+    let monitors = DomeClient
+        .monitors()
+        .context("query monitors (is dome running?)")?;
     let content = compose_dome_sh(&monitors, &dome, &dome_sh_str)?;
     install(&dome_sh, &rc, &content)?;
     let reloaded = run_sketchybar(&["--reload"])?.status.success();

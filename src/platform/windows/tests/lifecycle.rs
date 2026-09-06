@@ -363,19 +363,19 @@ fn multi_action_sequence_applies_each_hub_action() {
     ]);
     for action in &actions {
         match action {
-            Action::Focus(t) => {
+            Action::Focus { target: t } => {
                 env.dome.apply_focus(t);
                 env.dome.apply_layout();
             }
-            Action::Move(t) => {
+            Action::Move { target: t } => {
                 env.dome.apply_move(t);
                 env.dome.apply_layout();
             }
-            Action::Toggle(t) => {
+            Action::Toggle { target: t } => {
                 env.dome.apply_toggle(t);
                 env.dome.apply_layout();
             }
-            Action::Master(t) => {
+            Action::Master { target: t } => {
                 env.dome.apply_master(t);
                 env.dome.apply_layout();
             }
@@ -646,7 +646,7 @@ fn primary_change_to_a_tracked_display_parks_the_displaced_workspaces() {
     env.dome.apply_layout();
 
     let workspaces = env.dome.query_workspaces_json();
-    assert!(workspaces.contains("\"state\":\"Parked\""), "{workspaces}");
+    assert!(workspaces.contains("\"state\":\"parked\""), "{workspaces}");
     assert!(
         workspaces.contains("\"monitor\":\"External\""),
         "{workspaces}"

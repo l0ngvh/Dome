@@ -131,7 +131,7 @@ fn workspace_info_json_shape() {
     let json: serde_json::Value = serde_json::to_value(&info).unwrap();
     assert_eq!(json["name"], "main");
     assert_eq!(json["monitor"], "DELL #1");
-    assert_eq!(json["state"], "Attached");
+    assert_eq!(json["state"], "attached");
     assert_eq!(json["is_focused"], true);
     assert_eq!(json["is_visible"], false);
     assert_eq!(json["window_count"], 3);

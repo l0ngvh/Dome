@@ -266,19 +266,19 @@ fn multi_action_sequence_applies_each_hub_action() {
     ]);
     for action in &actions {
         match action {
-            Action::Focus(t) => {
+            Action::Focus { target: t } => {
                 dome.apply_focus(t);
                 dome.flush_layout();
             }
-            Action::Move(t) => {
+            Action::Move { target: t } => {
                 dome.apply_move(t);
                 dome.flush_layout();
             }
-            Action::Toggle(t) => {
+            Action::Toggle { target: t } => {
                 dome.apply_toggle(t);
                 dome.flush_layout();
             }
-            Action::Master(t) => {
+            Action::Master { target: t } => {
                 dome.apply_master(t);
                 dome.flush_layout();
             }
@@ -552,7 +552,7 @@ fn primary_change_to_a_new_display_carries_the_workspaces() {
         workspaces.contains("\"monitor\":\"Studio\""),
         "{workspaces}"
     );
-    assert!(!workspaces.contains("Parked"), "{workspaces}");
+    assert!(!workspaces.contains("parked"), "{workspaces}");
 }
 
 #[test]
@@ -570,7 +570,7 @@ fn primary_change_to_a_tracked_display_parks_the_displaced_workspaces() {
     macos.settle(&mut dome, 10);
 
     let workspaces = dome.query_workspaces_json();
-    assert!(workspaces.contains("\"state\":\"Parked\""), "{workspaces}");
+    assert!(workspaces.contains("\"state\":\"parked\""), "{workspaces}");
     assert!(
         workspaces.contains("\"monitor\":\"External\""),
         "{workspaces}"

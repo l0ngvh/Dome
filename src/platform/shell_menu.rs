@@ -78,10 +78,12 @@ pub(crate) fn id_to_action(id: u32, workspaces: &[WorkspaceInfo]) -> Option<Acti
     if id >= TRAY_CMD_WORKSPACE_BASE {
         let idx = (id - TRAY_CMD_WORKSPACE_BASE) as usize;
         if let Some(ws) = workspaces.get(idx) {
-            return Some(Action::Focus(FocusTarget::Workspace {
-                name: ws.name.clone(),
-                monitor: Some(ws.monitor.clone()),
-            }));
+            return Some(Action::Focus {
+                target: FocusTarget::Workspace {
+                    name: ws.name.clone(),
+                    monitor: Some(ws.monitor.clone()),
+                },
+            });
         }
     }
     None
@@ -198,7 +200,9 @@ mod tests {
         ];
         let action = id_to_action(TRAY_CMD_WORKSPACE_BASE + 1, &list).unwrap();
         match action {
-            Action::Focus(FocusTarget::Workspace { name, .. }) => assert_eq!(name, "Beta"),
+            Action::Focus {
+                target: FocusTarget::Workspace { name, .. },
+            } => assert_eq!(name, "Beta"),
             other => panic!("wrong variant: {other:?}"),
         }
     }
@@ -211,7 +215,9 @@ mod tests {
         ];
         let action = id_to_action(TRAY_CMD_WORKSPACE_BASE + 1, &list).unwrap();
         match action {
-            Action::Focus(FocusTarget::Workspace { name, monitor }) => {
+            Action::Focus {
+                target: FocusTarget::Workspace { name, monitor },
+            } => {
                 assert_eq!(name, "Beta");
                 assert_eq!(monitor, Some("Mon2".to_string()));
             }
@@ -227,7 +233,9 @@ mod tests {
         ];
         let action = id_to_action(TRAY_CMD_WORKSPACE_BASE + 1, &list).unwrap();
         match action {
-            Action::Focus(FocusTarget::Workspace { name, monitor }) => {
+            Action::Focus {
+                target: FocusTarget::Workspace { name, monitor },
+            } => {
                 assert_eq!(name, "Ghost");
                 assert_eq!(monitor, Some("GoneOrigin".to_string()));
             }

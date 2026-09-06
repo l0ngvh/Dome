@@ -69,20 +69,24 @@ fn default_keymaps() -> ModalKeymaps {
                 key: i.to_string(),
                 modifiers: Modifiers::META,
             },
-            Actions::new(vec![Action::Focus(FocusTarget::Workspace {
-                name: i.to_string(),
-                monitor: None,
-            })]),
+            Actions::new(vec![Action::Focus {
+                target: FocusTarget::Workspace {
+                    name: i.to_string(),
+                    monitor: None,
+                },
+            }]),
         );
         keymaps.insert(
             Keymap {
                 key: i.to_string(),
                 modifiers: Modifiers::META | Modifiers::SHIFT,
             },
-            Actions::new(vec![Action::Move(MoveTarget::Workspace {
-                name: i.to_string(),
-                monitor: None,
-            })]),
+            Actions::new(vec![Action::Move {
+                target: MoveTarget::Workspace {
+                    name: i.to_string(),
+                    monitor: None,
+                },
+            }]),
         );
     }
     keymaps.insert(
@@ -90,109 +94,139 @@ fn default_keymaps() -> ModalKeymaps {
             key: "e".into(),
             modifiers: Modifiers::META,
         },
-        Actions::new(vec![Action::Toggle(ToggleTarget::Spawn)]),
+        Actions::new(vec![Action::Toggle {
+            target: ToggleTarget::Spawn,
+        }]),
     );
     keymaps.insert(
         Keymap {
             key: "d".into(),
             modifiers: Modifiers::META,
         },
-        Actions::new(vec![Action::Toggle(ToggleTarget::Direction)]),
+        Actions::new(vec![Action::Toggle {
+            target: ToggleTarget::Direction,
+        }]),
     );
     keymaps.insert(
         Keymap {
             key: "b".into(),
             modifiers: Modifiers::META,
         },
-        Actions::new(vec![Action::Toggle(ToggleTarget::Layout)]),
+        Actions::new(vec![Action::Toggle {
+            target: ToggleTarget::Layout,
+        }]),
     );
     keymaps.insert(
         Keymap {
             key: "p".into(),
             modifiers: Modifiers::META,
         },
-        Actions::new(vec![Action::Focus(FocusTarget::Parent)]),
+        Actions::new(vec![Action::Focus {
+            target: FocusTarget::Parent,
+        }]),
     );
     keymaps.insert(
         Keymap {
             key: "h".into(),
             modifiers: Modifiers::META,
         },
-        Actions::new(vec![Action::Focus(FocusTarget::Left)]),
+        Actions::new(vec![Action::Focus {
+            target: FocusTarget::Left,
+        }]),
     );
     keymaps.insert(
         Keymap {
             key: "j".into(),
             modifiers: Modifiers::META,
         },
-        Actions::new(vec![Action::Focus(FocusTarget::Down)]),
+        Actions::new(vec![Action::Focus {
+            target: FocusTarget::Down,
+        }]),
     );
     keymaps.insert(
         Keymap {
             key: "k".into(),
             modifiers: Modifiers::META,
         },
-        Actions::new(vec![Action::Focus(FocusTarget::Up)]),
+        Actions::new(vec![Action::Focus {
+            target: FocusTarget::Up,
+        }]),
     );
     keymaps.insert(
         Keymap {
             key: "l".into(),
             modifiers: Modifiers::META,
         },
-        Actions::new(vec![Action::Focus(FocusTarget::Right)]),
+        Actions::new(vec![Action::Focus {
+            target: FocusTarget::Right,
+        }]),
     );
     keymaps.insert(
         Keymap {
             key: "[".into(),
             modifiers: Modifiers::META,
         },
-        Actions::new(vec![Action::Focus(FocusTarget::Tab {
-            direction: TabDirection::Prev,
-        })]),
+        Actions::new(vec![Action::Focus {
+            target: FocusTarget::Tab {
+                direction: TabDirection::Prev,
+            },
+        }]),
     );
     keymaps.insert(
         Keymap {
             key: "]".into(),
             modifiers: Modifiers::META,
         },
-        Actions::new(vec![Action::Focus(FocusTarget::Tab {
-            direction: TabDirection::Next,
-        })]),
+        Actions::new(vec![Action::Focus {
+            target: FocusTarget::Tab {
+                direction: TabDirection::Next,
+            },
+        }]),
     );
     keymaps.insert(
         Keymap {
             key: "h".into(),
             modifiers: Modifiers::META | Modifiers::SHIFT,
         },
-        Actions::new(vec![Action::Move(MoveTarget::Left)]),
+        Actions::new(vec![Action::Move {
+            target: MoveTarget::Left,
+        }]),
     );
     keymaps.insert(
         Keymap {
             key: "j".into(),
             modifiers: Modifiers::META | Modifiers::SHIFT,
         },
-        Actions::new(vec![Action::Move(MoveTarget::Down)]),
+        Actions::new(vec![Action::Move {
+            target: MoveTarget::Down,
+        }]),
     );
     keymaps.insert(
         Keymap {
             key: "k".into(),
             modifiers: Modifiers::META | Modifiers::SHIFT,
         },
-        Actions::new(vec![Action::Move(MoveTarget::Up)]),
+        Actions::new(vec![Action::Move {
+            target: MoveTarget::Up,
+        }]),
     );
     keymaps.insert(
         Keymap {
             key: "l".into(),
             modifiers: Modifiers::META | Modifiers::SHIFT,
         },
-        Actions::new(vec![Action::Move(MoveTarget::Right)]),
+        Actions::new(vec![Action::Move {
+            target: MoveTarget::Right,
+        }]),
     );
     keymaps.insert(
         Keymap {
             key: "f".into(),
             modifiers: Modifiers::META | Modifiers::SHIFT,
         },
-        Actions::new(vec![Action::Toggle(ToggleTarget::Float)]),
+        Actions::new(vec![Action::Toggle {
+            target: ToggleTarget::Float,
+        }]),
     );
     keymaps.insert(
         Keymap {
@@ -212,16 +246,20 @@ fn default_keymaps() -> ModalKeymaps {
                 key: key.into(),
                 modifiers: Modifiers::META | Modifiers::ALT,
             },
-            Actions::new(vec![Action::Focus(FocusTarget::Monitor {
-                target: target.clone(),
-            })]),
+            Actions::new(vec![Action::Focus {
+                target: FocusTarget::Monitor {
+                    target: target.clone(),
+                },
+            }]),
         );
         keymaps.insert(
             Keymap {
                 key: key.into(),
                 modifiers: Modifiers::META | Modifiers::ALT | Modifiers::SHIFT,
             },
-            Actions::new(vec![Action::Move(MoveTarget::Monitor { target })]),
+            Actions::new(vec![Action::Move {
+                target: MoveTarget::Monitor { target },
+            }]),
         );
     }
     ModalKeymaps {

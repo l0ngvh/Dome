@@ -578,19 +578,19 @@ fn end_drag(
 fn send(dome: &mut Dome, s: &str) {
     let action: Action = s.parse().unwrap();
     match &action {
-        Action::Focus(t) => {
+        Action::Focus { target: t } => {
             dome.apply_focus(t);
             dome.flush_layout();
         }
-        Action::Move(t) => {
+        Action::Move { target: t } => {
             dome.apply_move(t);
             dome.flush_layout();
         }
-        Action::Toggle(t) => {
+        Action::Toggle { target: t } => {
             dome.apply_toggle(t);
             dome.flush_layout();
         }
-        Action::Master(t) => {
+        Action::Master { target: t } => {
             dome.apply_master(t);
             dome.flush_layout();
         }
