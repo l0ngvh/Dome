@@ -1,5 +1,4 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::any::Any;
 
 use dome_auxiliary_window::{
     AuxiliaryWindow, AuxiliaryWindowExtWindows, AuxiliaryWindowHandler, MouseButton,
@@ -8,7 +7,7 @@ use dome_auxiliary_window::{
 
 use crate::config::Config;
 use crate::platform::render::{Compositor, Renderer, WgpuContext};
-use crate::platform::tab_bar::TabBarWidget;
+use crate::platform::tab_bar::{TabBarMessage, TabBarWidget};
 use crate::platform::windows::{HubEvent, HubSender};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::DirectComposition::{
@@ -569,7 +568,7 @@ pub(in crate::platform::windows) trait TabBarOverlayApi {
 /// The bar must not raise itself on click. The crate declines click-activation for every
 /// window, so foreground stays with whatever managed window owned it.
 struct TabBarHandler {
-    widget: Rc<RefCell<TabBarWidget>>,
+    widget: TabBarWidget,
     hub_sender: HubSender,
 }
 
@@ -577,18 +576,18 @@ impl AuxiliaryWindowHandler for TabBarHandler {
     fn on_mouse_moved(&mut self, at: PhysicalPosition) {
         // Window-local physical pixels divide by scale to reach the logical points
         // TabBarWidget paints in.
-        let mut widget = self.widget.borrow_mut();
-        let scale = widget.scale();
-        widget.push_pointer_moved(egui::pos2(at.x as f32 / scale, at.y as f32 / scale));
+        let scale = self.widget.scale();
+        self.widget
+            .push_pointer_moved(egui::pos2(at.x as f32 / scale, at.y as f32 / scale));
     }
 
     fn on_mouse_down(&mut self, at: PhysicalPosition, button: MouseButton) {
         if button != MouseButton::Primary {
             return;
         }
-        let mut widget = self.widget.borrow_mut();
-        let scale = widget.scale();
-        widget.push_pointer_button(egui::pos2(at.x as f32 / scale, at.y as f32 / scale), true);
+        let scale = self.widget.scale();
+        self.widget
+            .push_pointer_button(egui::pos2(at.x as f32 / scale, at.y as f32 / scale), true);
     }
 
     fn on_mouse_up(&mut self, at: PhysicalPosition, button: MouseButton) {
@@ -597,21 +596,40 @@ impl AuxiliaryWindowHandler for TabBarHandler {
         }
         // Button-up is the edge paint_tab_bar's Sense::click() observes, with the queued
         // press still present in the same render pass.
-        let click = {
-            let mut widget = self.widget.borrow_mut();
-            let scale = widget.scale();
-            widget.push_pointer_button(egui::pos2(at.x as f32 / scale, at.y as f32 / scale), false);
-            widget.render()
-        };
-        if let Some((cid, idx)) = click {
+        let scale = self.widget.scale();
+        self.widget
+            .push_pointer_button(egui::pos2(at.x as f32 / scale, at.y as f32 / scale), false);
+        if let Some((cid, idx)) = self.widget.render() {
             self.hub_sender.send(HubEvent::TabClicked(cid, idx));
+        }
+    }
+
+    fn on_message(&mut self, message: Box<dyn Any>) {
+        let msg = message
+            .downcast::<TabBarMessage>()
+            .expect("tab bar window received a non-TabBarMessage payload");
+        match *msg {
+            TabBarMessage::Content {
+                scale,
+                size,
+                border,
+                titles,
+                active_index,
+                is_highlighted,
+            } => {
+                self.widget
+                    .set_content(scale, size, border, titles, active_index, is_highlighted);
+                let _ = self.widget.render();
+            }
+            TabBarMessage::Style { theme, font } => {
+                self.widget.set_style(theme, &font);
+                let _ = self.widget.render();
+            }
         }
     }
 }
 
 pub(in crate::platform::windows) struct TabBarOverlay {
-    // widget precedes aux so the Renderer drops before DestroyWindow.
-    widget: Rc<RefCell<TabBarWidget>>,
     aux: AuxiliaryWindow,
 }
 
@@ -651,21 +669,11 @@ impl TabBarOverlay {
             &config.font,
             Box::new(crate::platform::windows::font::resolve_system_font),
         )?;
-        let widget = Rc::new(RefCell::new(TabBarWidget::new(
-            renderer,
-            container_id,
-            scale,
-            (w_phys, h_phys),
-        )));
-        let aux = AuxiliaryWindow::new(
-            &attributes,
-            Box::new(TabBarHandler {
-                widget: Rc::clone(&widget),
-                hub_sender,
-            }),
-        )?;
+        let widget = TabBarWidget::new(renderer, container_id, scale, (w_phys, h_phys));
+        let aux =
+            AuxiliaryWindow::new(&attributes, Box::new(TabBarHandler { widget, hub_sender }))?;
         aux.set_content_visual(dcomp_device, &dcomp_visual)?;
-        Ok(Box::new(Self { widget, aux }))
+        Ok(Box::new(Self { aux }))
     }
 }
 
@@ -685,14 +693,6 @@ impl TabBarOverlayApi for TabBarOverlay {
             Length::new(h_phys as f32 / scale),
         );
         let border = Length::from_pixels(border_thickness).to_logical(scale);
-        self.widget.borrow_mut().set_content(
-            scale,
-            bar_size,
-            border,
-            titles,
-            active_index,
-            is_highlighted,
-        );
         // No z-order lift needed. The tab bar is created above the bottom-parked
         // border overlay, the only window it shares pixels with, and set_frame
         // preserves that order.
@@ -707,7 +707,14 @@ impl TabBarOverlayApi for TabBarOverlay {
             },
         );
         self.aux.set_visible(true);
-        let _ = self.widget.borrow_mut().render();
+        self.aux.deliver(Box::new(TabBarMessage::Content {
+            scale,
+            size: bar_size,
+            border,
+            titles,
+            active_index,
+            is_highlighted,
+        }));
     }
 
     fn hide(&mut self) {
@@ -715,6 +722,9 @@ impl TabBarOverlayApi for TabBarOverlay {
     }
 
     fn set_config(&mut self, config: &Config) {
-        self.widget.borrow_mut().set_config(config);
+        self.aux.deliver(Box::new(TabBarMessage::Style {
+            theme: config.theme,
+            font: config.font.clone(),
+        }));
     }
 }

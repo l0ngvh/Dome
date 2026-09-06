@@ -1,7 +1,26 @@
-use crate::config::Config;
 use crate::core::{ContainerId, Dimension, Length, Logical};
+use crate::font::FontConfig;
 use crate::overlay::{self, BorderMetrics};
 use crate::platform::render::Renderer;
+use crate::theme::Flavor;
+
+/// A payload delivered to a tab bar window's handler through `AuxiliaryWindow::deliver`.
+/// `Style` ships theme and font rather than a whole `Config`, the tab bar's only config
+/// dependency.
+pub(crate) enum TabBarMessage {
+    Content {
+        scale: f32,
+        size: (Length<Logical>, Length<Logical>),
+        border: Length<Logical>,
+        titles: Vec<String>,
+        active_index: usize,
+        is_highlighted: bool,
+    },
+    Style {
+        theme: Flavor,
+        font: FontConfig,
+    },
+}
 
 pub(crate) struct TabBarWidget {
     renderer: Renderer,
@@ -67,9 +86,9 @@ impl TabBarWidget {
         }
     }
 
-    pub(crate) fn set_config(&mut self, config: &Config) {
-        self.renderer.set_theme(config.theme);
-        self.renderer.set_font(&config.font);
+    pub(crate) fn set_style(&mut self, theme: Flavor, font: &FontConfig) {
+        self.renderer.set_theme(theme);
+        self.renderer.set_font(font);
     }
 
     /// DPI scale of the last `set_content`. Windows divides physical pointer

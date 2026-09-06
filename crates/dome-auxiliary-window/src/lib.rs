@@ -1,6 +1,9 @@
 //! Window creation and the window event loop for Dome and its status-bar
 //! subprocess. Names no Dome domain type.
 
+mod menu;
+pub use menu::{MenuEntry, MenuItem};
+
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
@@ -13,7 +16,9 @@ mod windows;
 #[cfg(target_os = "windows")]
 use crate::windows as imp;
 #[cfg(target_os = "windows")]
-pub use windows::{AuxiliaryWindowExtWindows, MenuEntry, MenuItem};
+use ::windows::Win32::UI::WindowsAndMessaging::HICON;
+#[cfg(target_os = "windows")]
+pub use windows::AuxiliaryWindowExtWindows;
 
 /// A point in physical pixels. The origin may be negative across multiple monitors.
 #[derive(Clone, Copy, Debug)]
@@ -70,6 +75,10 @@ pub trait AuxiliaryWindowHandler {
     fn on_display_changed(&mut self) {}
     fn on_work_area_changed(&mut self) {}
 
+    /// A payload handed to this handler by `AuxiliaryWindow::deliver`. The crate treats it
+    /// as opaque, so the handler downcasts it to its own message type.
+    fn on_message(&mut self, _message: Box<dyn std::any::Any>) {}
+
     /// The entries to show when the tray icon's context menu opens. Called on each open,
     /// so it reflects current state.
     #[cfg(target_os = "windows")]
@@ -87,6 +96,50 @@ pub trait AuxiliaryLoopHandler {
     fn on_started(&mut self) {}
     fn on_stopping(&mut self) {}
     fn on_wake(&mut self) {}
+}
+
+/// The app's shell integration: the tray or menu-bar menu, and the shell's display
+/// notifications. Every method defaults to a no-op.
+pub trait AppShellHandler {
+    /// The entries to show when the menu opens. Called on each open, so it reflects
+    /// current state.
+    fn menu(&mut self) -> Vec<MenuEntry> {
+        Vec::new()
+    }
+
+    /// A menu row was chosen. `id` is the `MenuItem::id` of the row.
+    fn on_menu_selected(&mut self, _id: u32) {}
+
+    fn on_display_changed(&mut self) {}
+    fn on_work_area_changed(&mut self) {}
+}
+
+/// The app's presence in the desktop shell, one type across platforms: the system-tray
+/// icon on Windows and the menu-bar status item on macOS, each with a menu and the
+/// shell's display notifications. On Windows the host window lives entirely inside this
+/// type and is never exposed.
+pub struct AppShell {
+    inner: imp::AppShell,
+}
+
+impl AppShell {
+    #[cfg(target_os = "macos")]
+    pub fn new(icon_png: &[u8], handler: Box<dyn AppShellHandler>) -> anyhow::Result<Self> {
+        Ok(Self {
+            inner: imp::AppShell::new(icon_png, handler)?,
+        })
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn new(icon: HICON, handler: Box<dyn AppShellHandler>) -> anyhow::Result<Self> {
+        Ok(Self {
+            inner: imp::AppShell::new(icon, handler)?,
+        })
+    }
+
+    pub fn set_tooltip(&self, tooltip: &str) {
+        self.inner.set_tooltip(tooltip);
+    }
 }
 
 /// A borderless auxiliary window, one type across platforms. Reach the native handle
@@ -117,6 +170,13 @@ impl AuxiliaryWindow {
 
     pub fn set_level(&self, level: WindowLevel) {
         self.inner.set_level(level);
+    }
+
+    /// Hands an opaque payload to this window's handler on the window thread, synchronously.
+    /// The handler borrow lives and ends inside this call, so a caller cannot hold it across
+    /// a window-mutating call such as `set_frame`.
+    pub fn deliver(&self, message: Box<dyn std::any::Any>) {
+        self.inner.deliver(message);
     }
 }
 

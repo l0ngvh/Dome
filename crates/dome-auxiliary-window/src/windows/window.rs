@@ -54,14 +54,6 @@ pub(super) struct WindowState {
 pub trait AuxiliaryWindowExtWindows {
     fn hwnd(&self) -> HWND;
 
-    /// Attaches a system-tray icon to the window. The crate re-adds it when the taskbar
-    /// restarts and removes it when the window drops. A context-menu request drives
-    /// `tray_menu` then `on_tray_menu_selected`. The caller keeps ownership of `icon`.
-    fn install_tray_icon(&self, icon: HICON, tooltip: &str) -> anyhow::Result<()>;
-
-    /// A no-op when no icon is installed.
-    fn set_tray_tooltip(&self, tooltip: &str);
-
     /// Roots `visual` on this window through a DirectComposition target the window then
     /// owns. The consumer builds `device` and `visual` without an HWND, so this is the
     /// window-bound half of surface creation, the analog of macOS `set_content_layer`.
@@ -78,94 +70,12 @@ impl AuxiliaryWindowExtWindows for crate::AuxiliaryWindow {
         self.inner.hwnd()
     }
 
-    fn install_tray_icon(&self, icon: HICON, tooltip: &str) -> anyhow::Result<()> {
-        self.inner.install_tray_icon(icon, tooltip)
-    }
-
-    fn set_tray_tooltip(&self, tooltip: &str) {
-        self.inner.set_tray_tooltip(tooltip);
-    }
-
     fn set_content_visual(
         &self,
         device: &IDCompositionDevice,
         visual: &IDCompositionVisual,
     ) -> anyhow::Result<()> {
         self.inner.set_content_visual(device, visual)
-    }
-}
-
-fn ensure_class_registered() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| {
-        let instance: HINSTANCE = match unsafe { GetModuleHandleW(None) } {
-            Ok(module) => module.into(),
-            Err(e) => {
-                tracing::error!(?e, "GetModuleHandleW failed registering window class");
-                return;
-            }
-        };
-        let cursor: HCURSOR = unsafe { LoadCursorW(None, IDC_ARROW) }.unwrap_or_default();
-        let class = WNDCLASSW {
-            lpfnWndProc: Some(aux_wnd_proc),
-            hInstance: instance,
-            lpszClassName: CLASS_NAME,
-            hCursor: cursor,
-            ..Default::default()
-        };
-        unsafe { RegisterClassW(&class) };
-    });
-}
-
-fn ex_style_for(attributes: &WindowAttributes) -> WINDOW_EX_STYLE {
-    let mut ex_style = WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP;
-    if attributes.click_through {
-        ex_style |= WS_EX_LAYERED | WS_EX_TRANSPARENT;
-    }
-    if !attributes.focusable {
-        ex_style |= WS_EX_NOACTIVATE;
-    }
-    ex_style
-}
-
-struct OwnedHwnd {
-    hwnd: HWND,
-}
-
-impl OwnedHwnd {
-    fn new(ex_style: WINDOW_EX_STYLE, attributes: &WindowAttributes) -> anyhow::Result<Self> {
-        let hwnd = unsafe {
-            CreateWindowExW(
-                ex_style,
-                CLASS_NAME,
-                w!(""),
-                WS_POPUP,
-                attributes.position.x,
-                attributes.position.y,
-                attributes.size.width as i32,
-                attributes.size.height as i32,
-                None,
-                None,
-                Some(GetModuleHandleW(None)?.into()),
-                None,
-            )?
-        };
-        Ok(Self { hwnd })
-    }
-
-    fn hwnd(&self) -> HWND {
-        self.hwnd
-    }
-}
-
-impl Drop for OwnedHwnd {
-    /// Win32 refuses to destroy a window owned by another thread and only reports it
-    /// through the return value, so swallowing the error hides both a cross-thread
-    /// destroy and whatever teardown the window still owed the OS.
-    fn drop(&mut self) {
-        if let Err(e) = unsafe { DestroyWindow(self.hwnd) } {
-            tracing::error!(?e, "failed to destroy window");
-        }
     }
 }
 
@@ -210,6 +120,15 @@ impl Window {
     pub(crate) fn set_visible(&self, visible: bool) {
         let cmd = if visible { SW_SHOWNA } else { SW_HIDE };
         unsafe { ShowWindow(self.window.hwnd(), cmd).ok().ok() };
+    }
+
+    pub(crate) fn deliver(&self, message: Box<dyn std::any::Any>) {
+        // Borrow lives and ends here. Calls no window API, so it never re-enters the
+        // wnd-proc while the WindowState borrow is held.
+        unsafe { &*self.state }
+            .borrow_mut()
+            .handler
+            .on_message(message);
     }
 
     pub(crate) fn set_level(&self, level: crate::WindowLevel) {
@@ -296,7 +215,83 @@ impl Window {
 impl Drop for Window {
     fn drop(&mut self) {
         unsafe { SetWindowLongPtrW(self.window.hwnd(), GWLP_USERDATA, 0) };
+        // Frees WindowState (and its Renderer / DirectComposition target) before the
+        // OwnedHwnd field's Drop calls DestroyWindow.
         drop(unsafe { Box::from_raw(self.state) });
+    }
+}
+
+fn ensure_class_registered() {
+    static REGISTER: Once = Once::new();
+    REGISTER.call_once(|| {
+        let instance: HINSTANCE = match unsafe { GetModuleHandleW(None) } {
+            Ok(module) => module.into(),
+            Err(e) => {
+                tracing::error!(?e, "GetModuleHandleW failed registering window class");
+                return;
+            }
+        };
+        let cursor: HCURSOR = unsafe { LoadCursorW(None, IDC_ARROW) }.unwrap_or_default();
+        let class = WNDCLASSW {
+            lpfnWndProc: Some(aux_wnd_proc),
+            hInstance: instance,
+            lpszClassName: CLASS_NAME,
+            hCursor: cursor,
+            ..Default::default()
+        };
+        unsafe { RegisterClassW(&class) };
+    });
+}
+
+fn ex_style_for(attributes: &WindowAttributes) -> WINDOW_EX_STYLE {
+    let mut ex_style = WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP;
+    if attributes.click_through {
+        ex_style |= WS_EX_LAYERED | WS_EX_TRANSPARENT;
+    }
+    if !attributes.focusable {
+        ex_style |= WS_EX_NOACTIVATE;
+    }
+    ex_style
+}
+
+struct OwnedHwnd {
+    hwnd: HWND,
+}
+
+impl OwnedHwnd {
+    fn new(ex_style: WINDOW_EX_STYLE, attributes: &WindowAttributes) -> anyhow::Result<Self> {
+        let hwnd = unsafe {
+            CreateWindowExW(
+                ex_style,
+                CLASS_NAME,
+                w!(""),
+                WS_POPUP,
+                attributes.position.x,
+                attributes.position.y,
+                attributes.size.width as i32,
+                attributes.size.height as i32,
+                None,
+                None,
+                Some(GetModuleHandleW(None)?.into()),
+                None,
+            )?
+        };
+        Ok(Self { hwnd })
+    }
+
+    fn hwnd(&self) -> HWND {
+        self.hwnd
+    }
+}
+
+impl Drop for OwnedHwnd {
+    /// Win32 refuses to destroy a window owned by another thread and only reports it
+    /// through the return value, so swallowing the error hides both a cross-thread
+    /// destroy and whatever teardown the window still owed the OS.
+    fn drop(&mut self) {
+        if let Err(e) = unsafe { DestroyWindow(self.hwnd) } {
+            tracing::error!(?e, "failed to destroy window");
+        }
     }
 }
 

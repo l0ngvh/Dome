@@ -1,10 +1,11 @@
+mod app_shell;
 mod event_loop;
 mod menu;
 mod window;
 mod wnd_proc;
 
+pub(crate) use app_shell::AppShell;
 pub(crate) use event_loop::{EventLoop, LoopHandle, LoopWaker};
-pub use menu::{MenuEntry, MenuItem};
 pub use window::AuxiliaryWindowExtWindows;
 pub(crate) use window::Window;
 

@@ -1,83 +1,18 @@
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, HMENU, MENU_ITEM_FLAGS, MF_CHECKED,
-    MF_POPUP, MF_SEPARATOR, MF_STRING, PostMessageW, SetForegroundWindow, TPM_NONOTIFY,
+    MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, PostMessageW, SetForegroundWindow, TPM_NONOTIFY,
     TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_CONTEXTMENU, WM_NULL, WM_RBUTTONUP,
 };
 use windows::core::PCWSTR;
 
-/// One selectable row in a tray context menu. `id` is the consumer's own value, returned
-/// verbatim from `on_tray_menu_selected`.
-#[derive(Clone, Debug)]
-pub struct MenuItem {
-    pub label: String,
-    pub id: u32,
-    pub checked: bool,
-}
-
-/// One entry in a tray context menu. A submenu holds one level of items.
-#[derive(Clone, Debug)]
-pub enum MenuEntry {
-    Item(MenuItem),
-    Separator,
-    Submenu { label: String, items: Vec<MenuItem> },
-}
+use crate::{MenuEntry, MenuItem};
 
 /// Whether the tray callback's payload is a context-menu request (right-click or menu
 /// key). The legacy notify-icon protocol packs the triggering mouse message into the low
 /// word of `lparam`.
 pub(super) fn is_tray_context_menu(lparam: LPARAM) -> bool {
     matches!((lparam.0 & 0xFFFF) as u32, WM_RBUTTONUP | WM_CONTEXTMENU)
-}
-
-fn to_wide_null(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-fn append_item(menu: HMENU, item: &MenuItem) {
-    let flags: MENU_ITEM_FLAGS = if item.checked {
-        MF_STRING | MF_CHECKED
-    } else {
-        MF_STRING
-    };
-    let label = to_wide_null(&item.label);
-    if let Err(e) = unsafe { AppendMenuW(menu, flags, item.id as usize, PCWSTR(label.as_ptr())) } {
-        tracing::warn!(?e, "AppendMenuW item failed");
-    }
-}
-
-fn append_entry(menu: HMENU, entry: &MenuEntry) {
-    match entry {
-        MenuEntry::Separator => {
-            if let Err(e) = unsafe { AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null()) } {
-                tracing::warn!(?e, "AppendMenuW separator failed");
-            }
-        }
-        MenuEntry::Item(item) => append_item(menu, item),
-        MenuEntry::Submenu { label, items } => {
-            let submenu = match unsafe { CreatePopupMenu() } {
-                Ok(m) => m,
-                Err(e) => {
-                    tracing::warn!(?e, "CreatePopupMenu (submenu) failed");
-                    return;
-                }
-            };
-            for item in items {
-                append_item(submenu, item);
-            }
-            // The MF_POPUP id is the child HMENU handle. A child attached this way is
-            // freed by the root DestroyMenu, so only the failed-attach branch frees it.
-            let label = to_wide_null(label);
-            if let Err(e) =
-                unsafe { AppendMenuW(menu, MF_POPUP, submenu.0 as usize, PCWSTR(label.as_ptr())) }
-            {
-                tracing::warn!(?e, "AppendMenuW submenu failed");
-                if let Err(e2) = unsafe { DestroyMenu(submenu) } {
-                    tracing::warn!(?e2, "DestroyMenu (orphaned submenu) failed");
-                }
-            }
-        }
-    }
 }
 
 /// Shows `entries` as a popup menu owned by `hwnd` and returns the chosen `MenuItem::id`,
@@ -135,4 +70,63 @@ pub(super) fn show_context_menu(hwnd: HWND, entries: &[MenuEntry]) -> Option<u32
     }
 
     (cmd != 0).then_some(cmd)
+}
+
+fn to_wide_null(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn append_item(menu: HMENU, item: &MenuItem) {
+    let flags: MENU_ITEM_FLAGS = if item.checked {
+        MF_STRING | MF_CHECKED
+    } else {
+        MF_STRING
+    };
+    let label = to_wide_null(&item.label);
+    if let Err(e) = unsafe { AppendMenuW(menu, flags, item.id as usize, PCWSTR(label.as_ptr())) } {
+        tracing::warn!(?e, "AppendMenuW item failed");
+    }
+}
+
+fn append_entry(menu: HMENU, entry: &MenuEntry) {
+    match entry {
+        MenuEntry::Separator => {
+            if let Err(e) = unsafe { AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null()) } {
+                tracing::warn!(?e, "AppendMenuW separator failed");
+            }
+        }
+        MenuEntry::Item(item) => append_item(menu, item),
+        MenuEntry::Submenu {
+            label,
+            items,
+            enabled,
+        } => {
+            let submenu = match unsafe { CreatePopupMenu() } {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::warn!(?e, "CreatePopupMenu (submenu) failed");
+                    return;
+                }
+            };
+            for item in items {
+                append_item(submenu, item);
+            }
+            // The MF_POPUP id is the child HMENU handle. A child attached this way is
+            // freed by the root DestroyMenu, so only the failed-attach branch frees it.
+            let flags = if *enabled {
+                MF_POPUP
+            } else {
+                MF_POPUP | MF_GRAYED
+            };
+            let label = to_wide_null(label);
+            if let Err(e) =
+                unsafe { AppendMenuW(menu, flags, submenu.0 as usize, PCWSTR(label.as_ptr())) }
+            {
+                tracing::warn!(?e, "AppendMenuW submenu failed");
+                if let Err(e2) = unsafe { DestroyMenu(submenu) } {
+                    tracing::warn!(?e2, "DestroyMenu (orphaned submenu) failed");
+                }
+            }
+        }
+    }
 }

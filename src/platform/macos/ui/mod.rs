@@ -1,28 +1,30 @@
 mod compositor;
 mod mirror;
 mod overlay;
-mod status_menu;
 
-use std::cell::{Cell, OnceCell, RefCell};
+use std::cell::{OnceCell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, mpsc};
 
 use dispatch2::{DispatchQueue, DispatchRetained};
-use dome_auxiliary_window::{AuxiliaryLoopHandler, EventLoop, LoopWaker};
+use dome_auxiliary_window::{
+    AppShell, AppShellHandler, AuxiliaryLoopHandler, EventLoop, LoopWaker, MenuEntry,
+};
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_app_kit::NSApplication;
 use objc2_core_graphics::CGWindowID;
 use objc2_io_surface::IOSurface;
 
-use super::dome::{HubEvent, HubMessage, SceneSender};
+use super::dome::{HubEvent, HubMessage, SceneSender, get_all_monitors};
 use super::listeners::EventListener;
+use crate::action::{Actions, WorkspaceInfo};
 use crate::config::Config;
 use crate::core::{ContainerId, MonitorId, WindowId};
 use crate::platform::render::WgpuContext;
+use crate::platform::shell_menu::{build_menu, focused_tooltip, id_to_action};
 use mirror::{WindowCapture, create_captures_async};
 use overlay::{FloatOverlay, TabBarOverlay, TilingOverlay};
-use status_menu::StatusMenu;
 
 #[derive(Clone)]
 pub(super) struct MessageSender {
@@ -89,34 +91,33 @@ impl Ui {
         let (capture_tx, capture_rx) = mpsc::channel();
         let gpu = Rc::new(create_wgpu_context().expect("wgpu instance/adapter/device init"));
 
-        let state = Rc::new(UiState {
+        let capture_sender: Rc<OnceCell<CaptureSender>> = Rc::new(OnceCell::new());
+        let state = UiState {
             scene_rx,
             capture_rx,
-            capture_sender: OnceCell::new(),
+            capture_sender: Rc::clone(&capture_sender),
             capture_queue: DispatchQueue::new("dome.capture", None),
-            tiling_overlays: RefCell::new(HashMap::new()),
-            tab_bar_overlays: RefCell::new(HashMap::new()),
-            float_overlays: RefCell::new(HashMap::new()),
-            captures: RefCell::new(HashMap::new()),
+            tiling_overlays: HashMap::new(),
+            tab_bar_overlays: HashMap::new(),
+            float_overlays: HashMap::new(),
+            captures: HashMap::new(),
             event_listener,
             gpu,
-            config: RefCell::new(config),
-            last_focused: Cell::new(None),
-            last_focused_monitor_id: Cell::new(None),
-            status_menu: RefCell::new(None),
+            config,
+            last_focused: None,
+            last_focused_monitor_id: None,
+            app_shell: None,
+            status_workspaces: Rc::new(RefCell::new(Vec::new())),
             hub_sender,
-        });
+        };
 
-        let event_loop = EventLoop::new(Box::new(WindowLoopHandler {
-            state: state.clone(),
-        }));
+        let event_loop = EventLoop::new(Box::new(WindowLoopHandler { state }));
         let waker = event_loop.waker();
         let sender = MessageSender {
             tx: scene_tx,
             waker: waker.clone(),
         };
-        if state
-            .capture_sender
+        if capture_sender
             .set(CaptureSender {
                 tx: capture_tx,
                 waker,
@@ -156,32 +157,84 @@ fn create_wgpu_context() -> anyhow::Result<WgpuContext> {
 struct UiState {
     scene_rx: mpsc::Receiver<HubMessage>,
     capture_rx: mpsc::Receiver<CaptureMessage>,
-    // Set once in Ui::new, after the loop's waker exists.
-    capture_sender: OnceCell<CaptureSender>,
+    // Shared with Ui::new so it can be set once the loop's waker exists, after the
+    // handler that owns this state has moved into the event loop.
+    capture_sender: Rc<OnceCell<CaptureSender>>,
     // Serial background queue for SCStream output handlers. Keeps IOSurface extraction
     // off the main thread while preserving scene ordering.
     capture_queue: DispatchRetained<DispatchQueue>,
-    tiling_overlays: RefCell<HashMap<MonitorId, TilingOverlay>>,
-    tab_bar_overlays: RefCell<HashMap<ContainerId, TabBarOverlay>>,
-    float_overlays: RefCell<HashMap<CGWindowID, FloatOverlay>>,
+    tiling_overlays: HashMap<MonitorId, TilingOverlay>,
+    tab_bar_overlays: HashMap<ContainerId, TabBarOverlay>,
+    float_overlays: HashMap<CGWindowID, FloatOverlay>,
     // Owns each live WindowCapture to keep its SCStream running.
-    captures: RefCell<HashMap<CGWindowID, WindowCapture>>,
+    captures: HashMap<CGWindowID, WindowCapture>,
     event_listener: EventListener,
     gpu: Rc<WgpuContext>,
-    config: RefCell<Config>,
-    last_focused: Cell<Option<WindowId>>,
-    last_focused_monitor_id: Cell<Option<MonitorId>>,
-    status_menu: RefCell<Option<StatusMenu>>,
+    config: Config,
+    last_focused: Option<WindowId>,
+    last_focused_monitor_id: Option<MonitorId>,
+    app_shell: Option<AppShell>,
+    // Shared with the AppShell handler so the pull-model menu and set_tooltip read the
+    // same workspace list. Written on each scene, read when the menu opens.
+    status_workspaces: Rc<RefCell<Vec<WorkspaceInfo>>>,
     hub_sender: calloop::channel::Sender<HubEvent>,
 }
 
+/// Template PNG embedded at compile time. macOS auto-tints alpha-defined shapes to match
+/// dark or light mode when setTemplate is true. Embedding avoids the bundle-path search
+/// NSImage::imageNamed uses, so cargo run and cargo make bundle both work with no fork.
+const STATUS_BAR_ICON_PNG: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/resources/macos/status_bar_icon.png"
+));
+
+struct ShellHandler {
+    hub_sender: calloop::channel::Sender<HubEvent>,
+    workspaces: Rc<RefCell<Vec<WorkspaceInfo>>>,
+}
+
+impl AppShellHandler for ShellHandler {
+    fn menu(&mut self) -> Vec<MenuEntry> {
+        build_menu(&self.workspaces.borrow(), true)
+    }
+
+    fn on_menu_selected(&mut self, id: u32) {
+        if let Some(action) = id_to_action(id, &self.workspaces.borrow()) {
+            self.hub_sender
+                .send(HubEvent::Action(Actions::new(vec![action])))
+                .ok();
+        }
+    }
+
+    fn on_display_changed(&mut self) {
+        let mtm =
+            MainThreadMarker::new().expect("screen-change notification runs on the main thread");
+        match get_all_monitors(mtm) {
+            Ok(monitors) => {
+                self.hub_sender
+                    .send(HubEvent::MonitorsChanged(monitors))
+                    .ok();
+            }
+            Err(e) => tracing::error!(%e, "Failed to enumerate monitors on screen change"),
+        }
+    }
+}
+
 struct WindowLoopHandler {
-    state: Rc<UiState>,
+    state: UiState,
 }
 
 impl AuxiliaryLoopHandler for WindowLoopHandler {
     fn on_started(&mut self) {
         tracing::info!("Application did finish launching");
+        let handler = ShellHandler {
+            hub_sender: self.state.hub_sender.clone(),
+            workspaces: Rc::clone(&self.state.status_workspaces),
+        };
+        match AppShell::new(STATUS_BAR_ICON_PNG, Box::new(handler)) {
+            Ok(app_shell) => self.state.app_shell = Some(app_shell),
+            Err(e) => tracing::error!(%e, "Failed to create status item"),
+        }
     }
 
     fn on_stopping(&mut self) {
@@ -189,38 +242,36 @@ impl AuxiliaryLoopHandler for WindowLoopHandler {
     }
 
     fn on_wake(&mut self) {
-        let state = self.state.clone();
+        let state = &mut self.state;
         let mtm = MainThreadMarker::new().expect("on_wake runs on the main thread");
         while let Ok(msg) = state.scene_rx.try_recv() {
             match msg {
                 HubMessage::Scene(scene) => {
-                    let sender_clone = state.hub_sender.clone();
-                    state
-                        .status_menu
-                        .borrow_mut()
-                        .get_or_insert_with(|| StatusMenu::new(mtm, sender_clone))
-                        .update(mtm, &scene.workspaces);
+                    *state.status_workspaces.borrow_mut() = scene.workspaces.clone();
+                    if let Some(app_shell) = &state.app_shell {
+                        app_shell.set_tooltip(&focused_tooltip(&scene.workspaces));
+                    }
 
-                    let mut tiling_overlays = state.tiling_overlays.borrow_mut();
-                    let mut float_overlays = state.float_overlays.borrow_mut();
-                    let mut captures = state.captures.borrow_mut();
-
-                    let config = state.config.borrow().clone();
+                    let config = state.config.clone();
                     let gpu = state.gpu.clone();
                     let hub_sender = state.hub_sender.clone();
 
                     let active_monitors: Vec<_> =
                         scene.tiling.iter().map(|t| t.monitor_id).collect();
                     for data in &scene.tiling {
-                        let overlay = tiling_overlays.entry(data.monitor_id).or_insert_with(|| {
-                            TilingOverlay::new(
-                                mtm,
-                                &gpu,
-                                config.clone(),
-                                data.cocoa_frame,
-                                data.scale,
-                            )
-                        });
+                        let overlay =
+                            state
+                                .tiling_overlays
+                                .entry(data.monitor_id)
+                                .or_insert_with(|| {
+                                    TilingOverlay::new(
+                                        mtm,
+                                        &gpu,
+                                        config.clone(),
+                                        data.cocoa_frame,
+                                        data.scale,
+                                    )
+                                });
                         overlay.set_border_thickness(data.border_thickness);
                         if data.windows.is_empty() && data.containers.is_empty() {
                             overlay.clear();
@@ -234,17 +285,20 @@ impl AuxiliaryLoopHandler for WindowLoopHandler {
                             );
                         }
                     }
-                    tiling_overlays.retain(|id, _| active_monitors.contains(id));
+                    state
+                        .tiling_overlays
+                        .retain(|id, _| active_monitors.contains(id));
 
-                    let mut tab_bar_overlays = state.tab_bar_overlays.borrow_mut();
                     let mut active_tab_bars: HashSet<ContainerId> = HashSet::new();
                     for data in &scene.tiling {
                         for cs in &data.containers {
                             if !cs.placement.is_tabbed || cs.placement.titles.is_empty() {
                                 continue;
                             }
-                            let entry =
-                                tab_bar_overlays.entry(cs.placement.id).or_insert_with(|| {
+                            let entry = state
+                                .tab_bar_overlays
+                                .entry(cs.placement.id)
+                                .or_insert_with(|| {
                                     TabBarOverlay::new(
                                         mtm,
                                         &gpu,
@@ -259,13 +313,14 @@ impl AuxiliaryLoopHandler for WindowLoopHandler {
                             active_tab_bars.insert(cs.placement.id);
                         }
                     }
-                    tab_bar_overlays.retain(|id, _| active_tab_bars.contains(id));
-                    drop(tab_bar_overlays);
+                    state
+                        .tab_bar_overlays
+                        .retain(|id, _| active_tab_bars.contains(id));
 
                     let mut capture_pairs = Vec::new();
                     for show in &scene.float_shows {
-                        let is_new = !float_overlays.contains_key(&show.cg_id);
-                        let overlay = float_overlays.entry(show.cg_id).or_insert_with(|| {
+                        let is_new = !state.float_overlays.contains_key(&show.cg_id);
+                        let overlay = state.float_overlays.entry(show.cg_id).or_insert_with(|| {
                             FloatOverlay::new(
                                 mtm,
                                 show.cocoa_frame,
@@ -288,7 +343,7 @@ impl AuxiliaryLoopHandler for WindowLoopHandler {
                             capture_pairs.push(show.cg_id);
                         }
 
-                        if let Some(capture) = captures.get_mut(&show.cg_id) {
+                        if let Some(capture) = state.captures.get_mut(&show.cg_id) {
                             if scene.focused_window != Some(show.placement.id) {
                                 capture.start(show.cg_id, show.content_dim, show.scale);
                             } else {
@@ -315,30 +370,28 @@ impl AuxiliaryLoopHandler for WindowLoopHandler {
                     // tracking which windows transitioned from float to tiling.
                     let active_floats: HashSet<CGWindowID> =
                         scene.float_shows.iter().map(|s| s.cg_id).collect();
-                    float_overlays.retain(|cg_id, _| active_floats.contains(cg_id));
-                    captures.retain(|cg_id, _| active_floats.contains(cg_id));
-
-                    drop(tiling_overlays);
-                    drop(float_overlays);
-                    drop(captures);
+                    state
+                        .float_overlays
+                        .retain(|cg_id, _| active_floats.contains(cg_id));
+                    state
+                        .captures
+                        .retain(|cg_id, _| active_floats.contains(cg_id));
 
                     {
-                        let last = state.last_focused.get();
-                        let last_monitor = state.last_focused_monitor_id.get();
+                        let last = state.last_focused;
+                        let last_monitor = state.last_focused_monitor_id;
                         let monitor_changed =
                             last_monitor.is_some_and(|m| m != scene.focused_monitor_id);
                         if last != scene.focused_window || monitor_changed {
-                            state.last_focused.set(scene.focused_window);
-                            if scene.focused_window.is_none() {
-                                let overlays = state.tiling_overlays.borrow();
-                                if let Some(overlay) = overlays.get(&scene.focused_monitor_id) {
-                                    overlay.focus(mtm);
-                                }
+                            state.last_focused = scene.focused_window;
+                            if scene.focused_window.is_none()
+                                && let Some(overlay) =
+                                    state.tiling_overlays.get(&scene.focused_monitor_id)
+                            {
+                                overlay.focus(mtm);
                             }
                         }
-                        state
-                            .last_focused_monitor_id
-                            .set(Some(scene.focused_monitor_id));
+                        state.last_focused_monitor_id = Some(scene.focused_monitor_id);
                     }
                 }
                 HubMessage::RefreshObservers => {
@@ -346,19 +399,29 @@ impl AuxiliaryLoopHandler for WindowLoopHandler {
                 }
                 HubMessage::ConfigChanged(new_config) => {
                     let new_config = *new_config;
-                    *state.config.borrow_mut() = new_config.clone();
-                    for overlay in state.float_overlays.borrow_mut().values_mut() {
+                    state.config = new_config.clone();
+                    for overlay in state.float_overlays.values_mut() {
                         overlay.set_config(&new_config);
                     }
-                    for overlay in state.tiling_overlays.borrow_mut().values_mut() {
+                    for overlay in state.tiling_overlays.values_mut() {
                         overlay.set_config(&new_config);
                     }
-                    for overlay in state.tab_bar_overlays.borrow().values() {
+                    for overlay in state.tab_bar_overlays.values() {
                         overlay.set_config(&new_config);
                     }
                 }
                 HubMessage::Shutdown => {
-                    NSApplication::sharedApplication(mtm).terminate(None);
+                    // This runs inside the wake-source callback, which holds a
+                    // mutable borrow of the loop handler across on_wake. terminate
+                    // fires applicationWillTerminate: synchronously, and that
+                    // delegate method borrows the same handler again, so calling it
+                    // here double-borrows and panics. Defer it to the next main
+                    // run-loop turn, once the borrow is released.
+                    DispatchQueue::main().exec_async(|| {
+                        let mtm = MainThreadMarker::new()
+                            .expect("main dispatch queue runs on the main thread");
+                        NSApplication::sharedApplication(mtm).terminate(None);
+                    });
                     return;
                 }
             }
@@ -367,12 +430,12 @@ impl AuxiliaryLoopHandler for WindowLoopHandler {
         while let Ok(msg) = state.capture_rx.try_recv() {
             match msg {
                 CaptureMessage::Ready { cg_id, capture } => {
-                    if state.float_overlays.borrow().contains_key(&cg_id) {
-                        state.captures.borrow_mut().insert(cg_id, capture);
+                    if state.float_overlays.contains_key(&cg_id) {
+                        state.captures.insert(cg_id, capture);
                     }
                 }
                 CaptureMessage::Frame { cg_id, surface } => {
-                    if let Some(overlay) = state.float_overlays.borrow_mut().get_mut(&cg_id) {
+                    if let Some(overlay) = state.float_overlays.get_mut(&cg_id) {
                         overlay.apply_frame(&surface);
                     }
                 }

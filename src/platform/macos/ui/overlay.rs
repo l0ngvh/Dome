@@ -1,5 +1,4 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::any::Any;
 
 use calloop::channel::Sender as CalloopSender;
 use dome_auxiliary_window::{
@@ -26,7 +25,7 @@ use crate::font::FontConfig;
 use crate::overlay::{self, BorderMetrics, LogicalTiledContainer, LogicalTiledWindow};
 use crate::platform::macos::objc2_wrapper::{kAXFrontmostAttribute, set_attribute_value};
 use crate::platform::render::{Renderer, WgpuContext};
-use crate::platform::tab_bar::TabBarWidget;
+use crate::platform::tab_bar::{TabBarMessage, TabBarWidget};
 use crate::theme::Flavor;
 
 fn frame_attrs(frame: NSRect) -> (PhysicalPosition, PhysicalSize) {
@@ -373,7 +372,7 @@ impl TilingOverlay {
 }
 
 struct TabBarHandler {
-    widget: Rc<RefCell<TabBarWidget>>,
+    widget: TabBarWidget,
     hub_sender: CalloopSender<HubEvent>,
 }
 
@@ -382,21 +381,42 @@ impl AuxiliaryWindowHandler for TabBarHandler {
     // divide. Rendering on the press edge keeps the press queued for the click
     // TabBarWidget::render resolves on release.
     fn on_mouse_down(&mut self, at: PhysicalPosition, _button: MouseButton) {
-        let mut widget = self.widget.borrow_mut();
-        widget.push_pointer_button(egui::pos2(at.x as f32, at.y as f32), true);
-        widget.render();
+        self.widget
+            .push_pointer_button(egui::pos2(at.x as f32, at.y as f32), true);
+        self.widget.render();
     }
 
     fn on_mouse_up(&mut self, at: PhysicalPosition, _button: MouseButton) {
-        let clicked = {
-            let mut widget = self.widget.borrow_mut();
-            widget.push_pointer_button(egui::pos2(at.x as f32, at.y as f32), false);
-            widget.render()
-        };
-        if let Some((cid, tab_idx)) = clicked {
+        self.widget
+            .push_pointer_button(egui::pos2(at.x as f32, at.y as f32), false);
+        if let Some((cid, tab_idx)) = self.widget.render() {
             self.hub_sender
                 .send(HubEvent::TabClicked(cid, tab_idx))
                 .ok();
+        }
+    }
+
+    fn on_message(&mut self, message: Box<dyn Any>) {
+        let msg = message
+            .downcast::<TabBarMessage>()
+            .expect("tab bar window received a non-TabBarMessage payload");
+        match *msg {
+            TabBarMessage::Content {
+                scale,
+                size,
+                border,
+                titles,
+                active_index,
+                is_highlighted,
+            } => {
+                self.widget
+                    .set_content(scale, size, border, titles, active_index, is_highlighted);
+                self.widget.render();
+            }
+            TabBarMessage::Style { theme, font } => {
+                self.widget.set_style(theme, &font);
+                self.widget.render();
+            }
         }
     }
 }
@@ -405,7 +425,6 @@ impl AuxiliaryWindowHandler for TabBarHandler {
 /// directly instead of traversing the click-through `TilingOverlay`.
 pub(super) struct TabBarOverlay {
     window: AuxiliaryWindow,
-    widget: Rc<RefCell<TabBarWidget>>,
 }
 
 impl TabBarOverlay {
@@ -431,12 +450,7 @@ impl TabBarOverlay {
             Box::new(crate::platform::macos::font::resolve_system_font),
         )
         .expect("tab bar renderer init");
-        let widget = Rc::new(RefCell::new(TabBarWidget::new(
-            renderer,
-            container_id,
-            scale as f32,
-            (init_w, init_h),
-        )));
+        let widget = TabBarWidget::new(renderer, container_id, scale as f32, (init_w, init_h));
 
         // Same level as the per-monitor tiling overlay. Stacking against
         // sibling same-level windows is fine because the tiling overlay is
@@ -449,42 +463,36 @@ impl TabBarOverlay {
                 click_through: false,
                 focusable: false,
             },
-            Box::new(TabBarHandler {
-                widget: Rc::clone(&widget),
-                hub_sender,
-            }),
+            Box::new(TabBarHandler { widget, hub_sender }),
         )
         .expect("auxiliary window on main thread");
         window.set_level(WindowLevel::Bottom);
         window.set_content_layer(&metal_layer);
         window.set_visible(true);
 
-        Self { window, widget }
+        Self { window }
     }
 
     pub(super) fn render(&self, cs: &ContainerShow, scale: f64, border_thickness: Length<Logical>) {
         let (position, size) = frame_attrs(cs.tab_bar_cocoa_frame);
         self.window.set_frame(position, size);
         let bar = cs.tab_bar_dim;
-        {
-            let mut widget = self.widget.borrow_mut();
-            widget.set_content(
-                scale as f32,
-                (bar.width, bar.height),
-                border_thickness,
-                cs.placement.titles.clone(),
-                cs.placement.active_tab_index,
-                cs.placement.is_highlighted,
-            );
-            widget.render();
-        }
+        self.window.deliver(Box::new(TabBarMessage::Content {
+            scale: scale as f32,
+            size: (bar.width, bar.height),
+            border: border_thickness,
+            titles: cs.placement.titles.clone(),
+            active_index: cs.placement.active_tab_index,
+            is_highlighted: cs.placement.is_highlighted,
+        }));
         self.window.set_visible(true);
     }
 
     pub(super) fn set_config(&self, config: &Config) {
-        let mut widget = self.widget.borrow_mut();
-        widget.set_config(config);
-        widget.render();
+        self.window.deliver(Box::new(TabBarMessage::Style {
+            theme: config.theme,
+            font: config.font.clone(),
+        }));
     }
 }
 

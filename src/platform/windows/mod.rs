@@ -48,8 +48,8 @@ use crate::config::{
 use crate::ipc;
 use crate::keymap::KeymapState;
 use crate::platform::render::WgpuContext;
-use dome::app_window::AppWindow;
 use dome::events::{HubMessage, SceneSender};
+use dome::shell::ShellHandle;
 use dome::{Dome, HubEvent};
 use dome_auxiliary_window::{AuxiliaryLoopHandler, EventLoop, LoopWaker};
 use event_listener::install_event_hooks;
@@ -428,12 +428,12 @@ fn run_window_thread(domain_thread_id: u32, handshake: Sender<WindowThreadReady>
     )
     .expect("DirectComposition device init");
 
-    let app_window = AppWindow::new(hub_sender.clone()).expect("Failed to create app window");
+    let shell = ShellHandle::new(hub_sender.clone()).expect("Failed to create app shell");
 
     let window_thread = WindowThread::new(
         config,
         Box::new(overlay_factory),
-        app_window,
+        shell,
         Box::new(handle::Win32ZOrder),
     );
 

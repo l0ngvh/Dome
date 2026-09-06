@@ -20,8 +20,8 @@ use crate::core::{
     Physical, PixelRect, Pixels, TilingWindowPlacement, WindowId,
 };
 use crate::platform::windows::dome::MonitorInfo;
-use crate::platform::windows::dome::app_window::AppWindowApi;
 use crate::platform::windows::dome::events::SceneSender;
+use crate::platform::windows::dome::shell::ShellApi;
 use crate::platform::windows::dome::{
     CreateOverlay, Dome, NewWindow, QueryDisplay, WindowsMetadata,
 };
@@ -255,7 +255,7 @@ impl TestEnv {
         let window: Box<dyn SceneSender> = Box::new(WindowThread::new(
             config.clone(),
             Box::new(overlays.clone()),
-            Box::new(NoopAppWindow),
+            Box::new(NoopShell),
             Box::new(z_stack.clone()),
         ));
         let dome = Dome::new(
@@ -970,9 +970,9 @@ impl ManageTaskbar for NoopTaskbar {
     fn delete_tab(&self, _: HwndId) {}
 }
 
-struct NoopAppWindow;
-impl AppWindowApi for NoopAppWindow {
-    fn update_tray(&self, _: &[WorkspaceInfo]) {}
+struct NoopShell;
+impl ShellApi for NoopShell {
+    fn update(&self, _: &[WorkspaceInfo]) {}
 }
 
 #[derive(Clone)]

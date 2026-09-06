@@ -12,64 +12,6 @@ use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol};
 
 use crate::AuxiliaryLoopHandler;
 
-struct AuxiliaryDelegateIvars {
-    handler: RefCell<Box<dyn AuxiliaryLoopHandler>>,
-}
-
-define_class!(
-    #[unsafe(super(NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[ivars = AuxiliaryDelegateIvars]
-    struct AuxiliaryDelegate;
-
-    unsafe impl NSObjectProtocol for AuxiliaryDelegate {}
-
-    unsafe impl NSApplicationDelegate for AuxiliaryDelegate {
-        #[unsafe(method(applicationDidFinishLaunching:))]
-        fn did_finish_launching(&self, _notification: &NSNotification) {
-            self.ivars().handler.borrow_mut().on_started();
-        }
-
-        #[unsafe(method(applicationWillTerminate:))]
-        fn will_terminate(&self, _notification: &NSNotification) {
-            self.ivars().handler.borrow_mut().on_stopping();
-        }
-    }
-);
-
-impl AuxiliaryDelegate {
-    fn new(mtm: MainThreadMarker, handler: Box<dyn AuxiliaryLoopHandler>) -> Retained<Self> {
-        let ivars = AuxiliaryDelegateIvars {
-            handler: RefCell::new(handler),
-        };
-        let this = Self::alloc(mtm).set_ivars(ivars);
-        unsafe { msg_send![super(this), init] }
-    }
-}
-
-// Keeps the `C-unwind` ABI so a panic unwinds through the CoreFoundation frame instead
-// of aborting.
-unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
-    let delegate: &AuxiliaryDelegate = unsafe { &*(info as *const AuxiliaryDelegate) };
-    delegate.ivars().handler.borrow_mut().on_wake();
-}
-
-fn create_frame_source(delegate: &Retained<AuxiliaryDelegate>) -> CFRetained<CFRunLoopSource> {
-    let mut context = CFRunLoopSourceContext {
-        version: 0,
-        info: Retained::as_ptr(delegate) as *mut c_void,
-        retain: None,
-        release: None,
-        copyDescription: None,
-        equal: None,
-        hash: None,
-        schedule: None,
-        cancel: None,
-        perform: Some(frame_callback),
-    };
-    unsafe { CFRunLoopSource::new(None, 0, &mut context).unwrap() }
-}
-
 pub struct EventLoop {
     app: Retained<NSApplication>,
     delegate: Retained<AuxiliaryDelegate>,
@@ -85,7 +27,7 @@ impl EventLoop {
         app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
 
         let delegate = AuxiliaryDelegate::new(mtm, handler);
-        let source = create_frame_source(&delegate);
+        let source = create_wake_source(&delegate);
         let run_loop = CFRunLoop::main().unwrap();
         run_loop.add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
 
@@ -146,4 +88,62 @@ impl LoopWaker {
         self.source.signal();
         self.run_loop.wake_up();
     }
+}
+
+struct AuxiliaryDelegateIvars {
+    handler: RefCell<Box<dyn AuxiliaryLoopHandler>>,
+}
+
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = AuxiliaryDelegateIvars]
+    struct AuxiliaryDelegate;
+
+    unsafe impl NSObjectProtocol for AuxiliaryDelegate {}
+
+    unsafe impl NSApplicationDelegate for AuxiliaryDelegate {
+        #[unsafe(method(applicationDidFinishLaunching:))]
+        fn did_finish_launching(&self, _notification: &NSNotification) {
+            self.ivars().handler.borrow_mut().on_started();
+        }
+
+        #[unsafe(method(applicationWillTerminate:))]
+        fn will_terminate(&self, _notification: &NSNotification) {
+            self.ivars().handler.borrow_mut().on_stopping();
+        }
+    }
+);
+
+impl AuxiliaryDelegate {
+    fn new(mtm: MainThreadMarker, handler: Box<dyn AuxiliaryLoopHandler>) -> Retained<Self> {
+        let ivars = AuxiliaryDelegateIvars {
+            handler: RefCell::new(handler),
+        };
+        let this = Self::alloc(mtm).set_ivars(ivars);
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+// Keeps the `C-unwind` ABI so a panic unwinds through the CoreFoundation frame instead
+// of aborting.
+unsafe extern "C-unwind" fn wake_callback(info: *mut c_void) {
+    let delegate: &AuxiliaryDelegate = unsafe { &*(info as *const AuxiliaryDelegate) };
+    delegate.ivars().handler.borrow_mut().on_wake();
+}
+
+fn create_wake_source(delegate: &Retained<AuxiliaryDelegate>) -> CFRetained<CFRunLoopSource> {
+    let mut context = CFRunLoopSourceContext {
+        version: 0,
+        info: Retained::as_ptr(delegate) as *mut c_void,
+        retain: None,
+        release: None,
+        copyDescription: None,
+        equal: None,
+        hash: None,
+        schedule: None,
+        cancel: None,
+        perform: Some(wake_callback),
+    };
+    unsafe { CFRunLoopSource::new(None, 0, &mut context).unwrap() }
 }

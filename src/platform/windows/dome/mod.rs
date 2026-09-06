@@ -1,10 +1,10 @@
-pub(super) mod app_window;
 pub(super) mod events;
 mod external_bar;
 pub(super) mod monitor;
 mod placement_tracker;
 mod recovery;
 mod registry;
+pub(super) mod shell;
 pub(super) mod tray;
 pub(super) mod window;
 
@@ -736,59 +736,6 @@ impl Dome {
         self.dispatch(HubMessage::Scene(scene));
     }
 
-    fn dispatch(&mut self, msg: HubMessage) {
-        self.window.send(msg);
-    }
-
-    #[tracing::instrument(level = "trace", skip_all)]
-    fn position_windows(
-        &mut self,
-        per_monitor: &[MonitorScene],
-        focused: Option<WindowId>,
-    ) -> (Vec<PendingPlacement>, Vec<FloatOverlayAction>) {
-        let focus_changed = focused != self.last_focused;
-        let mut placements: Vec<PendingPlacement> = Vec::new();
-        let mut float_actions: Vec<FloatOverlayAction> = Vec::new();
-
-        for data in per_monitor {
-            for wp in &data.float_windows {
-                let Some(entry) = self.registry.get(wp.id) else {
-                    tracing::debug!(id = ?wp.id, "position_windows: float window missing from registry");
-                    continue;
-                };
-                let hwnd_id = entry.ext.id();
-                if self.placement_tracker.is_moving(hwnd_id) {
-                    continue;
-                }
-                let (placement, float_action) = self.show_float(
-                    wp.id,
-                    wp,
-                    focus_changed,
-                    focused == Some(wp.id),
-                    data.monitor_id,
-                    data.border_thickness,
-                );
-                placements.extend(placement);
-                float_actions.extend(float_action);
-            }
-
-            for wp in &data.tiling_windows {
-                let Some(entry) = self.registry.get(wp.id) else {
-                    tracing::debug!(id = ?wp.id, "position_windows: tiling window missing from registry");
-                    continue;
-                };
-                let hwnd_id = entry.ext.id();
-                // Mid-move: skip SetWindowPos but the overlay still gets the target rect,
-                // which apply_scene applies unconditionally.
-                if self.placement_tracker.is_moving(hwnd_id) {
-                    continue;
-                }
-                placements.extend(self.show_tiling(wp.id, wp, data.monitor_id));
-            }
-        }
-        (placements, float_actions)
-    }
-
     /// Returns `true` when the window settled on a different monitor than
     /// before, the signal to re-read its size constraints.
     pub(super) fn handle_window_moved(
@@ -824,41 +771,6 @@ impl Dome {
         // TODO: full re-layout on every title change is expensive -- we should
         // selectively re-render only the affected tiling overlay instead.
         self.apply_layout();
-    }
-
-    fn update_monitors(&mut self, mut monitors: Vec<MonitorInfo>) -> Vec<HwndId> {
-        if monitors.is_empty() {
-            tracing::warn!("Empty monitor list, skipping update");
-            return Vec::new();
-        }
-        self.status_bars.reserve(&mut monitors, &self.monitors);
-        let change = self.monitors.reconcile(&mut self.hub, &monitors);
-        let added: Vec<NewTilingOverlay> = change
-            .added
-            .iter()
-            .map(|&monitor_id| {
-                let m = self.monitors.monitor(monitor_id);
-                NewTilingOverlay {
-                    monitor_id,
-                    work_area: m.work_area(),
-                    scale: m.scale(),
-                }
-            })
-            .collect();
-        self.dispatch(HubMessage::MonitorsChanged(MonitorSetChange {
-            added,
-            removed: change.removed,
-        }));
-
-        self.registry
-            .iter()
-            .filter(|(_, id)| {
-                self.registry
-                    .get(*id)
-                    .is_none_or(|e| !matches!(e.state, WindowState::ExclusiveFullscreen))
-            })
-            .map(|(hwnd_id, _)| hwnd_id)
-            .collect()
     }
 
     pub(super) fn capture_bar(
@@ -931,16 +843,6 @@ impl Dome {
         reserved != info.work_area.to_dimension()
     }
 
-    fn recompute_work_areas(&mut self) {
-        match self.display.get_all_monitors() {
-            Ok(monitors) => {
-                self.update_monitors(monitors);
-                self.apply_layout();
-            }
-            Err(e) => tracing::warn!("Failed to enumerate monitors for bar reservation: {e}"),
-        }
-    }
-
     pub(super) fn retry_drifted_windows(&mut self) {
         let window_ids: Vec<(HwndId, WindowId)> = self.registry.iter().collect();
         let placements: Vec<PendingPlacement> = window_ids
@@ -952,6 +854,104 @@ impl Dome {
 
     pub(super) fn is_managed(&self, id_key: HwndId) -> bool {
         self.registry.contains_hwnd(id_key)
+    }
+
+    fn dispatch(&mut self, msg: HubMessage) {
+        self.window.send(msg);
+    }
+
+    #[tracing::instrument(level = "trace", skip_all)]
+    fn position_windows(
+        &mut self,
+        per_monitor: &[MonitorScene],
+        focused: Option<WindowId>,
+    ) -> (Vec<PendingPlacement>, Vec<FloatOverlayAction>) {
+        let focus_changed = focused != self.last_focused;
+        let mut placements: Vec<PendingPlacement> = Vec::new();
+        let mut float_actions: Vec<FloatOverlayAction> = Vec::new();
+
+        for data in per_monitor {
+            for wp in &data.float_windows {
+                let Some(entry) = self.registry.get(wp.id) else {
+                    tracing::debug!(id = ?wp.id, "position_windows: float window missing from registry");
+                    continue;
+                };
+                let hwnd_id = entry.ext.id();
+                if self.placement_tracker.is_moving(hwnd_id) {
+                    continue;
+                }
+                let (placement, float_action) = self.show_float(
+                    wp.id,
+                    wp,
+                    focus_changed,
+                    focused == Some(wp.id),
+                    data.monitor_id,
+                    data.border_thickness,
+                );
+                placements.extend(placement);
+                float_actions.extend(float_action);
+            }
+
+            for wp in &data.tiling_windows {
+                let Some(entry) = self.registry.get(wp.id) else {
+                    tracing::debug!(id = ?wp.id, "position_windows: tiling window missing from registry");
+                    continue;
+                };
+                let hwnd_id = entry.ext.id();
+                // Mid-move: skip SetWindowPos but the overlay still gets the target rect,
+                // which apply_scene applies unconditionally.
+                if self.placement_tracker.is_moving(hwnd_id) {
+                    continue;
+                }
+                placements.extend(self.show_tiling(wp.id, wp, data.monitor_id));
+            }
+        }
+        (placements, float_actions)
+    }
+
+    fn update_monitors(&mut self, mut monitors: Vec<MonitorInfo>) -> Vec<HwndId> {
+        if monitors.is_empty() {
+            tracing::warn!("Empty monitor list, skipping update");
+            return Vec::new();
+        }
+        self.status_bars.reserve(&mut monitors, &self.monitors);
+        let change = self.monitors.reconcile(&mut self.hub, &monitors);
+        let added: Vec<NewTilingOverlay> = change
+            .added
+            .iter()
+            .map(|&monitor_id| {
+                let m = self.monitors.monitor(monitor_id);
+                NewTilingOverlay {
+                    monitor_id,
+                    work_area: m.work_area(),
+                    scale: m.scale(),
+                }
+            })
+            .collect();
+        self.dispatch(HubMessage::MonitorsChanged(MonitorSetChange {
+            added,
+            removed: change.removed,
+        }));
+
+        self.registry
+            .iter()
+            .filter(|(_, id)| {
+                self.registry
+                    .get(*id)
+                    .is_none_or(|e| !matches!(e.state, WindowState::ExclusiveFullscreen))
+            })
+            .map(|(hwnd_id, _)| hwnd_id)
+            .collect()
+    }
+
+    fn recompute_work_areas(&mut self) {
+        match self.display.get_all_monitors() {
+            Ok(monitors) => {
+                self.update_monitors(monitors);
+                self.apply_layout();
+            }
+            Err(e) => tracing::warn!("Failed to enumerate monitors for bar reservation: {e}"),
+        }
     }
 }
 

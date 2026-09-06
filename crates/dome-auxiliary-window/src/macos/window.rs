@@ -13,15 +13,6 @@ use crate::{
     AuxiliaryWindowHandler, MouseButton, PhysicalPosition, PhysicalSize, WindowAttributes,
 };
 
-impl crate::WindowLevel {
-    fn to_ns(self) -> NSWindowLevel {
-        match self {
-            Self::Floating => NSFloatingWindowLevel,
-            Self::Bottom => NSNormalWindowLevel - 1,
-        }
-    }
-}
-
 pub trait AuxiliaryWindowExtMacOs {
     fn set_content_layer(&self, layer: &CALayer);
     /// Toggles click-through at runtime. `WindowAttributes::click_through` sets the
@@ -44,6 +35,87 @@ impl AuxiliaryWindowExtMacOs for crate::AuxiliaryWindow {
 
     fn focus(&self) {
         self.inner.focus();
+    }
+}
+
+pub(crate) struct Window {
+    window: Retained<AuxiliaryNSWindow>,
+    view: Retained<AuxiliaryView>,
+}
+
+impl Window {
+    pub(crate) fn new(
+        attributes: &WindowAttributes,
+        handler: Box<dyn AuxiliaryWindowHandler>,
+    ) -> anyhow::Result<Self> {
+        let mtm =
+            MainThreadMarker::new().expect("AuxiliaryWindow::new must run on the main thread");
+        let frame = to_nsrect(attributes.position, attributes.size);
+        let window = AuxiliaryNSWindow::new(
+            mtm,
+            frame,
+            NSWindowStyleMask::Borderless,
+            attributes.focusable,
+        );
+        window.setBackgroundColor(Some(&NSColor::clearColor()));
+        window.setOpaque(false);
+        window.setCollectionBehavior(auxiliary_collection_behavior());
+        unsafe { window.setReleasedWhenClosed(false) };
+        window.setIgnoresMouseEvents(attributes.click_through);
+
+        let view = AuxiliaryView::new(
+            mtm,
+            NSRect::new(NSPoint::new(0.0, 0.0), frame.size),
+            handler,
+        );
+        window.setContentView(Some(&view));
+
+        Ok(Self { window, view })
+    }
+
+    pub(crate) fn set_frame(&self, position: PhysicalPosition, size: PhysicalSize) {
+        self.window
+            .setFrame_display(to_nsrect(position, size), true);
+    }
+
+    pub(crate) fn set_visible(&self, visible: bool) {
+        self.window.setIsVisible(visible);
+    }
+
+    pub(crate) fn deliver(&self, message: Box<dyn std::any::Any>) {
+        self.view.ivars().handler.borrow_mut().on_message(message);
+    }
+
+    pub(crate) fn set_content_layer(&self, layer: &CALayer) {
+        self.view.setLayer(Some(layer));
+        self.view.setWantsLayer(true);
+    }
+
+    pub(crate) fn set_click_through(&self, click_through: bool) {
+        self.window.setIgnoresMouseEvents(click_through);
+    }
+
+    pub(crate) fn set_level(&self, level: crate::WindowLevel) {
+        self.window.setLevel(level.to_ns());
+    }
+
+    pub(crate) fn focus(&self) {
+        self.window.makeKeyAndOrderFront(None);
+    }
+}
+
+impl Drop for Window {
+    fn drop(&mut self) {
+        self.window.close();
+    }
+}
+
+impl crate::WindowLevel {
+    fn to_ns(self) -> NSWindowLevel {
+        match self {
+            Self::Floating => NSFloatingWindowLevel,
+            Self::Bottom => NSNormalWindowLevel - 1,
+        }
     }
 }
 
@@ -157,74 +229,6 @@ impl AuxiliaryView {
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), initWithFrame: frame] }
-    }
-}
-
-pub(crate) struct Window {
-    window: Retained<AuxiliaryNSWindow>,
-    view: Retained<AuxiliaryView>,
-}
-
-impl Window {
-    pub(crate) fn new(
-        attributes: &WindowAttributes,
-        handler: Box<dyn AuxiliaryWindowHandler>,
-    ) -> anyhow::Result<Self> {
-        let mtm =
-            MainThreadMarker::new().expect("AuxiliaryWindow::new must run on the main thread");
-        let frame = to_nsrect(attributes.position, attributes.size);
-        let window = AuxiliaryNSWindow::new(
-            mtm,
-            frame,
-            NSWindowStyleMask::Borderless,
-            attributes.focusable,
-        );
-        window.setBackgroundColor(Some(&NSColor::clearColor()));
-        window.setOpaque(false);
-        window.setCollectionBehavior(auxiliary_collection_behavior());
-        unsafe { window.setReleasedWhenClosed(false) };
-        window.setIgnoresMouseEvents(attributes.click_through);
-
-        let view = AuxiliaryView::new(
-            mtm,
-            NSRect::new(NSPoint::new(0.0, 0.0), frame.size),
-            handler,
-        );
-        window.setContentView(Some(&view));
-
-        Ok(Self { window, view })
-    }
-
-    pub(crate) fn set_frame(&self, position: PhysicalPosition, size: PhysicalSize) {
-        self.window
-            .setFrame_display(to_nsrect(position, size), true);
-    }
-
-    pub(crate) fn set_visible(&self, visible: bool) {
-        self.window.setIsVisible(visible);
-    }
-
-    pub(crate) fn set_content_layer(&self, layer: &CALayer) {
-        self.view.setLayer(Some(layer));
-        self.view.setWantsLayer(true);
-    }
-
-    pub(crate) fn set_click_through(&self, click_through: bool) {
-        self.window.setIgnoresMouseEvents(click_through);
-    }
-
-    pub(crate) fn set_level(&self, level: crate::WindowLevel) {
-        self.window.setLevel(level.to_ns());
-    }
-
-    pub(crate) fn focus(&self) {
-        self.window.makeKeyAndOrderFront(None);
-    }
-}
-
-impl Drop for Window {
-    fn drop(&mut self) {
-        self.window.close();
     }
 }
 
