@@ -73,6 +73,10 @@ impl AppShell {
         let ns = NSString::from_str(tooltip);
         self.button.setToolTip(Some(&ns));
     }
+
+    pub(crate) fn deliver(&self, message: Box<dyn std::any::Any>) {
+        self.target.ivars().handler.borrow_mut().on_message(message);
+    }
 }
 
 impl Drop for AppShell {

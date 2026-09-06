@@ -29,6 +29,10 @@ impl AuxiliaryWindowHandler for AppShellWindowHandler {
     fn on_tray_menu_selected(&mut self, id: u32) {
         self.handler.on_menu_selected(id);
     }
+
+    fn on_message(&mut self, message: Box<dyn std::any::Any>) {
+        self.handler.on_message(message);
+    }
 }
 
 pub(crate) struct AppShell {
@@ -55,5 +59,9 @@ impl AppShell {
 
     pub(crate) fn set_tooltip(&self, tooltip: &str) {
         self.window.set_tray_tooltip(tooltip);
+    }
+
+    pub(crate) fn deliver(&self, message: Box<dyn std::any::Any>) {
+        self.window.deliver(message);
     }
 }

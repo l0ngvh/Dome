@@ -2,6 +2,12 @@ use dome_auxiliary_window::{MenuEntry, MenuItem};
 
 use crate::action::{Action, FocusTarget, WorkspaceInfo, WorkspaceState};
 
+/// Pushed to the shell handler on each scene so the handler owns the current workspace
+/// list and reads it when the OS opens the menu.
+pub(crate) enum ShellMessage {
+    Workspaces(Vec<WorkspaceInfo>),
+}
+
 const TRAY_CMD_EXIT: u32 = 1;
 const TRAY_CMD_WORKSPACE_BASE: u32 = 100;
 const STATUS_TOOLTIP_MAX_CHARS: usize = 20;

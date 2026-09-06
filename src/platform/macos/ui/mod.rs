@@ -2,7 +2,8 @@ mod compositor;
 mod mirror;
 mod overlay;
 
-use std::cell::{OnceCell, RefCell};
+use std::any::Any;
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, mpsc};
@@ -22,7 +23,7 @@ use crate::action::{Actions, WorkspaceInfo};
 use crate::config::Config;
 use crate::core::{ContainerId, MonitorId, WindowId};
 use crate::platform::render::WgpuContext;
-use crate::platform::shell_menu::{build_menu, focused_tooltip, id_to_action};
+use crate::platform::shell_menu::{ShellMessage, build_menu, focused_tooltip, id_to_action};
 use mirror::{WindowCapture, create_captures_async};
 use overlay::{FloatOverlay, TabBarOverlay, TilingOverlay};
 
@@ -107,7 +108,6 @@ impl Ui {
             last_focused: None,
             last_focused_monitor_id: None,
             app_shell: None,
-            status_workspaces: Rc::new(RefCell::new(Vec::new())),
             hub_sender,
         };
 
@@ -174,9 +174,6 @@ struct UiState {
     last_focused: Option<WindowId>,
     last_focused_monitor_id: Option<MonitorId>,
     app_shell: Option<AppShell>,
-    // Shared with the AppShell handler so the pull-model menu and set_tooltip read the
-    // same workspace list. Written on each scene, read when the menu opens.
-    status_workspaces: Rc<RefCell<Vec<WorkspaceInfo>>>,
     hub_sender: calloop::channel::Sender<HubEvent>,
 }
 
@@ -190,19 +187,28 @@ const STATUS_BAR_ICON_PNG: &[u8] = include_bytes!(concat!(
 
 struct ShellHandler {
     hub_sender: calloop::channel::Sender<HubEvent>,
-    workspaces: Rc<RefCell<Vec<WorkspaceInfo>>>,
+    workspaces: Vec<WorkspaceInfo>,
 }
 
 impl AppShellHandler for ShellHandler {
     fn menu(&mut self) -> Vec<MenuEntry> {
-        build_menu(&self.workspaces.borrow(), true)
+        build_menu(&self.workspaces, true)
     }
 
     fn on_menu_selected(&mut self, id: u32) {
-        if let Some(action) = id_to_action(id, &self.workspaces.borrow()) {
+        if let Some(action) = id_to_action(id, &self.workspaces) {
             self.hub_sender
                 .send(HubEvent::Action(Actions::new(vec![action])))
                 .ok();
+        }
+    }
+
+    fn on_message(&mut self, message: Box<dyn Any>) {
+        let msg = message
+            .downcast::<ShellMessage>()
+            .expect("app shell received a non-ShellMessage payload");
+        match *msg {
+            ShellMessage::Workspaces(workspaces) => self.workspaces = workspaces,
         }
     }
 
@@ -229,7 +235,7 @@ impl AuxiliaryLoopHandler for WindowLoopHandler {
         tracing::info!("Application did finish launching");
         let handler = ShellHandler {
             hub_sender: self.state.hub_sender.clone(),
-            workspaces: Rc::clone(&self.state.status_workspaces),
+            workspaces: Vec::new(),
         };
         match AppShell::new(STATUS_BAR_ICON_PNG, Box::new(handler)) {
             Ok(app_shell) => self.state.app_shell = Some(app_shell),
@@ -247,8 +253,9 @@ impl AuxiliaryLoopHandler for WindowLoopHandler {
         while let Ok(msg) = state.scene_rx.try_recv() {
             match msg {
                 HubMessage::Scene(scene) => {
-                    *state.status_workspaces.borrow_mut() = scene.workspaces.clone();
                     if let Some(app_shell) = &state.app_shell {
+                        app_shell
+                            .deliver(Box::new(ShellMessage::Workspaces(scene.workspaces.clone())));
                         app_shell.set_tooltip(&focused_tooltip(&scene.workspaces));
                     }
 

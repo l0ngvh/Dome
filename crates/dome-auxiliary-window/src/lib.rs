@@ -112,6 +112,10 @@ pub trait AppShellHandler {
 
     fn on_display_changed(&mut self) {}
     fn on_work_area_changed(&mut self) {}
+
+    /// An opaque payload from `AppShell::deliver`, downcast by the handler. Mirrors
+    /// `AuxiliaryWindowHandler::on_message`.
+    fn on_message(&mut self, _message: Box<dyn std::any::Any>) {}
 }
 
 /// The app's presence in the desktop shell, one type across platforms: the system-tray
@@ -139,6 +143,12 @@ impl AppShell {
 
     pub fn set_tooltip(&self, tooltip: &str) {
         self.inner.set_tooltip(tooltip);
+    }
+
+    /// Hands an opaque payload to the shell's handler, synchronously. The handler borrow
+    /// lives and ends inside this call.
+    pub fn deliver(&self, message: Box<dyn std::any::Any>) {
+        self.inner.deliver(message);
     }
 }
 
