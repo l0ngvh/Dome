@@ -150,7 +150,7 @@ pub(in crate::platform::macos) struct WindowMove {
     pub(in crate::platform::macos) observed_at: DebounceBurst,
 }
 
-pub(in crate::platform::macos) trait FrameSender: Send {
+pub(in crate::platform::macos) trait SceneSender: Send {
     fn send(&self, msg: HubMessage);
 }
 
@@ -164,14 +164,14 @@ pub(in crate::platform::macos) struct Dome {
     registry: WindowRegistry,
     monitor_registry: MonitorRegistry,
     /// The windows Dome currently has on screen. Owned here rather than per monitor entry
-    /// so it survives a monitor removal, which is what lets a departed monitor's windows hide.
+    /// so it survives a monitor removal.
     displayed_windows: HashSet<WindowId>,
     config: Config,
     /// Full height of the primary display (including menu bar/dock), used for Quartz→Cocoa
     /// coordinate conversion in overlay rendering.
     primary_full_height: f32,
     observed_pids: HashSet<i32>,
-    sender: Box<dyn FrameSender>,
+    sender: Box<dyn SceneSender>,
     last_focused: Option<WindowId>,
     recovery: Recovery,
     pending_created: Vec<WindowId>,
@@ -188,7 +188,7 @@ impl Dome {
         monitors: &[MonitorInfo],
         config: Config,
         workspace_overrides: Vec<LayoutWorkspaceConfig>,
-        sender: Box<dyn FrameSender>,
+        sender: Box<dyn SceneSender>,
     ) -> Self {
         let primary = monitors
             .iter()

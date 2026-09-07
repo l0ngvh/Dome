@@ -84,10 +84,10 @@ if [ -n "$SENDER" ]; then
             | ( [ $disps[] | select(.["arrangement-id"] != null and .["DirectDisplayID"] != null) | { (.["DirectDisplayID"] | tostring): .["arrangement-id"] } ] | add // {} ) as $arr_by_did
             | ( reduce ( $mons[] | select(.cg_display_id != null and (.unique_name | length) > 0) ) as $m
                   ({}; ($m.unique_name | slug) as $sl | .[$sl] = $arr_by_did[$m.cg_display_id | tostring]) ) as $arr_by_slug
-            | ( [ $ws[] | select(.state == "Attached" and (.monitor | slug) != "")
+            | ( [ $ws[] | select(.state == "attached" and (.monitor | slug) != "")
                   | { item: ("dome." + (.monitor | slug) + ".ws." + .name), sl: (.monitor | slug), name: .name, w: . } ] ) as $live
             | ( $live | map(.item) ) as $live_items
-            | ( [ $ws[] | select(.state == "Parked" and .window_count > 0 and (.monitor | slug) != "")
+            | ( [ $ws[] | select(.state == "parked" and .window_count > 0 and (.monitor | slug) != "")
                   | { o: (.monitor | slug), n: .name, origin: .monitor } ] ) as $parked
             | ( $parked | map(.o) | unique ) as $origins
             | ( $parked | map("dome.parked." + .o + "." + .n) ) as $parked_items

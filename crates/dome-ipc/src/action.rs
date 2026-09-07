@@ -3,24 +3,42 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-use crate::core::WindowId;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct WindowId(usize);
+
+impl WindowId {
+    pub fn new(raw: usize) -> Self {
+        Self(raw)
+    }
+
+    pub fn get(self) -> usize {
+        self.0
+    }
+}
+
+impl fmt::Display for WindowId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "WindowId({})", self.0)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum IpcMessage {
-    Action(Action),
-    Query(Query),
+    Action { action: Action },
+    Query { query: Query },
     ExportLayout,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Query {
     Workspaces,
     MinimizedWindows,
     Monitors,
 }
 
-/// Wire DTO for `Query::MinimizedWindows`. `bundle_id` is populated on
-/// macOS, `executable_path` on Windows.
+/// `bundle_id` is populated on macOS, `executable_path` on Windows.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinimizedWindow {
     pub id: WindowId,
@@ -44,8 +62,7 @@ pub struct MonitorDetails {
     pub work_area: MonitorFrame,
 }
 
-/// The monitor work area. Core's `PixelRect` is generic over a unit tag, so it
-/// does not serialize.
+/// Core's `PixelRect` is generic over a unit tag, so it does not serialize.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MonitorFrame {
     pub x: i32,
@@ -63,10 +80,7 @@ pub struct WorkspaceInfo {
     /// The owning monitor's stored `unique_name`, the position-ranked name
     /// shown to the user. For a Parked workspace this is the ORIGIN
     /// monitor's stored `unique_name`, frozen at unplug, which is NOT
-    /// currently connected -- that is exactly why the workspace is not
-    /// Attached. Consumers derive "origin detached" from `state != Attached`,
-    /// there is no separate bool. A consumer can further derive "visiting" as
-    /// a Parked row that is also its host monitor's active workspace.
+    /// currently connected.
     pub monitor: String,
     pub state: WorkspaceState,
     pub is_focused: bool,
@@ -75,26 +89,34 @@ pub struct WorkspaceInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum WorkspaceState {
     Attached,
     Parked,
 }
 
-/// Every user-visible action Dome can perform. This is the single source of
-/// truth for the action set. CLI (`src/cli.rs`), IPC JSON, and TOML keymap
-/// strings all parse into this enum. Adding a new action requires editing only
-/// this enum and its `Display`/`FromStr` impls. IPC wire format uses the
-/// variant name as its tag, so a rename is a wire-format break.
+/// The IPC wire format tags each variant by its snake_case name, so renaming a variant
+/// breaks the wire format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
-    Focus(FocusTarget),
-    Move(MoveTarget),
-    Toggle(ToggleTarget),
-    Master(MasterTarget),
-    /// Restore a specific minimized window. Not bindable in keymaps and lacks
-    /// `FromStr` because `WindowId`s are not stable across daemon restarts, so a
-    /// bound id would have no meaning after a reload.
-    UnminimizeWindow(WindowId),
+    Focus {
+        target: FocusTarget,
+    },
+    Move {
+        target: MoveTarget,
+    },
+    Toggle {
+        target: ToggleTarget,
+    },
+    Master {
+        target: MasterTarget,
+    },
+    /// Lacks `FromStr` and is not bindable in a keymap because a `WindowId` is not stable
+    /// across daemon restarts, so a bound id would mean nothing after a reload.
+    UnminimizeWindow {
+        id: WindowId,
+    },
     Exec {
         command: String,
     },
@@ -106,6 +128,7 @@ pub enum Action {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MonitorTarget {
     Up,
     Down,
@@ -115,6 +138,7 @@ pub enum MonitorTarget {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TabDirection {
     Next,
     Prev,
@@ -132,11 +156,11 @@ impl fmt::Display for TabDirection {
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Action::Focus(t) => write!(f, "focus {t}"),
-            Action::Move(t) => write!(f, "move {t}"),
-            Action::Toggle(t) => write!(f, "toggle {t}"),
-            Action::Master(t) => write!(f, "master {t}"),
-            Action::UnminimizeWindow(id) => write!(f, "unminimize window {id}"),
+            Action::Focus { target } => write!(f, "focus {target}"),
+            Action::Move { target } => write!(f, "move {target}"),
+            Action::Toggle { target } => write!(f, "toggle {target}"),
+            Action::Master { target } => write!(f, "master {target}"),
+            Action::UnminimizeWindow { id } => write!(f, "unminimize window {id}"),
             Action::Exec { command } => write!(f, "exec {command}"),
             Action::Exit => write!(f, "exit"),
             Action::Close => write!(f, "close"),
@@ -199,6 +223,7 @@ impl<'de> serde::Deserialize<'de> for Actions {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FocusTarget {
     Up,
     Down,
@@ -236,6 +261,7 @@ impl fmt::Display for FocusTarget {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MoveTarget {
     Up,
     Down,
@@ -279,6 +305,7 @@ impl fmt::Display for MonitorTarget {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ToggleTarget {
     Spawn,
     Direction,
@@ -300,6 +327,7 @@ impl fmt::Display for ToggleTarget {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MasterTarget {
     Grow,
     Shrink,
@@ -322,15 +350,13 @@ impl FromStr for Action {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        // Handle exec specially since command can contain spaces
+        // strip_prefix rather than a match arm, because the argument can contain spaces.
         if let Some(command) = s.strip_prefix("exec ") {
             return Ok(Action::Exec {
                 command: command.to_string(),
             });
         }
 
-        // Uses strip_prefix (like exec) instead of the match-arm shape so mode
-        // names with spaces work and parsing stays consistent across free-form args.
         if let Some(name) = s.strip_prefix("mode ") {
             let name = name.trim();
             if !name.is_empty() {
@@ -340,51 +366,98 @@ impl FromStr for Action {
             }
         }
 
-        // Workspace names and monitor names can both contain spaces, so the
-        // split_whitespace slice match below cannot carry the optional
-        // --monitor selector. Parse the tail with a monitor-pinned-last split
-        // before the slice match, mirroring exec and mode above.
+        // Parsed before the slice match because the optional --monitor selector needs
+        // the monitor-pinned-last split in parse_workspace_selector, which a
+        // split_whitespace match cannot express.
         if let Some(rest) = s.strip_prefix("focus workspace ") {
             let (name, monitor) = parse_workspace_selector(rest);
-            return Ok(Action::Focus(FocusTarget::Workspace { name, monitor }));
+            return Ok(Action::Focus {
+                target: FocusTarget::Workspace { name, monitor },
+            });
         }
         if let Some(rest) = s.strip_prefix("move workspace ") {
             let (name, monitor) = parse_workspace_selector(rest);
-            return Ok(Action::Move(MoveTarget::Workspace { name, monitor }));
+            return Ok(Action::Move {
+                target: MoveTarget::Workspace { name, monitor },
+            });
         }
 
         let parts: Vec<&str> = s.split_whitespace().collect();
         match parts.as_slice() {
-            ["focus", "up"] => Ok(Action::Focus(FocusTarget::Up)),
-            ["focus", "down"] => Ok(Action::Focus(FocusTarget::Down)),
-            ["focus", "left"] => Ok(Action::Focus(FocusTarget::Left)),
-            ["focus", "right"] => Ok(Action::Focus(FocusTarget::Right)),
-            ["focus", "parent"] => Ok(Action::Focus(FocusTarget::Parent)),
-            ["focus", "tab", "next"] => Ok(Action::Focus(FocusTarget::Tab {
-                direction: TabDirection::Next,
-            })),
-            ["focus", "tab", "prev"] => Ok(Action::Focus(FocusTarget::Tab {
-                direction: TabDirection::Prev,
-            })),
-            ["focus", "monitor", target] => Ok(Action::Focus(FocusTarget::Monitor {
-                target: parse_monitor_target(target)?,
-            })),
-            ["move", "up"] => Ok(Action::Move(MoveTarget::Up)),
-            ["move", "down"] => Ok(Action::Move(MoveTarget::Down)),
-            ["move", "left"] => Ok(Action::Move(MoveTarget::Left)),
-            ["move", "right"] => Ok(Action::Move(MoveTarget::Right)),
-            ["move", "monitor", target] => Ok(Action::Move(MoveTarget::Monitor {
-                target: parse_monitor_target(target)?,
-            })),
-            ["toggle", "spawn"] => Ok(Action::Toggle(ToggleTarget::Spawn)),
-            ["toggle", "direction"] => Ok(Action::Toggle(ToggleTarget::Direction)),
-            ["toggle", "layout"] => Ok(Action::Toggle(ToggleTarget::Layout)),
-            ["toggle", "float"] => Ok(Action::Toggle(ToggleTarget::Float)),
-            ["toggle", "fullscreen"] => Ok(Action::Toggle(ToggleTarget::Fullscreen)),
-            ["master", "grow"] => Ok(Action::Master(MasterTarget::Grow)),
-            ["master", "shrink"] => Ok(Action::Master(MasterTarget::Shrink)),
-            ["master", "more"] => Ok(Action::Master(MasterTarget::More)),
-            ["master", "fewer"] => Ok(Action::Master(MasterTarget::Fewer)),
+            ["focus", "up"] => Ok(Action::Focus {
+                target: FocusTarget::Up,
+            }),
+            ["focus", "down"] => Ok(Action::Focus {
+                target: FocusTarget::Down,
+            }),
+            ["focus", "left"] => Ok(Action::Focus {
+                target: FocusTarget::Left,
+            }),
+            ["focus", "right"] => Ok(Action::Focus {
+                target: FocusTarget::Right,
+            }),
+            ["focus", "parent"] => Ok(Action::Focus {
+                target: FocusTarget::Parent,
+            }),
+            ["focus", "tab", "next"] => Ok(Action::Focus {
+                target: FocusTarget::Tab {
+                    direction: TabDirection::Next,
+                },
+            }),
+            ["focus", "tab", "prev"] => Ok(Action::Focus {
+                target: FocusTarget::Tab {
+                    direction: TabDirection::Prev,
+                },
+            }),
+            ["focus", "monitor", target] => Ok(Action::Focus {
+                target: FocusTarget::Monitor {
+                    target: parse_monitor_target(target)?,
+                },
+            }),
+            ["move", "up"] => Ok(Action::Move {
+                target: MoveTarget::Up,
+            }),
+            ["move", "down"] => Ok(Action::Move {
+                target: MoveTarget::Down,
+            }),
+            ["move", "left"] => Ok(Action::Move {
+                target: MoveTarget::Left,
+            }),
+            ["move", "right"] => Ok(Action::Move {
+                target: MoveTarget::Right,
+            }),
+            ["move", "monitor", target] => Ok(Action::Move {
+                target: MoveTarget::Monitor {
+                    target: parse_monitor_target(target)?,
+                },
+            }),
+            ["toggle", "spawn"] => Ok(Action::Toggle {
+                target: ToggleTarget::Spawn,
+            }),
+            ["toggle", "direction"] => Ok(Action::Toggle {
+                target: ToggleTarget::Direction,
+            }),
+            ["toggle", "layout"] => Ok(Action::Toggle {
+                target: ToggleTarget::Layout,
+            }),
+            ["toggle", "float"] => Ok(Action::Toggle {
+                target: ToggleTarget::Float,
+            }),
+            ["toggle", "fullscreen"] => Ok(Action::Toggle {
+                target: ToggleTarget::Fullscreen,
+            }),
+            ["master", "grow"] => Ok(Action::Master {
+                target: MasterTarget::Grow,
+            }),
+            ["master", "shrink"] => Ok(Action::Master {
+                target: MasterTarget::Shrink,
+            }),
+            ["master", "more"] => Ok(Action::Master {
+                target: MasterTarget::More,
+            }),
+            ["master", "fewer"] => Ok(Action::Master {
+                target: MasterTarget::Fewer,
+            }),
             ["exit"] => Ok(Action::Exit),
             ["close"] => Ok(Action::Close),
             _ => Err(anyhow!("Unknown action: {}", s)),
@@ -392,12 +465,9 @@ impl FromStr for Action {
     }
 }
 
-// MonitorTarget is parsed here instead of using clap's Subcommand derive.
-// Deriving Subcommand would require nested subcommands (e.g., `dome focus monitor up`
-// becoming `dome focus monitor up` with `up` as its own subcommand), which is overly
-// complex. Since actions are primarily parsed from config files and IPC strings anyway,
-// manual parsing is simpler and more flexible.
-pub(crate) fn parse_monitor_target(s: &str) -> Result<MonitorTarget> {
+// Parsed by hand rather than through clap's `Subcommand` derive, which would force each
+// target word into a nested subcommand of its own.
+pub fn parse_monitor_target(s: &str) -> Result<MonitorTarget> {
     match s {
         "up" => Ok(MonitorTarget::Up),
         "down" => Ok(MonitorTarget::Down),
@@ -425,39 +495,60 @@ mod tests {
     #[test]
     fn serde_wire_format() {
         let cases = vec![
-            (Action::Focus(FocusTarget::Up), r#"{"Focus":"Up"}"#),
             (
-                Action::Move(MoveTarget::Workspace {
-                    name: "1".into(),
-                    monitor: None,
-                }),
-                r#"{"Move":{"Workspace":{"name":"1","monitor":null}}}"#,
+                Action::Focus {
+                    target: FocusTarget::Up,
+                },
+                r#"{"type":"focus","target":"up"}"#,
             ),
-            (Action::Toggle(ToggleTarget::Float), r#"{"Toggle":"Float"}"#),
-            (Action::Master(MasterTarget::Grow), r#"{"Master":"Grow"}"#),
+            (
+                Action::Move {
+                    target: MoveTarget::Workspace {
+                        name: "1".into(),
+                        monitor: None,
+                    },
+                },
+                r#"{"type":"move","target":{"workspace":{"name":"1","monitor":null}}}"#,
+            ),
+            (
+                Action::Toggle {
+                    target: ToggleTarget::Float,
+                },
+                r#"{"type":"toggle","target":"float"}"#,
+            ),
+            (
+                Action::Master {
+                    target: MasterTarget::Grow,
+                },
+                r#"{"type":"master","target":"grow"}"#,
+            ),
             (
                 Action::Exec {
                     command: "open -a Terminal".into(),
                 },
-                r#"{"Exec":{"command":"open -a Terminal"}}"#,
+                r#"{"type":"exec","command":"open -a Terminal"}"#,
             ),
-            (Action::Exit, r#""Exit""#),
-            (Action::Close, r#""Close""#),
+            (Action::Exit, r#"{"type":"exit"}"#),
+            (Action::Close, r#"{"type":"close"}"#),
             (
-                Action::UnminimizeWindow(serde_json::from_value(serde_json::json!(7)).unwrap()),
-                r#"{"UnminimizeWindow":7}"#,
+                Action::UnminimizeWindow {
+                    id: serde_json::from_value(serde_json::json!(7)).unwrap(),
+                },
+                r#"{"type":"unminimize_window","id":7}"#,
             ),
             (
                 Action::Mode {
                     name: "resize".into(),
                 },
-                r#"{"Mode":{"name":"resize"}}"#,
+                r#"{"type":"mode","name":"resize"}"#,
             ),
             (
-                Action::Focus(FocusTarget::Tab {
-                    direction: TabDirection::Next,
-                }),
-                r#"{"Focus":{"Tab":{"direction":"Next"}}}"#,
+                Action::Focus {
+                    target: FocusTarget::Tab {
+                        direction: TabDirection::Next,
+                    },
+                },
+                r#"{"type":"focus","target":{"tab":{"direction":"next"}}}"#,
             ),
         ];
         for (action, expected) in &cases {
@@ -475,22 +566,37 @@ mod tests {
     #[test]
     fn ipc_message_serde() {
         let cases = vec![
-            (IpcMessage::Action(Action::Exit), r#"{"Action":"Exit"}"#),
             (
-                IpcMessage::Action(Action::Focus(FocusTarget::Up)),
-                r#"{"Action":{"Focus":"Up"}}"#,
+                IpcMessage::Action {
+                    action: Action::Exit,
+                },
+                r#"{"type":"action","action":{"type":"exit"}}"#,
             ),
             (
-                IpcMessage::Query(Query::Workspaces),
-                r#"{"Query":"Workspaces"}"#,
+                IpcMessage::Action {
+                    action: Action::Focus {
+                        target: FocusTarget::Up,
+                    },
+                },
+                r#"{"type":"action","action":{"type":"focus","target":"up"}}"#,
             ),
             (
-                IpcMessage::Query(Query::MinimizedWindows),
-                r#"{"Query":"MinimizedWindows"}"#,
+                IpcMessage::Query {
+                    query: Query::Workspaces,
+                },
+                r#"{"type":"query","query":{"type":"workspaces"}}"#,
             ),
             (
-                IpcMessage::Query(Query::Monitors),
-                r#"{"Query":"Monitors"}"#,
+                IpcMessage::Query {
+                    query: Query::MinimizedWindows,
+                },
+                r#"{"type":"query","query":{"type":"minimized_windows"}}"#,
+            ),
+            (
+                IpcMessage::Query {
+                    query: Query::Monitors,
+                },
+                r#"{"type":"query","query":{"type":"monitors"}}"#,
             ),
         ];
         for (msg, expected) in &cases {
@@ -507,10 +613,6 @@ mod tests {
 
     #[test]
     fn action_from_str_round_trip() {
-        // Every action string whose FromStr path takes no free-form argument
-        // must survive a parse -> Display -> compare cycle. This locks
-        // Display/FromStr symmetry and would have caught the old
-        // SpawnDirection round-trip bug.
         let cases = [
             "focus up",
             "focus down",
@@ -567,7 +669,7 @@ mod tests {
     #[test]
     fn unminimize_window_display_uses_space() {
         let id: WindowId = serde_json::from_value(serde_json::json!(7)).unwrap();
-        let action = Action::UnminimizeWindow(id);
+        let action = Action::UnminimizeWindow { id };
         assert_eq!(action.to_string(), "unminimize window WindowId(7)");
     }
 

@@ -4,7 +4,7 @@ use crate::core::{Length, MonitorLayout, MonitorPlacements, WindowId};
 use crate::platform::macos::objc2_wrapper::dimension_to_ns_rect_cocoa;
 
 use super::Dome;
-use super::events::{ContainerShow, FloatShow, HubMessage, MonitorTilingData, RenderFrame};
+use super::events::{ContainerShow, FloatShow, HubMessage, MonitorTilingData, RenderScene};
 
 impl Dome {
     /// All fullscreen -> normal and normal -> fullscreen must be resolved before this step
@@ -74,7 +74,7 @@ impl Dome {
             self.registry.remove(cg_id);
         }
 
-        self.sender.send(HubMessage::Frame(RenderFrame {
+        self.sender.send(HubMessage::Scene(RenderScene {
             tiling,
             float_shows,
             focused_window,

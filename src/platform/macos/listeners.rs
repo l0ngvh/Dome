@@ -4,7 +4,6 @@ use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::ptr::NonNull;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -12,14 +11,13 @@ use std::time::{Duration, Instant};
 use calloop::channel::Sender as CalloopSender;
 
 use block2::RcBlock;
-use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{
-    NSApplicationDidChangeScreenParametersNotification, NSWorkspace,
-    NSWorkspaceActiveSpaceDidChangeNotification, NSWorkspaceDidActivateApplicationNotification,
-    NSWorkspaceDidLaunchApplicationNotification, NSWorkspaceDidTerminateApplicationNotification,
-    NSWorkspaceScreensDidSleepNotification, NSWorkspaceWillSleepNotification,
+    NSWorkspace, NSWorkspaceActiveSpaceDidChangeNotification,
+    NSWorkspaceDidActivateApplicationNotification, NSWorkspaceDidLaunchApplicationNotification,
+    NSWorkspaceDidTerminateApplicationNotification, NSWorkspaceScreensDidSleepNotification,
+    NSWorkspaceWillSleepNotification,
 };
 use objc2_application_services::{AXObserver, AXUIElement};
 use objc2_core_foundation::{
@@ -28,12 +26,11 @@ use objc2_core_foundation::{
 };
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{
-    NSDistributedNotificationCenter, NSNotification, NSNotificationCenter, NSObjectProtocol,
-    NSOperationQueue, NSString,
+    NSDistributedNotificationCenter, NSNotification, NSObjectProtocol, NSOperationQueue, NSString,
 };
 
 use crate::platform::macos::accessibility::AXApp;
-use crate::platform::macos::dome::{HubEvent, get_all_monitors};
+use crate::platform::macos::dome::HubEvent;
 use crate::platform::macos::objc2_wrapper::{
     add_observer_notification, create_observer, get_cg_window_id, get_pid,
     kAXApplicationHiddenNotification, kAXApplicationShownNotification,
@@ -70,7 +67,6 @@ pub(super) struct EventListener {
     sync_timer: Option<CFRetained<CFRunLoopTimer>>,
     workspace_observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
     distributed_observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
-    screen_observer: Retained<ProtocolObject<dyn NSObjectProtocol>>,
 }
 
 /// Wraps an `AXObserver` added to a run loop. Tracks registered notifications
@@ -111,7 +107,7 @@ impl Drop for RegisteredObserver {
     }
 }
 
-type Observers = Rc<RefCell<HashMap<i32, RegisteredObserver>>>;
+type Observers = RefCell<HashMap<i32, RegisteredObserver>>;
 type FocusThrottle = Pin<Box<Throttle<i32>>>;
 type TitleThrottle = Pin<Box<Throttle<CGWindowID>>>;
 
@@ -121,14 +117,13 @@ impl EventListener {
 
         let mut ctx = Box::new(ListenerCtx {
             is_suspended,
-            observers: Rc::new(RefCell::new(HashMap::new())),
+            observers: RefCell::new(HashMap::new()),
             focus_throttle,
             title_throttle,
             hub_sender,
         });
 
         let (workspace_observers, distributed_observers) = setup_app_observers(&mut ctx);
-        let screen_observer = setup_screen_observer(&ctx);
         let sync_timer = schedule_sync_timer(&ctx);
 
         Self {
@@ -136,7 +131,6 @@ impl EventListener {
             sync_timer,
             workspace_observers,
             distributed_observers,
-            screen_observer,
         }
     }
 
@@ -169,15 +163,11 @@ impl Drop for EventListener {
         for observer in &self.distributed_observers {
             unsafe { distributed_center.removeObserver(ProtocolObject::as_ref(observer)) };
         }
-
-        let default_center = NSNotificationCenter::defaultCenter();
-        unsafe { default_center.removeObserver(ProtocolObject::as_ref(&self.screen_observer)) };
     }
 }
 
 type WorkspaceObservers = Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>;
 type DistributedObservers = Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>;
-type ScreenObserver = Retained<ProtocolObject<dyn NSObjectProtocol>>;
 
 fn setup_app_observers(ctx: &mut ListenerCtx) -> (WorkspaceObservers, DistributedObservers) {
     // To bypass FnMut and lifetime requirement of block2. ctx will outlive these callbacks as
@@ -290,29 +280,6 @@ fn setup_app_observers(ctx: &mut ListenerCtx) -> (WorkspaceObservers, Distribute
     });
 
     (workspace_observers, distributed_observers)
-}
-
-fn setup_screen_observer(ctx: &ListenerCtx) -> ScreenObserver {
-    let ctx_ptr = ctx as *const ListenerCtx as *mut ListenerCtx;
-    let default_center = NSNotificationCenter::defaultCenter();
-    unsafe {
-        default_center.addObserverForName_object_queue_usingBlock(
-            Some(NSApplicationDidChangeScreenParametersNotification),
-            None,
-            Some(&NSOperationQueue::mainQueue()),
-            &RcBlock::new(move |_: NonNull<NSNotification>| {
-                let mtm = MainThreadMarker::new().unwrap();
-                let monitors = match get_all_monitors(mtm) {
-                    Ok(monitors) => monitors,
-                    Err(e) => {
-                        tracing::error!(%e, "Failed to enumerate monitors on screen change");
-                        return;
-                    }
-                };
-                send_hub_event(&(*ctx_ptr).hub_sender, HubEvent::MonitorsChanged(monitors));
-            }),
-        )
-    }
 }
 
 fn setup_throttles(hub_sender: CalloopSender<HubEvent>) -> (FocusThrottle, TitleThrottle) {

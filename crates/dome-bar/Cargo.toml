@@ -1,0 +1,13 @@
+[package]
+name = "dome-bar"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "dome-bar"
+path = "src/main.rs"
+
+[dependencies]
+dome-ipc = { path = "../dome-ipc" }
+anyhow = { workspace = true }
+tracing = "0.1.41"

@@ -220,11 +220,21 @@ impl From<CliQuery> for Query {
 
 fn cli_toggle_to_action(t: CliToggle) -> Action {
     match t {
-        CliToggle::Spawn => Action::Toggle(ToggleTarget::Spawn),
-        CliToggle::Direction => Action::Toggle(ToggleTarget::Direction),
-        CliToggle::Layout => Action::Toggle(ToggleTarget::Layout),
-        CliToggle::Float => Action::Toggle(ToggleTarget::Float),
-        CliToggle::Fullscreen => Action::Toggle(ToggleTarget::Fullscreen),
+        CliToggle::Spawn => Action::Toggle {
+            target: ToggleTarget::Spawn,
+        },
+        CliToggle::Direction => Action::Toggle {
+            target: ToggleTarget::Direction,
+        },
+        CliToggle::Layout => Action::Toggle {
+            target: ToggleTarget::Layout,
+        },
+        CliToggle::Float => Action::Toggle {
+            target: ToggleTarget::Float,
+        },
+        CliToggle::Fullscreen => Action::Toggle {
+            target: ToggleTarget::Fullscreen,
+        },
     }
 }
 
@@ -232,10 +242,16 @@ impl From<CliCommand> for Dispatch {
     fn from(cmd: CliCommand) -> Self {
         match cmd {
             CliCommand::Launch { config, layout } => Dispatch::Launch { config, layout },
-            CliCommand::Focus { target } => Dispatch::Action(Action::Focus(target.into())),
-            CliCommand::Move { target } => Dispatch::Action(Action::Move(target.into())),
+            CliCommand::Focus { target } => Dispatch::Action(Action::Focus {
+                target: target.into(),
+            }),
+            CliCommand::Move { target } => Dispatch::Action(Action::Move {
+                target: target.into(),
+            }),
             CliCommand::Toggle { target } => Dispatch::Action(cli_toggle_to_action(target)),
-            CliCommand::Master { target } => Dispatch::Action(Action::Master(target.into())),
+            CliCommand::Master { target } => Dispatch::Action(Action::Master {
+                target: target.into(),
+            }),
             CliCommand::Exec { command } => Dispatch::Action(Action::Exec { command }),
             CliCommand::Exit => Dispatch::Action(Action::Exit),
             CliCommand::Close => Dispatch::Action(Action::Close),
@@ -249,7 +265,7 @@ impl From<CliCommand> for Dispatch {
                 // every u64 fits in usize on the 64-bit targets Dome supports.
                 let window_id: WindowId = serde_json::from_value(serde_json::json!(id))
                     .expect("WindowId round-trips from a bare integer");
-                Dispatch::Action(Action::UnminimizeWindow(window_id))
+                Dispatch::Action(Action::UnminimizeWindow { id: window_id })
             }
         }
     }
@@ -268,14 +284,20 @@ pub fn run() -> anyhow::Result<()> {
     match dispatch {
         Dispatch::Launch { config, layout } => crate::run_app(config, layout)?,
         Dispatch::Action(action) => {
-            crate::DomeClient.send_action(&action)?;
+            crate::DomeClient.action(&action)?;
         }
         Dispatch::Query(query) => {
-            let response = crate::DomeClient.send_query(&query)?;
-            println!("{response}");
+            let json = match query {
+                Query::Workspaces => serde_json::to_string(&crate::DomeClient.workspaces()?)?,
+                Query::MinimizedWindows => {
+                    serde_json::to_string(&crate::DomeClient.minimized_windows()?)?
+                }
+                Query::Monitors => serde_json::to_string(&crate::DomeClient.monitors()?)?,
+            };
+            println!("{json}");
         }
         Dispatch::Export => {
-            crate::DomeClient.send_export_layout()?;
+            crate::DomeClient.export_layout()?;
         }
         Dispatch::Generate(CliGenerate::Yasb { config }) => {
             crate::integrations::yasb::generate(config.as_deref())?;
@@ -314,14 +336,14 @@ mod tests {
 
     fn focus_target(argv: &[&str]) -> FocusTarget {
         match dispatch_from_argv(argv) {
-            Dispatch::Action(Action::Focus(t)) => t,
+            Dispatch::Action(Action::Focus { target: t }) => t,
             other => panic!("{argv:?} produced {other:?}, expected Focus"),
         }
     }
 
     fn move_target(argv: &[&str]) -> MoveTarget {
         match dispatch_from_argv(argv) {
-            Dispatch::Action(Action::Move(t)) => t,
+            Dispatch::Action(Action::Move { target: t }) => t,
             other => panic!("{argv:?} produced {other:?}, expected Move"),
         }
     }
@@ -473,7 +495,7 @@ mod tests {
         let expected: WindowId = serde_json::from_value(serde_json::json!(7)).unwrap();
         let d = dispatch_from_argv(&["dome", "unminimize-window", "7"]);
         match d {
-            Dispatch::Action(Action::UnminimizeWindow(id)) if id == expected => {}
+            Dispatch::Action(Action::UnminimizeWindow { id }) if id == expected => {}
             other => panic!("expected Action(UnminimizeWindow(7)), got {other:?}"),
         }
     }

@@ -12,24 +12,23 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::action::{Action, Actions, WorkspaceInfo};
+use crate::action::{Action, Actions};
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Length, LimitObservation, LimitUpdate, Logical,
     Physical, PixelRect, Pixels, TilingWindowPlacement, WindowId,
 };
-use crate::font::FontConfig;
 use crate::platform::windows::dome::MonitorInfo;
-use crate::platform::windows::dome::app_window::AppWindowApi;
-use crate::platform::windows::dome::overlay::{
-    FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi,
-};
+use crate::platform::windows::dome::events::SceneSender;
 use crate::platform::windows::dome::{
     CreateOverlay, Dome, NewWindow, QueryDisplay, WindowsMetadata,
 };
 use crate::platform::windows::external::{HwndId, ManageExternalWindow, ShowCmd, ZOrder};
+use crate::platform::windows::handle::ManageZOrder;
 use crate::platform::windows::taskbar::ManageTaskbar;
+use crate::platform::windows::ui::WindowThread;
+use crate::platform::windows::ui::overlay::{FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi};
 use crate::theme::Flavor;
 
 /// Mirrors what the real tiling overlay shows on screen. The mock writes
@@ -44,7 +43,7 @@ enum TilingOverlayState {
 }
 
 /// Mirrors what the real float overlay shows on screen. `update` writes
-/// `Visible{..}` with the placement it received; `hide` writes `Hidden`.
+/// `Visible{..}` with the placement it received. `hide` writes `Hidden`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum FloatOverlayState {
     Hidden,
@@ -74,7 +73,7 @@ enum FocusTarget {
 
 /// Mirrors the real float overlay's shared observable state. `Rc` between
 /// the mock map entry and every `MockFloatOverlay` clone Dome holds.
-/// `Drop` on the last `MockFloatOverlay` sets `stale`; the snapshot skips
+/// `Drop` on the last `MockFloatOverlay` sets `stale`. The snapshot skips
 /// stale entries.
 #[derive(Clone, Debug)]
 struct FloatOverlayShared {
@@ -82,7 +81,6 @@ struct FloatOverlayShared {
     stale: Cell<bool>,
     state: Cell<FloatOverlayState>,
     flavor: Cell<Flavor>,
-    font: RefCell<FontConfig>,
 }
 
 // ── Snapshot types ──
@@ -92,7 +90,6 @@ struct TilingOverlaySnapshot {
     overlay_id: HwndId,
     state: TilingOverlayState,
     flavor: Flavor,
-    font: FontConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -100,7 +97,6 @@ struct FloatOverlaySnapshot {
     overlay_id: HwndId,
     state: FloatOverlayState,
     flavor: Flavor,
-    font: FontConfig,
 }
 
 const SCREEN_WIDTH: Length = Length::new(1920.0);
@@ -108,8 +104,8 @@ const SCREEN_HEIGHT: Length = Length::new(1080.0);
 const OFFSCREEN_POS: Length = Length::new(-32000.0);
 
 /// Initial rect a freshly-spawned mock reports until layout overwrites it.
-/// Tests that don't care about the pre-layout dimension pass `SPAWN_DIM`;
-/// tests that exercise the registration-time dim (fullscreen detection,
+/// Tests that don't care about the pre-layout dimension pass `SPAWN_DIM`.
+/// Tests that exercise the registration-time dim (fullscreen detection,
 /// min-size constraints) pass an explicit value.
 const SPAWN_DIM: Dimension<Physical> = Dimension::new(
     Length::ZERO,
@@ -255,13 +251,17 @@ impl TestEnv {
             tab_bars: tab_bars.clone(),
         }));
 
+        let window: Box<dyn SceneSender> = Box::new(WindowThread::new(
+            config.clone(),
+            Box::new(overlays.clone()),
+            Box::new(z_stack.clone()),
+        ));
         let dome = Dome::new(
             config.clone(),
             layout.workspace,
             Rc::new(NoopTaskbar),
-            Box::new(overlays.clone()),
             Box::new(display),
-            Box::new(NoopAppWindow),
+            window,
         )
         .unwrap();
         Self {
@@ -516,10 +516,10 @@ impl TestEnv {
     fn run_actions(&mut self, s: &str) {
         let action: Action = s.parse().unwrap();
         match &action {
-            Action::Focus(t) => self.dome.apply_focus(t),
-            Action::Move(t) => self.dome.apply_move(t),
-            Action::Toggle(t) => self.dome.apply_toggle(t),
-            Action::Master(t) => self.dome.apply_master(t),
+            Action::Focus { target: t } => self.dome.apply_focus(t),
+            Action::Move { target: t } => self.dome.apply_move(t),
+            Action::Toggle { target: t } => self.dome.apply_toggle(t),
+            Action::Master { target: t } => self.dome.apply_master(t),
             _ => {}
         }
         self.dome.apply_layout();
@@ -544,7 +544,6 @@ impl TestEnv {
                 overlay_id: ov.overlay_id,
                 state: ov.state(),
                 flavor: ov.flavor(),
-                font: ov.font(),
             })
             .collect()
     }
@@ -558,7 +557,6 @@ impl TestEnv {
                 overlay_id: shared.overlay_id,
                 state: shared.state.get(),
                 flavor: shared.flavor.get(),
-                font: shared.font.borrow().clone(),
             })
             .collect()
     }
@@ -712,13 +710,23 @@ impl ZOrderStack {
     }
 
     /// Simulate CreateWindowExW: place a freshly-created HWND at the top of
-    /// the normal z-order band. Models the OS-side birth event; the tiling
+    /// the normal z-order band. Models the OS-side birth event. The tiling
     /// overlay's explicit drop-to-bottom park is applied separately by the
     /// caller via `move_to_bottom`.
     fn simulate_create(&self, hwnd: HwndId) {
         let mut bands = self.bands.lock().unwrap();
         bands.normal.retain(|&id| id != hwnd);
         bands.normal.insert(0, hwnd);
+    }
+}
+
+impl ManageZOrder for ZOrderStack {
+    fn window_above(&self, hwnd: HwndId) -> Option<HwndId> {
+        ZOrderStack::window_above(self, hwnd)
+    }
+
+    fn demote_below(&self, overlay: HwndId, managed: HwndId) {
+        self.apply(overlay, ZOrder::After(managed));
     }
 }
 
@@ -832,7 +840,7 @@ impl ManageExternalWindow for MockExternalHwnd {
     }
 
     fn pid(&self) -> u32 {
-        // Tests do not exercise pid plumbing yet; return a deterministic
+        // Tests do not exercise pid plumbing yet. Return a deterministic
         // sentinel derived from the hwnd so log output stays stable.
         1
     }
@@ -884,7 +892,7 @@ impl ManageExternalWindow for MockExternalHwnd {
                 // rect (the placement-read closure early-returns on IsIconic
                 // before reading), so the mock skips the rect overwrite
                 // entirely. The move-log push exists to drive the
-                // LOCATIONCHANGE replay in flush_moves; the value is dropped
+                // LOCATIONCHANGE replay in flush_moves. The value is dropped
                 // by the iconic guard before reaching window_moved.
                 self.minimized.store(true, Ordering::Relaxed);
                 let dim = *self.dimension.lock().unwrap();
@@ -960,11 +968,6 @@ impl ManageTaskbar for NoopTaskbar {
     fn delete_tab(&self, _: HwndId) {}
 }
 
-struct NoopAppWindow;
-impl AppWindowApi for NoopAppWindow {
-    fn update_tray(&self, _: &[WorkspaceInfo]) {}
-}
-
 #[derive(Clone)]
 struct MockFloatOverlay {
     overlay_id: HwndId,
@@ -989,7 +992,6 @@ impl MockFloatOverlay {
                 stale: Cell::new(false),
                 state: Cell::new(FloatOverlayState::Hidden),
                 flavor: Cell::new(config.theme),
-                font: RefCell::new(config.font.clone()),
             }),
             overlays,
             config: Rc::new(RefCell::new(config)),
@@ -1001,7 +1003,6 @@ impl FloatOverlayApi for MockFloatOverlay {
     fn update(
         &mut self,
         wp: &crate::core::FloatWindowPlacement,
-        _: &Config,
         z_order: ZOrder,
         _scale: f32,
         _border_thickness: Pixels<Physical>,
@@ -1023,7 +1024,6 @@ impl FloatOverlayApi for MockFloatOverlay {
     }
     fn set_config(&mut self, config: &Config) {
         self.shared.flavor.set(config.theme);
-        *self.shared.font.borrow_mut() = config.font.clone();
         *self.config.borrow_mut() = config.clone();
     }
 }
@@ -1034,16 +1034,14 @@ impl Drop for MockFloatOverlay {
     }
 }
 
-/// `monitor` is shared (not just `Cell<PixelRect>`) so the struct stays
-/// cheaply `Clone`: the factory hands clones to the Hub while `TestEnv`
-/// retains one for inspection.
 #[derive(Clone)]
 struct MockTilingOverlay {
     overlay_id: HwndId,
     z_stack: ZOrderStack,
     state: Rc<RefCell<TilingOverlayState>>,
     flavor: Rc<Cell<Flavor>>,
-    font: Rc<RefCell<FontConfig>>,
+    /// Shared (not just `Cell<PixelRect>`) so the struct stays cheaply `Clone`:
+    /// the factory hands clones to the Hub while `TestEnv` retains one for inspection.
     monitor: Rc<Cell<PixelRect>>,
     config: Rc<RefCell<Config>>,
     focus_target: Arc<Mutex<FocusTarget>>,
@@ -1061,7 +1059,6 @@ impl MockTilingOverlay {
             z_stack,
             state: Rc::new(RefCell::new(TilingOverlayState::Hidden)),
             flavor: Rc::new(Cell::new(config.theme)),
-            font: Rc::new(RefCell::new(config.font.clone())),
             monitor: Rc::new(Cell::new(PixelRect::ZERO)),
             config: Rc::new(RefCell::new(config)),
             focus_target,
@@ -1075,10 +1072,6 @@ impl MockTilingOverlay {
     fn flavor(&self) -> Flavor {
         self.flavor.get()
     }
-
-    fn font(&self) -> FontConfig {
-        self.font.borrow().clone()
-    }
 }
 
 impl TilingOverlayApi for MockTilingOverlay {
@@ -1086,7 +1079,7 @@ impl TilingOverlayApi for MockTilingOverlay {
         &mut self,
         monitor: PixelRect,
         windows: &[TilingWindowPlacement],
-        _containers: &[(ContainerPlacement, Vec<String>)],
+        _containers: &[ContainerPlacement],
         _scale: f32,
         border_thickness: Pixels<Physical>,
     ) {
@@ -1107,17 +1100,13 @@ impl TilingOverlayApi for MockTilingOverlay {
     }
     fn set_config(&mut self, config: &Config) {
         self.flavor.set(config.theme);
-        *self.font.borrow_mut() = config.font.clone();
         *self.config.borrow_mut() = config.clone();
-    }
-    fn window_above(&self) -> Option<HwndId> {
-        self.z_stack.window_above(self.overlay_id)
-    }
-    fn demote_below(&mut self, managed: HwndId) {
-        self.z_stack.apply(self.overlay_id, ZOrder::After(managed));
     }
     fn focus(&self) {
         *self.focus_target.lock().unwrap() = FocusTarget::Overlay;
+    }
+    fn id(&self) -> HwndId {
+        self.overlay_id
     }
 }
 

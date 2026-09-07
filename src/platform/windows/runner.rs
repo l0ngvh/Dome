@@ -159,6 +159,18 @@ impl Runner {
             HubEvent::ExportLayout(path) => {
                 self.dome.export_layout(std::path::Path::new(&path));
             }
+            HubEvent::DpiChanged => {
+                let to_refresh = self.dome.handle_dpi_change();
+                self.refresh_and_relayout(to_refresh);
+            }
+            HubEvent::WorkAreaChanged => {
+                let to_refresh = self.dome.handle_work_area_change();
+                self.refresh_and_relayout(to_refresh);
+            }
+            HubEvent::DisplayChanged => {
+                let to_refresh = self.dome.handle_display_change();
+                self.refresh_and_relayout(to_refresh);
+            }
         }
     }
 
@@ -166,16 +178,16 @@ impl Runner {
     fn handle_actions(&mut self, actions: &Actions) {
         for action in actions {
             match action {
-                Action::Focus(t) => {
+                Action::Focus { target: t } => {
                     self.dome.apply_focus(t);
                 }
-                Action::Move(t) => {
+                Action::Move { target: t } => {
                     self.dome.apply_move(t);
                 }
-                Action::Toggle(t) => {
+                Action::Toggle { target: t } => {
                     self.dome.apply_toggle(t);
                 }
-                Action::Master(t) => {
+                Action::Master { target: t } => {
                     self.dome.apply_master(t);
                 }
                 Action::Exec { command } => {
@@ -192,7 +204,7 @@ impl Runner {
                 Action::Close => {
                     self.dome.close_focused_window();
                 }
-                Action::UnminimizeWindow(id) => {
+                Action::UnminimizeWindow { id } => {
                     self.dome.unminimize_window(*id);
                 }
                 Action::Mode { name } => {
@@ -343,28 +355,10 @@ impl Runner {
         );
     }
 
-    pub(super) fn handle_display_change(&mut self) {
-        let to_refresh = self.dome.handle_display_change();
+    fn refresh_and_relayout(&mut self, to_refresh: Vec<HwndId>) {
         for hwnd_id in to_refresh {
             self.dispatch_constraint_read(hwnd_id);
         }
-        self.dome.apply_layout();
-    }
-
-    pub(super) fn handle_work_area_change(&mut self) {
-        let to_refresh = self.dome.handle_work_area_change();
-        for hwnd_id in to_refresh {
-            self.dispatch_constraint_read(hwnd_id);
-        }
-        self.dome.apply_layout();
-    }
-
-    pub(super) fn handle_dpi_change(&mut self, handle: isize, dpi: u32) {
-        for hwnd_id in self.dome.monitor_dpi_changed(handle, dpi) {
-            self.dispatch_constraint_read(hwnd_id);
-        }
-        // apply_layout runs even on an unchanged scale (empty result): Hub state
-        // is unchanged and stored targets are physical, so positions match.
         self.dome.apply_layout();
     }
 

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail, ensure};
 
 use crate::DomeClient;
-use crate::action::{MonitorDetails, Query};
+use crate::action::MonitorDetails;
 
 /// The workspace plugin YASB runs each tick. dome bakes its own path in and
 /// writes the result beside the config.
@@ -58,11 +58,9 @@ pub(crate) fn generate(config_path: Option<&str>) -> anyhow::Result<()> {
          Pass --config with a space-free directory."
     );
 
-    let json = DomeClient
-        .send_query(&Query::Monitors)
+    let monitors = DomeClient
+        .monitors()
         .context("query monitors (is dome running?)")?;
-    let monitors: Vec<MonitorDetails> = serde_json::from_str(&json)
-        .with_context(|| format!("dome query monitors did not return a monitor array: {json}"))?;
 
     let generated = generate_yaml(&monitors, &plugin_str)?;
     let plugin_body = bake_plugin(DOME_WORKSPACES_PS1, &dome)?;

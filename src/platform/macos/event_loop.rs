@@ -188,19 +188,19 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
 fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
     for action in actions {
         match action {
-            Action::Focus(t) => {
+            Action::Focus { target: t } => {
                 runner.dome.apply_focus(t);
                 runner.dome.flush_layout();
             }
-            Action::Move(t) => {
+            Action::Move { target: t } => {
                 runner.dome.apply_move(t);
                 runner.dome.flush_layout();
             }
-            Action::Toggle(t) => {
+            Action::Toggle { target: t } => {
                 runner.dome.apply_toggle(t);
                 runner.dome.flush_layout();
             }
-            Action::Master(t) => {
+            Action::Master { target: t } => {
                 runner.dome.apply_master(t);
                 runner.dome.flush_layout();
             }
@@ -216,7 +216,7 @@ fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
             Action::Close => {
                 runner.dome.close_focused_window();
             }
-            Action::UnminimizeWindow(id) => {
+            Action::UnminimizeWindow { id } => {
                 runner.dome.unminimize_window(*id);
             }
             Action::Mode { name } => {

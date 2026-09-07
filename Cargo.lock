@@ -423,6 +423,8 @@ dependencies = [
  "calloop",
  "clap",
  "dispatch2",
+ "dome-auxiliary-window",
+ "dome-ipc",
  "egui",
  "egui-wgpu",
  "embed-resource",
@@ -446,6 +448,7 @@ dependencies = [
  "pollster",
  "rand",
  "rand_chacha",
+ "raw-window-handle",
  "rayon",
  "regex",
  "rustc-hash 2.1.2",
@@ -458,6 +461,39 @@ dependencies = [
  "tracing-subscriber",
  "wgpu",
  "windows",
+]
+
+[[package]]
+name = "dome-auxiliary-window"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "objc2-quartz-core",
+ "tracing",
+ "windows",
+]
+
+[[package]]
+name = "dome-bar"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dome-ipc",
+ "tracing",
+]
+
+[[package]]
+name = "dome-ipc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "interprocess",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

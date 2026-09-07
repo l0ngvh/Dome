@@ -101,7 +101,7 @@ impl fmt::Display for HubEvent {
 }
 
 pub(in crate::platform::macos) enum HubMessage {
-    Frame(RenderFrame),
+    Scene(RenderScene),
     RefreshObservers,
     ConfigChanged(Box<Config>),
     Shutdown,
@@ -110,12 +110,12 @@ pub(in crate::platform::macos) enum HubMessage {
 /// Rendering instructions produced by the hub thread after each layout cycle.
 /// The main thread consumes this to create, update, and destroy overlay windows,
 /// since macOS requires all UI operations to happen on the main thread.
-pub(in crate::platform::macos) struct RenderFrame {
+pub(in crate::platform::macos) struct RenderScene {
     /// One entry per visible monitor. Monitors with no tiling content still get
     /// an entry so the main thread can hide their overlay.
     pub(in crate::platform::macos) tiling: Vec<MonitorTilingData>,
     /// Float windows visible on the current workspace. Created on first appearance,
-    /// updated on subsequent frames. Float windows are rare, so the UI thread simply
+    /// updated on subsequent scenes. Float windows are rare, so the UI thread simply
     /// removes overlays and captures for any window not in this list rather than
     /// tracking individual deletions or float-to-tiling transitions.
     pub(in crate::platform::macos) float_shows: Vec<FloatShow>,

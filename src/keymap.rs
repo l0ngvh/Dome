@@ -127,7 +127,9 @@ mod tests {
     }
 
     fn focus_left_actions() -> Actions {
-        Actions::new(vec![Action::Focus(FocusTarget::Left)])
+        Actions::new(vec![Action::Focus {
+            target: FocusTarget::Left,
+        }])
     }
 
     fn mode_action(name: &str) -> Action {
@@ -208,7 +210,9 @@ mod tests {
             vec![(
                 cmd_r.clone(),
                 Actions::new(vec![
-                    Action::Focus(FocusTarget::Left),
+                    Action::Focus {
+                        target: FocusTarget::Left,
+                    },
                     mode_action("resize"),
                 ]),
             )],

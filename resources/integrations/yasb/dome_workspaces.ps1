@@ -58,7 +58,7 @@ if ($workspaces -isnot [Array]) {
 # so no single bar can own it.
 $hasParked = $false
 foreach ($w in $workspaces) {
-    if ($w.state -eq 'Parked' -and $w.window_count -gt 0) {
+    if ($w.state -eq 'parked' -and $w.window_count -gt 0) {
         $hasParked = $true
         break
     }
@@ -66,10 +66,10 @@ foreach ($w in $workspaces) {
 
 # Cells show live workspaces on this monitor. $Monitor is slugged so a name or
 # its slug both match. A parked workspace keeps its origin monitor name, so the
-# Attached check drops it from the cells.
+# attached check drops it from the cells.
 $want = Get-Slug $Monitor
 $rows = @($workspaces | Where-Object {
-    $_.state -eq 'Attached' -and (Get-Slug $_.monitor) -eq $want
+    $_.state -eq 'attached' -and (Get-Slug $_.monitor) -eq $want
 })
 
 # Numeric names sort numerically, non-numeric names lexically after them.

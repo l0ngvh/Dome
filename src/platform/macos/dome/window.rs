@@ -22,7 +22,7 @@ pub(super) enum WindowState {
     /// Window is in a macOS native fullscreen Space.
     NativeFullscreen,
     /// Window was zoomed to fill the screen via the zoom button or similar.
-    /// Distinct from native fullscreen — no separate Space is created.
+    /// Distinct from native fullscreen -- no separate Space is created.
     BorderlessFullscreen,
     /// Borderless-fullscreen window currently minimized by Dome because its workspace is inactive.
     BorderlessMinimized {
@@ -100,6 +100,10 @@ pub(super) struct FloatPlacement {
 
 impl FloatPlacement {
     pub(super) fn new(target: PixelRect) -> Self {
+        debug_assert!(
+            !target.is_empty(),
+            "an empty content box is filtered out before it reaches a placement"
+        );
         Self {
             target,
             placed_at: Instant::now(),
@@ -108,6 +112,10 @@ impl FloatPlacement {
 
     /// Returns true if set_frame is needed.
     fn set_target(&mut self, target: PixelRect) -> bool {
+        debug_assert!(
+            !target.is_empty(),
+            "an empty content box is filtered out before it reaches a placement"
+        );
         if self.target == target {
             return false;
         }
@@ -119,6 +127,10 @@ impl FloatPlacement {
 
 impl Placement {
     fn new(actual: PixelRect, target: PixelRect) -> Self {
+        debug_assert!(
+            !target.is_empty(),
+            "an empty content box is filtered out before it reaches a placement"
+        );
         Self {
             target,
             actual,
@@ -130,6 +142,10 @@ impl Placement {
 
     /// Returns true if set_frame is needed.
     fn set_target(&mut self, target: PixelRect) -> bool {
+        debug_assert!(
+            !target.is_empty(),
+            "an empty content box is filtered out before it reaches a placement"
+        );
         let target_changed = self.target != target;
         self.target = target;
         if target_changed {
@@ -272,10 +288,6 @@ impl Dome {
 
     #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
     pub(super) fn show_tiling(&mut self, window_id: WindowId, target: PixelRect) {
-        debug_assert!(
-            !target.is_empty(),
-            "caller must guard against an empty content box"
-        );
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
@@ -338,10 +350,6 @@ impl Dome {
 
     #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
     pub(super) fn show_float(&mut self, window_id: WindowId, target: PixelRect) {
-        debug_assert!(
-            !target.is_empty(),
-            "caller must guard against an empty content box"
-        );
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };

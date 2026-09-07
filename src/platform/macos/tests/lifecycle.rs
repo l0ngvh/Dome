@@ -179,7 +179,7 @@ fn render_frame_focused_state() {
     let mut dome = macos.setup_dome();
     dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
 
-    let state = macos.last_frame_state();
+    let state = macos.last_scene_state();
     assert!(state.focused_window.is_some());
     assert!(state.focused_monitor_id.is_some());
 }
@@ -192,7 +192,7 @@ fn render_frame_focused_none_after_last_window_removed() {
     dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
     dome.reconcile_windows(&[], &[cg1], &[], vec![], &[], &[]);
 
-    let state = macos.last_frame_state();
+    let state = macos.last_scene_state();
     assert_eq!(state.focused_window, None);
 }
 
@@ -214,7 +214,7 @@ fn render_frame_focused_container_after_focus_parent() {
 
     // After focus_parent, focused_tiling_window() returns None (container highlighted),
     // so the platform receives focused_window: None and focuses the overlay.
-    let state = macos.last_frame_state();
+    let state = macos.last_scene_state();
     assert!(state.focused_window.is_none());
 }
 
@@ -226,7 +226,7 @@ fn render_frame_focused_none_on_empty_workspace() {
     dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
     send(&mut dome, "focus workspace 1");
 
-    let state = macos.last_frame_state();
+    let state = macos.last_scene_state();
     assert_eq!(state.focused_window, None);
 }
 
@@ -236,9 +236,9 @@ fn render_frame_focused_monitor_changes_on_focus_monitor() {
     let mut dome = macos.setup_dome();
     dome.monitors_changed(vec![default_monitor(), second_monitor()]);
 
-    let before = macos.last_frame_state();
+    let before = macos.last_scene_state();
     send(&mut dome, "focus monitor right");
-    let after = macos.last_frame_state();
+    let after = macos.last_scene_state();
 
     assert_ne!(before.focused_monitor_id, after.focused_monitor_id);
 }
@@ -266,19 +266,19 @@ fn multi_action_sequence_applies_each_hub_action() {
     ]);
     for action in &actions {
         match action {
-            Action::Focus(t) => {
+            Action::Focus { target: t } => {
                 dome.apply_focus(t);
                 dome.flush_layout();
             }
-            Action::Move(t) => {
+            Action::Move { target: t } => {
                 dome.apply_move(t);
                 dome.flush_layout();
             }
-            Action::Toggle(t) => {
+            Action::Toggle { target: t } => {
                 dome.apply_toggle(t);
                 dome.flush_layout();
             }
-            Action::Master(t) => {
+            Action::Master { target: t } => {
                 dome.apply_master(t);
                 dome.flush_layout();
             }
@@ -552,7 +552,7 @@ fn primary_change_to_a_new_display_carries_the_workspaces() {
         workspaces.contains("\"monitor\":\"Studio\""),
         "{workspaces}"
     );
-    assert!(!workspaces.contains("Parked"), "{workspaces}");
+    assert!(!workspaces.contains("parked"), "{workspaces}");
 }
 
 #[test]
@@ -570,7 +570,7 @@ fn primary_change_to_a_tracked_display_parks_the_displaced_workspaces() {
     macos.settle(&mut dome, 10);
 
     let workspaces = dome.query_workspaces_json();
-    assert!(workspaces.contains("\"state\":\"Parked\""), "{workspaces}");
+    assert!(workspaces.contains("\"state\":\"parked\""), "{workspaces}");
     assert!(
         workspaces.contains("\"monitor\":\"External\""),
         "{workspaces}"
