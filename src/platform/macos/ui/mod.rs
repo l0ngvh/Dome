@@ -30,10 +30,6 @@ pub(super) struct MessageSender {
     waker: LoopWaker,
 }
 
-// The waker signals the main run loop from any thread, and the mpsc sender carries the
-// scene to the main thread where on_wake drains it.
-unsafe impl Send for MessageSender {}
-
 impl MessageSender {
     pub(super) fn send(&self, msg: HubMessage) {
         if self.tx.send(msg).is_ok() {
