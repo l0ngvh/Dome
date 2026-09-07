@@ -1,6 +1,8 @@
 //! Window creation and the window event loop for Dome and its status-bar
 //! subprocess. Names no Dome domain type.
 
+use std::marker::PhantomData;
+
 mod menu;
 pub use menu::{MenuEntry, MenuItem};
 
@@ -18,17 +20,104 @@ use crate::windows as imp;
 #[cfg(target_os = "windows")]
 pub use windows::AuxiliaryWindowExtWindows;
 
-/// A point in physical pixels. The origin may be negative across multiple monitors.
-#[derive(Clone, Copy, Debug)]
-pub struct PhysicalPosition {
-    pub x: i32,
-    pub y: i32,
+/// Logical points. Physical pixels divided by the display scale factor.
+pub enum Logical {}
+
+/// Physical device pixels.
+pub enum Physical {}
+
+/// The platform's native window coordinate unit. macOS window APIs speak logical points,
+/// Windows speaks physical pixels. Events and frames arrive in this unit, and the crate
+/// applies no scale conversion of its own.
+#[cfg(target_os = "macos")]
+pub type NativeUnit = Logical;
+#[cfg(target_os = "windows")]
+pub type NativeUnit = Physical;
+
+/// The origin may be negative across multiple monitors.
+pub struct Point<U> {
+    x: i32,
+    y: i32,
+    _marker: PhantomData<U>,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct PhysicalSize {
-    pub width: u32,
-    pub height: u32,
+pub struct Size<U> {
+    width: u32,
+    height: u32,
+    _marker: PhantomData<U>,
+}
+
+impl<U> Point<U> {
+    pub fn new(x: i32, y: i32) -> Self {
+        Self {
+            x,
+            y,
+            _marker: PhantomData,
+        }
+    }
+    pub fn x(&self) -> i32 {
+        self.x
+    }
+    pub fn y(&self) -> i32 {
+        self.y
+    }
+}
+
+impl<U> Size<U> {
+    pub fn new(width: u32, height: u32) -> Self {
+        Self {
+            width,
+            height,
+            _marker: PhantomData,
+        }
+    }
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+}
+
+impl Point<Physical> {
+    /// Rounds to the nearest whole logical point. Only a physical point exposes this, so a
+    /// logical point cannot be scaled twice.
+    pub fn to_logical(self, scale: f32) -> Point<Logical> {
+        Point::new(
+            (self.x as f32 / scale).round() as i32,
+            (self.y as f32 / scale).round() as i32,
+        )
+    }
+}
+
+impl<U> Clone for Point<U> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<U> Copy for Point<U> {}
+impl<U> std::fmt::Debug for Point<U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Point")
+            .field("x", &self.x)
+            .field("y", &self.y)
+            .finish()
+    }
+}
+
+impl<U> Clone for Size<U> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<U> Copy for Size<U> {}
+impl<U> std::fmt::Debug for Size<U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Size")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,8 +139,8 @@ pub enum WindowLevel {
 
 #[derive(Clone, Copy, Debug)]
 pub struct WindowAttributes {
-    pub position: PhysicalPosition,
-    pub size: PhysicalSize,
+    pub position: Point<NativeUnit>,
+    pub size: Size<NativeUnit>,
     pub click_through: bool,
     /// The window may hold keyboard focus. This only sets eligibility. The crate never
     /// forces focus itself.
@@ -60,13 +149,12 @@ pub struct WindowAttributes {
 
 /// Every method defaults to a no-op, so a consumer implements only the events it needs.
 pub trait AuxiliaryWindowHandler {
-    fn on_mouse_down(&mut self, _at: PhysicalPosition, _button: MouseButton) {}
-    fn on_mouse_up(&mut self, _at: PhysicalPosition, _button: MouseButton) {}
-    fn on_mouse_moved(&mut self, _at: PhysicalPosition) {}
-    fn on_mouse_left(&mut self) {}
+    fn on_mouse_down(&mut self, _at: Point<NativeUnit>, _button: MouseButton) {}
+    fn on_mouse_up(&mut self, _at: Point<NativeUnit>, _button: MouseButton) {}
+    fn on_mouse_moved(&mut self, _at: Point<NativeUnit>) {}
 
     fn on_redraw(&mut self) {}
-    fn on_resized(&mut self, _size: PhysicalSize) {}
+    fn on_resized(&mut self, _size: Size<NativeUnit>) {}
     fn on_scale_changed(&mut self, _scale: f32) {}
     fn on_close_requested(&mut self) {}
 
@@ -180,7 +268,7 @@ impl AuxiliaryWindow {
 
     /// Combined rather than split into position and size. Every caller places the
     /// window at a full rect, and this maps to one native call per platform.
-    pub fn set_frame(&self, position: PhysicalPosition, size: PhysicalSize) {
+    pub fn set_frame(&self, position: Point<NativeUnit>, size: Size<NativeUnit>) {
         self.inner.set_frame(position, size);
     }
 

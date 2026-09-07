@@ -25,6 +25,7 @@ pub(crate) enum IpcEvent {
 const QUERY_TIMEOUT: Duration = Duration::from_secs(1);
 const RPC_READ_TIMEOUT: Duration = Duration::from_secs(2);
 const RPC_POLL_INTERVAL: Duration = Duration::from_millis(5);
+const RPC_MAX_REQUEST_BYTES: usize = 64 * 1024;
 
 pub(crate) fn start_server<F>(export_layout_path: String, dispatch: F) -> anyhow::Result<()>
 where
@@ -143,6 +144,10 @@ fn read_request_line(stream: &interprocess::local_socket::Stream) -> anyhow::Res
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     loop {
+        anyhow::ensure!(
+            line.len() <= RPC_MAX_REQUEST_BYTES,
+            "RPC request exceeds {RPC_MAX_REQUEST_BYTES} bytes"
+        );
         match reader.read_line(&mut line) {
             Ok(0) => return Ok(line),
             Ok(_) if line.ends_with('\n') => return Ok(line),

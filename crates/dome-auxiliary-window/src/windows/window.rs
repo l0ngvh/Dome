@@ -17,7 +17,7 @@ use windows::core::{PCWSTR, w};
 
 use super::CLASS_NAME;
 use super::wnd_proc::aux_wnd_proc;
-use crate::{AuxiliaryWindowHandler, PhysicalPosition, PhysicalSize, WindowAttributes};
+use crate::{AuxiliaryWindowHandler, NativeUnit, Point, Size, WindowAttributes};
 
 /// Per-window state stored behind `GWLP_USERDATA`.
 pub(super) struct WindowState {
@@ -78,15 +78,15 @@ impl Window {
         Ok(Self { window, state })
     }
 
-    pub(crate) fn set_frame(&self, position: PhysicalPosition, size: PhysicalSize) {
+    pub(crate) fn set_frame(&self, position: Point<NativeUnit>, size: Size<NativeUnit>) {
         unsafe {
             SetWindowPos(
                 self.window.hwnd(),
                 None,
-                position.x,
-                position.y,
-                size.width as i32,
-                size.height as i32,
+                position.x(),
+                position.y(),
+                size.width() as i32,
+                size.height() as i32,
                 SWP_NOZORDER | SWP_NOACTIVATE,
             )
             .ok();

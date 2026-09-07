@@ -2,8 +2,8 @@ use std::any::Any;
 
 use calloop::channel::Sender as CalloopSender;
 use dome_auxiliary_window::{
-    AuxiliaryWindow, AuxiliaryWindowExtMacOs, AuxiliaryWindowHandler, MouseButton,
-    PhysicalPosition, PhysicalSize, WindowAttributes, WindowLevel,
+    AuxiliaryWindow, AuxiliaryWindowExtMacOs, AuxiliaryWindowHandler, MouseButton, NativeUnit,
+    Point, Size, WindowAttributes, WindowLevel,
 };
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -28,16 +28,13 @@ use crate::platform::render::{Renderer, WgpuContext};
 use crate::platform::tab_bar::{TabBarMessage, TabBarWidget};
 use crate::theme::Flavor;
 
-fn frame_attrs(frame: NSRect) -> (PhysicalPosition, PhysicalSize) {
+fn frame_attrs(frame: NSRect) -> (Point<NativeUnit>, Size<NativeUnit>) {
     (
-        PhysicalPosition {
-            x: frame.origin.x.round() as i32,
-            y: frame.origin.y.round() as i32,
-        },
-        PhysicalSize {
-            width: frame.size.width.round() as u32,
-            height: frame.size.height.round() as u32,
-        },
+        Point::new(frame.origin.x.round() as i32, frame.origin.y.round() as i32),
+        Size::new(
+            frame.size.width.round() as u32,
+            frame.size.height.round() as u32,
+        ),
     )
 }
 
@@ -47,7 +44,7 @@ struct FloatHandler {
 }
 
 impl AuxiliaryWindowHandler for FloatHandler {
-    fn on_mouse_down(&mut self, _at: PhysicalPosition, _button: MouseButton) {
+    fn on_mouse_down(&mut self, _at: Point<NativeUnit>, _button: MouseButton) {
         self.hub_sender
             .send(HubEvent::MirrorClicked(self.cg_id))
             .ok();
@@ -377,18 +374,17 @@ struct TabBarHandler {
 }
 
 impl AuxiliaryWindowHandler for TabBarHandler {
-    // macOS pointer positions arrive already in logical points, so no scale
-    // divide. Rendering on the press edge keeps the press queued for the click
+    // Rendering on the press edge keeps the press queued for the click
     // TabBarWidget::render resolves on release.
-    fn on_mouse_down(&mut self, at: PhysicalPosition, _button: MouseButton) {
+    fn on_mouse_down(&mut self, at: Point<NativeUnit>, _button: MouseButton) {
         self.widget
-            .push_pointer_button(egui::pos2(at.x as f32, at.y as f32), true);
+            .push_pointer_button(egui::pos2(at.x() as f32, at.y() as f32), true);
         self.widget.render();
     }
 
-    fn on_mouse_up(&mut self, at: PhysicalPosition, _button: MouseButton) {
+    fn on_mouse_up(&mut self, at: Point<NativeUnit>, _button: MouseButton) {
         self.widget
-            .push_pointer_button(egui::pos2(at.x as f32, at.y as f32), false);
+            .push_pointer_button(egui::pos2(at.x() as f32, at.y() as f32), false);
         if let Some((cid, tab_idx)) = self.widget.render() {
             self.hub_sender
                 .send(HubEvent::TabClicked(cid, tab_idx))

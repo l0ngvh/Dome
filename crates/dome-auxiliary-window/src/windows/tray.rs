@@ -18,7 +18,7 @@ use super::menu::{is_tray_context_menu, show_context_menu};
 use super::window::{OwnedHwnd, ex_style_for, register_class};
 use super::wnd_proc::{wnd_proc_no_state, wnd_proc_prologue};
 use super::{TRAY_CLASS_NAME, TRAY_UID, WM_APP_TRAY};
-use crate::{AppHandler, PhysicalPosition, PhysicalSize, WindowAttributes};
+use crate::{AppHandler, Point, Size, WindowAttributes};
 
 /// The consumer's `AppHandler`, shared between `App`, which drives the wake path, and the
 /// tray window's wnd-proc, which drives the menu and the display notifications.
@@ -54,11 +54,8 @@ impl Tray {
     pub(crate) fn new(icon: HICON, handler: SharedHandler) -> anyhow::Result<Self> {
         ensure_tray_class_registered();
         let attributes = WindowAttributes {
-            position: PhysicalPosition { x: 0, y: 0 },
-            size: PhysicalSize {
-                width: 0,
-                height: 0,
-            },
+            position: Point::new(0, 0),
+            size: Size::new(0, 0),
             click_through: false,
             focusable: false,
         };

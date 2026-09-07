@@ -1,8 +1,8 @@
 use std::any::Any;
 
 use dome_auxiliary_window::{
-    AuxiliaryWindow, AuxiliaryWindowExtWindows, AuxiliaryWindowHandler, MouseButton,
-    PhysicalPosition, PhysicalSize, WindowAttributes, WindowLevel,
+    AuxiliaryWindow, AuxiliaryWindowExtWindows, AuxiliaryWindowHandler, MouseButton, NativeUnit,
+    Point, Size, WindowAttributes, WindowLevel,
 };
 
 use crate::config::Config;
@@ -115,14 +115,8 @@ impl TilingOverlay {
         // click_through keeps the tiling overlay transparent to the pointer, so events
         // reach managed windows below.
         let attributes = WindowAttributes {
-            position: PhysicalPosition {
-                x: x_phys,
-                y: y_phys,
-            },
-            size: PhysicalSize {
-                width: init_w,
-                height: init_h,
-            },
+            position: Point::new(x_phys, y_phys),
+            size: Size::new(init_w, init_h),
             click_through: true,
             focusable: true,
         };
@@ -218,16 +212,8 @@ impl TilingOverlayApi for TilingOverlay {
 
         if self.monitor != monitor {
             self.renderer.resize(scale, w_phys, h_phys);
-            self.aux.set_frame(
-                PhysicalPosition {
-                    x: x_phys,
-                    y: y_phys,
-                },
-                PhysicalSize {
-                    width: w_phys,
-                    height: h_phys,
-                },
-            );
+            self.aux
+                .set_frame(Point::new(x_phys, y_phys), Size::new(w_phys, h_phys));
             self.aux.set_level(WindowLevel::Bottom);
             self.aux.set_visible(true);
         }
@@ -325,11 +311,8 @@ impl FloatOverlay {
     ) -> anyhow::Result<Box<Self>> {
         // Not focusable, so clicking the float border never steals foreground.
         let attributes = WindowAttributes {
-            position: PhysicalPosition { x, y },
-            size: PhysicalSize {
-                width: width_phys,
-                height: height_phys,
-            },
+            position: Point::new(x, y),
+            size: Size::new(width_phys, height_phys),
             click_through: true,
             focusable: false,
         };
@@ -573,32 +556,30 @@ struct TabBarHandler {
 }
 
 impl AuxiliaryWindowHandler for TabBarHandler {
-    fn on_mouse_moved(&mut self, at: PhysicalPosition) {
-        // Window-local physical pixels divide by scale to reach the logical points
-        // TabBarWidget paints in.
-        let scale = self.widget.scale();
+    fn on_mouse_moved(&mut self, at: Point<NativeUnit>) {
+        let at = at.to_logical(self.widget.scale());
         self.widget
-            .push_pointer_moved(egui::pos2(at.x as f32 / scale, at.y as f32 / scale));
+            .push_pointer_moved(egui::pos2(at.x() as f32, at.y() as f32));
     }
 
-    fn on_mouse_down(&mut self, at: PhysicalPosition, button: MouseButton) {
+    fn on_mouse_down(&mut self, at: Point<NativeUnit>, button: MouseButton) {
         if button != MouseButton::Primary {
             return;
         }
-        let scale = self.widget.scale();
+        let at = at.to_logical(self.widget.scale());
         self.widget
-            .push_pointer_button(egui::pos2(at.x as f32 / scale, at.y as f32 / scale), true);
+            .push_pointer_button(egui::pos2(at.x() as f32, at.y() as f32), true);
     }
 
-    fn on_mouse_up(&mut self, at: PhysicalPosition, button: MouseButton) {
+    fn on_mouse_up(&mut self, at: Point<NativeUnit>, button: MouseButton) {
         if button != MouseButton::Primary {
             return;
         }
         // Button-up is the edge paint_tab_bar's Sense::click() observes, with the queued
         // press still present in the same render pass.
-        let scale = self.widget.scale();
+        let at = at.to_logical(self.widget.scale());
         self.widget
-            .push_pointer_button(egui::pos2(at.x as f32 / scale, at.y as f32 / scale), false);
+            .push_pointer_button(egui::pos2(at.x() as f32, at.y() as f32), false);
         if let Some((cid, idx)) = self.widget.render() {
             self.hub_sender.send(HubEvent::TabClicked(cid, idx));
         }
@@ -647,14 +628,8 @@ impl TabBarOverlay {
         // Not focusable, so a tab click never steals foreground. Clicks dispatch as
         // `HubEvent::TabClicked` rather than raising the window.
         let attributes = WindowAttributes {
-            position: PhysicalPosition {
-                x: x_phys,
-                y: y_phys,
-            },
-            size: PhysicalSize {
-                width: w_phys,
-                height: h_phys,
-            },
+            position: Point::new(x_phys, y_phys),
+            size: Size::new(w_phys, h_phys),
             click_through: false,
             focusable: false,
         };
@@ -696,16 +671,8 @@ impl TabBarOverlayApi for TabBarOverlay {
         // No z-order lift needed. The tab bar is created above the bottom-parked
         // border overlay, the only window it shares pixels with, and set_frame
         // preserves that order.
-        self.aux.set_frame(
-            PhysicalPosition {
-                x: x_phys,
-                y: y_phys,
-            },
-            PhysicalSize {
-                width: w_phys,
-                height: h_phys,
-            },
-        );
+        self.aux
+            .set_frame(Point::new(x_phys, y_phys), Size::new(w_phys, h_phys));
         self.aux.set_visible(true);
         self.aux.deliver(Box::new(TabBarMessage::Content {
             scale,

@@ -9,9 +9,7 @@ use objc2_app_kit::{
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use objc2_quartz_core::CALayer;
 
-use crate::{
-    AuxiliaryWindowHandler, MouseButton, PhysicalPosition, PhysicalSize, WindowAttributes,
-};
+use crate::{AuxiliaryWindowHandler, MouseButton, NativeUnit, Point, Size, WindowAttributes};
 
 pub trait AuxiliaryWindowExtMacOs {
     fn set_content_layer(&self, layer: &CALayer);
@@ -73,7 +71,7 @@ impl Window {
         Ok(Self { window, view })
     }
 
-    pub(crate) fn set_frame(&self, position: PhysicalPosition, size: PhysicalSize) {
+    pub(crate) fn set_frame(&self, position: Point<NativeUnit>, size: Size<NativeUnit>) {
         self.window
             .setFrame_display(to_nsrect(position, size), true);
     }
@@ -232,18 +230,15 @@ impl AuxiliaryView {
     }
 }
 
-fn to_nsrect(position: PhysicalPosition, size: PhysicalSize) -> NSRect {
+fn to_nsrect(position: Point<NativeUnit>, size: Size<NativeUnit>) -> NSRect {
     NSRect::new(
-        NSPoint::new(position.x as f64, position.y as f64),
-        NSSize::new(size.width as f64, size.height as f64),
+        NSPoint::new(position.x() as f64, position.y() as f64),
+        NSSize::new(size.width() as f64, size.height() as f64),
     )
 }
 
-fn event_pos(view: &NSView, event: &NSEvent) -> PhysicalPosition {
+fn event_pos(view: &NSView, event: &NSEvent) -> Point<NativeUnit> {
     let loc = event.locationInWindow();
     let view_loc = view.convertPoint_fromView(loc, None);
-    PhysicalPosition {
-        x: view_loc.x as i32,
-        y: view_loc.y as i32,
-    }
+    Point::new(view_loc.x as i32, view_loc.y as i32)
 }

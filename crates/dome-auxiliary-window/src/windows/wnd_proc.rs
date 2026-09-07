@@ -11,7 +11,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use super::BASE_DPI;
 use super::window::WindowState;
-use crate::{MouseButton, PhysicalPosition, PhysicalSize};
+use crate::{MouseButton, NativeUnit, Point, Size};
 
 /// Universal messages handled before the per-window state lookup, because they can arrive
 /// during creation while `GWLP_USERDATA` is still null. Returns `Some` when handled.
@@ -20,6 +20,10 @@ pub(super) fn wnd_proc_prologue(hwnd: HWND, msg: u32, lparam: LPARAM) -> Option<
     match msg {
         WM_ERASEBKGND => Some(LRESULT(1)),
         WM_GETDPISCALEDSIZE => {
+            // The crate's windows are borderless WS_POPUP with no non-client area, so
+            // GetClientRect == window size. Reporting the current size as the desired size
+            // makes Windows 11's automatic DPI resize a no-op. A future window class with a
+            // title bar or border must NOT copy this without adding the non-client delta.
             let mut rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut rect).ok() };
             let size = windows::Win32::Foundation::SIZE {
@@ -27,7 +31,7 @@ pub(super) fn wnd_proc_prologue(hwnd: HWND, msg: u32, lparam: LPARAM) -> Option<
                 cy: rect.bottom - rect.top,
             };
             let out = lparam.0 as *mut windows::Win32::Foundation::SIZE;
-            unsafe { *out = wm_getdpiscaledsize_reply(size) };
+            unsafe { *out = size };
             Some(LRESULT(1))
         }
         _ => None,
@@ -93,7 +97,7 @@ pub(super) unsafe extern "system" fn aux_wnd_proc(
             state
                 .borrow_mut()
                 .handler
-                .on_resized(PhysicalSize { width, height });
+                .on_resized(Size::new(width, height));
             LRESULT(0)
         }
         WM_MOUSEMOVE => {
@@ -161,39 +165,8 @@ pub(super) unsafe extern "system" fn aux_wnd_proc(
     }
 }
 
-fn client_point(lparam: LPARAM) -> PhysicalPosition {
+fn client_point(lparam: LPARAM) -> Point<NativeUnit> {
     let x = (lparam.0 & 0xFFFF) as i16 as i32;
     let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
-    PhysicalPosition { x, y }
-}
-
-/// Reports the current window size as the desired size for a WM_GETDPISCALEDSIZE reply,
-/// which makes Windows 11's automatic DPI resize a no-op.
-///
-/// The crate's windows are borderless WS_POPUP with no non-client area, so
-/// GetClientRect == window size. A future window class with a title bar or border must
-/// NOT copy this pattern without adding the non-client delta.
-fn wm_getdpiscaledsize_reply(
-    current: windows::Win32::Foundation::SIZE,
-) -> windows::Win32::Foundation::SIZE {
-    current
-}
-
-#[cfg(test)]
-mod tests {
-    use super::wm_getdpiscaledsize_reply;
-    use windows::Win32::Foundation::SIZE;
-
-    #[test]
-    fn wm_getdpiscaledsize_reply_returns_current_size() {
-        let input = SIZE { cx: 1920, cy: 1080 };
-        let output = wm_getdpiscaledsize_reply(input);
-        assert_eq!(output.cx, 1920);
-        assert_eq!(output.cy, 1080);
-
-        let zero = SIZE { cx: 0, cy: 0 };
-        let out_zero = wm_getdpiscaledsize_reply(zero);
-        assert_eq!(out_zero.cx, 0);
-        assert_eq!(out_zero.cy, 0);
-    }
+    Point::new(x, y)
 }

@@ -15,6 +15,14 @@ pub struct RpcError {
     pub message: String,
 }
 
+impl std::fmt::Display for RpcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RpcError {}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
@@ -40,14 +48,14 @@ impl Response {
     pub fn into_data(self) -> anyhow::Result<serde_json::Value> {
         match self {
             Response::Ok { data } => Ok(data),
-            Response::Error { error } => anyhow::bail!("{}", error.message),
+            Response::Error { error } => Err(error.into()),
         }
     }
 
     pub fn into_unit(self) -> anyhow::Result<()> {
         match self {
             Response::Ok { .. } => Ok(()),
-            Response::Error { error } => anyhow::bail!("{}", error.message),
+            Response::Error { error } => Err(error.into()),
         }
     }
 }
@@ -86,6 +94,14 @@ mod tests {
         let response = Response::error(ErrorCode::ActionFailed, "no focused window");
         let err = response.into_unit().unwrap_err();
         assert_eq!(err.to_string(), "no focused window");
+    }
+
+    #[test]
+    fn into_unit_error_preserves_code_for_downcast() {
+        let response = Response::error(ErrorCode::QueryTimedOut, "query timed out");
+        let err = response.into_unit().unwrap_err();
+        let rpc = err.downcast_ref::<RpcError>().unwrap();
+        assert_eq!(rpc.code, ErrorCode::QueryTimedOut);
     }
 
     #[test]
