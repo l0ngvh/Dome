@@ -174,7 +174,15 @@ mod tests {
     fn temp_socket_path() -> PathBuf {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("dome-ipc-test-{}-{n}.sock", std::process::id()))
+        let pid = std::process::id();
+        #[cfg(unix)]
+        {
+            std::env::temp_dir().join(format!("dome-ipc-test-{pid}-{n}.sock"))
+        }
+        #[cfg(windows)]
+        {
+            PathBuf::from(format!(r"\\.\pipe\dome-ipc-test-{pid}-{n}"))
+        }
     }
 
     fn start_test_server<F>(on_message: F) -> PathBuf
