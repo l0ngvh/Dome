@@ -15,8 +15,7 @@ pub(in crate::platform::windows) enum HubMessage {
     Placements(Vec<PendingPlacement>),
 }
 
-/// The domain's only route to the window side. `Dome` names this instead of `WindowThread`
-/// so the window work can move onto its own thread without the domain learning that it did.
+/// The domain's only route to the window side.
 pub(in crate::platform::windows) trait SceneSender {
     fn send(&mut self, msg: HubMessage);
 }

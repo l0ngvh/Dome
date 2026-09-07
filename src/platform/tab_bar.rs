@@ -5,8 +5,6 @@ use crate::platform::render::Renderer;
 use crate::theme::Flavor;
 
 /// A payload delivered to a tab bar window's handler through `AuxiliaryWindow::deliver`.
-/// `Style` ships theme and font rather than a whole `Config`, the tab bar's only config
-/// dependency.
 pub(crate) enum TabBarMessage {
     Content {
         scale: f32,

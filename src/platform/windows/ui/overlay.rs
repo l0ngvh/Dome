@@ -27,10 +27,8 @@ use crate::platform::windows::dome::CreateOverlay;
 use crate::platform::windows::external::{HwndId, ZOrder};
 use crate::platform::windows::foreground::force_set_foreground;
 
-/// The window-independent half of the DirectComposition surface: the composition device
-/// and this overlay's visual, which wgpu renders into with no HWND. The window-bound half
-/// (a target rooting this visual) is created later by `AuxiliaryWindow::set_content_visual`,
-/// so the renderer and its state can be built before the window exists.
+/// The DirectComposition device and visual that wgpu renders into. Neither needs an HWND,
+/// so the renderer and its overlay state are built before the window exists.
 struct WindowsCompositor {
     dcomp_visual: IDCompositionVisual,
     dcomp_device: IDCompositionDevice,
@@ -236,7 +234,6 @@ impl TilingOverlayApi for TilingOverlay {
     fn clear(&mut self) {
         self.windows.clear();
         self.containers.clear();
-        // Render a transparent frame so the overlay becomes invisible.
         // No region clipping needed: the overlay sits behind managed windows.
         self.rerender();
     }
@@ -625,8 +622,7 @@ impl TabBarOverlay {
         hub_sender: HubSender,
     ) -> anyhow::Result<Box<Self>> {
         let (x_phys, y_phys, w_phys, h_phys) = rect.to_surface_size();
-        // Not focusable, so a tab click never steals foreground. Clicks dispatch as
-        // `HubEvent::TabClicked` rather than raising the window.
+        // Not focusable, so a tab click never steals foreground.
         let attributes = WindowAttributes {
             position: Point::new(x_phys, y_phys),
             size: Size::new(w_phys, h_phys),

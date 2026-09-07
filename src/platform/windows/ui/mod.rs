@@ -13,9 +13,7 @@ use crate::platform::windows::dome::events::{
 use crate::platform::windows::external::ZOrder;
 use crate::platform::windows::handle::ManageZOrder;
 
-/// Owns every Dome-created window and the only code that touches one. It never reaches
-/// the registry, the placement tracker, or the hub, which is what lets it move to its own
-/// thread.
+/// Owns every Dome-created window and the only code that touches one.
 pub(in crate::platform::windows) struct WindowThread {
     config: Config,
     overlay_factory: Box<dyn CreateOverlay>,

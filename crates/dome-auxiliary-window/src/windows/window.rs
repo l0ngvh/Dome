@@ -32,9 +32,7 @@ pub trait AuxiliaryWindowExtWindows {
     fn hwnd(&self) -> HWND;
 
     /// Roots `visual` on this window through a DirectComposition target the window then
-    /// owns. The consumer builds `device` and `visual` without an HWND, so this is the
-    /// window-bound half of surface creation, the analog of macOS `set_content_layer`.
-    /// `target` must be created from `device` for `SetRoot` to accept `visual`.
+    /// owns. `target` must be created from `device` for `SetRoot` to accept `visual`.
     fn set_content_visual(
         &self,
         device: &IDCompositionDevice,

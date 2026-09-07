@@ -113,7 +113,7 @@ pub(super) struct Dome {
     registry: WindowRegistry,
     monitors: MonitorRegistry,
     /// The windows Dome currently has on screen. Owned here rather than per monitor entry
-    /// so it survives a monitor removal, which is what lets a departed monitor's windows hide.
+    /// so it survives a monitor removal.
     displayed_windows: HashSet<WindowId>,
     config: Config,
     taskbar: Rc<dyn ManageTaskbar>,

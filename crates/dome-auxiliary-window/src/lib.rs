@@ -266,8 +266,6 @@ impl AuxiliaryWindow {
         })
     }
 
-    /// Combined rather than split into position and size. Every caller places the
-    /// window at a full rect, and this maps to one native call per platform.
     pub fn set_frame(&self, position: Point<NativeUnit>, size: Size<NativeUnit>) {
         self.inner.set_frame(position, size);
     }

@@ -16,9 +16,8 @@ pub trait AuxiliaryWindowExtMacOs {
     /// Toggles click-through at runtime. `WindowAttributes::click_through` sets the
     /// initial value.
     fn set_click_through(&self, click_through: bool);
-    /// Makes the window key. This is only the `makeKeyAndOrderFront` half. The consumer
-    /// forces app-frontmost separately, because that path needs accessibility the crate
-    /// must not pull in.
+    /// Makes the window key. The consumer forces app-frontmost separately, because that
+    /// path needs accessibility the crate must not pull in.
     fn focus(&self);
 }
 

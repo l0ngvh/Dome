@@ -154,7 +154,6 @@ fn create_wgpu_context() -> anyhow::Result<WgpuContext> {
     ))
 }
 
-/// Main-thread UI state, owned by `WindowLoopHandler`.
 struct UiState {
     scene_rx: mpsc::Receiver<HubMessage>,
     capture_rx: mpsc::Receiver<CaptureMessage>,
