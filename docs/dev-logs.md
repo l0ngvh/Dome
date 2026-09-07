@@ -1,4 +1,5 @@
 # Dev logs
+- Perhaps we can try disable blocking all commands on exclusive fullscreen windows. Those windows behaved erratically when Dome tried to manage them, but it was a bug caused by minimizing those windows immediately on insert. I suspect the worst case scenario that can happen now is that the window will be minimized because focus leaves them, but idk.
 - Terminal in remote box should be managed as windows by Dome. Wezterm does this well, but all its windows are closed on disconnect, and it's hard to have Dome memorize Wezterm windows position.
 - Maintaining those status bars integration seems to be as much work as building a status bar ourselves.
 - TOML is showing its limitation. Modeling $mod1 $mod2 pattern is awkward, platform specific configuration requires putting [macos] and [windows] on almost every key.
@@ -12,7 +13,7 @@
 - Turned out AttachInputThread doesn't grant foreground window privilege if it's called from a background thread. And if it's called from Dome's thread, if the attached thread hangs, Dome is cooked.
 - Somehow CGEventTap can live on a background thread
 - Far far west is somehow not tiled.
-- It turned out some games, like L4D2, actually change the monitor resolution when they go fullscreen. That's why Alt-tabbing from L4D2 zoom everything. We can use this to detect 
+- It turned out some games, like L4D2, actually change the monitor resolution when they go fullscreen. That's why Alt-tabbing from L4D2 zoom everything. We can use this to detect those fullscreen games, to avoid touching them. Those windows don't like being modified.
 - Titanfall 2 crashed my machine.
 - When Zoom goes fullscreen, it lives on a different macOS space, so we can't focus to an empty workspace, since we can't hide zoom in this space. Fortunately we can focus our own window
 - Make overlay non clickthrough is a bad idea. On empty workspace, we can't click on the desktop, and sometimes the overlay got pushed over managed windows... We have to split the tab bar to separated windows.
