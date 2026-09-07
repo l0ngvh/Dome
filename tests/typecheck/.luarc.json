@@ -1,0 +1,12 @@
+{
+  "runtime": {
+    "version": "Lua 5.1"
+  },
+  "diagnostics": {
+    "enable": true,
+    "disable": ["lowercase-global"]
+  },
+  "workspace": {
+    "library": ["../../resources/dome.meta.lua"]
+  }
+}

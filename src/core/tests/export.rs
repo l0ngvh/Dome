@@ -387,7 +387,6 @@ fn export_float_toggled_to_tiling_returns_to_tree() {
 
 #[test]
 fn render_layout_round_trips_master_and_nested_tree() {
-    // A quote and a backslash exercise JSONC string escaping.
     let quoted = WindowMatcher {
         title: Some("a\"b\\c".into()),
         ..Default::default()
@@ -528,7 +527,6 @@ fn render_layout_preserves_comments_and_reconciles_in_place() {
     )
     .unwrap();
 
-    // The file header comment survives the rewrite.
     assert!(rendered.contains("Dome layout. Hand-written comments survive export."));
 
     let nanos = std::time::SystemTime::now()
@@ -541,7 +539,6 @@ fn render_layout_preserves_comments_and_reconciles_in_place() {
     let parsed = LayoutConfig::load(path.to_str().unwrap())
         .expect("rendered layout.jsonc parses through the JSONC loader");
 
-    // Workspace 1 was updated in place, workspace 2 appended.
     let ws1 = parsed
         .workspace
         .iter()
@@ -552,4 +549,44 @@ fn render_layout_preserves_comments_and_reconciles_in_place() {
         _ => panic!("workspace 1 should be master"),
     }
     assert!(parsed.workspace.iter().any(|w| w.name() == "2"));
+}
+
+#[test]
+fn render_layout_adds_schema_reference_when_absent() {
+    let rendered = crate::core::export::render_layout(
+        "",
+        &[(
+            "1".into(),
+            WorkspaceExport {
+                strategy: "master".into(),
+                ..WorkspaceExport::default()
+            },
+        )],
+    )
+    .unwrap();
+
+    let schema = format!(
+        "\"$schema\": \"{}\"",
+        crate::core::export::LAYOUT_SCHEMA_URL
+    );
+    assert!(rendered.contains(&schema), "rendered: {rendered}");
+}
+
+#[test]
+fn render_layout_keeps_a_users_own_schema_reference() {
+    let existing = "{\n  \"$schema\": \"./my-schema.json\",\n  \"workspace\": []\n}\n";
+    let rendered = crate::core::export::render_layout(
+        existing,
+        &[(
+            "1".into(),
+            WorkspaceExport {
+                strategy: "master".into(),
+                ..WorkspaceExport::default()
+            },
+        )],
+    )
+    .unwrap();
+
+    assert!(rendered.contains("\"$schema\": \"./my-schema.json\""));
+    assert!(!rendered.contains(crate::core::export::LAYOUT_SCHEMA_URL));
 }

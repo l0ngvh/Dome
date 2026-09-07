@@ -132,18 +132,9 @@ enum CliQuery {
 
 #[derive(Subcommand, Debug)]
 enum CliGenerate {
-    Yasb {
-        /// YASB config.yaml to edit. Defaults to the YASB config location.
-        #[arg(long)]
-        config: Option<String>,
-    },
+    Yasb,
     Sketchybar,
-    Zebar {
-        /// Directory to scaffold the widget pack into. Defaults to the Zebar
-        /// pack location.
-        #[arg(long)]
-        out: Option<String>,
-    },
+    Zebar,
 }
 
 #[derive(Debug)]
@@ -299,14 +290,14 @@ pub fn run() -> anyhow::Result<()> {
         Dispatch::Export => {
             crate::DomeClient.export_layout()?;
         }
-        Dispatch::Generate(CliGenerate::Yasb { config }) => {
-            crate::integrations::yasb::generate(config.as_deref())?;
+        Dispatch::Generate(CliGenerate::Yasb) => {
+            crate::integrations::yasb::generate()?;
         }
         Dispatch::Generate(CliGenerate::Sketchybar) => {
             crate::integrations::sketchybar::generate()?;
         }
-        Dispatch::Generate(CliGenerate::Zebar { out }) => {
-            crate::integrations::zebar::generate(out.as_deref())?;
+        Dispatch::Generate(CliGenerate::Zebar) => {
+            crate::integrations::zebar::generate()?;
         }
     }
     Ok(())
@@ -504,8 +495,8 @@ mod tests {
     fn cli_generate_yasb() {
         let d = dispatch_from_argv(&["dome", "generate", "yasb"]);
         match d {
-            Dispatch::Generate(CliGenerate::Yasb { config: None }) => {}
-            other => panic!("expected Generate(Yasb) with no config, got {other:?}"),
+            Dispatch::Generate(CliGenerate::Yasb) => {}
+            other => panic!("expected Generate(Yasb), got {other:?}"),
         }
     }
 
@@ -522,17 +513,8 @@ mod tests {
     fn cli_generate_zebar() {
         let d = dispatch_from_argv(&["dome", "generate", "zebar"]);
         match d {
-            Dispatch::Generate(CliGenerate::Zebar { out: None }) => {}
-            other => panic!("expected Generate(Zebar) with no out, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn cli_generate_zebar_with_out() {
-        let d = dispatch_from_argv(&["dome", "generate", "zebar", "--out", "/tmp/pack"]);
-        match d {
-            Dispatch::Generate(CliGenerate::Zebar { out: Some(ref p) }) if p == "/tmp/pack" => {}
-            other => panic!("expected Generate(Zebar) with out, got {other:?}"),
+            Dispatch::Generate(CliGenerate::Zebar) => {}
+            other => panic!("expected Generate(Zebar), got {other:?}"),
         }
     }
 

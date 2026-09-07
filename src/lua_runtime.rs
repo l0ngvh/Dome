@@ -1,12 +1,6 @@
-//! The `dome-lua` runtime thread. It owns the one persistent Luau VM and every
-//! value that is not `Send`: the VM itself and the registered callback
-//! functions. It talks to the rest of Dome only over plain-data channels, so
-//! this module carries no platform type.
-//!
-//! A keybinding bound to a Lua function must stay callable after the load that
-//! created it, so the VM that owns the function must outlive the load. This is
-//! why config load and reload run here rather than on a fresh drop-after-load
-//! VM.
+//! The `dome-lua` thread owns the persistent Luau VM and the registered
+//! callbacks, none of which are `Send`. The VM outlives each load so a
+//! function-valued binding stays callable after the load that created it.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -23,19 +17,11 @@ use crate::config::{
     CallbackId, Config, DEFAULT_LUA, Modifiers, load_config_into, load_default_config_into,
 };
 
-/// A message the runtime thread emits back to the platform. The platform's
-/// `out` closure translates each variant into a hub event or a `KeymapState`
-/// write. Only plain data crosses this boundary.
 pub(crate) enum RuntimeOut {
     Actions(Actions),
-    /// Mode state lives in `KeymapState`, not the hub, so a mode switch cannot
-    /// ride the action path.
-    SwitchMode(String),
-    /// A reload produced a new config for the platform to apply.
     Reloaded(Box<Config>),
 }
 
-/// A message the platform sends into the runtime thread.
 pub(crate) enum RuntimeMsg {
     RunCallback(CallbackId),
     Reload,
@@ -45,8 +31,24 @@ pub(crate) enum RuntimeMsg {
 const MODIFIER_ADD_ERROR: &str = "a modifier joins only with another modifier or a key string";
 const REVOKED_ERROR: &str = "this action handle is not valid outside its handler";
 
-/// A modifier set exposed to Luau as a userdata constant. The `+` operator
-/// unions two modifiers or attaches a key to produce a chord string.
+// A setter captures its modifier in a closure, so no state lives on `dome` and
+// it stays a plain frozen table.
+const INSTALL_DEFAULTS: &str = r#"return function(build, dome)
+	dome.defaults = function()
+		return build()
+	end
+	dome.with_default_modifier = function(modifier)
+		if modifier ~= Meta and modifier ~= Alt then
+			error("dome.with_default_modifier accepts only Meta or Alt", 2)
+		end
+		return {
+			defaults = function()
+				return build(modifier)
+			end,
+		}
+	end
+end"#;
+
 #[derive(Clone, Copy)]
 struct Modifier(Modifiers);
 
@@ -68,11 +70,16 @@ impl mlua::UserData for Modifier {
                 _ => Err(mlua::Error::runtime(MODIFIER_ADD_ERROR)),
             },
         );
+        methods.add_meta_method(mlua::MetaMethod::Eq, |_, this, other: mlua::Value| {
+            let equal = other
+                .as_userdata()
+                .and_then(|ud| ud.borrow::<Modifier>().ok().map(|o| o.0 == this.0))
+                .unwrap_or(false);
+            Ok(equal)
+        });
     }
 }
 
-/// Build a chord string that `Keymap::from_str` accepts. `from_str` is
-/// order-independent, so this order is only for a stable, readable result.
 fn chord_string(mods: Modifiers, key: &str) -> String {
     let mut chord = String::new();
     for (bit, token) in [
@@ -90,8 +97,6 @@ fn chord_string(mods: Modifiers, key: &str) -> String {
     chord
 }
 
-/// Build the persistent VM with the frozen read-only surface installed once. The
-/// surface persists across reloads because the same VM evaluates each reload.
 pub(crate) fn build_vm() -> mlua::Result<mlua::Lua> {
     let lua = mlua::Lua::new();
     let globals = lua.globals();
@@ -109,14 +114,14 @@ pub(crate) fn build_vm() -> mlua::Result<mlua::Lua> {
         "executable",
         lua.create_function(|_, name: String| Ok(which::which(name).is_ok()))?,
     )?;
-    dome.set(
-        "defaults",
-        lua.create_function(|lua, ()| {
-            lua.load(DEFAULT_LUA)
-                .set_name("dome.defaults")
-                .eval::<mlua::Table>()
-        })?,
-    )?;
+
+    let build: mlua::Function = lua.load(DEFAULT_LUA).set_name("default.lua").eval()?;
+    let install: mlua::Function = lua
+        .load(INSTALL_DEFAULTS)
+        .set_name("dome.defaults")
+        .eval()?;
+    install.call::<()>((build, dome.clone()))?;
+
     let table_lib: mlua::Table = globals.get("table")?;
     let freeze: mlua::Function = table_lib.get("freeze")?;
     let dome: mlua::Table = freeze.call(dome)?;
@@ -132,8 +137,8 @@ pub(crate) fn build_vm() -> mlua::Result<mlua::Lua> {
     globals.set("Opt", Modifier(Modifiers::ALT))?;
     globals.set("Control", Modifier(Modifiers::CTRL))?;
 
-    // Sandbox after the surface is installed, so the constants and `dome` are
-    // base globals the sandbox protects from in-place mutation.
+    // Sandbox after installing the surface, so its globals are protected from
+    // in-place mutation.
     lua.sandbox(true)?;
     Ok(lua)
 }
@@ -159,7 +164,6 @@ fn monitor_target(s: &str) -> MonitorTarget {
     }
 }
 
-/// A no-argument accessor that emits one fixed `Action`.
 fn action_fn(
     lua: &mlua::Lua,
     cell: &LiveCell,
@@ -176,8 +180,6 @@ fn action_fn(
     })
 }
 
-/// A one-string-argument accessor. The `make` closure decides whether the
-/// argument becomes an action or a mode switch.
 fn action_fn_str(
     lua: &mlua::Lua,
     cell: &LiveCell,
@@ -193,9 +195,8 @@ fn action_fn_str(
     })
 }
 
-/// Build the mutating action capability passed to a handler as its `actions`
-/// argument. Each accessor is gated by `cell` and errors once the handler
-/// returns, so a stashed handle cannot drive the hub later (R10).
+/// Accessors are gated by `cell` and error once the handler returns, so a
+/// stashed handle cannot drive the hub later (R10).
 fn build_capability(lua: &mlua::Lua, cell: LiveCell, sink: Sink) -> mlua::Result<mlua::Table> {
     let actions = lua.create_table()?;
 
@@ -389,16 +390,14 @@ fn build_capability(lua: &mlua::Lua, cell: LiveCell, sink: Sink) -> mlua::Result
     actions.set("exit", action_fn(lua, &cell, &sink, || Action::Exit)?)?;
     actions.set(
         "mode",
-        action_fn_str(lua, &cell, &sink, RuntimeOut::SwitchMode)?,
+        action_fn_str(lua, &cell, &sink, |name| {
+            RuntimeOut::Actions(Actions::new(vec![Action::Mode { name }]))
+        })?,
     )?;
 
     Ok(actions)
 }
 
-/// Spawn the runtime thread. It builds the VM, does the initial load on the new
-/// thread, and returns the initial `Config` before entering the message loop.
-/// The only error is a failure to spawn the thread itself. A bad or missing
-/// config file yields the bundled default config, matching the startup fallback.
 pub(crate) fn spawn(
     config_path: String,
     out: Box<dyn Fn(RuntimeOut) + Send>,
@@ -459,7 +458,7 @@ fn run_callback(
     out: &dyn Fn(RuntimeOut),
 ) {
     // A reload can rebuild the registry while a keypress for an old id is still
-    // in flight, so a stale id is expected rather than a bug.
+    // in flight, so a miss is expected rather than a bug.
     let Some(func) = callbacks.get(id.0) else {
         tracing::warn!(id = id.0, "Callback id out of range, dropping");
         return;
@@ -596,7 +595,7 @@ mod tests {
         assert!(matches!(&out[4], RuntimeOut::Actions(a) if a.to_string() == "[master grow]"));
         assert!(matches!(&out[5], RuntimeOut::Actions(a) if a.to_string() == "[exec wt]"));
         assert!(matches!(&out[6], RuntimeOut::Actions(a) if a.to_string() == "[close]"));
-        assert!(matches!(&out[7], RuntimeOut::SwitchMode(name) if name == "resize"));
+        assert!(matches!(&out[7], RuntimeOut::Actions(a) if a.to_string() == "[mode resize]"));
     }
 
     #[test]
@@ -621,7 +620,40 @@ mod tests {
         let os: String = lua.load("return dome.os").eval().unwrap();
         assert!(os == "macos" || os == "windows");
         assert!(lua.load(r#"dome.os = "x""#).exec().is_err());
+        assert!(lua.load("dome.defaults = 1").exec().is_err());
         assert!(lua.load("dome.new_field = 1").exec().is_err());
+    }
+
+    #[test]
+    fn dome_with_default_modifier_rebuilds_the_keymap() {
+        let lua = build_vm().unwrap();
+        let default_has_alt: bool = lua
+            .load(r#"return dome.defaults().keymaps.main["alt+h"] ~= nil"#)
+            .eval()
+            .unwrap();
+        assert!(default_has_alt);
+        let rebuilt: bool = lua
+            .load(
+                r#"local m = dome.with_default_modifier(Meta).defaults().keymaps.main
+return m["meta+h"] ~= nil and m["alt+h"] == nil and m["meta+ctrl+h"] ~= nil"#,
+            )
+            .eval()
+            .unwrap();
+        assert!(rebuilt);
+    }
+
+    #[test]
+    fn with_default_modifier_accepts_only_meta_or_alt() {
+        let lua = build_vm().unwrap();
+        assert!(lua.load("dome.with_default_modifier(Meta)").exec().is_ok());
+        assert!(lua.load("dome.with_default_modifier(Alt)").exec().is_ok());
+        assert!(lua.load("dome.with_default_modifier(Cmd)").exec().is_ok());
+        assert!(lua.load("dome.with_default_modifier(Ctrl)").exec().is_err());
+        assert!(
+            lua.load("dome.with_default_modifier(Meta + Ctrl)")
+                .exec()
+                .is_err()
+        );
     }
 
     #[test]
@@ -648,7 +680,7 @@ mod tests {
         let lua = build_vm().unwrap();
         let good = write_temp(
             "good",
-            "return { keymaps = { ['meta+c'] = function() end } }",
+            "return { keymaps = { main = { ['meta+c'] = function() end } } }",
         );
         let mut callbacks = Vec::new();
         load_config_into(&lua, &path_str(&good), &mut callbacks).unwrap();
@@ -664,8 +696,8 @@ mod tests {
         let lua = build_vm().unwrap();
         let mut callbacks = Vec::new();
         let config = load_default_config_into(&lua, &mut callbacks).unwrap();
-        assert_eq!(config.keymaps.default.len(), 44);
-        assert!(callbacks.is_empty());
+        assert_eq!(config.keymaps.modes["main"].len(), 44);
+        assert_eq!(callbacks.len(), 44);
     }
 
     #[test]
@@ -674,9 +706,9 @@ mod tests {
         let leaked: bool = lua
             .load(
                 r#"local a = dome.defaults()
-a.keymaps["meta+x"] = "close"
+a.keymaps.main["meta+x"] = function() end
 local b = dome.defaults()
-return b.keymaps["meta+x"] ~= nil"#,
+return b.keymaps.main["meta+x"] ~= nil"#,
             )
             .eval()
             .unwrap();

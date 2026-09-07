@@ -1,0 +1,153 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/l0ngvh/Dome/main/resources/layout.schema.json",
+  "title": "Dome preferred layout",
+  "description": "Schema for Dome's preferred layout file (layout.jsonc).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "workspace": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/workspace" }
+    }
+  },
+  "definitions": {
+    "workspace": {
+      "oneOf": [
+        { "$ref": "#/definitions/partitionTreeWorkspace" },
+        { "$ref": "#/definitions/masterWorkspace" }
+      ]
+    },
+    "partitionTreeWorkspace": {
+      "type": "object",
+      "required": ["name", "strategy"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The workspace this layout applies to."
+        },
+        "strategy": { "const": "partition_tree" },
+        "tree": {
+          "$ref": "#/definitions/treeNode",
+          "description": "The container tree Dome builds as windows appear."
+        },
+        "float": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/matcher" },
+          "description": "Windows that float on insert."
+        },
+        "fullscreen": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/matcher" },
+          "description": "Windows that fullscreen on insert."
+        }
+      }
+    },
+    "masterWorkspace": {
+      "type": "object",
+      "required": ["name", "strategy"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The workspace this layout applies to."
+        },
+        "strategy": { "const": "master" },
+        "master_ratio": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 0.9,
+          "description": "Fraction of the monitor width the master pane takes."
+        },
+        "master_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many windows fill the master pane before the rest overflow to the secondary pane."
+        },
+        "master": {
+          "$ref": "#/definitions/pane",
+          "description": "Windows placed in the master pane, in order."
+        },
+        "secondary": {
+          "$ref": "#/definitions/pane",
+          "description": "Windows placed in the secondary pane, in order."
+        },
+        "float": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/matcher" },
+          "description": "Windows that float on insert."
+        },
+        "fullscreen": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/matcher" },
+          "description": "Windows that fullscreen on insert."
+        }
+      }
+    },
+    "matcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A window match rule. Wrap a value in /.../ to match it as a regular expression.",
+      "properties": {
+        "app": { "type": "string" },
+        "bundle_id": { "type": "string" },
+        "title": { "type": "string" },
+        "process": { "type": "string" },
+        "class": { "type": "string" },
+        "aumid": { "type": "string" }
+      }
+    },
+    "treeNode": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": { "$ref": "#/definitions/treeNode" },
+          "description": "An array lets Dome choose the split direction."
+        },
+        {
+          "type": "object",
+          "required": ["children"],
+          "additionalProperties": false,
+          "properties": {
+            "split": {
+              "enum": ["horizontal", "vertical", "tabbed"],
+              "description": "How the container arranges its children."
+            },
+            "children": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/treeNode" }
+            }
+          }
+        },
+        { "$ref": "#/definitions/matcher" }
+      ]
+    },
+    "pane": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": { "$ref": "#/definitions/matcher" },
+          "description": "An array of matchers fills the pane tiled."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "display": {
+              "enum": ["tiled", "tabbed"],
+              "description": "How the pane shows its windows."
+            },
+            "children": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/matcher" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

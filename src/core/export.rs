@@ -10,6 +10,10 @@ use super::{Hub, WindowId};
 use crate::config::{PaneConfig, SplitMode, TreeLayoutNode, WindowMatcher};
 use crate::core::PaneDisplay;
 
+// The exported file references this so an editor can validate and complete it.
+pub(super) const LAYOUT_SCHEMA_URL: &str =
+    "https://raw.githubusercontent.com/l0ngvh/Dome/main/resources/layout.schema.json";
+
 fn matcher_to_cst(matcher: &WindowMatcher) -> CstInputValue {
     let mut fields: Vec<(String, CstInputValue)> = Vec::new();
     let mut push = |key: &str, value: &Option<String>| {
@@ -34,9 +38,6 @@ fn push_matcher_list(fields: &mut Vec<(String, CstInputValue)>, key: &str, list:
     fields.push((key.to_string(), CstInputValue::Array(matchers)));
 }
 
-/// A tiled pane exports as a plain matcher array. A tabbed pane exports as
-/// `{ display: "tabbed", children: [...] }`, the object shape `PaneConfig`
-/// reads back. An empty pane exports nothing.
 fn push_pane(fields: &mut Vec<(String, CstInputValue)>, key: &str, pane: &PaneConfig) {
     if pane.children.is_empty() {
         return;
@@ -52,8 +53,7 @@ fn push_pane(fields: &mut Vec<(String, CstInputValue)>, key: &str, pane: &PaneCo
     fields.push((key.to_string(), value));
 }
 
-/// Work-stack frame for `tree_to_cst`, which builds the tree bottom-up without
-/// recursion per the no-recursion rule.
+/// Builds the tree bottom-up on a work stack, without recursion.
 enum TreeFrame<'a> {
     Enter(&'a TreeLayoutNode),
     ExitContainer {
@@ -142,11 +142,8 @@ fn object_name(obj: &CstObject) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Reconciles live workspaces into the existing `layout.jsonc` text, preserving
-/// comments and formatting. Matches each workspace to a document entry by name,
-/// updates it in place, appends a new one, and drops entries no longer live. A
-/// missing or empty file starts from an empty object. The root node stays alive
-/// until `to_string`, because dropping it early can panic.
+/// The root CST node must stay alive until `to_string`, or dropping it early
+/// can panic.
 pub(super) fn render_layout(
     existing: &str,
     workspaces: &[(String, WorkspaceExport)],
@@ -159,6 +156,14 @@ pub(super) fn render_layout(
     let root =
         CstRootNode::parse(source, &ParseOptions::default()).map_err(|e| anyhow::anyhow!("{e}"))?;
     let root_obj = root.object_value_or_set();
+    // Point editors at the schema, but leave a user's own $schema in place.
+    if root_obj.get("$schema").is_none() {
+        root_obj.insert(
+            0,
+            "$schema",
+            CstInputValue::String(LAYOUT_SCHEMA_URL.to_string()),
+        );
+    }
     let ws_arr = root_obj.array_value_or_set("workspace");
 
     let live: Vec<(String, CstInputValue)> = workspaces

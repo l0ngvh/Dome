@@ -5,9 +5,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use crate::action::{Action, Actions};
 use crate::core::{Length, Logical, PaneDisplay, Pixels, Unit};
-use crate::font::{FontConfig, MAX_FONT_SIZE, MIN_FONT_SIZE, default_text_size};
+use crate::font::{FontConfig, MAX_FONT_SIZE, MIN_FONT_SIZE, default_font_size};
 use crate::theme::Flavor;
 use mlua::LuaSerdeExt;
 
@@ -19,7 +18,7 @@ pub(crate) struct Config {
     pub(crate) border_size: Pixels<Logical>,
     #[serde(default)]
     pub(crate) theme: Flavor,
-    #[serde(default)]
+    #[serde(flatten, default)]
     pub(crate) font: FontConfig,
     #[serde(default)]
     pub(crate) ignore: Vec<WindowMatcher>,
@@ -190,7 +189,6 @@ impl FromStr for Keymap {
         let mut modifiers = Modifiers::empty();
         for m in &parts[..parts.len() - 1] {
             modifiers |= match *m {
-                // cmd and win name the meta key on their platforms, so a config need not branch on the OS.
                 "meta" | "cmd" | "win" => Modifiers::META,
                 "shift" => Modifiers::SHIFT,
                 "alt" => Modifiers::ALT,
@@ -205,19 +203,11 @@ impl FromStr for Keymap {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct CallbackId(pub usize);
 
-/// A resolved keymap value. A static action list resolves on the event-tap
-/// thread. A callback is a Lua function held on the `dome-lua` thread and
-/// referenced here only by id.
-#[derive(Debug, Clone)]
-pub(crate) enum Binding {
-    Static(Actions),
-    Callback(CallbackId),
-}
+pub(crate) const BASE_MODE: &str = "main";
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ModalKeymaps {
-    pub(crate) default: HashMap<Keymap, Binding>,
-    pub(crate) modes: HashMap<String, HashMap<Keymap, Binding>>,
+    pub(crate) modes: HashMap<String, HashMap<Keymap, CallbackId>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -250,9 +240,8 @@ pub(crate) fn default_partition_tree_config() -> PartitionTreeConfig {
     }
 }
 
-/// Global `master_ratio` and `master_count` seed new workspaces on their first
-/// `attach_window`. They do NOT flow into existing workspaces on hot-reload.
-/// Runtime tuning via `master grow/shrink/more/fewer` persists across reloads.
+/// Seed new workspaces only. A reload does not push these into existing
+/// workspaces, and runtime tuning persists.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub(crate) struct MasterConfig {
     #[serde(default = "default_master_ratio")]
@@ -501,9 +490,6 @@ impl LayoutConfig {
     }
 }
 
-/// One master-strategy pane in `layout.jsonc`. An array of matchers is a tiled
-/// pane. An object `{ display, children }` sets the display explicitly, so
-/// `{ "display": "tabbed", "children": [...] }` stacks the pane into tabs.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct PaneConfig {
     pub(crate) display: PaneDisplay,
@@ -610,15 +596,10 @@ impl LayoutWorkspaceConfig {
     }
 }
 
-/// A node in the preferred tree layout for partition-tree workspaces. The
-/// custom deserializer accepts three shapes: a leaf window matcher, an array of
-/// children, or a `{ split, children }` container.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum TreeLayoutNode {
     Leaf(WindowMatcher),
     Container {
-        /// `None` leaves the split mode to the runtime, which picks one based
-        /// on context when it materializes the tree.
         split: Option<SplitMode>,
         children: Vec<TreeLayoutNode>,
     },
@@ -695,14 +676,6 @@ pub(crate) enum SplitMode {
     Tabbed,
 }
 
-fn parse_actions(action_strs: &[String]) -> Result<Actions> {
-    let actions: Vec<Action> = action_strs
-        .iter()
-        .map(|s| s.parse())
-        .collect::<Result<_>>()?;
-    Ok(Actions::new(actions))
-}
-
 fn field_path(prefix: &str, key: &str) -> String {
     if prefix.is_empty() {
         key.to_string()
@@ -711,9 +684,6 @@ fn field_path(prefix: &str, key: &str) -> String {
     }
 }
 
-// Clamp out-of-range tuning values per field, keeping the rest. A wrong type or
-// a negative or fractional pixel fails deserialization earlier and hits the
-// whole-file fallback in load_or_default instead.
 fn normalize_config(config: &mut Config) {
     if config.partition_tree.tab_bar_height <= Pixels::ZERO {
         tracing::warn!(
@@ -739,26 +709,28 @@ fn normalize_config(config: &mut Config) {
         );
         config.master.master_count = default_master_count();
     }
-    if !(MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&config.font.text_size) {
+    if !(MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&config.font.size) {
         tracing::warn!(
-            field = "font.text_size",
-            value = config.font.text_size,
+            field = "font_size",
+            value = config.font.size,
             "Out of range, using default",
         );
-        config.font.text_size = default_text_size();
+        config.font.size = default_font_size();
     }
     if let Some(family) = &config.font.family
         && family.trim().is_empty()
     {
-        tracing::warn!(field = "font.family", "Blank font family, using default",);
+        tracing::warn!(field = "font_family", "Blank font family, using default",);
         config.font.family = None;
     }
 }
 
-// The bundled default config. `dome.defaults()` re-evaluates this source to
-// return a fresh table, and the R8 fallback deserializes it. It must not call
-// `dome.defaults()`, which would re-enter its own evaluation and not terminate.
 pub(crate) const DEFAULT_LUA: &str = include_str!("../resources/default.lua");
+
+const STARTER_LUA: &str = include_str!("../resources/config.starter.lua");
+
+const META_LUA: &str = include_str!("../resources/dome.meta.lua");
+const LUARC_JSON: &str = include_str!("../resources/config.luarc.json");
 
 #[cfg(target_os = "macos")]
 const BUNDLED_IGNORE: &str = include_str!("../resources/ignore/macos.lua");
@@ -766,8 +738,6 @@ const BUNDLED_IGNORE: &str = include_str!("../resources/ignore/macos.lua");
 #[cfg(target_os = "windows")]
 const BUNDLED_IGNORE: &str = include_str!("../resources/ignore/windows.lua");
 
-// The rules ship as bundled Lua data, so a parse or type failure here is a
-// build defect in the bundled file rather than a user error.
 fn default_ignore() -> Vec<WindowMatcher> {
     let lua = mlua::Lua::new();
     let value: mlua::Value = lua
@@ -796,52 +766,40 @@ fn walk_lua_keymaps(
         }
     };
 
-    // `mode` is pulled aside so it does not parse as a top-level binding.
-    let mode_value = keymaps_table.get::<mlua::Value>("mode")?;
-    keymaps_table.set("mode", mlua::Value::Nil)?;
-
-    let default = walk_lua_bindings(&keymaps_table, "keymaps", registry)?;
-
     let mut modes = HashMap::new();
-    match mode_value {
-        mlua::Value::Table(mode_map) => {
-            for pair in mode_map.pairs::<String, mlua::Value>() {
-                let (mode_name, mode_val) = pair?;
-                if mode_name == "default" {
-                    tracing::warn!(
-                        field = %format!("keymaps.mode.{mode_name}"),
-                        "Reserved mode name, dropping",
-                    );
-                    continue;
-                }
-                if mode_name.is_empty() {
-                    tracing::warn!(field = "keymaps.mode.", "Empty mode name, dropping",);
-                    continue;
-                }
-                let mlua::Value::Table(bindings) = mode_val else {
-                    tracing::warn!(
-                        field = %format!("keymaps.mode.{mode_name}"),
-                        "Expected table for mode, dropping",
-                    );
-                    continue;
-                };
-                let prefix = format!("keymaps.mode.{mode_name}");
-                let mode_bindings = walk_lua_bindings(&bindings, &prefix, registry)?;
-                modes.insert(mode_name, mode_bindings);
-            }
+    for pair in keymaps_table.pairs::<String, mlua::Value>() {
+        let (mode_name, mode_val) = pair?;
+        if mode_name.is_empty() {
+            tracing::warn!(field = "keymaps.", "Empty mode name, dropping");
+            continue;
         }
-        mlua::Value::Nil => {}
-        _ => tracing::warn!(field = "keymaps.mode", "Expected table, ignoring",),
+        let mlua::Value::Table(bindings) = mode_val else {
+            tracing::warn!(
+                field = %format!("keymaps.{mode_name}"),
+                "Expected a table of bindings for the mode, dropping",
+            );
+            continue;
+        };
+        let prefix = format!("keymaps.{mode_name}");
+        let mode_bindings = walk_lua_bindings(&bindings, &prefix, registry)?;
+        modes.insert(mode_name, mode_bindings);
     }
 
-    Ok(ModalKeymaps { default, modes })
+    if !modes.is_empty() && !modes.contains_key(BASE_MODE) {
+        tracing::warn!(
+            base_mode = BASE_MODE,
+            "Keymaps define no base mode, startup keypresses will not resolve"
+        );
+    }
+
+    Ok(ModalKeymaps { modes })
 }
 
 fn walk_lua_bindings(
     table: &mlua::Table,
     prefix: &str,
     registry: &mut Vec<mlua::Function>,
-) -> mlua::Result<HashMap<Keymap, Binding>> {
+) -> mlua::Result<HashMap<Keymap, CallbackId>> {
     let mut result = HashMap::new();
     for pair in table.pairs::<String, mlua::Value>() {
         let (key_str, value) = pair?;
@@ -853,48 +811,22 @@ fn walk_lua_bindings(
                 continue;
             }
         };
-        let binding = match value {
-            mlua::Value::String(s) => match parse_actions(&[s.to_str()?.to_string()]) {
-                Ok(actions) => Binding::Static(actions),
-                Err(e) => {
-                    tracing::warn!(field = %field, error = %e, "Invalid action, dropping binding");
-                    continue;
-                }
-            },
-            mlua::Value::Table(list) => {
-                let action_strs = match list
-                    .sequence_values::<String>()
-                    .collect::<mlua::Result<Vec<_>>>()
-                {
-                    Ok(v) => v,
-                    Err(e) => {
-                        tracing::warn!(field = %field, error = %e, "Invalid actions value, dropping");
-                        continue;
-                    }
-                };
-                match parse_actions(&action_strs) {
-                    Ok(actions) => Binding::Static(actions),
-                    Err(e) => {
-                        tracing::warn!(field = %field, error = %e, "Invalid action, dropping binding");
-                        continue;
-                    }
-                }
-            }
+        let id = match value {
             mlua::Value::Function(f) => {
                 let id = CallbackId(registry.len());
                 registry.push(f);
-                Binding::Callback(id)
+                id
             }
             other => {
                 tracing::warn!(
                     field = %field,
-                    error = %format!("expected string, list, or function, got {}", other.type_name()),
-                    "Invalid actions value, dropping",
+                    error = %format!("expected a function, got {}", other.type_name()),
+                    "Invalid binding, dropping",
                 );
                 continue;
             }
         };
-        result.insert(keymap, binding);
+        result.insert(keymap, id);
     }
     Ok(result)
 }
@@ -911,13 +843,11 @@ fn config_from_lua(
         .ok_or_else(|| mlua::Error::runtime("config must return a table"))?
         .clone();
     let keymaps = walk_lua_keymaps(&table, registry)?;
-    // Drop keymaps before serde. A binding value may be a function, which does
-    // not deserialize. Keymaps are walked by hand above instead.
+    // A binding value may be a function, which serde cannot deserialize.
     table.set("keymaps", mlua::Value::Nil)?;
     let mut config: Config = lua.from_value(mlua::Value::Table(table))?;
     config.keymaps = keymaps;
     let floor = default_ignore();
-    // R19: the floor applies to every config, so surface it at load.
     tracing::info!(count = floor.len(), "Applying built-in window-ignore floor");
     tracing::debug!(rules = ?floor, "Built-in window-ignore floor");
     config.ignore.extend(floor);
@@ -940,8 +870,8 @@ pub(crate) fn load_default_config_into(
     lua: &mlua::Lua,
     registry: &mut Vec<mlua::Function>,
 ) -> anyhow::Result<Config> {
-    let config =
-        config_from_lua(lua, "default.lua", DEFAULT_LUA, registry).map_err(|e| anyhow!("{e}"))?;
+    let config = config_from_lua(lua, "default.lua", "return dome.defaults()", registry)
+        .map_err(|e| anyhow!("{e}"))?;
     config.validate_layout()?;
     Ok(config)
 }
@@ -971,6 +901,62 @@ pub(crate) fn layout_default_path(config_path: &Path) -> PathBuf {
         .parent()
         .expect("config path must have a parent directory")
         .join("layout.jsonc")
+}
+
+// An explicit `-c <path>` is used as given, even when it is missing. Only the
+// default path is bootstrapped.
+pub(crate) fn resolve_config_path(explicit: Option<String>) -> String {
+    match explicit {
+        Some(path) => path,
+        None => {
+            let path = Config::default_path();
+            bootstrap_config(&path);
+            write_editor_support(&path);
+            path
+        }
+    }
+}
+
+// A write failure leaves Dome on the bundled default, so warn rather than abort.
+fn bootstrap_config(path: &str) {
+    let path = Path::new(path);
+    if path.exists() {
+        return;
+    }
+    if let Some(dir) = path.parent()
+        && let Err(e) = std::fs::create_dir_all(dir)
+    {
+        tracing::warn!(path = %path.display(), error = %e, "Could not create config directory, using bundled defaults");
+        return;
+    }
+    match std::fs::write(path, STARTER_LUA) {
+        Ok(()) => tracing::info!(path = %path.display(), "Wrote starter config on first launch"),
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "Could not write starter config, using bundled defaults");
+        }
+    }
+}
+
+// dome.meta.lua is rewritten every launch to track the version. A user-edited
+// .luarc.json is left in place.
+fn write_editor_support(config_path: &str) {
+    let Some(dir) = Path::new(config_path).parent() else {
+        return;
+    };
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        tracing::warn!(dir = %dir.display(), error = %e, "Could not create config directory for editor support");
+        return;
+    }
+    let meta = dir.join("dome.meta.lua");
+    if let Err(e) = std::fs::write(&meta, META_LUA) {
+        tracing::warn!(path = %meta.display(), error = %e, "Could not write dome.meta.lua");
+    }
+    let luarc = dir.join(".luarc.json");
+    if !luarc.exists()
+        && let Err(e) = std::fs::write(&luarc, LUARC_JSON)
+    {
+        tracing::warn!(path = %luarc.display(), error = %e, "Could not write .luarc.json");
+    }
 }
 
 pub(crate) fn start_file_watcher(
@@ -1072,6 +1058,85 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("dome_{tag}_{nanos}.jsonc"))
+    }
+
+    struct CleanupDir(std::path::PathBuf);
+    impl Drop for CleanupDir {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
+    }
+
+    fn temp_config_dir(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("dome_{tag}_{nanos}"))
+    }
+
+    #[test]
+    fn bootstrap_writes_starter_config_when_missing() {
+        let dir = temp_config_dir("bootstrap_missing");
+        let _cleanup = CleanupDir(dir.clone());
+        let path = dir.join("config.lua");
+
+        bootstrap_config(path.to_str().unwrap());
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), STARTER_LUA);
+    }
+
+    #[test]
+    fn bootstrap_leaves_an_existing_config_untouched() {
+        let dir = temp_config_dir("bootstrap_existing");
+        let _cleanup = CleanupDir(dir.clone());
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.lua");
+        std::fs::write(&path, "return {}\n").unwrap();
+
+        bootstrap_config(path.to_str().unwrap());
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "return {}\n");
+    }
+
+    #[test]
+    fn editor_support_writes_the_meta_and_luarc() {
+        let dir = temp_config_dir("editor_support");
+        let _cleanup = CleanupDir(dir.clone());
+        let config = dir.join("config.lua");
+
+        write_editor_support(config.to_str().unwrap());
+
+        assert_eq!(
+            std::fs::read_to_string(dir.join("dome.meta.lua")).unwrap(),
+            META_LUA
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".luarc.json")).unwrap(),
+            LUARC_JSON
+        );
+    }
+
+    #[test]
+    fn editor_support_refreshes_the_meta_but_keeps_the_luarc() {
+        let dir = temp_config_dir("editor_support_refresh");
+        let _cleanup = CleanupDir(dir.clone());
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("config.lua");
+        std::fs::write(dir.join("dome.meta.lua"), "-- stale\n").unwrap();
+        let customized = "{ \"custom\": true }\n";
+        std::fs::write(dir.join(".luarc.json"), customized).unwrap();
+
+        write_editor_support(config.to_str().unwrap());
+
+        assert_eq!(
+            std::fs::read_to_string(dir.join("dome.meta.lua")).unwrap(),
+            META_LUA
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".luarc.json")).unwrap(),
+            customized
+        );
     }
 
     #[test]
@@ -1249,8 +1314,8 @@ mod tests {
 
     #[test]
     fn font_deserializes_via_config() {
-        let config = config_from("return { font = { text_size = 18.0 } }");
-        assert_eq!(config.font.text_size, 18.0);
+        let config = config_from("return { font_size = 18.0 }");
+        assert_eq!(config.font.size, 18.0);
     }
 
     #[test]
@@ -1262,20 +1327,10 @@ mod tests {
         };
         let config = config_from(
             r#"local key = dome.os == "macos" and "meta+h" or "meta+l"
-return { keymaps = { [key] = "focus left" } }"#,
+return { keymaps = { main = { [key] = function(a) a.focus.left() end } } }"#,
         );
-        assert!(
-            config
-                .keymaps
-                .default
-                .contains_key(&present.parse::<Keymap>().unwrap())
-        );
-        assert!(
-            !config
-                .keymaps
-                .default
-                .contains_key(&absent.parse::<Keymap>().unwrap())
-        );
+        assert!(config.keymaps.modes["main"].contains_key(&present.parse::<Keymap>().unwrap()));
+        assert!(!config.keymaps.modes["main"].contains_key(&absent.parse::<Keymap>().unwrap()));
     }
 
     #[test]
@@ -1306,9 +1361,9 @@ return { keymaps = { [key] = "focus left" } }"#,
 
     #[test]
     fn font_family_blank_falls_back_to_default() {
-        let config = config_from(r#"return { font = { family = "   ", text_size = 18.0 } }"#);
+        let config = config_from(r#"return { font_family = "   ", font_size = 18.0 }"#);
         assert_eq!(config.font.family, None);
-        assert_eq!(config.font.text_size, 18.0);
+        assert_eq!(config.font.size, 18.0);
     }
 
     #[test]
@@ -1349,72 +1404,42 @@ return { keymaps = { [key] = "focus left" } }"#,
     }
 
     #[test]
-    fn modal_keymaps_empty_modes() {
-        let config = config_from(r#"return { keymaps = { ["meta+h"] = "focus left" } }"#);
-        assert!(config.keymaps.modes.is_empty());
+    fn modal_keymaps_base_mode_only() {
+        let config = config_from(
+            r#"return { keymaps = { main = { ["meta+h"] = function(a) a.focus.left() end } } }"#,
+        );
+        assert_eq!(config.keymaps.modes.len(), 1);
         let keymap = "meta+h".parse::<Keymap>().unwrap();
-        assert!(config.keymaps.default.contains_key(&keymap));
-    }
-
-    #[test]
-    fn keymap_list_value_parses() {
-        let config = config_from(r#"return { keymaps = { ["meta+h"] = { "focus left" } } }"#);
-        let keymap = "meta+h".parse::<Keymap>().unwrap();
-        assert!(config.keymaps.default.contains_key(&keymap));
+        assert!(config.keymaps.modes["main"].contains_key(&keymap));
     }
 
     #[test]
     fn keymap_function_value_becomes_callback() {
-        let (config, registry) =
-            config_and_registry_from(r#"return { keymaps = { ["meta+h"] = function() end } }"#);
-        let keymap = "meta+h".parse::<Keymap>().unwrap();
-        assert!(matches!(
-            config.keymaps.default.get(&keymap),
-            Some(Binding::Callback(_))
-        ));
-        assert_eq!(registry.len(), 1);
-    }
-
-    #[test]
-    fn keymap_string_and_list_values_are_static() {
         let (config, registry) = config_and_registry_from(
-            r#"return { keymaps = { ["meta+h"] = "focus left", ["meta+j"] = { "focus down" } } }"#,
+            r#"return { keymaps = { main = { ["meta+h"] = function() end } } }"#,
         );
-        let h = "meta+h".parse::<Keymap>().unwrap();
-        let j = "meta+j".parse::<Keymap>().unwrap();
-        assert!(matches!(
-            config.keymaps.default.get(&h),
-            Some(Binding::Static(_))
-        ));
-        assert!(matches!(
-            config.keymaps.default.get(&j),
-            Some(Binding::Static(_))
-        ));
-        assert!(registry.is_empty());
+        let keymap = "meta+h".parse::<Keymap>().unwrap();
+        assert!(config.keymaps.modes["main"].contains_key(&keymap));
+        assert_eq!(registry.len(), 1);
     }
 
     #[test]
     fn dome_defaults_returns_the_default_keymaps() {
         let config = config_from("return dome.defaults()");
-        assert_eq!(config.keymaps.default.len(), 44);
-        let meta_h = "meta+h".parse::<Keymap>().unwrap();
-        assert!(matches!(
-            config.keymaps.default.get(&meta_h),
-            Some(Binding::Static(_))
-        ));
+        assert!(!config.keymaps.modes["main"].is_empty());
     }
 
     #[test]
     fn dome_defaults_override_keeps_defaults_and_adds_a_binding() {
+        let default_count = config_from("return dome.defaults()").keymaps.modes["main"].len();
         let config = config_from(
             r#"local c = dome.defaults()
-c.keymaps["meta+x"] = "close"
+c.keymaps.main["meta+x"] = function(a) a.close() end
 return c"#,
         );
-        let meta_h = "meta+h".parse::<Keymap>().unwrap();
         let meta_x = "meta+x".parse::<Keymap>().unwrap();
-        assert!(config.keymaps.default.contains_key(&meta_h));
-        assert!(config.keymaps.default.contains_key(&meta_x));
+        assert_eq!(config.keymaps.modes["main"].len(), default_count + 1);
+        assert!(config.keymaps.modes["main"].contains_key(&meta_x));
     }
 
     #[test]
@@ -1438,18 +1463,19 @@ return c"#,
         let config = config_from(
             r#"return {
   keymaps = {
-    ["meta+h"] = "focus left",
-    mode = {
-      resize = {
-        ["h"] = "focus left",
-        ["escape"] = "mode default",
-      },
+    main = {
+      ["meta+h"] = function(a) a.focus.left() end,
+      ["meta+r"] = function(a) a.mode("resize") end,
+    },
+    resize = {
+      ["h"] = function(a) a.focus.left() end,
+      ["escape"] = function(a) a.mode("main") end,
     },
   },
 }"#,
         );
         let meta_h = "meta+h".parse::<Keymap>().unwrap();
-        assert!(config.keymaps.default.contains_key(&meta_h));
+        assert!(config.keymaps.modes["main"].contains_key(&meta_h));
         let resize = config
             .keymaps
             .modes
@@ -1462,71 +1488,39 @@ return c"#,
     }
 
     #[test]
-    fn modal_keymaps_drops_default_mode_name() {
-        let config = config_from(
-            r#"return {
-  keymaps = {
-    ["meta+h"] = "focus left",
-    mode = { default = { ["h"] = "focus left" } },
-  },
-}"#,
-        );
-        let meta_h = "meta+h".parse::<Keymap>().unwrap();
-        assert!(config.keymaps.default.contains_key(&meta_h));
-        assert!(!config.keymaps.modes.contains_key("default"));
-    }
-
-    #[test]
     fn modal_keymaps_drops_empty_mode_name() {
         let config = config_from(
             r#"return {
   keymaps = {
-    ["meta+h"] = "focus left",
-    mode = { [""] = { ["h"] = "focus left" } },
+    main = { ["meta+h"] = function(a) a.focus.left() end },
+    [""] = { ["h"] = function(a) a.focus.left() end },
   },
 }"#,
         );
         let meta_h = "meta+h".parse::<Keymap>().unwrap();
-        assert!(config.keymaps.default.contains_key(&meta_h));
+        assert!(config.keymaps.modes["main"].contains_key(&meta_h));
         assert!(!config.keymaps.modes.contains_key(""));
     }
 
     #[test]
     fn load_drops_single_bad_keymap_binding() {
         let config = config_from(
-            r#"return { keymaps = { ["meta+a"] = "focus left", ["unkmod+h"] = "focus left" } }"#,
+            r#"return { keymaps = { main = { ["meta+a"] = function(a) a.focus.left() end, ["unkmod+h"] = function(a) a.focus.left() end } } }"#,
         );
         let good = "meta+a".parse::<Keymap>().unwrap();
-        assert!(config.keymaps.default.contains_key(&good));
-        assert_eq!(config.keymaps.default.len(), 1);
+        assert!(config.keymaps.modes["main"].contains_key(&good));
+        assert_eq!(config.keymaps.modes["main"].len(), 1);
     }
 
     #[test]
-    fn load_drops_single_bad_action_in_binding() {
+    fn load_drops_non_function_binding() {
         let config = config_from(
-            r#"return { keymaps = { ["meta+a"] = "fly to mars", ["meta+b"] = "focus left" } }"#,
+            r#"return { keymaps = { main = { ["meta+a"] = "focus left", ["meta+b"] = function(a) a.focus.left() end } } }"#,
         );
         let b = "meta+b".parse::<Keymap>().unwrap();
-        assert!(config.keymaps.default.contains_key(&b));
+        assert!(config.keymaps.modes["main"].contains_key(&b));
         let a = "meta+a".parse::<Keymap>().unwrap();
-        assert!(!config.keymaps.default.contains_key(&a));
-    }
-
-    #[test]
-    fn example_config_parses() {
-        let path = format!("{}/examples/config.lua", env!("CARGO_MANIFEST_DIR"));
-        let config = Config::load(&path).expect("example config failed to load");
-        assert_eq!(
-            config.size_constraints.minimum_width,
-            SizeConstraint::Pixels(Pixels::new(200))
-        );
-    }
-
-    #[test]
-    fn example_layout_parses() {
-        let path = format!("{}/examples/layout.jsonc", env!("CARGO_MANIFEST_DIR"));
-        let layout = LayoutConfig::load(&path).expect("example layout failed to load");
-        assert_eq!(layout.workspace.len(), 2);
+        assert!(!config.keymaps.modes["main"].contains_key(&a));
     }
 
     #[test]

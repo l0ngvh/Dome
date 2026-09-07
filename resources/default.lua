@@ -1,58 +1,55 @@
--- The default configuration Dome falls back to and exposes through
--- dome.defaults(). It returns a config table holding the default keymaps. A user
--- starts from dome.defaults(), overrides fields, and returns the table.
---
--- This file must not call dome.defaults(). That function re-evaluates this same
--- source, so a call here would not terminate.
---
--- Keymaps only. Static scalar defaults live in Rust field defaults, and the
--- window-ignore floor is applied by Rust regardless of this file.
+-- Do not call dome.defaults() here. It calls this builder, so it would recurse forever.
+return function(mod1)
+	mod1 = mod1 or Alt
 
-return {
-  keymaps = {
-    ["meta+0"] = "focus workspace 0",
-    ["meta+1"] = "focus workspace 1",
-    ["meta+2"] = "focus workspace 2",
-    ["meta+3"] = "focus workspace 3",
-    ["meta+4"] = "focus workspace 4",
-    ["meta+5"] = "focus workspace 5",
-    ["meta+6"] = "focus workspace 6",
-    ["meta+7"] = "focus workspace 7",
-    ["meta+8"] = "focus workspace 8",
-    ["meta+9"] = "focus workspace 9",
-    ["meta+shift+0"] = "move workspace 0",
-    ["meta+shift+1"] = "move workspace 1",
-    ["meta+shift+2"] = "move workspace 2",
-    ["meta+shift+3"] = "move workspace 3",
-    ["meta+shift+4"] = "move workspace 4",
-    ["meta+shift+5"] = "move workspace 5",
-    ["meta+shift+6"] = "move workspace 6",
-    ["meta+shift+7"] = "move workspace 7",
-    ["meta+shift+8"] = "move workspace 8",
-    ["meta+shift+9"] = "move workspace 9",
-    ["meta+e"] = "toggle spawn",
-    ["meta+d"] = "toggle direction",
-    ["meta+b"] = "toggle layout",
-    ["meta+p"] = "focus parent",
-    ["meta+h"] = "focus left",
-    ["meta+j"] = "focus down",
-    ["meta+k"] = "focus up",
-    ["meta+l"] = "focus right",
-    ["meta+["] = "focus tab prev",
-    ["meta+]"] = "focus tab next",
-    ["meta+shift+h"] = "move left",
-    ["meta+shift+j"] = "move down",
-    ["meta+shift+k"] = "move up",
-    ["meta+shift+l"] = "move right",
-    ["meta+shift+f"] = "toggle float",
-    ["meta+shift+q"] = "close",
-    ["meta+alt+h"] = "focus monitor left",
-    ["meta+alt+j"] = "focus monitor down",
-    ["meta+alt+k"] = "focus monitor up",
-    ["meta+alt+l"] = "focus monitor right",
-    ["meta+alt+shift+h"] = "move monitor left",
-    ["meta+alt+shift+j"] = "move monitor down",
-    ["meta+alt+shift+k"] = "move monitor up",
-    ["meta+alt+shift+l"] = "move monitor right",
-  },
-}
+	return {
+		keymaps = {
+			main = {
+				[mod1 + "0"] = function(a) a.focus.workspace("0") end,
+				[mod1 + "1"] = function(a) a.focus.workspace("1") end,
+				[mod1 + "2"] = function(a) a.focus.workspace("2") end,
+				[mod1 + "3"] = function(a) a.focus.workspace("3") end,
+				[mod1 + "4"] = function(a) a.focus.workspace("4") end,
+				[mod1 + "5"] = function(a) a.focus.workspace("5") end,
+				[mod1 + "6"] = function(a) a.focus.workspace("6") end,
+				[mod1 + "7"] = function(a) a.focus.workspace("7") end,
+				[mod1 + "8"] = function(a) a.focus.workspace("8") end,
+				[mod1 + "9"] = function(a) a.focus.workspace("9") end,
+				[mod1 + Shift + "0"] = function(a) a.move.workspace("0") end,
+				[mod1 + Shift + "1"] = function(a) a.move.workspace("1") end,
+				[mod1 + Shift + "2"] = function(a) a.move.workspace("2") end,
+				[mod1 + Shift + "3"] = function(a) a.move.workspace("3") end,
+				[mod1 + Shift + "4"] = function(a) a.move.workspace("4") end,
+				[mod1 + Shift + "5"] = function(a) a.move.workspace("5") end,
+				[mod1 + Shift + "6"] = function(a) a.move.workspace("6") end,
+				[mod1 + Shift + "7"] = function(a) a.move.workspace("7") end,
+				[mod1 + Shift + "8"] = function(a) a.move.workspace("8") end,
+				[mod1 + Shift + "9"] = function(a) a.move.workspace("9") end,
+				[mod1 + "e"] = function(a) a.toggle.spawn() end,
+				[mod1 + "d"] = function(a) a.toggle.direction() end,
+				[mod1 + "b"] = function(a) a.toggle.layout() end,
+				[mod1 + "p"] = function(a) a.focus.parent() end,
+				[mod1 + "h"] = function(a) a.focus.left() end,
+				[mod1 + "j"] = function(a) a.focus.down() end,
+				[mod1 + "k"] = function(a) a.focus.up() end,
+				[mod1 + "l"] = function(a) a.focus.right() end,
+				[mod1 + "["] = function(a) a.focus.tab.prev() end,
+				[mod1 + "]"] = function(a) a.focus.tab.next() end,
+				[mod1 + Shift + "h"] = function(a) a.move.left() end,
+				[mod1 + Shift + "j"] = function(a) a.move.down() end,
+				[mod1 + Shift + "k"] = function(a) a.move.up() end,
+				[mod1 + Shift + "l"] = function(a) a.move.right() end,
+				[mod1 + Shift + "f"] = function(a) a.toggle.float() end,
+				[mod1 + Shift + "q"] = function(a) a.close() end,
+				[mod1 + Ctrl + "h"] = function(a) a.focus.monitor("left") end,
+				[mod1 + Ctrl + "j"] = function(a) a.focus.monitor("down") end,
+				[mod1 + Ctrl + "k"] = function(a) a.focus.monitor("up") end,
+				[mod1 + Ctrl + "l"] = function(a) a.focus.monitor("right") end,
+				[mod1 + Ctrl + Shift + "h"] = function(a) a.move.monitor("left") end,
+				[mod1 + Ctrl + Shift + "j"] = function(a) a.move.monitor("down") end,
+				[mod1 + Ctrl + Shift + "k"] = function(a) a.move.monitor("up") end,
+				[mod1 + Ctrl + Shift + "l"] = function(a) a.move.monitor("right") end,
+			},
+		},
+	}
+end

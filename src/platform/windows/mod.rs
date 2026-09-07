@@ -44,7 +44,7 @@ use windows::core::BOOL;
 use crate::action::{Actions, WorkspaceInfo};
 use crate::config::{
     Config, LayoutConfig, LayoutWorkspaceConfig, ModalKeymaps, layout_default_path,
-    load_or_default, start_config_watcher, start_file_watcher,
+    load_or_default, resolve_config_path, start_config_watcher, start_file_watcher,
 };
 use crate::ipc;
 use crate::keymap::KeymapState;
@@ -213,7 +213,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
 
     let logger = Logger::init();
 
-    let config_path = config_path.unwrap_or_else(Config::default_path);
+    let config_path = resolve_config_path(config_path);
 
     let layout_path = layout_path.unwrap_or_else(|| {
         layout_default_path(std::path::Path::new(&config_path))
@@ -242,12 +242,11 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
 
     let dome_thread_id = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let barrier = Arc::new(std::sync::Barrier::new(2));
-    // KeymapState starts empty and is filled from the runtime thread's initial
-    // config below, before the keyboard hook and watchers that read it start.
+    // Filled from the runtime thread's initial config below, before the keyboard
+    // hook and watchers read it.
     let keymap_state = Arc::new(RwLock::new(KeymapState::new(ModalKeymaps::default())));
 
-    // The hub sender is built per call because the dome thread id is not known
-    // until the barrier below has passed.
+    // Built per call: the dome thread id is not known until the barrier below passes.
     let out: Box<dyn Fn(RuntimeOut) + Send> = {
         let keymap_state = Arc::clone(&keymap_state);
         let logger = logger.clone();
@@ -258,11 +257,6 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
             };
             match event {
                 RuntimeOut::Actions(actions) => hub.send(HubEvent::Action(actions)),
-                RuntimeOut::SwitchMode(name) => {
-                    if let Ok(mut ks) = keymap_state.write() {
-                        ks.switch_mode(&name);
-                    }
-                }
                 RuntimeOut::Reloaded(config) => {
                     logger.set_level(config.log_level);
                     if let Ok(mut ks) = keymap_state.write() {
@@ -313,11 +307,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
         thread_id: dome_thread_id.load(std::sync::atomic::Ordering::Acquire),
     };
 
-    let keyboard_hook = install_keyboard_hook(
-        hub_sender.clone(),
-        Arc::clone(&keymap_state),
-        runtime_tx.clone(),
-    )?;
+    let keyboard_hook = install_keyboard_hook(Arc::clone(&keymap_state), runtime_tx.clone())?;
     let _event_hooks = install_event_hooks(hub_sender.clone())?;
 
     ipc::start_server(layout_path.clone(), {

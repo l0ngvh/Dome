@@ -23,20 +23,6 @@ detects exclusive fullscreen and skips any action that would touch the game's
 window, including most keybindings. Tab out (Alt+Tab) or switch to borderless
 fullscreen, and the keybindings will work again.
 
-## My config changes didn't take effect
-
-Your setting probably had an error and Dome silently replaced it with the
-default. Check `dome.log` for warning lines containing the dotted field path
-(for example, `field=master.master_ratio`). These tell you exactly which
-fields failed and why.
-
-Dome recovers from most config errors per field. If a field has the wrong type,
-is out of range, or uses an unrecognized value, Dome defaults that single field
-and loads the rest of your config normally.
-
-If `dome.log` shows that Dome fell back to defaults entirely, you likely have a
-Lua syntax error (a missing quote or an unmatched bracket).
-
 ## A random window got focused when the focused window closed
 
 When you close a window on macOS, the system sometimes picks the next window

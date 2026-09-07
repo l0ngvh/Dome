@@ -122,7 +122,7 @@ struct TestEnv {
 
 impl TestEnv {
     fn new() -> Self {
-        Self::with_config("examples/config.toml")
+        Self::with_config("resources/config.starter.lua")
     }
 
     fn with_config(config_path: &str) -> Self {

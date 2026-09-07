@@ -1,4 +1,3 @@
--- Bundled default ignore rules for Windows. Appended to the user's ignore list.
 return {
   { process = "LockApp.exe" },
   { process = "SearchHost.exe" },

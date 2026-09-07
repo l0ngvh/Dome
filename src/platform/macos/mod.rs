@@ -25,8 +25,8 @@ use objc2_core_foundation::{CFDictionary, kCFBooleanTrue};
 use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess};
 
 use crate::config::{
-    Config, LayoutConfig, ModalKeymaps, layout_default_path, load_or_default, start_config_watcher,
-    start_file_watcher,
+    LayoutConfig, ModalKeymaps, layout_default_path, load_or_default, resolve_config_path,
+    start_config_watcher, start_file_watcher,
 };
 use crate::ipc;
 use crate::keymap::KeymapState;
@@ -40,7 +40,7 @@ use ui::Ui;
 pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyhow::Result<()> {
     let logger = Logger::init();
 
-    let config_path = config_path.unwrap_or_else(Config::default_path);
+    let config_path = resolve_config_path(config_path);
 
     let layout_path = layout_path.unwrap_or_else(|| {
         layout_default_path(std::path::Path::new(&config_path))
@@ -87,8 +87,8 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
 
     let (event_tx, event_rx) = calloop::channel::channel();
 
-    // KeymapState starts empty and is filled from the runtime thread's initial
-    // config below, before the event tap and watchers that read it start.
+    // Filled from the runtime thread's initial config below, before the event
+    // tap and watchers read it.
     let keymap_state = Arc::new(RwLock::new(KeymapState::new(ModalKeymaps::default())));
 
     let out: Box<dyn Fn(RuntimeOut) + Send> = {
@@ -98,11 +98,6 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
         let bundle_path = bundle_path.clone();
         Box::new(move |event| match event {
             RuntimeOut::Actions(actions) => send_hub_event(&tx, HubEvent::Action(actions)),
-            RuntimeOut::SwitchMode(name) => {
-                if let Ok(mut ks) = keymap_state.write() {
-                    ks.switch_mode(&name);
-                }
-            }
             RuntimeOut::Reloaded(config) => {
                 logger.set_level(config.log_level);
                 if let Ok(mut ks) = keymap_state.write() {
@@ -176,9 +171,8 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
         .name("dome-event-tap".to_owned())
         .spawn({
             let keymap_state = keymap_state.clone();
-            let hub_sender = event_tx.clone();
             let runtime_sender = runtime_tx.clone();
-            move || keyboard::run_event_tap(keymap_state, is_suspended, hub_sender, runtime_sender)
+            move || keyboard::run_event_tap(keymap_state, is_suspended, runtime_sender)
         })?;
 
     let (ui, sender) = Ui::new(mtm, event_tx, event_listener, config.clone());

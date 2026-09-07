@@ -84,14 +84,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
 
-  luau-typecheck:
+  lua-typecheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install luau-lsp
+      - name: Install lua-language-server
         run: |
-          curl -sSL -o luau-lsp.zip https://github.com/JohnnyMorganz/luau-lsp/releases/download/1.69.0/luau-lsp-linux-x86_64.zip
-          unzip -q luau-lsp.zip
-          chmod +x luau-lsp
-      - name: Typecheck config.lua against dome.d.luau
-        run: ./luau-lsp analyze --definitions=resources/dome.d.luau examples/config.lua resources/default.lua
+          curl -sSL -o lua-language-server.tar.gz https://github.com/LuaLS/lua-language-server/releases/download/3.19.1/lua-language-server-3.19.1-linux-x64.tar.gz
+          mkdir lua-language-server
+          tar -xzf lua-language-server.tar.gz -C lua-language-server
+          chmod +x lua-language-server/bin/lua-language-server
+      - name: Typecheck Lua against dome.meta.lua
+        run: |
+          ./lua-language-server/bin/lua-language-server --check tests/typecheck --checklevel=Warning
+          ./lua-language-server/bin/lua-language-server --check resources --checklevel=Warning
