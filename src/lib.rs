@@ -28,3 +28,8 @@ pub use platform::macos::run_app;
 
 #[cfg(target_os = "windows")]
 pub use platform::windows::run_app;
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn run_app(_config_path: Option<String>, _layout_path: Option<String>) -> anyhow::Result<()> {
+    anyhow::bail!("dome has no window backend on this platform")
+}

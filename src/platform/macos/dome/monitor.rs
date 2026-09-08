@@ -274,10 +274,10 @@ impl MonitorRegistry {
         monitor.is_some_and(|m| {
             let mon = m.info.work_area;
             let tolerance = Pixels::new(2);
-            (rect.x() - mon.x()).abs() <= tolerance
-                && (rect.y() - mon.y()).abs() <= tolerance
-                && (rect.width() - mon.width()).abs() <= tolerance
-                && (rect.height() - mon.height()).abs() <= tolerance
+            rect.x() <= mon.x() + tolerance
+                && rect.y() <= mon.y() + tolerance
+                && rect.right() >= mon.right() - tolerance
+                && rect.bottom() >= mon.bottom() - tolerance
         })
     }
 
