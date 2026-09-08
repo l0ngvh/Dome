@@ -18,7 +18,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::config::{CallbackId, Keymap, Modifiers};
 use crate::keymap::KeymapState;
-use crate::lua_runtime::RuntimeMsg;
+use crate::platform::windows::dome::HubEvent;
+
+use super::HubSender;
 
 pub(super) struct KeyboardHookHandle {
     thread_id: u32,
@@ -27,7 +29,7 @@ pub(super) struct KeyboardHookHandle {
 
 struct KeyboardState {
     keymap_state: Arc<RwLock<KeymapState>>,
-    runtime_sender: mpsc::Sender<RuntimeMsg>,
+    hub_sender: HubSender,
 }
 
 static STATE: OnceLock<KeyboardState> = OnceLock::new();
@@ -47,12 +49,12 @@ static MODIFIERS: AtomicU8 = AtomicU8::new(0);
 
 pub(super) fn install_keyboard_hook(
     keymap_state: Arc<RwLock<KeymapState>>,
-    runtime_sender: mpsc::Sender<RuntimeMsg>,
+    hub_sender: HubSender,
 ) -> anyhow::Result<KeyboardHookHandle> {
     STATE
         .set(KeyboardState {
             keymap_state,
-            runtime_sender,
+            hub_sender,
         })
         .ok();
 
@@ -116,13 +118,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                 && let Some(id) = resolve_key(vk, modifiers, &state.keymap_state)
             {
                 tracing::trace!(?id, "Keymap matched callback");
-                if state
-                    .runtime_sender
-                    .send(RuntimeMsg::RunCallback(id))
-                    .is_err()
-                {
-                    tracing::warn!("dome-lua thread unavailable, callback dropped");
-                }
+                state.hub_sender.send(HubEvent::RunCallback(id));
                 return LRESULT(1);
             }
         }

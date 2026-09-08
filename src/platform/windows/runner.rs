@@ -7,10 +7,13 @@ use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessage
 use crate::action::{Action, Actions};
 use crate::core::{Physical, PixelRect};
 use crate::keymap::KeymapState;
+use crate::logging::Logger;
+use crate::lua_runtime::{LuaRuntime, RuntimeOut};
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
 use crate::platform::windows::dome::{Dome, HubEvent, NewWindow, WindowsMetadata};
 use crate::platform::windows::external::{HwndId, InspectExternalWindow, ManageExternalWindow};
 use crate::platform::windows::handle::ExternalHwnd;
+use crate::platform::windows::login_item;
 use crate::platform::windows::throttle::{Throttle, ThrottleResult};
 use crate::platform::windows::timer_registry::{TimerKind, TimerRegistry, Win32Timer};
 
@@ -29,6 +32,8 @@ pub(super) struct Runner {
     timers: TimerRegistry,
     main_thread_id: u32,
     keymap_state: Arc<RwLock<KeymapState>>,
+    runtime: LuaRuntime,
+    logger: Logger,
 }
 
 impl Runner {
@@ -37,6 +42,8 @@ impl Runner {
         thread_id: u32,
         main_thread_id: u32,
         keymap_state: Arc<RwLock<KeymapState>>,
+        runtime: LuaRuntime,
+        logger: Logger,
     ) -> Self {
         let mut timers = TimerRegistry::new(Box::new(Win32Timer));
         timers.schedule_drift_retry(DRIFT_RETRY_INTERVAL);
@@ -47,6 +54,8 @@ impl Runner {
             timers,
             main_thread_id,
             keymap_state,
+            runtime,
+            logger,
         }
     }
 
@@ -77,8 +86,25 @@ impl Runner {
                 tracing::info!("Shutdown requested");
                 unsafe { PostQuitMessage(0) };
             }
-            HubEvent::ConfigChanged(c) => {
-                self.dome.config_changed(*c);
+            HubEvent::RunCallback(id) => {
+                for out in self.runtime.run_callback(id) {
+                    if let RuntimeOut::Actions(actions) = out {
+                        self.handle_actions(&actions);
+                    }
+                }
+            }
+            HubEvent::ReloadConfig => {
+                for out in self.runtime.reload() {
+                    if let RuntimeOut::Reloaded(config) = out {
+                        self.logger.set_level(config.log_level);
+                        self.keymap_state
+                            .write()
+                            .unwrap()
+                            .update_keymaps(config.keymaps.clone());
+                        login_item::sync_login_item(config.start_at_login);
+                        self.dome.config_changed(*config);
+                    }
+                }
             }
             HubEvent::LayoutConfigChanged(c) => {
                 self.dome.layout_changed(*c);

@@ -1,7 +1,6 @@
 use std::cell::OnceCell;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
 
 use objc2_core_foundation::{
@@ -14,14 +13,14 @@ use objc2_core_graphics::{
 
 use crate::config::{Keymap, Modifiers};
 use crate::keymap::KeymapState;
-use crate::lua_runtime::RuntimeMsg;
+use crate::platform::macos::dome::HubEvent;
 
 pub(super) type SharedKeymapState = Arc<RwLock<KeymapState>>;
 
 struct KeyboardCtx {
     keymap_state: SharedKeymapState,
     is_suspended: Arc<AtomicBool>,
-    runtime_sender: Sender<RuntimeMsg>,
+    event_sender: calloop::channel::Sender<HubEvent>,
     event_tap: OnceCell<CFRetained<CFMachPort>>,
 }
 
@@ -31,12 +30,12 @@ struct KeyboardCtx {
 pub(super) fn run_event_tap(
     keymap_state: SharedKeymapState,
     is_suspended: Arc<AtomicBool>,
-    runtime_sender: Sender<RuntimeMsg>,
+    event_sender: calloop::channel::Sender<HubEvent>,
 ) {
     let ctx = KeyboardCtx {
         keymap_state,
         is_suspended,
-        runtime_sender,
+        event_sender,
         event_tap: OnceCell::new(),
     };
 
@@ -137,12 +136,8 @@ fn handle_keyboard(ctx: &KeyboardCtx, event: *mut CGEvent) -> bool {
     }
 
     tracing::trace!(?keymap, ?id, "Keymap matched callback");
-    if ctx
-        .runtime_sender
-        .send(RuntimeMsg::RunCallback(id))
-        .is_err()
-    {
-        tracing::warn!("dome-lua thread unavailable, callback dropped");
+    if ctx.event_sender.send(HubEvent::RunCallback(id)).is_err() {
+        tracing::warn!("Hub thread unavailable, callback dropped");
     }
     true
 }

@@ -18,7 +18,7 @@ mod ui;
 mod tests;
 
 use std::rc::Rc;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -48,7 +48,7 @@ use crate::config::{
 };
 use crate::ipc;
 use crate::keymap::KeymapState;
-use crate::lua_runtime::{self, RuntimeMsg, RuntimeOut};
+use crate::lua_runtime::LuaRuntime;
 use crate::platform::render::WgpuContext;
 use crate::platform::shell_menu::{build_menu, focused_tooltip, id_to_action};
 use dome::events::{HubMessage, SceneSender};
@@ -240,74 +240,68 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
         tracing::warn!("Failed to install console control handler");
     }
 
-    let dome_thread_id = Arc::new(std::sync::atomic::AtomicU32::new(0));
-    let barrier = Arc::new(std::sync::Barrier::new(2));
-    // Filled from the runtime thread's initial config below, before the keyboard
+    // Filled from the dome thread's initial config below, before the keyboard
     // hook and watchers read it.
     let keymap_state = Arc::new(RwLock::new(KeymapState::new(ModalKeymaps::default())));
 
-    // Built per call: the dome thread id is not known until the barrier below passes.
-    let out: Box<dyn Fn(RuntimeOut) + Send> = {
+    // The dome thread owns the VM, so it loads the config and hands both its
+    // thread id and the config back in one message.
+    let (init_tx, init_rx) = mpsc::channel::<(u32, Config)>();
+    let dome_thread = thread::spawn({
         let keymap_state = Arc::clone(&keymap_state);
         let logger = logger.clone();
-        let tid = Arc::clone(&dome_thread_id);
-        Box::new(move |event| {
-            let hub = HubSender {
-                thread_id: tid.load(std::sync::atomic::Ordering::Acquire),
-            };
-            match event {
-                RuntimeOut::Actions(actions) => hub.send(HubEvent::Action(actions)),
-                RuntimeOut::Reloaded(config) => {
-                    logger.set_level(config.log_level);
-                    if let Ok(mut ks) = keymap_state.write() {
-                        ks.update_keymaps(config.keymaps.clone());
+        let config_path = config_path.clone();
+        let layout = layout.workspace.clone();
+        move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+                    .ok()
+                    .expect("CoInitializeEx failed");
+                let mut runtime = match LuaRuntime::new(config_path) {
+                    Ok(runtime) => runtime,
+                    Err(e) => {
+                        tracing::error!(error = %e, "Failed to build the Lua VM, aborting startup");
+                        return;
                     }
-                    let start_at_login = config.start_at_login;
-                    hub.send(HubEvent::ConfigChanged(config));
-                    login_item::sync_login_item(start_at_login);
-                }
+                };
+                let config = runtime.load();
+                // Populate keymaps before init_tx.send. Main installs the keyboard
+                // hook only after init_rx.recv, so an early keypress cannot resolve
+                // against an empty keymap.
+                keymap_state
+                    .write()
+                    .unwrap()
+                    .update_keymaps(config.keymaps.clone());
+                let tid = unsafe { GetCurrentThreadId() };
+                init_tx.send((tid, config.clone())).ok();
+                run_dome(
+                    config,
+                    layout,
+                    main_thread_id,
+                    keymap_state,
+                    runtime,
+                    logger,
+                );
+            }));
+            if result.is_err() {
+                tracing::error!("Dome thread panicked");
             }
-        })
-    };
-
-    let (runtime_handle, runtime_tx, config) = lua_runtime::spawn(config_path.clone(), out)?;
-    logger.set_level(config.log_level);
-    tracing::info!(%config_path, "Loaded config");
-    keymap_state
-        .write()
-        .unwrap()
-        .update_keymaps(config.keymaps.clone());
-    login_item::sync_login_item(config.start_at_login);
-
-    let config_clone = config.clone();
-    let layout_clone = layout.workspace.clone();
-    let tid = Arc::clone(&dome_thread_id);
-    let bar = Arc::clone(&barrier);
-    let keymap_clone = Arc::clone(&keymap_state);
-    let dome_thread = thread::spawn(move || {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
-                .ok()
-                .expect("CoInitializeEx failed");
-            tid.store(
-                unsafe { GetCurrentThreadId() },
-                std::sync::atomic::Ordering::Release,
-            );
-            bar.wait();
-            run_dome(config_clone, layout_clone, main_thread_id, keymap_clone);
-        }));
-        if result.is_err() {
-            tracing::error!("Dome thread panicked");
+            unsafe { PostThreadMessageW(main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
         }
-        unsafe { PostThreadMessageW(main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
     });
 
-    barrier.wait();
+    let (dome_tid, config) = init_rx
+        .recv()
+        .map_err(|_| anyhow::anyhow!("dome thread exited before the initial config load"))?;
+    logger.set_level(config.log_level);
+    tracing::info!(%config_path, "Loaded config");
+    login_item::sync_login_item(config.start_at_login);
+
     let hub_sender = HubSender {
-        thread_id: dome_thread_id.load(std::sync::atomic::Ordering::Acquire),
+        thread_id: dome_tid,
     };
 
-    let keyboard_hook = install_keyboard_hook(Arc::clone(&keymap_state), runtime_tx.clone())?;
+    let keyboard_hook = install_keyboard_hook(Arc::clone(&keymap_state), hub_sender.clone())?;
     let _event_hooks = install_event_hooks(hub_sender.clone())?;
 
     ipc::start_server(layout_path.clone(), {
@@ -326,9 +320,9 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
     })?;
 
     let _config_watcher = start_file_watcher(&config_path, {
-        let runtime_tx = runtime_tx.clone();
+        let hub_sender = hub_sender.clone();
         move || {
-            runtime_tx.send(RuntimeMsg::Reload).ok();
+            hub_sender.send(HubEvent::ReloadConfig);
         }
     })
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))
@@ -353,8 +347,6 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
     }
 
     hub_sender.send(HubEvent::Shutdown);
-    runtime_tx.send(RuntimeMsg::Shutdown).ok();
-    runtime_handle.join().ok();
     dome_thread.join().ok();
     uninstall_keyboard_hook(keyboard_hook);
 
@@ -366,6 +358,8 @@ fn run_dome(
     workspace_overrides: Vec<LayoutWorkspaceConfig>,
     main_thread_id: u32,
     keymap_state: Arc<RwLock<KeymapState>>,
+    runtime: LuaRuntime,
+    logger: Logger,
 ) {
     let domain_thread_id = unsafe { GetCurrentThreadId() };
 
@@ -416,7 +410,14 @@ fn run_dome(
         tracing::warn!("Failed to enumerate windows: {e}");
     }
 
-    let mut runner = runner::Runner::new(dome, domain_thread_id, main_thread_id, keymap_state);
+    let mut runner = runner::Runner::new(
+        dome,
+        domain_thread_id,
+        main_thread_id,
+        keymap_state,
+        runtime,
+        logger,
+    );
 
     for hwnd_id in initial_hwnds {
         runner.dispatch_window_created(hwnd_id);
