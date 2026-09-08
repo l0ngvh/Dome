@@ -53,6 +53,8 @@ args = ["test", "--test", "e2e", "--", "--test-threads=1", "${@}"]
 
 [tasks.leak-check]
 description = "Run leak check"
+# Run once at the workspace root, not per member. See [tasks.bundle].
+workspace = false
 run_task = [
     { name = "leak-check-macos", condition = { platforms = ["mac"] } },
 ]
