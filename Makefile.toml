@@ -118,6 +118,9 @@ cargo install cargo-insta --locked
 
 [tasks.bundle]
 description = "Build release binary and create platform package. Set BUNDLE_TARGET to cross-compile (e.g. aarch64-apple-darwin)."
+# Run once at the workspace root. Without this, cargo-make fans the task out to
+# every workspace member, and the member crates define no bundle task.
+workspace = false
 run_task = [
     { name = "bundle-macos-impl", condition = { platforms = ["mac"] } },
     { name = "bundle-windows-impl", condition = { platforms = ["windows"] } },
