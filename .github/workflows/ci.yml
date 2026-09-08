@@ -44,10 +44,24 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --lib
+      - run: cargo test --lib -- --skip smoke_test
 
   test-windows:
     runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --lib -- --skip smoke_test
+
+  # Platform-neutral core tests (including the smoke fuzzer) run once on the
+  # cheap 1x Linux runner instead of on the 10x macOS and 2x Windows runners.
+  # RUSTFLAGS is cleared because gating the platform layer out on Linux leaves
+  # its consumers (config, theme, font, overlay, keymap) dead, which is expected.
+  test-core-linux:
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: ""
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

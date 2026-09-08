@@ -521,17 +521,6 @@ impl<U> Pixels<U> {
         self.v
     }
 
-    #[cfg_attr(
-        target_os = "windows",
-        expect(
-            dead_code,
-            reason = "only the macOS borderless-fullscreen tolerance check compares distances"
-        )
-    )]
-    pub(crate) fn abs(self) -> Self {
-        Self::new(self.v.abs())
-    }
-
     pub(crate) fn max(self, other: Self) -> Self {
         Self::new(self.v.max(other.v))
     }

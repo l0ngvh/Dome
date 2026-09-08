@@ -504,6 +504,11 @@ fn default_ignore() -> Vec<WindowMatcher> {
     )))
 }
 
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn default_ignore() -> Vec<WindowMatcher> {
+    Vec::new()
+}
+
 impl WalkRecover for LayoutConfig {
     fn walk(w: &mut Walker) -> Self {
         let raw = w.rule_vec::<LayoutWorkspaceConfig>("workspace");
