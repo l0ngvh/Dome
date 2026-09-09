@@ -65,7 +65,7 @@ fn action_fn_str(
 }
 
 /// Accessors are gated by `cell` and error once the handler returns, so a
-/// stashed handle cannot drive the hub later (R10).
+/// stashed handle cannot drive the hub later.
 pub(super) fn build_capability(
     lua: &mlua::Lua,
     cell: LiveCell,

@@ -240,8 +240,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
         tracing::warn!("Failed to install console control handler");
     }
 
-    // Filled from the dome thread's initial config below, before the keyboard
-    // hook and watchers read it.
+    // The dome thread fills this before the keyboard hook and watchers read it.
     let keymap_state = Arc::new(RwLock::new(KeymapState::new(ModalKeymaps::default())));
 
     // The dome thread owns the VM, so it loads the config and hands both its

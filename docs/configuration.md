@@ -8,8 +8,6 @@ locations, which will be created on first launch:
 
 The default config path can be overridden with `dome launch -c <path>`
 
-## Default bindings
-
 ## Config Options
 
 ### `border_size`

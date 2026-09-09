@@ -139,9 +139,11 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
             for out in runner.runtime.reload() {
                 if let RuntimeOut::Reloaded(config) = out {
                     runner.logger.set_level(config.log_level);
-                    if let Ok(mut ks) = runner.keymap_state.write() {
-                        ks.update_keymaps(config.keymaps.clone());
-                    }
+                    runner
+                        .keymap_state
+                        .write()
+                        .unwrap()
+                        .update_keymaps(config.keymaps.clone());
                     login_item::sync_login_item(
                         config.start_at_login,
                         runner.bundle_path.as_deref(),
