@@ -53,23 +53,6 @@ impl mlua::UserData for Modifier {
     }
 }
 
-fn chord_string(mods: Modifiers, key: &str) -> String {
-    let mut chord = String::new();
-    for (bit, token) in [
-        (Modifiers::META, "meta"),
-        (Modifiers::CTRL, "ctrl"),
-        (Modifiers::ALT, "alt"),
-        (Modifiers::SHIFT, "shift"),
-    ] {
-        if mods.contains(bit) {
-            chord.push_str(token);
-            chord.push('+');
-        }
-    }
-    chord.push_str(key);
-    chord
-}
-
 pub(crate) fn build_vm() -> mlua::Result<mlua::Lua> {
     let lua = mlua::Lua::new();
     let globals = lua.globals();
@@ -114,6 +97,23 @@ pub(crate) fn build_vm() -> mlua::Result<mlua::Lua> {
     // in-place mutation.
     lua.sandbox(true)?;
     Ok(lua)
+}
+
+fn chord_string(mods: Modifiers, key: &str) -> String {
+    let mut chord = String::new();
+    for (bit, token) in [
+        (Modifiers::META, "meta"),
+        (Modifiers::CTRL, "ctrl"),
+        (Modifiers::ALT, "alt"),
+        (Modifiers::SHIFT, "shift"),
+    ] {
+        if mods.contains(bit) {
+            chord.push_str(token);
+            chord.push('+');
+        }
+    }
+    chord.push_str(key);
+    chord
 }
 
 #[cfg(test)]

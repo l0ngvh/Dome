@@ -15,55 +15,6 @@ const REVOKED_ERROR: &str = "this action handle is not valid outside its handler
 pub(super) type LiveCell = Rc<Cell<bool>>;
 pub(super) type Sink = Rc<RefCell<Vec<RuntimeOut>>>;
 
-fn guard(cell: &LiveCell) -> mlua::Result<()> {
-    if cell.get() {
-        Ok(())
-    } else {
-        Err(mlua::Error::runtime(REVOKED_ERROR))
-    }
-}
-
-fn monitor_target(s: &str) -> MonitorTarget {
-    match s {
-        "up" => MonitorTarget::Up,
-        "down" => MonitorTarget::Down,
-        "left" => MonitorTarget::Left,
-        "right" => MonitorTarget::Right,
-        other => MonitorTarget::Name(other.to_string()),
-    }
-}
-
-fn action_fn(
-    lua: &mlua::Lua,
-    cell: &LiveCell,
-    sink: &Sink,
-    make: impl Fn() -> Action + 'static,
-) -> mlua::Result<mlua::Function> {
-    let cell = cell.clone();
-    let sink = sink.clone();
-    lua.create_function(move |_, ()| {
-        guard(&cell)?;
-        sink.borrow_mut()
-            .push(RuntimeOut::Actions(Actions::new(vec![make()])));
-        Ok(())
-    })
-}
-
-fn action_fn_str(
-    lua: &mlua::Lua,
-    cell: &LiveCell,
-    sink: &Sink,
-    make: impl Fn(String) -> RuntimeOut + 'static,
-) -> mlua::Result<mlua::Function> {
-    let cell = cell.clone();
-    let sink = sink.clone();
-    lua.create_function(move |_, arg: String| {
-        guard(&cell)?;
-        sink.borrow_mut().push(make(arg));
-        Ok(())
-    })
-}
-
 /// Accessors are gated by `cell` and error once the handler returns, so a
 /// stashed handle cannot drive the hub later.
 pub(super) fn build_capability(
@@ -269,6 +220,55 @@ pub(super) fn build_capability(
     )?;
 
     Ok(actions)
+}
+
+fn guard(cell: &LiveCell) -> mlua::Result<()> {
+    if cell.get() {
+        Ok(())
+    } else {
+        Err(mlua::Error::runtime(REVOKED_ERROR))
+    }
+}
+
+fn monitor_target(s: &str) -> MonitorTarget {
+    match s {
+        "up" => MonitorTarget::Up,
+        "down" => MonitorTarget::Down,
+        "left" => MonitorTarget::Left,
+        "right" => MonitorTarget::Right,
+        other => MonitorTarget::Name(other.to_string()),
+    }
+}
+
+fn action_fn(
+    lua: &mlua::Lua,
+    cell: &LiveCell,
+    sink: &Sink,
+    make: impl Fn() -> Action + 'static,
+) -> mlua::Result<mlua::Function> {
+    let cell = cell.clone();
+    let sink = sink.clone();
+    lua.create_function(move |_, ()| {
+        guard(&cell)?;
+        sink.borrow_mut()
+            .push(RuntimeOut::Actions(Actions::new(vec![make()])));
+        Ok(())
+    })
+}
+
+fn action_fn_str(
+    lua: &mlua::Lua,
+    cell: &LiveCell,
+    sink: &Sink,
+    make: impl Fn(String) -> RuntimeOut + 'static,
+) -> mlua::Result<mlua::Function> {
+    let cell = cell.clone();
+    let sink = sink.clone();
+    lua.create_function(move |_, arg: String| {
+        guard(&cell)?;
+        sink.borrow_mut().push(make(arg));
+        Ok(())
+    })
 }
 
 #[cfg(test)]

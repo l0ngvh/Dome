@@ -14,6 +14,65 @@ use crate::core::PaneDisplay;
 pub(super) const LAYOUT_SCHEMA_URL: &str =
     "https://raw.githubusercontent.com/l0ngvh/Dome/main/resources/layout.schema.json";
 
+/// The root CST node must stay alive until `to_string`, or dropping it early
+/// can panic.
+pub(super) fn render_layout(
+    existing: &str,
+    workspaces: &[(String, WorkspaceExport)],
+) -> anyhow::Result<String> {
+    let source = if existing.trim().is_empty() {
+        "{}\n"
+    } else {
+        existing
+    };
+    let root =
+        CstRootNode::parse(source, &ParseOptions::default()).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let root_obj = root.object_value_or_set();
+    // Point editors at the schema, but leave a user's own $schema in place.
+    if root_obj.get("$schema").is_none() {
+        root_obj.insert(
+            0,
+            "$schema",
+            CstInputValue::String(LAYOUT_SCHEMA_URL.to_string()),
+        );
+    }
+    let ws_arr = root_obj.array_value_or_set("workspace");
+
+    let live: Vec<(String, CstInputValue)> = workspaces
+        .iter()
+        .map(|(name, ws)| (name.clone(), workspace_to_cst(name, ws)))
+        .collect();
+    let live_names: std::collections::HashSet<&str> =
+        live.iter().map(|(name, _)| name.as_str()).collect();
+
+    for element in ws_arr.elements() {
+        let Some(obj) = element.as_object() else {
+            continue;
+        };
+        if object_name(&obj).is_some_and(|name| !live_names.contains(name.as_str())) {
+            obj.remove();
+        }
+    }
+
+    for (name, value) in live {
+        let existing = ws_arr
+            .elements()
+            .into_iter()
+            .filter_map(|element| element.as_object())
+            .find(|obj| object_name(obj).as_deref() == Some(name.as_str()));
+        match existing {
+            Some(obj) => {
+                obj.replace_with(value);
+            }
+            None => {
+                ws_arr.append(value);
+            }
+        }
+    }
+
+    Ok(root.to_string())
+}
+
 fn matcher_to_cst(matcher: &WindowMatcher) -> CstInputValue {
     let mut fields: Vec<(String, CstInputValue)> = Vec::new();
     let mut push = |key: &str, value: &Option<String>| {
@@ -140,65 +199,6 @@ fn object_name(obj: &CstObject) -> Option<String> {
         .get("name")?
         .as_str()
         .map(str::to_string)
-}
-
-/// The root CST node must stay alive until `to_string`, or dropping it early
-/// can panic.
-pub(super) fn render_layout(
-    existing: &str,
-    workspaces: &[(String, WorkspaceExport)],
-) -> anyhow::Result<String> {
-    let source = if existing.trim().is_empty() {
-        "{}\n"
-    } else {
-        existing
-    };
-    let root =
-        CstRootNode::parse(source, &ParseOptions::default()).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let root_obj = root.object_value_or_set();
-    // Point editors at the schema, but leave a user's own $schema in place.
-    if root_obj.get("$schema").is_none() {
-        root_obj.insert(
-            0,
-            "$schema",
-            CstInputValue::String(LAYOUT_SCHEMA_URL.to_string()),
-        );
-    }
-    let ws_arr = root_obj.array_value_or_set("workspace");
-
-    let live: Vec<(String, CstInputValue)> = workspaces
-        .iter()
-        .map(|(name, ws)| (name.clone(), workspace_to_cst(name, ws)))
-        .collect();
-    let live_names: std::collections::HashSet<&str> =
-        live.iter().map(|(name, _)| name.as_str()).collect();
-
-    for element in ws_arr.elements() {
-        let Some(obj) = element.as_object() else {
-            continue;
-        };
-        if object_name(&obj).is_some_and(|name| !live_names.contains(name.as_str())) {
-            obj.remove();
-        }
-    }
-
-    for (name, value) in live {
-        let existing = ws_arr
-            .elements()
-            .into_iter()
-            .filter_map(|element| element.as_object())
-            .find(|obj| object_name(obj).as_deref() == Some(name.as_str()));
-        match existing {
-            Some(obj) => {
-                obj.replace_with(value);
-            }
-            None => {
-                ws_arr.append(value);
-            }
-        }
-    }
-
-    Ok(root.to_string())
 }
 
 impl Hub {

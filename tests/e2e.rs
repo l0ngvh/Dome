@@ -268,7 +268,10 @@ fn test_exec() {
     // Wait for command to complete
     thread::sleep(Duration::from_millis(1000));
 
-    assert!(marker.exists(), "execute command did not create marker file");
+    assert!(
+        marker.exists(),
+        "execute command did not create marker file"
+    );
 
     std::fs::remove_file(&marker).ok();
 }
@@ -286,7 +289,10 @@ fn test_exec() {
 
     thread::sleep(Duration::from_millis(1000));
 
-    assert!(marker.exists(), "execute command did not create marker file");
+    assert!(
+        marker.exists(),
+        "execute command did not create marker file"
+    );
 
     std::fs::remove_file(&marker).ok();
 }
