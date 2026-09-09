@@ -74,3 +74,6 @@ rayon = "1.10"
 
 [profile.release]
 debug = "line-tables-only"
+
+[profile.test]
+opt-level = 2
