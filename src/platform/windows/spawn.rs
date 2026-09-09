@@ -1,98 +1,79 @@
-use windows::Win32::Foundation::HWND;
-use windows::Win32::UI::Shell::ShellExecuteW;
-use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-use windows::core::PCWSTR;
+use std::collections::{BTreeMap, HashMap};
+use std::ffi::c_void;
 
-/// Launches a command via `ShellExecuteW` (the Windows "open" verb).
+use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::System::Threading::{
+    CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
+};
+use windows::core::PWSTR;
+
+/// Runs `command` through `cmd.exe /C`, so a full command line works: pipes,
+/// `&&`, redirects, and any program on PATH. There is no shell "open" verb, so
+/// open a URL, document, or folder with `start <target>` inside the command.
 ///
-/// Handles executables, documents, URLs, and folders. No intermediate
-/// `cmd.exe` window — the target opens directly. Splits the first
-/// whitespace-separated token as the program; the rest is passed as
-/// arguments. Empty command is a no-op.
-///
-/// Returns `Ok(())` when `ShellExecuteW` reports success (>32). Returns
-/// `Err` on failure, including when the user cancels a UAC prompt or
-/// the association is missing.
-pub(super) fn spawn(command: &str) -> Result<(), anyhow::Error> {
+/// `env` is layered over Dome's own environment for the child, so a `PATH` set
+/// in config reaches the program cmd.exe resolves. `CREATE_NO_WINDOW` keeps the
+/// intermediate cmd.exe from flashing a console.
+pub(super) fn spawn(command: &str, env: &HashMap<String, String>) -> Result<(), anyhow::Error> {
     let command = command.trim();
     if command.is_empty() {
         return Ok(());
     }
 
-    let (program, args) = split_first_arg(command);
+    // CreateProcessW may write to the command-line buffer, so it must be mutable.
+    let mut command_line: Vec<u16> = format!("cmd.exe /C {command}")
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let env_block = env_block(std::env::vars(), env);
 
-    let operation_wide: Vec<u16> = "open".encode_utf16().chain(std::iter::once(0)).collect();
-    let program_wide: Vec<u16> = program.encode_utf16().chain(std::iter::once(0)).collect();
-    let args_wide: Vec<u16> = args.encode_utf16().chain(std::iter::once(0)).collect();
-
-    let result = unsafe {
-        ShellExecuteW(
-            Some(HWND::default()),                     // hwnd
-            PCWSTR::from_raw(operation_wide.as_ptr()), // lpOperation
-            PCWSTR::from_raw(program_wide.as_ptr()),   // lpFile
-            PCWSTR::from_raw(args_wide.as_ptr()),      // lpParameters
-            PCWSTR::null(),                            // lpDirectory
-            SW_SHOWNORMAL,
-        )
+    let startup = STARTUPINFOW {
+        cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+        ..Default::default()
     };
+    let mut info = PROCESS_INFORMATION::default();
 
-    // ShellExecuteW returns a value > 32 on success (as an HINSTANCE).
-    // Values <= 32 are error codes per the Win32 convention.
-    if result.0 as isize > 32 {
-        Ok(())
-    } else {
-        let code = result.0 as isize;
-        let msg = match code {
-            0 => "out of memory or resources".into(),
-            2 => "file not found".into(),
-            3 => "path not found".into(),
-            5 => "access denied / UAC canceled".into(),
-            8 => "out of memory".into(),
-            10 => "bad executable (16-bit on 64-bit system)".into(),
-            11 => "invalid EXE / missing association".into(),
-            26 => "sharing violation".into(),
-            27 => "incomplete association".into(),
-            28 => "DDE timeout".into(),
-            29 => "DDE failed".into(),
-            30 => "DDE busy".into(),
-            31 => "no association".into(),
-            32 => "DLL not found".into(),
-            _ => format!("unknown error code {}", code),
-        };
-        anyhow::bail!("ShellExecuteW failed ({}): {msg}", code)
+    unsafe {
+        CreateProcessW(
+            None,
+            Some(PWSTR(command_line.as_mut_ptr())),
+            None,
+            None,
+            false,
+            CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+            Some(env_block.as_ptr() as *const c_void),
+            None,
+            &startup,
+            &mut info,
+        )
+    }?;
+
+    // Dome does not wait on the child, so release the handles it owns.
+    unsafe {
+        CloseHandle(info.hProcess).ok();
+        CloseHandle(info.hThread).ok();
     }
+    Ok(())
 }
 
-/// Splits `input` into `(first_token, rest)` on the first whitespace run.
-///
-/// Handles quoted tokens: `"foo bar" baz` → `(foo bar, baz)`.
-/// Treats leading whitespace as part of the separator (no program).
-///
-/// Owns the return values (two `String`s) so the caller can encode them
-/// to wide strings independently.
-fn split_first_arg(input: &str) -> (String, String) {
-    let input = input.trim_start();
-    if input.is_empty() {
-        return (String::new(), String::new());
+// A UTF-16 environment block: KEY=VALUE strings, each nul-terminated, closed by
+// a final nul. A user override replaces the inherited value for the same key.
+// BTreeMap dedupes by key and keeps the order stable for tests.
+fn env_block(
+    base: impl Iterator<Item = (String, String)>,
+    overrides: &HashMap<String, String>,
+) -> Vec<u16> {
+    let mut merged: BTreeMap<String, String> = base.collect();
+    for (key, value) in overrides {
+        merged.insert(key.clone(), value.clone());
     }
-
-    if let Some(rest) = input.strip_prefix('"') {
-        // Quoted program: scan to the closing quote.
-        if let Some(end) = rest.find('"') {
-            let program = &rest[..end];
-            let after = rest[end + 1..].trim_start();
-            return (program.to_string(), after.to_string());
-        }
-        // No closing quote: treat the rest as the program name,
-        // with the leading quote stripped.
-        (rest.to_string(), String::new())
-    } else if let Some(idx) = input.find(char::is_whitespace) {
-        let program = &input[..idx];
-        let args = input[idx..].trim_start();
-        (program.to_string(), args.to_string())
-    } else {
-        (input.to_string(), String::new())
+    let mut block = Vec::new();
+    for (key, value) in merged {
+        block.extend(format!("{key}={value}").encode_utf16());
+        block.push(0);
     }
+    block.push(0);
+    block
 }
 
 #[cfg(test)]
@@ -100,55 +81,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn split_simple() {
-        assert_eq!(
-            split_first_arg("notepad.exe foo.txt"),
-            ("notepad.exe".into(), "foo.txt".into())
-        );
-    }
+    fn env_block_overrides_inherited_and_double_terminates() {
+        let base = [
+            ("PATH".to_string(), "/a".to_string()),
+            ("HOME".to_string(), "/h".to_string()),
+        ]
+        .into_iter();
+        let mut overrides = HashMap::new();
+        overrides.insert("PATH".to_string(), "/b".to_string());
+        overrides.insert("EDITOR".to_string(), "nvim".to_string());
 
-    #[test]
-    fn split_no_args() {
-        assert_eq!(
-            split_first_arg("firefox.exe"),
-            ("firefox.exe".into(), "".into())
-        );
-    }
+        let block = env_block(base, &overrides);
+        let decoded = String::from_utf16(&block).unwrap();
+        let entries: Vec<&str> = decoded.split('\0').filter(|s| !s.is_empty()).collect();
 
-    #[test]
-    fn split_quoted_program() {
-        assert_eq!(
-            split_first_arg("\"C:\\Program Files\\App\\app.exe\" --flag"),
-            ("C:\\Program Files\\App\\app.exe".into(), "--flag".into())
-        );
-    }
-
-    #[test]
-    fn split_unclosed_quote() {
-        assert_eq!(
-            split_first_arg("\"C:\\Program Files"),
-            ("C:\\Program Files".into(), "".into())
-        );
-    }
-
-    #[test]
-    fn split_empty() {
-        assert_eq!(split_first_arg(""), ("".into(), "".into()));
-    }
-
-    #[test]
-    fn split_only_whitespace() {
-        assert_eq!(split_first_arg("   "), ("".into(), "".into()));
-    }
-
-    #[test]
-    fn split_preserves_inner_spaces_in_args() {
-        assert_eq!(
-            split_first_arg("code --install-extension rust-lang.rust-analyzer"),
-            (
-                "code".into(),
-                "--install-extension rust-lang.rust-analyzer".into()
-            )
-        );
+        assert!(entries.contains(&"PATH=/b"));
+        assert!(entries.contains(&"HOME=/h"));
+        assert!(entries.contains(&"EDITOR=nvim"));
+        assert_eq!(entries.len(), 3);
+        assert_eq!(&block[block.len() - 2..], &[0, 0]);
     }
 }

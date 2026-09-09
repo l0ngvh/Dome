@@ -416,6 +416,7 @@ fn run_dome(
         keymap_state,
         runtime,
         logger,
+        config.env.clone(),
     );
 
     for hwnd_id in initial_hwnds {

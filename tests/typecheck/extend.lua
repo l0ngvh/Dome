@@ -35,15 +35,15 @@ config.ignore = ignore
 -- keymaps is optional on Config, so annotate the local before indexing.
 ---@type Keymaps
 local keymaps = config.keymaps
-keymaps.main[Meta + "return"] = function(actions) actions.exec(terminal) end
-keymaps.main[Alt + "return"] = function(actions) actions.exec(terminal) end
+keymaps.main[Meta + "return"] = function(actions) actions.execute(terminal) end
+keymaps.main[Alt + "return"] = function(actions) actions.execute(terminal) end
 keymaps.main[Meta + Shift + "1"] = function(actions)
   actions.move.workspace("1")
   actions.focus.workspace("1")
 end
 keymaps.main["meta+r"] = function(actions) actions.mode("resize") end
 keymaps.main[Meta + Shift + "return"] = function(actions)
-  actions.exec(terminal)
+  actions.execute(terminal)
   actions.focus.right()
   actions.move.workspace("2")
   actions.mode("resize")

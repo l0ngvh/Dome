@@ -37,7 +37,7 @@ enum CliCommand {
         #[command(subcommand)]
         target: CliMaster,
     },
-    Exec {
+    Execute {
         command: String,
     },
     Exit,
@@ -243,7 +243,7 @@ impl From<CliCommand> for Dispatch {
             CliCommand::Master { target } => Dispatch::Action(Action::Master {
                 target: target.into(),
             }),
-            CliCommand::Exec { command } => Dispatch::Action(Action::Exec { command }),
+            CliCommand::Execute { command } => Dispatch::Action(Action::Execute { command }),
             CliCommand::Exit => Dispatch::Action(Action::Exit),
             CliCommand::Close => Dispatch::Action(Action::Close),
             CliCommand::Mode { name } => Dispatch::Action(Action::Mode { name }),
@@ -434,8 +434,8 @@ mod tests {
     #[test]
     fn cli_exec_passthrough() {
         assert_action(
-            &["dome", "exec", "open -a Terminal"],
-            "exec open -a Terminal",
+            &["dome", "execute", "open -a Terminal"],
+            "execute open -a Terminal",
         );
     }
 

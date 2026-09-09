@@ -254,9 +254,9 @@ pub(super) fn build_capability(
     actions.set("master", master)?;
 
     actions.set(
-        "exec",
+        "execute",
         action_fn_str(lua, &cell, &sink, |command| {
-            RuntimeOut::Actions(Actions::new(vec![Action::Exec { command }]))
+            RuntimeOut::Actions(Actions::new(vec![Action::Execute { command }]))
         })?,
     )?;
     actions.set("close", action_fn(lua, &cell, &sink, || Action::Close)?)?;
@@ -289,7 +289,7 @@ mod tests {
                     a.move.monitor("left")
                     a.toggle.float()
                     a.master.grow()
-                    a.exec("wt")
+                    a.execute("wt")
                     a.close()
                     a.mode("resize")
                 end"#,
@@ -310,7 +310,7 @@ mod tests {
         );
         assert!(matches!(&out[3], RuntimeOut::Actions(a) if a.to_string() == "[toggle float]"));
         assert!(matches!(&out[4], RuntimeOut::Actions(a) if a.to_string() == "[master grow]"));
-        assert!(matches!(&out[5], RuntimeOut::Actions(a) if a.to_string() == "[exec wt]"));
+        assert!(matches!(&out[5], RuntimeOut::Actions(a) if a.to_string() == "[execute wt]"));
         assert!(matches!(&out[6], RuntimeOut::Actions(a) if a.to_string() == "[close]"));
         assert!(matches!(&out[7], RuntimeOut::Actions(a) if a.to_string() == "[mode resize]"));
     }

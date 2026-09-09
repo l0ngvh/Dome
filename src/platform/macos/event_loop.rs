@@ -43,6 +43,9 @@ pub(super) struct DomeRunner {
     runtime: LuaRuntime,
     logger: Logger,
     bundle_path: Option<String>,
+    /// Environment overrides applied to commands `Action::Execute` spawns,
+    /// refreshed on config reload.
+    env: HashMap<String, String>,
     /// Pending display-settle timer, replaced when a new display change arrives
     /// mid-settle so coverage restarts from the latest change.
     settle_token: Option<RegistrationToken>,
@@ -55,6 +58,7 @@ pub(super) fn run_dome(
     runtime: LuaRuntime,
     logger: Logger,
     bundle_path: Option<String>,
+    env: HashMap<String, String>,
 ) {
     install_signal_handlers();
     let mut event_loop =
@@ -75,6 +79,7 @@ pub(super) fn run_dome(
         runtime,
         logger,
         bundle_path,
+        env,
         settle_token: None,
     };
 
@@ -148,6 +153,7 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
                         config.start_at_login,
                         runner.bundle_path.as_deref(),
                     );
+                    runner.env = config.env.clone();
                     runner.dome.config_changed(*config);
                 }
             }
@@ -237,9 +243,11 @@ fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
                 runner.dome.apply_master(t);
                 runner.dome.flush_layout();
             }
-            Action::Exec { command } => {
-                if let Err(e) = crate::platform::macos::spawn::spawn_disclaimed_sh(command) {
-                    tracing::warn!(%command, "Failed to exec: {e}");
+            Action::Execute { command } => {
+                if let Err(e) =
+                    crate::platform::macos::spawn::spawn_disclaimed_sh(command, &runner.env)
+                {
+                    tracing::warn!(%command, "Failed to execute: {e}");
                 }
             }
             Action::Exit => {

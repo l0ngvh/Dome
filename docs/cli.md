@@ -143,14 +143,14 @@ Add one window slot to the master area.
 
 Remove one window slot from the master area, with a minimum of 1.
 
-## `dome exec <command>`
+## `dome execute <command>`
 
 Run a shell command, passed verbatim to the system shell. Quote a command that
-contains spaces, for example `dome exec "open -a Terminal"`.
+contains spaces, for example `dome execute "open -a Terminal"`.
 
 > **Note**
 > 
-> Do not run Dome with elevated privileges. `exec` runs arbitrary shell commands, so
+> Do not run Dome with elevated privileges. `execute` runs arbitrary shell commands, so
 > anyone with access to the user's shell or Dome's IPC socket would inherit
 > those privileges.
 

@@ -116,6 +116,15 @@ Floats matching windows. See [WindowMatcher](#windowmatcher).
 
 Fullscreens matching windows. See [WindowMatcher](#windowmatcher).
 
+### `env`
+
+`table<string, string>`, default `{}`.
+
+Sets environment variables for the commands [`actions.execute`](#actionsexecutecommand)
+spawns, layered over Dome's own environment. On macOS, launchd starts Dome with
+a minimal environment, so set `PATH` here for a spawned command to find its
+binary. Each entry replaces the inherited value for that variable.
+
 ### `keymaps`
 
 Table of keymaps keyed by name. The default holds a single built-in keymap,
@@ -300,9 +309,12 @@ Add one window slot to the master area.
 
 Remove one window slot from the master area, with a minimum of 1.
 
-### `actions.exec(command)`
+### `actions.execute(command)`
 
-Run `command` in the system shell.
+Run `command` as a shell command line. macOS runs it through `/bin/sh -c` and
+Windows through `cmd.exe /C`, so pipes, `&&`, and redirects work. On Windows
+there is no "open" verb, so open a URL, document, or folder with `start`, for
+example `start https://example.com`.
 
 ### `actions.close()`
 

@@ -117,7 +117,7 @@ pub enum Action {
     UnminimizeWindow {
         id: WindowId,
     },
-    Exec {
+    Execute {
         command: String,
     },
     Exit,
@@ -161,7 +161,7 @@ impl fmt::Display for Action {
             Action::Toggle { target } => write!(f, "toggle {target}"),
             Action::Master { target } => write!(f, "master {target}"),
             Action::UnminimizeWindow { id } => write!(f, "unminimize window {id}"),
-            Action::Exec { command } => write!(f, "exec {command}"),
+            Action::Execute { command } => write!(f, "execute {command}"),
             Action::Exit => write!(f, "exit"),
             Action::Close => write!(f, "close"),
             Action::Mode { name } => write!(f, "mode {name}"),
@@ -351,8 +351,8 @@ impl FromStr for Action {
 
     fn from_str(s: &str) -> Result<Self> {
         // strip_prefix rather than a match arm, because the argument can contain spaces.
-        if let Some(command) = s.strip_prefix("exec ") {
-            return Ok(Action::Exec {
+        if let Some(command) = s.strip_prefix("execute ") {
+            return Ok(Action::Execute {
                 command: command.to_string(),
             });
         }
@@ -523,10 +523,10 @@ mod tests {
                 r#"{"type":"master","target":"grow"}"#,
             ),
             (
-                Action::Exec {
+                Action::Execute {
                     command: "open -a Terminal".into(),
                 },
-                r#"{"type":"exec","command":"open -a Terminal"}"#,
+                r#"{"type":"execute","command":"open -a Terminal"}"#,
             ),
             (Action::Exit, r#"{"type":"exit"}"#),
             (Action::Close, r#"{"type":"close"}"#),
@@ -644,7 +644,7 @@ mod tests {
             "exit",
             "close",
             "mode resize",
-            "exec open -a Terminal",
+            "execute open -a Terminal",
         ];
         for input in cases {
             let action = Action::from_str(input)

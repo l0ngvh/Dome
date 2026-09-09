@@ -38,6 +38,12 @@ pub(crate) struct Config {
     pub(crate) float: Vec<WindowMatcher>,
     #[serde(default)]
     pub(crate) fullscreen: Vec<WindowMatcher>,
+    /// Environment variables layered over Dome's own environment for the
+    /// commands `actions.execute` spawns. On macOS launchd gives Dome a minimal
+    /// environment, so PATH usually must be set here for a spawned command to
+    /// find its binary.
+    #[serde(default)]
+    pub(crate) env: HashMap<String, String>,
 }
 
 pub(crate) fn default_border_size() -> Pixels<Logical> {
@@ -64,6 +70,7 @@ impl Default for Config {
             size_constraints: SizeConstraints::default(),
             float: Vec::new(),
             fullscreen: Vec::new(),
+            env: HashMap::new(),
         }
     }
 }

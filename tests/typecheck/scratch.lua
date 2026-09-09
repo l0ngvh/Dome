@@ -13,7 +13,7 @@ local config = {
     main = {
       [Meta + "h"] = function(actions) actions.focus.left() end,
       [Meta + "l"] = function(actions) actions.focus.right() end,
-      [Meta + "return"] = function(actions) actions.exec(terminal) end,
+      [Meta + "return"] = function(actions) actions.execute(terminal) end,
       [Meta + Shift + "1"] = function(actions)
         actions.move.workspace("1")
         actions.focus.workspace("1")

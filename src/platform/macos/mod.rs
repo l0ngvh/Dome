@@ -128,8 +128,17 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
                     .update_keymaps(config.keymaps.clone());
                 init_tx.send(config.clone()).ok();
                 let sender = sender_rx.recv().expect("main dropped the UI sender");
+                let env = config.env.clone();
                 let dome = Dome::new(&monitors, config, hub_layout, Box::new(sender));
-                event_loop::run_dome(dome, event_rx, keymap_state, runtime, logger, bundle_path);
+                event_loop::run_dome(
+                    dome,
+                    event_rx,
+                    keymap_state,
+                    runtime,
+                    logger,
+                    bundle_path,
+                    env,
+                );
             }))
             .ok();
         }

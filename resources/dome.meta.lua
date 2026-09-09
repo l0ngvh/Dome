@@ -42,7 +42,7 @@
 ---@field move dome.Move
 ---@field toggle dome.Toggle
 ---@field master dome.Master
----@field exec fun(command: string)
+---@field execute fun(command: string)
 ---@field close fun()
 ---@field exit fun()
 ---@field mode fun(name: string)
@@ -85,6 +85,7 @@
 ---@field float? WindowMatcher[]
 ---@field fullscreen? WindowMatcher[]
 ---@field ignore? WindowMatcher[]
+---@field env? table<string, string>
 ---@field keymaps? Keymaps
 
 -- A chord holds one key, so adding a second key is a type error.

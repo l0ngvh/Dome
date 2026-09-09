@@ -72,13 +72,13 @@ config.font_size = 15.0
 
 -- Add a key binding to the default list
 config.keymaps.main[Meta + "space"] = function(actions)
-  actions.exec("open -a Raycast")
+  actions.execute("open -a Raycast")
 end
 
 -- Different configuration based on platform.
 local terminal = dome.os == "macos" and "open -a Terminal" or "wt"
 config.keymaps.main[Meta + "return"] = function(actions)
-  actions.exec(terminal)
+  actions.execute(terminal)
 end
 
 -- Ignore, float, or fullscreen windows that match a rule.
@@ -105,10 +105,10 @@ config.keymaps.main[Meta + Shift + "1"] = function(actions)
 end
 local hyper = Meta + Alt + Shift + Ctrl
 config.keymaps.main[hyper + "space"] = function(actions)
-  actions.exec("open -a Terminal")
+  actions.execute("open -a Terminal")
 end
 -- Raw string also works
-config.keymaps.main["meta+return"] = function(actions) actions.exec("open -a Terminal") end
+config.keymaps.main["meta+return"] = function(actions) actions.execute("open -a Terminal") end
 ```
 
 To add another keymap table:

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -34,6 +35,7 @@ pub(super) struct Runner {
     keymap_state: Arc<RwLock<KeymapState>>,
     runtime: LuaRuntime,
     logger: Logger,
+    env: HashMap<String, String>,
 }
 
 impl Runner {
@@ -44,6 +46,7 @@ impl Runner {
         keymap_state: Arc<RwLock<KeymapState>>,
         runtime: LuaRuntime,
         logger: Logger,
+        env: HashMap<String, String>,
     ) -> Self {
         let mut timers = TimerRegistry::new(Box::new(Win32Timer));
         timers.schedule_drift_retry(DRIFT_RETRY_INTERVAL);
@@ -56,6 +59,7 @@ impl Runner {
             keymap_state,
             runtime,
             logger,
+            env,
         }
     }
 
@@ -102,6 +106,7 @@ impl Runner {
                             .unwrap()
                             .update_keymaps(config.keymaps.clone());
                         login_item::sync_login_item(config.start_at_login);
+                        self.env = config.env.clone();
                         self.dome.config_changed(*config);
                     }
                 }
@@ -216,9 +221,9 @@ impl Runner {
                 Action::Master { target: t } => {
                     self.dome.apply_master(t);
                 }
-                Action::Exec { command } => {
-                    if let Err(e) = crate::platform::windows::spawn::spawn(command) {
-                        tracing::warn!(%command, "Failed to exec: {e:#}");
+                Action::Execute { command } => {
+                    if let Err(e) = crate::platform::windows::spawn::spawn(command, &self.env) {
+                        tracing::warn!(%command, "Failed to execute: {e:#}");
                     }
                 }
                 Action::Exit => {
