@@ -477,14 +477,8 @@ impl Hub {
         let float_windows: Vec<WindowId> = ws.float_windows.clone();
         let fullscreen_windows: Vec<WindowId> = ws.fullscreen_windows.clone();
 
-        let float = self.collect_display_matchers(&float_windows, |mode| match mode {
-            DisplayMode::Float { occupy, .. } => *occupy,
-            _ => None,
-        });
-        let fullscreen = self.collect_display_matchers(&fullscreen_windows, |mode| match mode {
-            DisplayMode::Fullscreen { occupy } => *occupy,
-            _ => None,
-        });
+        let float = self.synthesize_display_matchers(&float_windows);
+        let fullscreen = self.synthesize_display_matchers(&fullscreen_windows);
 
         export.float = float;
         export.fullscreen = fullscreen;

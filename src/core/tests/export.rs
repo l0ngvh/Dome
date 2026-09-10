@@ -16,7 +16,7 @@ impl Drop for CleanupFile {
 }
 
 #[test]
-fn export_reemits_config_matchers_across_float_and_fullscreen() {
+fn export_synthesises_from_live_even_for_rule_placed_windows() {
     let float_matcher = WindowMatcher {
         process: Some("/float.*/".into()),
         ..Default::default()
@@ -28,8 +28,6 @@ fn export_reemits_config_matchers_across_float_and_fullscreen() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                // Global, so the hit carries `matcher_id: None` and export
-                // synthesises this window's matcher from live metadata.
                 .with_float(vec![WindowMatcher {
                     process: Some("orphan.exe".into()),
                     ..Default::default()
@@ -69,18 +67,31 @@ fn export_reemits_config_matchers_across_float_and_fullscreen() {
     );
 
     let result = hub.export_workspace(ws_id);
+    // Reuse of the placing rule is gone. Every floated or fullscreened window
+    // exports as its own matcher synthesised from live metadata, so a rule that
+    // matched several windows expands to one matcher each.
     assert_eq!(
         result,
         WorkspaceExport {
             strategy: "partition_tree".into(),
             float: vec![
-                float_matcher,
+                WindowMatcher {
+                    process: Some("float-window-alpha".into()),
+                    ..Default::default()
+                },
+                WindowMatcher {
+                    process: Some("float-window-beta".into()),
+                    ..Default::default()
+                },
                 WindowMatcher {
                     process: Some("orphan.exe".into()),
                     ..Default::default()
-                }
+                },
             ],
-            fullscreen: vec![fullscreen_matcher],
+            fullscreen: vec![WindowMatcher {
+                process: Some("fs-window-alpha".into()),
+                ..Default::default()
+            }],
             ..WorkspaceExport::default()
         }
     );
@@ -305,13 +316,13 @@ fn export_layout_writes_entry_for_empty_workspace() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("dome_export_empty_entry_{nanos}.jsonc"));
+    let path = std::env::temp_dir().join(format!("dome_export_empty_entry_{nanos}.lua"));
     let _cleanup = CleanupFile(path.clone());
 
     hub.export_layout(&path).unwrap();
 
     let parsed = LayoutConfig::load(path.to_str().unwrap())
-        .expect("exported layout.jsonc parses through the JSONC loader");
+        .expect("exported layout.lua parses through the Lua loader");
 
     let empty = parsed
         .workspace
@@ -343,6 +354,38 @@ fn export_layout_writes_entry_for_empty_workspace() {
         }
         _ => panic!("workspace 2 should be partition_tree"),
     }
+}
+
+#[test]
+fn export_layout_backs_up_the_previous_file() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(LayoutConfigBuilder::new().build())
+        .build();
+    hub.focus_workspace("1", None);
+    hub.insert_window(titled("alpha"), default_rect(), WindowRestrictions::None);
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("dome_export_backup_{nanos}.lua"));
+    let backup = path.with_extension("lua.bak");
+    let _cleanup_path = CleanupFile(path.clone());
+    let _cleanup_backup = CleanupFile(backup.clone());
+
+    let prior = "-- prior hand-written file\nreturn { workspace = {} }\n";
+    std::fs::write(&path, prior).unwrap();
+
+    hub.export_layout(&path).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(&backup).unwrap(),
+        prior,
+        "the prior file is preserved in the .bak"
+    );
+    let rewritten = std::fs::read_to_string(&path).unwrap();
+    assert!(rewritten.starts_with("---@type dome.Layout\n"));
+    assert_ne!(rewritten, prior);
 }
 
 #[test]
@@ -436,19 +479,18 @@ fn render_layout_round_trips_master_and_nested_tree() {
     };
 
     let rendered =
-        crate::core::export::render_layout("", &[("m".into(), master_ws), ("t".into(), tree_ws)])
-            .unwrap();
+        crate::core::export::render_layout(&[("m".into(), master_ws), ("t".into(), tree_ws)]);
 
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("dome_export_roundtrip_{nanos}.jsonc"));
+    let path = std::env::temp_dir().join(format!("dome_export_roundtrip_{nanos}.lua"));
     let _cleanup = CleanupFile(path.clone());
     std::fs::write(&path, &rendered).unwrap();
 
     let parsed = LayoutConfig::load(path.to_str().unwrap())
-        .expect("rendered layout.jsonc parses through the JSONC loader");
+        .expect("rendered layout.lua parses through the Lua loader");
 
     let m = parsed
         .workspace
@@ -504,40 +546,30 @@ fn render_layout_round_trips_master_and_nested_tree() {
 }
 
 #[test]
-fn render_layout_preserves_comments_and_reconciles_in_place() {
-    let existing = r#"{
-  // Dome layout. Hand-written comments survive export.
-  "workspace": [
-    { "name": "1", "strategy": "master", "master_count": 1 }
-  ]
-}
-"#;
-    let updated = WorkspaceExport {
-        strategy: "master".into(),
-        master_count: Some(2),
-        ..WorkspaceExport::default()
-    };
-    let appended = WorkspaceExport {
-        strategy: "partition_tree".into(),
-        ..WorkspaceExport::default()
-    };
-    let rendered = crate::core::export::render_layout(
-        existing,
-        &[("1".into(), updated), ("2".into(), appended)],
-    )
-    .unwrap();
+fn render_layout_regenerates_without_preserving_prior_content() {
+    // The Lua export is a full regenerate. A prior file's comments do not
+    // survive, which is why export_layout keeps a .bak. Here we only assert the
+    // rendered output carries the new state and the annotation header.
+    let rendered = crate::core::export::render_layout(&[(
+        "1".into(),
+        WorkspaceExport {
+            strategy: "master".into(),
+            master_count: Some(2),
+            ..WorkspaceExport::default()
+        },
+    )]);
 
-    assert!(rendered.contains("Dome layout. Hand-written comments survive export."));
+    assert!(rendered.starts_with("---@type dome.Layout\n"));
 
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("dome_export_comments_{nanos}.jsonc"));
+    let path = std::env::temp_dir().join(format!("dome_export_regen_{nanos}.lua"));
     let _cleanup = CleanupFile(path.clone());
     std::fs::write(&path, &rendered).unwrap();
     let parsed = LayoutConfig::load(path.to_str().unwrap())
-        .expect("rendered layout.jsonc parses through the JSONC loader");
+        .expect("rendered layout.lua parses through the Lua loader");
 
     let ws1 = parsed
         .workspace
@@ -548,45 +580,4 @@ fn render_layout_preserves_comments_and_reconciles_in_place() {
         LayoutWorkspaceConfig::Master { master_count, .. } => assert_eq!(*master_count, Some(2)),
         _ => panic!("workspace 1 should be master"),
     }
-    assert!(parsed.workspace.iter().any(|w| w.name() == "2"));
-}
-
-#[test]
-fn render_layout_adds_schema_reference_when_absent() {
-    let rendered = crate::core::export::render_layout(
-        "",
-        &[(
-            "1".into(),
-            WorkspaceExport {
-                strategy: "master".into(),
-                ..WorkspaceExport::default()
-            },
-        )],
-    )
-    .unwrap();
-
-    let schema = format!(
-        "\"$schema\": \"{}\"",
-        crate::core::export::LAYOUT_SCHEMA_URL
-    );
-    assert!(rendered.contains(&schema), "rendered: {rendered}");
-}
-
-#[test]
-fn render_layout_keeps_a_users_own_schema_reference() {
-    let existing = "{\n  \"$schema\": \"./my-schema.json\",\n  \"workspace\": []\n}\n";
-    let rendered = crate::core::export::render_layout(
-        existing,
-        &[(
-            "1".into(),
-            WorkspaceExport {
-                strategy: "master".into(),
-                ..WorkspaceExport::default()
-            },
-        )],
-    )
-    .unwrap();
-
-    assert!(rendered.contains("\"$schema\": \"./my-schema.json\""));
-    assert!(!rendered.contains(crate::core::export::LAYOUT_SCHEMA_URL));
 }

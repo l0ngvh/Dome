@@ -88,6 +88,32 @@
 ---@field env? table<string, string>
 ---@field keymaps? Keymaps
 
+---@class dome.Layout
+---@field workspace dome.LayoutWorkspace[]
+
+---@class dome.LayoutWorkspace
+---@field name string
+---@field strategy "partition_tree" | "master"
+---@field tree? dome.TreeNode
+---@field master_ratio? number
+---@field master_count? number
+---@field master? dome.Pane
+---@field secondary? dome.Pane
+---@field float? WindowMatcher[]
+---@field fullscreen? WindowMatcher[]
+
+---@alias dome.TreeNode WindowMatcher | dome.TreeNode[] | dome.TreeContainer
+
+---@class dome.TreeContainer
+---@field split? "horizontal" | "vertical" | "tabbed"
+---@field children dome.TreeNode[]
+
+---@alias dome.Pane WindowMatcher[] | dome.PaneContainer
+
+---@class dome.PaneContainer
+---@field display? "tiled" | "tabbed"
+---@field children WindowMatcher[]
+
 -- A chord holds one key, so adding a second key is a type error.
 ---@class Modifier
 ---@operator add(string): string

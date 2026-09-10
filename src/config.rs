@@ -124,6 +124,14 @@ impl Config {
         format!("{data_dir}/dome")
     }
 
+    #[cfg(test)]
+    pub(crate) fn load(path: &str) -> Result<Self> {
+        let src = std::fs::read_to_string(path)?;
+        let config = Self::from_lua_src(path, &src).map_err(|e| anyhow!("{e}"))?;
+        config.validate_layout()?;
+        Ok(config)
+    }
+
     fn validate_layout(&self) -> anyhow::Result<()> {
         if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) = (
             self.size_constraints.minimum_width,
@@ -150,14 +158,6 @@ impl Config {
             );
         }
         Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn load(path: &str) -> Result<Self> {
-        let src = std::fs::read_to_string(path)?;
-        let config = Self::from_lua_src(path, &src).map_err(|e| anyhow!("{e}"))?;
-        config.validate_layout()?;
-        Ok(config)
     }
 
     #[cfg(test)]
@@ -484,16 +484,23 @@ fn dedup_preferred_layout_config(
 impl LayoutConfig {
     pub(crate) fn load(path: &str) -> anyhow::Result<Self> {
         let src = std::fs::read_to_string(path)?;
-        let mut layout = Self::from_jsonc_src(path, &src)?;
+        let mut layout = Self::from_lua(path, &src)?;
         layout.workspace = dedup_preferred_layout_config(layout.workspace, "");
         Ok(layout)
     }
 
-    fn from_jsonc_src(path: &str, src: &str) -> anyhow::Result<Self> {
-        let value: serde_json::Value =
-            jsonc_parser::parse_to_serde_value(src, &jsonc_parser::ParseOptions::default())
-                .map_err(|e| anyhow!("{path}: {e}"))?;
-        Ok(serde_json::from_value(value)?)
+    // Layout is pure data, so a bare Lua VM is enough. The mlua value is routed
+    // through serde_json::Value so the custom Deserialize impls for
+    // TreeLayoutNode and PaneConfig see an unambiguous array-vs-object shape.
+    fn from_lua(path: &str, src: &str) -> anyhow::Result<Self> {
+        let lua = mlua::Lua::new();
+        let value: mlua::Value = lua
+            .load(src)
+            .set_name(path)
+            .eval()
+            .map_err(|e| anyhow!("{path}: {e}"))?;
+        let json: serde_json::Value = lua.from_value(value).map_err(|e| anyhow!("{path}: {e}"))?;
+        Ok(serde_json::from_value(json)?)
     }
 }
 
@@ -907,7 +914,7 @@ pub(crate) fn layout_default_path(config_path: &Path) -> PathBuf {
     config_path
         .parent()
         .expect("config path must have a parent directory")
-        .join("layout.jsonc")
+        .join("layout.lua")
 }
 
 // An explicit `-c <path>` is used as given, even when it is missing. Only the
@@ -1027,9 +1034,11 @@ mod tests {
         Config::from_lua_src("test config", src).map_err(|e| anyhow!("{e}"))
     }
 
+    // The struct-shape tests feed JSON, which deserializes through the same serde
+    // path the Lua loader routes into. layout_loads_from_lua_source covers the
+    // mlua front-end and its array-vs-map detection.
     fn layout_from(src: &str) -> LayoutConfig {
-        let mut layout =
-            LayoutConfig::from_jsonc_src("test layout", src).expect("layout should load");
+        let mut layout: LayoutConfig = serde_json::from_str(src).expect("layout should load");
         layout.workspace = dedup_preferred_layout_config(layout.workspace, "");
         layout
     }
@@ -1039,9 +1048,70 @@ mod tests {
     }
 
     fn try_workspace(src: &str) -> anyhow::Result<LayoutWorkspaceConfig> {
-        let value: serde_json::Value =
-            jsonc_parser::parse_to_serde_value(src, &jsonc_parser::ParseOptions::default())?;
-        Ok(serde_json::from_value(value)?)
+        Ok(serde_json::from_str(src)?)
+    }
+
+    #[test]
+    fn layout_loads_from_lua_source() {
+        let src = r#"
+---@type dome.Layout
+return {
+  workspace = {
+    {
+      name = "dev",
+      strategy = "partition_tree",
+      tree = {
+        { app = "Ghostty" },
+        { split = "vertical", children = {
+          { app = "Firefox" },
+          { app = "Slack" },
+        } },
+      },
+      float = { { app = "System Settings" } },
+    },
+    {
+      name = "work",
+      strategy = "master",
+      master_ratio = 0.6,
+      master = { { app = "Ghostty" } },
+      secondary = { display = "tabbed", children = { { app = "Firefox" } } },
+    },
+  },
+}
+"#;
+        let layout =
+            LayoutConfig::from_lua("test layout", src).expect("lua layout should load");
+        assert_eq!(layout.workspace.len(), 2);
+        match &layout.workspace[0] {
+            LayoutWorkspaceConfig::PartitionTree { tree, float, .. } => {
+                let Some(TreeLayoutNode::Container { split, children }) = tree else {
+                    panic!("expected outer container");
+                };
+                assert!(split.is_none());
+                assert_eq!(children.len(), 2);
+                assert!(matches!(children[0], TreeLayoutNode::Leaf(..)));
+                assert!(matches!(
+                    children[1],
+                    TreeLayoutNode::Container {
+                        split: Some(SplitMode::Vertical),
+                        ..
+                    }
+                ));
+                assert_eq!(float.len(), 1);
+            }
+            _ => panic!("expected PartitionTree"),
+        }
+        match &layout.workspace[1] {
+            LayoutWorkspaceConfig::Master {
+                master, secondary, ..
+            } => {
+                assert_eq!(master.display, PaneDisplay::Tiled);
+                assert_eq!(master.children.len(), 1);
+                assert_eq!(secondary.display, PaneDisplay::Tabbed);
+                assert_eq!(secondary.children.len(), 1);
+            }
+            _ => panic!("expected Master"),
+        }
     }
 
     struct CleanupFile(std::path::PathBuf);
@@ -1057,14 +1127,6 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("dome_{tag}_{nanos}.lua"))
-    }
-
-    fn temp_jsonc_path(tag: &str) -> std::path::PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("dome_{tag}_{nanos}.jsonc"))
     }
 
     struct CleanupDir(std::path::PathBuf);
@@ -1684,8 +1746,8 @@ return c"#,
 
     #[test]
     fn layout_load_or_default_returns_defaults_on_malformed() {
-        let path = temp_jsonc_path("layout_malformed");
-        std::fs::write(&path, "this is not valid json {{{\n").unwrap();
+        let path = temp_lua_path("layout_malformed");
+        std::fs::write(&path, "this is not valid lua ]]}\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
         let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
         assert!(layout.workspace.is_empty());
@@ -1731,8 +1793,7 @@ return c"#,
     #[test]
     fn preferred_layout_rejects_unknown_strategy() {
         assert!(
-            LayoutConfig::from_jsonc_src(
-                "test",
+            serde_json::from_str::<LayoutConfig>(
                 r#"{ "workspace": [ { "name": "bad", "strategy": "floating" } ] }"#,
             )
             .is_err()

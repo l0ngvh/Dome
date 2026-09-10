@@ -28,7 +28,6 @@ serde = { workspace = true }
 bitflags = "2.10.0"
 clap = { version = "4.5.53", features = ["derive"] }
 serde_json = { workspace = true }
-jsonc-parser = { version = "0.33", features = ["cst", "serde", "serde_json"] }
 regex = "1.12.2"
 interprocess = { workspace = true }
 notify = "8.2.0"

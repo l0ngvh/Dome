@@ -205,48 +205,6 @@ impl Runner {
         }
     }
 
-    #[tracing::instrument(skip(self))]
-    fn handle_actions(&mut self, actions: &Actions) {
-        for action in actions {
-            match action {
-                Action::Focus { target: t } => {
-                    self.dome.apply_focus(t);
-                }
-                Action::Move { target: t } => {
-                    self.dome.apply_move(t);
-                }
-                Action::Toggle { target: t } => {
-                    self.dome.apply_toggle(t);
-                }
-                Action::Master { target: t } => {
-                    self.dome.apply_master(t);
-                }
-                Action::Execute { command } => {
-                    if let Err(e) = crate::platform::windows::spawn::spawn(command, &self.env) {
-                        tracing::warn!(%command, "Failed to execute: {e:#}");
-                    }
-                }
-                Action::Exit => {
-                    unsafe {
-                        PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok()
-                    };
-                    unsafe { PostQuitMessage(0) };
-                }
-                Action::Close => {
-                    self.dome.close_focused_window();
-                }
-                Action::UnminimizeWindow { id } => {
-                    self.dome.unminimize_window(*id);
-                }
-                Action::Mode { name } => {
-                    self.keymap_state.write().unwrap().switch_mode(name);
-                    tracing::debug!(mode = %name, "Switching to mode");
-                }
-            }
-        }
-        self.dome.apply_layout();
-    }
-
     pub(super) fn dispatch_window_created(&mut self, hwnd_id: HwndId) {
         let ext = Arc::new(ExternalHwnd::new(hwnd_id.into()));
         let inspect: Arc<dyn InspectExternalWindow> = ext.clone();
@@ -293,6 +251,48 @@ impl Runner {
                 CreatedWindow::Skip => {}
             },
         );
+    }
+
+    #[tracing::instrument(skip(self))]
+    fn handle_actions(&mut self, actions: &Actions) {
+        for action in actions {
+            match action {
+                Action::Focus { target: t } => {
+                    self.dome.apply_focus(t);
+                }
+                Action::Move { target: t } => {
+                    self.dome.apply_move(t);
+                }
+                Action::Toggle { target: t } => {
+                    self.dome.apply_toggle(t);
+                }
+                Action::Master { target: t } => {
+                    self.dome.apply_master(t);
+                }
+                Action::Execute { command } => {
+                    if let Err(e) = crate::platform::windows::spawn::spawn(command, &self.env) {
+                        tracing::warn!(%command, "Failed to execute: {e:#}");
+                    }
+                }
+                Action::Exit => {
+                    unsafe {
+                        PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok()
+                    };
+                    unsafe { PostQuitMessage(0) };
+                }
+                Action::Close => {
+                    self.dome.close_focused_window();
+                }
+                Action::UnminimizeWindow { id } => {
+                    self.dome.unminimize_window(*id);
+                }
+                Action::Mode { name } => {
+                    self.keymap_state.write().unwrap().switch_mode(name);
+                    tracing::debug!(mode = %name, "Switching to mode");
+                }
+            }
+        }
+        self.dome.apply_layout();
     }
 
     fn dispatch_placement_read(&mut self, hwnd_id: HwndId, observed_at: Instant) {

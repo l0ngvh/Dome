@@ -209,6 +209,47 @@ impl From<CliQuery> for Query {
     }
 }
 
+pub fn run() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    let dispatch = match cli.command {
+        None => Dispatch::Launch {
+            config: None,
+            layout: None,
+        },
+        Some(cmd) => Dispatch::from(cmd),
+    };
+
+    match dispatch {
+        Dispatch::Launch { config, layout } => crate::run_app(config, layout)?,
+        Dispatch::Action(action) => {
+            crate::DomeClient.action(&action)?;
+        }
+        Dispatch::Query(query) => {
+            let json = match query {
+                Query::Workspaces => serde_json::to_string(&crate::DomeClient.workspaces()?)?,
+                Query::MinimizedWindows => {
+                    serde_json::to_string(&crate::DomeClient.minimized_windows()?)?
+                }
+                Query::Monitors => serde_json::to_string(&crate::DomeClient.monitors()?)?,
+            };
+            println!("{json}");
+        }
+        Dispatch::Export => {
+            crate::DomeClient.export_layout()?;
+        }
+        Dispatch::Generate(CliGenerate::Yasb) => {
+            crate::integrations::yasb::generate()?;
+        }
+        Dispatch::Generate(CliGenerate::Sketchybar) => {
+            crate::integrations::sketchybar::generate()?;
+        }
+        Dispatch::Generate(CliGenerate::Zebar) => {
+            crate::integrations::zebar::generate()?;
+        }
+    }
+    Ok(())
+}
+
 fn cli_toggle_to_action(t: CliToggle) -> Action {
     match t {
         CliToggle::Spawn => Action::Toggle {
@@ -260,47 +301,6 @@ impl From<CliCommand> for Dispatch {
             }
         }
     }
-}
-
-pub fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
-    let dispatch = match cli.command {
-        None => Dispatch::Launch {
-            config: None,
-            layout: None,
-        },
-        Some(cmd) => Dispatch::from(cmd),
-    };
-
-    match dispatch {
-        Dispatch::Launch { config, layout } => crate::run_app(config, layout)?,
-        Dispatch::Action(action) => {
-            crate::DomeClient.action(&action)?;
-        }
-        Dispatch::Query(query) => {
-            let json = match query {
-                Query::Workspaces => serde_json::to_string(&crate::DomeClient.workspaces()?)?,
-                Query::MinimizedWindows => {
-                    serde_json::to_string(&crate::DomeClient.minimized_windows()?)?
-                }
-                Query::Monitors => serde_json::to_string(&crate::DomeClient.monitors()?)?,
-            };
-            println!("{json}");
-        }
-        Dispatch::Export => {
-            crate::DomeClient.export_layout()?;
-        }
-        Dispatch::Generate(CliGenerate::Yasb) => {
-            crate::integrations::yasb::generate()?;
-        }
-        Dispatch::Generate(CliGenerate::Sketchybar) => {
-            crate::integrations::sketchybar::generate()?;
-        }
-        Dispatch::Generate(CliGenerate::Zebar) => {
-            crate::integrations::zebar::generate()?;
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

@@ -59,11 +59,6 @@ default locations are:
 - macOS: `~/.config/dome/config.lua` (or under `$XDG_CONFIG_HOME/dome/`).
 - Windows: `%APPDATA%\dome\config.lua`.
 
-Per-workspace layouts live in a separate `layout.jsonc` in the same directory,
-which Dome writes only when you run `dome export`. See [Preferred
-layout](#preferred-layout).
-
-
 ```lua
 local config = dome.defaults()
 
@@ -166,37 +161,37 @@ See the [keybinding configuration](docs/configuration.md#keymaps) and
 ## Preferred layout
 
 Dome can remember how a workspace is arranged and restore it the next time those
-windows open. Arrange a workspace, then save it:
+windows open. Once a workspace looks right, save its arrangement:
 
 ```bash
 dome export
 ```
 
-Dome writes the arrangement to `layout.jsonc`, next to your `config.lua`. Edit
-the file by hand to refine it, for example to match a window with a regular
-expression.
+That writes the arrangement to `layout.lua`, next to your `config.lua`:
 
-Example:
-```jsonc
-{
-  "$schema": "https://raw.githubusercontent.com/l0ngvh/Dome/main/resources/layout.schema.json",
-  "workspace": [
+```lua
+---@type dome.Layout
+return {
+  workspace = {
     {
-      "name": "3",
-      "strategy": "master",
-      "float": [{ "process": "calc.exe" }],
-      "fullscreen": [{ "title": "/Media Player/" }],
-      "master": [{ "process": "code.exe" }],
-      "secondary": [
-        { "process": "terminal.exe", "title": "build" },
-        { "process": "terminal.exe", "title": "test" }
-      ]
-    }
-  ]
+      name = "3",
+      strategy = "master",
+      float = { { process = "calc.exe" } },
+      fullscreen = { { title = "/Media Player/" } },
+      master = { { process = "code.exe" } },
+      secondary = {
+        { process = "terminal.exe", title = "build" },
+        { process = "terminal.exe", title = "test" },
+      },
+    },
+  },
 }
 ```
 
-See [Layout](docs/layout.md#preferred-layout) for the file format.
+Edit the file by hand to refine it, for example to match a window with a
+regular expression.
+
+See [Layout](docs/layout.md#preferred-layout) for more detail.
 
 ## Documentation
 

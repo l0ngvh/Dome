@@ -14,26 +14,6 @@ const DOME_SH: &str = include_str!("../../resources/integrations/sketchybar/dome
 // The number row baked for every monitor, in fixed order.
 const WORKSPACES: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
-/// A spawn failure with NotFound means SketchyBar is not installed, which is
-/// fatal. A non-zero exit is tolerated, because the bar may be mid-reload.
-fn run_sketchybar(args: &[&str]) -> anyhow::Result<std::process::Output> {
-    std::process::Command::new("sketchybar")
-        .args(args)
-        .output()
-        .map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => {
-                anyhow!("sketchybar not found on PATH. Install SketchyBar first.")
-            }
-            _ => anyhow::Error::new(e).context("run sketchybar"),
-        })
-}
-
-/// Single-quote a value for the `sh -c` that SketchyBar runs a script through.
-/// The one escape is `'\''` for a literal apostrophe.
-fn sh_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
 /// dome does not query SketchyBar, so this works before SketchyBar starts. Every
 /// query runs before any write, so a failed query leaves both files untouched.
 pub(crate) fn generate() -> anyhow::Result<()> {
@@ -66,6 +46,26 @@ pub(crate) fn generate() -> anyhow::Result<()> {
         }
     );
     Ok(())
+}
+
+/// A spawn failure with NotFound means SketchyBar is not installed, which is
+/// fatal. A non-zero exit is tolerated, because the bar may be mid-reload.
+fn run_sketchybar(args: &[&str]) -> anyhow::Result<std::process::Output> {
+    std::process::Command::new("sketchybar")
+        .args(args)
+        .output()
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                anyhow!("sketchybar not found on PATH. Install SketchyBar first.")
+            }
+            _ => anyhow::Error::new(e).context("run sketchybar"),
+        })
+}
+
+/// Single-quote a value for the `sh -c` that SketchyBar runs a script through.
+/// The one escape is `'\''` for a literal apostrophe.
+fn sh_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn default_sketchybarrc() -> anyhow::Result<PathBuf> {

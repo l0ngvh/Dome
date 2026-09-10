@@ -11,28 +11,6 @@ use crate::action::MonitorDetails;
 const DOME_WORKSPACES_PS1: &str =
     include_str!("../../resources/integrations/yasb/dome_workspaces.ps1");
 
-/// Refuse a drifted template rather than write a plugin that still holds a
-/// placeholder.
-fn bake_plugin(template: &str, dome_path: &str) -> anyhow::Result<String> {
-    let hits = template.matches("__DOME__").count();
-    ensure!(
-        hits == 1,
-        "dome_workspaces.ps1 template should hold 1 __DOME__ placeholder, found {hits}"
-    );
-    Ok(template.replace("__DOME__", &ps_string(dome_path)))
-}
-
-/// A single-quoted PowerShell string. The one escape is `''` for a literal
-/// apostrophe, so a Windows path's backslashes pass through as written.
-fn ps_string(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
-}
-
-struct DomeEntries {
-    bar_lines: Vec<String>,
-    widget_lines: Vec<String>,
-}
-
 /// Query and validate before touching disk, so a query failure never writes a
 /// partial config.
 pub(crate) fn generate() -> anyhow::Result<()> {
@@ -72,6 +50,28 @@ pub(crate) fn generate() -> anyhow::Result<()> {
         p = plugin.display()
     );
     Ok(())
+}
+
+/// Refuse a drifted template rather than write a plugin that still holds a
+/// placeholder.
+fn bake_plugin(template: &str, dome_path: &str) -> anyhow::Result<String> {
+    let hits = template.matches("__DOME__").count();
+    ensure!(
+        hits == 1,
+        "dome_workspaces.ps1 template should hold 1 __DOME__ placeholder, found {hits}"
+    );
+    Ok(template.replace("__DOME__", &ps_string(dome_path)))
+}
+
+/// A single-quoted PowerShell string. The one escape is `''` for a literal
+/// apostrophe, so a Windows path's backslashes pass through as written.
+fn ps_string(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+struct DomeEntries {
+    bar_lines: Vec<String>,
+    widget_lines: Vec<String>,
 }
 
 /// Back the config up once, so the pristine original survives a re-run.

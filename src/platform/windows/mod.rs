@@ -62,42 +62,6 @@ use ui::overlay::WgpuOverlayFactory;
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
 use taskbar::Taskbar;
 
-/// Verifies the process runs at Per-Monitor V2 DPI awareness, aborting otherwise because
-/// every downstream geometry and rendering assumption requires PMv2. See BRD risk #6.
-fn ensure_per_monitor_v2_awareness() -> anyhow::Result<()> {
-    let result =
-        unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
-    if result.is_ok() {
-        return Ok(());
-    }
-    let err = result.unwrap_err();
-
-    // GetDpiAwarenessContextForProcess + AreDpiAwarenessContextsEqual require Windows 10
-    // 1803+. This path is only reachable there anyway, because PMv2 needs 1703+ and a
-    // failed Set means awareness was pinned, which only a manifest or shim does on 1803+.
-    let current_ctx = unsafe { GetDpiAwarenessContextForProcess(GetCurrentProcess()) };
-    let is_pmv2 = unsafe {
-        AreDpiAwarenessContextsEqual(current_ctx, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
-    };
-    if is_pmv2.as_bool() {
-        tracing::info!(
-            err = %err,
-            "DPI awareness already PMv2 (likely manifest or compat shim); continuing"
-        );
-        return Ok(());
-    }
-
-    tracing::error!(
-        err = %err,
-        "Failed to set PMv2 DPI awareness; refusing to start because geometry would be wrong"
-    );
-    anyhow::bail!(
-        "Process DPI awareness is not Per-Monitor V2. \
-         Dome requires PMv2 for correct geometry. \
-         Check compatibility settings or application manifest. Original error: {err}"
-    );
-}
-
 pub(super) const WM_APP_HUBEVENT: u32 = WM_APP;
 pub(super) const WM_APP_DISPATCH_RESULT: u32 = WM_APP + 1;
 
@@ -179,29 +143,6 @@ impl AppHandler for WindowLoopHandler {
 
     fn on_work_area_changed(&mut self) {
         self.hub_sender.send(HubEvent::WorkAreaChanged);
-    }
-}
-
-/// Handles Ctrl+C, Ctrl+Break, and console close by posting WM_QUIT to the main
-/// thread, triggering the existing graceful shutdown path (Dome drop -> recovery).
-unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
-    match ctrl_type {
-        CTRL_C_EVENT | CTRL_BREAK_EVENT | CTRL_CLOSE_EVENT => {
-            tracing::info!(ctrl_type, "Received console control event");
-            let thread_id = MAIN_THREAD_ID.load(std::sync::atomic::Ordering::Relaxed);
-            if thread_id != 0 {
-                // Result ignored: the handler can't meaningfully recover from a failure,
-                // and returning TRUE still prevents the default handler from killing the process.
-                unsafe { PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
-            }
-            // Windows terminates the process shortly after the handler returns for
-            // CTRL_CLOSE_EVENT. Sleep to give the main thread time to shut down gracefully.
-            if ctrl_type == CTRL_CLOSE_EVENT {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-            }
-            BOOL(1)
-        }
-        _ => BOOL(0),
     }
 }
 
@@ -350,6 +291,65 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
     uninstall_keyboard_hook(keyboard_hook);
 
     Ok(())
+}
+
+/// Verifies the process runs at Per-Monitor V2 DPI awareness, aborting otherwise because
+/// every downstream geometry and rendering assumption requires PMv2. See BRD risk #6.
+fn ensure_per_monitor_v2_awareness() -> anyhow::Result<()> {
+    let result =
+        unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+    if result.is_ok() {
+        return Ok(());
+    }
+    let err = result.unwrap_err();
+
+    // GetDpiAwarenessContextForProcess + AreDpiAwarenessContextsEqual require Windows 10
+    // 1803+. This path is only reachable there anyway, because PMv2 needs 1703+ and a
+    // failed Set means awareness was pinned, which only a manifest or shim does on 1803+.
+    let current_ctx = unsafe { GetDpiAwarenessContextForProcess(GetCurrentProcess()) };
+    let is_pmv2 = unsafe {
+        AreDpiAwarenessContextsEqual(current_ctx, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+    };
+    if is_pmv2.as_bool() {
+        tracing::info!(
+            err = %err,
+            "DPI awareness already PMv2 (likely manifest or compat shim); continuing"
+        );
+        return Ok(());
+    }
+
+    tracing::error!(
+        err = %err,
+        "Failed to set PMv2 DPI awareness; refusing to start because geometry would be wrong"
+    );
+    anyhow::bail!(
+        "Process DPI awareness is not Per-Monitor V2. \
+         Dome requires PMv2 for correct geometry. \
+         Check compatibility settings or application manifest. Original error: {err}"
+    );
+}
+
+/// Handles Ctrl+C, Ctrl+Break, and console close by posting WM_QUIT to the main
+/// thread, triggering the existing graceful shutdown path (Dome drop -> recovery).
+unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
+    match ctrl_type {
+        CTRL_C_EVENT | CTRL_BREAK_EVENT | CTRL_CLOSE_EVENT => {
+            tracing::info!(ctrl_type, "Received console control event");
+            let thread_id = MAIN_THREAD_ID.load(std::sync::atomic::Ordering::Relaxed);
+            if thread_id != 0 {
+                // Result ignored: the handler can't meaningfully recover from a failure,
+                // and returning TRUE still prevents the default handler from killing the process.
+                unsafe { PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+            }
+            // Windows terminates the process shortly after the handler returns for
+            // CTRL_CLOSE_EVENT. Sleep to give the main thread time to shut down gracefully.
+            if ctrl_type == CTRL_CLOSE_EVENT {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+            BOOL(1)
+        }
+        _ => BOOL(0),
+    }
 }
 
 fn run_dome(
