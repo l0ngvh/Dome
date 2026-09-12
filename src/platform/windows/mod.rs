@@ -18,7 +18,7 @@ mod ui;
 mod tests;
 
 use std::rc::Rc;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -43,11 +43,12 @@ use windows::core::BOOL;
 
 use crate::action::{Actions, WorkspaceInfo};
 use crate::config::{
-    Config, LayoutConfig, LayoutWorkspaceConfig, layout_default_path, load_or_default,
-    start_config_watcher,
+    Config, LayoutConfig, LayoutWorkspaceConfig, ModalKeymaps, layout_default_path,
+    load_or_default, resolve_config_path, start_config_watcher, start_file_watcher,
 };
 use crate::ipc;
 use crate::keymap::KeymapState;
+use crate::lua_runtime::LuaRuntime;
 use crate::platform::render::WgpuContext;
 use crate::platform::shell_menu::{build_menu, focused_tooltip, id_to_action};
 use dome::events::{HubMessage, SceneSender};
@@ -60,42 +61,6 @@ use ui::overlay::WgpuOverlayFactory;
 
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
 use taskbar::Taskbar;
-
-/// Verifies the process runs at Per-Monitor V2 DPI awareness, aborting otherwise because
-/// every downstream geometry and rendering assumption requires PMv2. See BRD risk #6.
-fn ensure_per_monitor_v2_awareness() -> anyhow::Result<()> {
-    let result =
-        unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
-    if result.is_ok() {
-        return Ok(());
-    }
-    let err = result.unwrap_err();
-
-    // GetDpiAwarenessContextForProcess + AreDpiAwarenessContextsEqual require Windows 10
-    // 1803+. This path is only reachable there anyway, because PMv2 needs 1703+ and a
-    // failed Set means awareness was pinned, which only a manifest or shim does on 1803+.
-    let current_ctx = unsafe { GetDpiAwarenessContextForProcess(GetCurrentProcess()) };
-    let is_pmv2 = unsafe {
-        AreDpiAwarenessContextsEqual(current_ctx, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
-    };
-    if is_pmv2.as_bool() {
-        tracing::info!(
-            err = %err,
-            "DPI awareness already PMv2 (likely manifest or compat shim); continuing"
-        );
-        return Ok(());
-    }
-
-    tracing::error!(
-        err = %err,
-        "Failed to set PMv2 DPI awareness; refusing to start because geometry would be wrong"
-    );
-    anyhow::bail!(
-        "Process DPI awareness is not Per-Monitor V2. \
-         Dome requires PMv2 for correct geometry. \
-         Check compatibility settings or application manifest. Original error: {err}"
-    );
-}
 
 pub(super) const WM_APP_HUBEVENT: u32 = WM_APP;
 pub(super) const WM_APP_DISPATCH_RESULT: u32 = WM_APP + 1;
@@ -181,29 +146,6 @@ impl AppHandler for WindowLoopHandler {
     }
 }
 
-/// Handles Ctrl+C, Ctrl+Break, and console close by posting WM_QUIT to the main
-/// thread, triggering the existing graceful shutdown path (Dome drop -> recovery).
-unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
-    match ctrl_type {
-        CTRL_C_EVENT | CTRL_BREAK_EVENT | CTRL_CLOSE_EVENT => {
-            tracing::info!(ctrl_type, "Received console control event");
-            let thread_id = MAIN_THREAD_ID.load(std::sync::atomic::Ordering::Relaxed);
-            if thread_id != 0 {
-                // Result ignored: the handler can't meaningfully recover from a failure,
-                // and returning TRUE still prevents the default handler from killing the process.
-                unsafe { PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
-            }
-            // Windows terminates the process shortly after the handler returns for
-            // CTRL_CLOSE_EVENT. Sleep to give the main thread time to shut down gracefully.
-            if ctrl_type == CTRL_CLOSE_EVENT {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-            }
-            BOOL(1)
-        }
-        _ => BOOL(0),
-    }
-}
-
 pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Result<()> {
     ensure_per_monitor_v2_awareness()?;
 
@@ -212,10 +154,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
 
     let logger = Logger::init();
 
-    let config_path = config_path.unwrap_or_else(Config::default_path);
-    let config = load_or_default(&config_path, Config::load);
-    logger.set_level(config.log_level);
-    tracing::info!(%config_path, "Loaded config");
+    let config_path = resolve_config_path(config_path);
 
     let layout_path = layout_path.unwrap_or_else(|| {
         layout_default_path(std::path::Path::new(&config_path))
@@ -224,8 +163,6 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
     });
     let layout = load_or_default(&layout_path, LayoutConfig::load);
     tracing::info!(path = %layout_path, "Loaded layout");
-
-    login_item::sync_login_item(config.start_at_login);
 
     std::panic::set_hook(Box::new(|panic_info| {
         let backtrace = backtrace::Backtrace::new();
@@ -244,39 +181,67 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
         tracing::warn!("Failed to install console control handler");
     }
 
-    let dome_thread_id = Arc::new(std::sync::atomic::AtomicU32::new(0));
-    let barrier = Arc::new(std::sync::Barrier::new(2));
-    let keymap_state = Arc::new(RwLock::new(KeymapState::new(config.keymaps.clone())));
+    // The dome thread fills this before the keyboard hook and watchers read it.
+    let keymap_state = Arc::new(RwLock::new(KeymapState::new(ModalKeymaps::default())));
 
-    let config_clone = config.clone();
-    let layout_clone = layout.workspace.clone();
-    let tid = Arc::clone(&dome_thread_id);
-    let bar = Arc::clone(&barrier);
-    let keymap_clone = Arc::clone(&keymap_state);
-    let dome_thread = thread::spawn(move || {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
-                .ok()
-                .expect("CoInitializeEx failed");
-            tid.store(
-                unsafe { GetCurrentThreadId() },
-                std::sync::atomic::Ordering::Release,
-            );
-            bar.wait();
-            run_dome(config_clone, layout_clone, main_thread_id, keymap_clone);
-        }));
-        if result.is_err() {
-            tracing::error!("Dome thread panicked");
+    // The dome thread owns the VM, so it loads the config and hands both its
+    // thread id and the config back in one message.
+    let (init_tx, init_rx) = mpsc::channel::<(u32, Config)>();
+    let dome_thread = thread::spawn({
+        let keymap_state = Arc::clone(&keymap_state);
+        let logger = logger.clone();
+        let config_path = config_path.clone();
+        let layout = layout.workspace.clone();
+        move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+                    .ok()
+                    .expect("CoInitializeEx failed");
+                let mut runtime = match LuaRuntime::new(config_path) {
+                    Ok(runtime) => runtime,
+                    Err(e) => {
+                        tracing::error!(error = %e, "Failed to build the Lua VM, aborting startup");
+                        return;
+                    }
+                };
+                let config = runtime.load();
+                // Populate keymaps before init_tx.send. Main installs the keyboard
+                // hook only after init_rx.recv, so an early keypress cannot resolve
+                // against an empty keymap.
+                keymap_state
+                    .write()
+                    .unwrap()
+                    .update_keymaps(config.keymaps.clone());
+                let tid = unsafe { GetCurrentThreadId() };
+                init_tx.send((tid, config.clone())).ok();
+                run_dome(
+                    config,
+                    layout,
+                    main_thread_id,
+                    keymap_state,
+                    runtime,
+                    logger,
+                );
+            }));
+            if result.is_err() {
+                tracing::error!("Dome thread panicked");
+            }
+            unsafe { PostThreadMessageW(main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
         }
-        unsafe { PostThreadMessageW(main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
     });
 
-    barrier.wait();
+    let (dome_tid, config) = init_rx
+        .recv()
+        .map_err(|_| anyhow::anyhow!("dome thread exited before the initial config load"))?;
+    logger.set_level(config.log_level);
+    tracing::info!(%config_path, "Loaded config");
+    login_item::sync_login_item(config.start_at_login);
+
     let hub_sender = HubSender {
-        thread_id: dome_thread_id.load(std::sync::atomic::Ordering::Acquire),
+        thread_id: dome_tid,
     };
 
-    let keyboard_hook = install_keyboard_hook(hub_sender.clone(), Arc::clone(&keymap_state))?;
+    let keyboard_hook = install_keyboard_hook(Arc::clone(&keymap_state), hub_sender.clone())?;
     let _event_hooks = install_event_hooks(hub_sender.clone())?;
 
     ipc::start_server(layout_path.clone(), {
@@ -294,18 +259,10 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
         }
     })?;
 
-    let _config_watcher = start_config_watcher(&config_path, Config::load, {
-        let sender = hub_sender.clone();
-        let keymap_state = Arc::clone(&keymap_state);
-        move |cfg| {
-            logger.set_level(cfg.log_level);
-            keymap_state
-                .write()
-                .unwrap()
-                .update_keymaps(cfg.keymaps.clone());
-            let start_at_login = cfg.start_at_login;
-            sender.send(HubEvent::ConfigChanged(Box::new(cfg)));
-            login_item::sync_login_item(start_at_login);
+    let _config_watcher = start_file_watcher(&config_path, {
+        let hub_sender = hub_sender.clone();
+        move || {
+            hub_sender.send(HubEvent::ReloadConfig);
         }
     })
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))
@@ -336,11 +293,72 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
     Ok(())
 }
 
+/// Verifies the process runs at Per-Monitor V2 DPI awareness, aborting otherwise because
+/// every downstream geometry and rendering assumption requires PMv2. See BRD risk #6.
+fn ensure_per_monitor_v2_awareness() -> anyhow::Result<()> {
+    let result =
+        unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+    if result.is_ok() {
+        return Ok(());
+    }
+    let err = result.unwrap_err();
+
+    // GetDpiAwarenessContextForProcess + AreDpiAwarenessContextsEqual require Windows 10
+    // 1803+. This path is only reachable there anyway, because PMv2 needs 1703+ and a
+    // failed Set means awareness was pinned, which only a manifest or shim does on 1803+.
+    let current_ctx = unsafe { GetDpiAwarenessContextForProcess(GetCurrentProcess()) };
+    let is_pmv2 = unsafe {
+        AreDpiAwarenessContextsEqual(current_ctx, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+    };
+    if is_pmv2.as_bool() {
+        tracing::info!(
+            err = %err,
+            "DPI awareness already PMv2 (likely manifest or compat shim); continuing"
+        );
+        return Ok(());
+    }
+
+    tracing::error!(
+        err = %err,
+        "Failed to set PMv2 DPI awareness; refusing to start because geometry would be wrong"
+    );
+    anyhow::bail!(
+        "Process DPI awareness is not Per-Monitor V2. \
+         Dome requires PMv2 for correct geometry. \
+         Check compatibility settings or application manifest. Original error: {err}"
+    );
+}
+
+/// Handles Ctrl+C, Ctrl+Break, and console close by posting WM_QUIT to the main
+/// thread, triggering the existing graceful shutdown path (Dome drop -> recovery).
+unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
+    match ctrl_type {
+        CTRL_C_EVENT | CTRL_BREAK_EVENT | CTRL_CLOSE_EVENT => {
+            tracing::info!(ctrl_type, "Received console control event");
+            let thread_id = MAIN_THREAD_ID.load(std::sync::atomic::Ordering::Relaxed);
+            if thread_id != 0 {
+                // Result ignored: the handler can't meaningfully recover from a failure,
+                // and returning TRUE still prevents the default handler from killing the process.
+                unsafe { PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+            }
+            // Windows terminates the process shortly after the handler returns for
+            // CTRL_CLOSE_EVENT. Sleep to give the main thread time to shut down gracefully.
+            if ctrl_type == CTRL_CLOSE_EVENT {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+            BOOL(1)
+        }
+        _ => BOOL(0),
+    }
+}
+
 fn run_dome(
     config: Config,
     workspace_overrides: Vec<LayoutWorkspaceConfig>,
     main_thread_id: u32,
     keymap_state: Arc<RwLock<KeymapState>>,
+    runtime: LuaRuntime,
+    logger: Logger,
 ) {
     let domain_thread_id = unsafe { GetCurrentThreadId() };
 
@@ -391,7 +409,15 @@ fn run_dome(
         tracing::warn!("Failed to enumerate windows: {e}");
     }
 
-    let mut runner = runner::Runner::new(dome, domain_thread_id, main_thread_id, keymap_state);
+    let mut runner = runner::Runner::new(
+        dome,
+        domain_thread_id,
+        main_thread_id,
+        keymap_state,
+        runtime,
+        logger,
+        config.env.clone(),
+    );
 
     for hwnd_id in initial_hwnds {
         runner.dispatch_window_created(hwnd_id);

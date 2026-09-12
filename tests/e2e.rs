@@ -122,7 +122,7 @@ struct TestEnv {
 
 impl TestEnv {
     fn new() -> Self {
-        Self::with_config("examples/config.toml")
+        Self::with_config("resources/config.starter.lua")
     }
 
     fn with_config(config_path: &str) -> Self {
@@ -263,12 +263,15 @@ fn test_exec() {
     std::fs::remove_file(&marker).ok();
 
     let cmd = format!("touch {}", marker.display());
-    assert!(dome(&["exec", &cmd]));
+    assert!(dome(&["execute", &cmd]));
 
     // Wait for command to complete
     thread::sleep(Duration::from_millis(1000));
 
-    assert!(marker.exists(), "exec command did not create marker file");
+    assert!(
+        marker.exists(),
+        "execute command did not create marker file"
+    );
 
     std::fs::remove_file(&marker).ok();
 }
@@ -282,11 +285,14 @@ fn test_exec() {
     std::fs::remove_file(&marker).ok();
 
     let cmd = format!("type nul > {}", marker.display());
-    assert!(dome(&["exec", &cmd]));
+    assert!(dome(&["execute", &cmd]));
 
     thread::sleep(Duration::from_millis(1000));
 
-    assert!(marker.exists(), "exec command did not create marker file");
+    assert!(
+        marker.exists(),
+        "execute command did not create marker file"
+    );
 
     std::fs::remove_file(&marker).ok();
 }

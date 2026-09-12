@@ -17,7 +17,7 @@ use crate::action::{
     Actions, FocusTarget, MasterTarget, MinimizedWindow, MoveTarget, TabDirection, ToggleTarget,
     WorkspaceInfo,
 };
-use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
+use crate::config::{CallbackId, Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
     ContainerId, Direction, Hub, LimitObservation, MonitorId, MonitorLayout, Physical, PixelRect,
@@ -68,7 +68,8 @@ pub(super) enum HubEvent {
         query: Query,
         sender: std::sync::mpsc::SyncSender<String>,
     },
-    ConfigChanged(Box<Config>),
+    RunCallback(CallbackId),
+    ReloadConfig,
     LayoutConfigChanged(Box<LayoutConfig>),
     ExportLayout(String),
     TabClicked(ContainerId, usize),

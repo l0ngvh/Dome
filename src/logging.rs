@@ -8,6 +8,7 @@ use crate::config::{Config, LogLevel};
 
 type FilterHandle = Handle<EnvFilter, Registry>;
 
+#[derive(Clone)]
 pub(crate) struct Logger {
     handle: Option<FilterHandle>,
 }

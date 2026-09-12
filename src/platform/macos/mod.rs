@@ -16,6 +16,7 @@ mod ui;
 mod tests;
 
 use std::sync::atomic::AtomicBool;
+use std::sync::mpsc;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -25,23 +26,22 @@ use objc2_core_foundation::{CFDictionary, kCFBooleanTrue};
 use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess};
 
 use crate::config::{
-    Config, LayoutConfig, layout_default_path, load_or_default, start_config_watcher,
+    Config, LayoutConfig, ModalKeymaps, layout_default_path, load_or_default, resolve_config_path,
+    start_config_watcher, start_file_watcher,
 };
 use crate::ipc;
 use crate::keymap::KeymapState;
 use crate::logging::Logger;
+use crate::lua_runtime::LuaRuntime;
 pub(in crate::platform::macos) use dome::MonitorInfo;
 use dome::{Dome, HubEvent, get_all_monitors};
 use listeners::EventListener;
-use ui::Ui;
+use ui::{MessageSender, Ui};
 
 pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyhow::Result<()> {
     let logger = Logger::init();
 
-    let config_path = config_path.unwrap_or_else(Config::default_path);
-    let config = load_or_default(&config_path, Config::load);
-    logger.set_level(config.log_level);
-    tracing::info!(%config_path, "Loaded config");
+    let config_path = resolve_config_path(config_path);
 
     let layout_path = layout_path.unwrap_or_else(|| {
         layout_default_path(std::path::Path::new(&config_path))
@@ -52,7 +52,6 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
     tracing::info!(path = %layout_path, "Loaded layout");
 
     let bundle_path = login_item::detect_bundle_path();
-    login_item::sync_login_item(config.start_at_login, bundle_path.as_deref());
 
     std::panic::set_hook(Box::new(|panic_info| {
         let backtrace = backtrace::Backtrace::new();
@@ -89,23 +88,73 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
 
     let (event_tx, event_rx) = calloop::channel::channel();
 
-    let hub_config = config.clone();
-    let hub_layout = layout.workspace.clone();
-    let keymap_state = Arc::new(RwLock::new(KeymapState::new(config.keymaps.clone())));
+    // Filled from the runtime thread's initial config below, before the event
+    // tap and watchers read it.
+    let keymap_state = Arc::new(RwLock::new(KeymapState::new(ModalKeymaps::default())));
 
-    let _config_watcher = start_config_watcher(&config_path, Config::load, {
+    let monitors = get_all_monitors(mtm)?;
+    if monitors.is_empty() {
+        return Err(anyhow::anyhow!("No monitors detected"));
+    }
+
+    let hub_layout = layout.workspace.clone();
+
+    // Two-way startup handshake. The hub owns the VM, so it loads the config and
+    // sends it to main. Main builds the UI and sends the sender back to the hub.
+    let (init_tx, init_rx) = mpsc::channel::<Config>();
+    let (sender_tx, sender_rx) = mpsc::channel::<MessageSender>();
+
+    let hub_thread = thread::spawn({
         let keymap_state = keymap_state.clone();
+        let logger = logger.clone();
+        let bundle_path = bundle_path.clone();
+        let config_path = config_path.clone();
+        move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut runtime = match LuaRuntime::new(config_path) {
+                    Ok(runtime) => runtime,
+                    Err(e) => {
+                        tracing::error!(error = %e, "Failed to build the Lua VM, aborting startup");
+                        return;
+                    }
+                };
+                let config = runtime.load();
+                // Populate keymaps before init_tx.send. Main starts the event tap
+                // only after init_rx.recv, so an early keypress cannot resolve
+                // against an empty keymap.
+                keymap_state
+                    .write()
+                    .unwrap()
+                    .update_keymaps(config.keymaps.clone());
+                init_tx.send(config.clone()).ok();
+                let sender = sender_rx.recv().expect("main dropped the UI sender");
+                let env = config.env.clone();
+                let dome = Dome::new(&monitors, config, hub_layout, Box::new(sender));
+                event_loop::run_dome(
+                    dome,
+                    event_rx,
+                    keymap_state,
+                    runtime,
+                    logger,
+                    bundle_path,
+                    env,
+                );
+            }))
+            .ok();
+        }
+    });
+
+    let config = init_rx
+        .recv()
+        .map_err(|_| anyhow::anyhow!("hub thread exited before the initial config load"))?;
+    logger.set_level(config.log_level);
+    tracing::info!(%config_path, "Loaded config");
+    login_item::sync_login_item(config.start_at_login, bundle_path.as_deref());
+
+    let _config_watcher = start_file_watcher(&config_path, {
         let tx = event_tx.clone();
-        let bundle_path_for_watcher = bundle_path.clone();
-        move |cfg| {
-            logger.set_level(cfg.log_level);
-            keymap_state
-                .write()
-                .unwrap()
-                .update_keymaps(cfg.keymaps.clone());
-            let start_at_login = cfg.start_at_login;
-            tx.send(HubEvent::ConfigChanged(Box::new(cfg))).ok();
-            login_item::sync_login_item(start_at_login, bundle_path_for_watcher.as_deref());
+        move || {
+            tx.send(HubEvent::ReloadConfig).ok();
         }
     })
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))
@@ -139,11 +188,6 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
         }
     })?;
 
-    let monitors = get_all_monitors(mtm)?;
-    if monitors.is_empty() {
-        return Err(anyhow::anyhow!("No monitors detected"));
-    }
-
     let is_suspended = Arc::new(AtomicBool::new(false));
     let event_listener = EventListener::new(event_tx.clone(), is_suspended.clone());
 
@@ -151,19 +195,12 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
         .name("dome-event-tap".to_owned())
         .spawn({
             let keymap_state = keymap_state.clone();
-            let hub_sender = event_tx.clone();
-            move || keyboard::run_event_tap(keymap_state, is_suspended, hub_sender)
+            let event_sender = event_tx.clone();
+            move || keyboard::run_event_tap(keymap_state, is_suspended, event_sender)
         })?;
 
-    let (ui, sender) = Ui::new(mtm, event_tx, event_listener, config.clone());
-
-    let hub_thread = thread::spawn(move || {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let dome = Dome::new(&monitors, hub_config, hub_layout, Box::new(sender));
-            event_loop::run_dome(dome, event_rx, keymap_state);
-        }))
-        .ok();
-    });
+    let (ui, sender) = Ui::new(mtm, event_tx, event_listener, config);
+    sender_tx.send(sender).ok();
 
     ui.run();
 

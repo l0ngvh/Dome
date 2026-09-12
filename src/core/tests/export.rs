@@ -1,4 +1,6 @@
-use crate::config::{Strategy, TreeLayoutNode, WindowMatcher};
+use crate::config::{
+    LayoutConfig, LayoutWorkspaceConfig, PaneConfig, SplitMode, TreeLayoutNode, WindowMatcher,
+};
 use crate::core::node::WindowRestrictions;
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
@@ -14,7 +16,7 @@ impl Drop for CleanupFile {
 }
 
 #[test]
-fn export_reemits_config_matchers_across_float_and_fullscreen() {
+fn export_synthesises_from_live_even_for_rule_placed_windows() {
     let float_matcher = WindowMatcher {
         process: Some("/float.*/".into()),
         ..Default::default()
@@ -26,8 +28,6 @@ fn export_reemits_config_matchers_across_float_and_fullscreen() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                // Global, so the hit carries `matcher_id: None` and export
-                // synthesises this window's matcher from live metadata.
                 .with_float(vec![WindowMatcher {
                     process: Some("orphan.exe".into()),
                     ..Default::default()
@@ -67,18 +67,31 @@ fn export_reemits_config_matchers_across_float_and_fullscreen() {
     );
 
     let result = hub.export_workspace(ws_id);
+    // Reuse of the placing rule is gone. Every floated or fullscreened window
+    // exports as its own matcher synthesised from live metadata, so a rule that
+    // matched several windows expands to one matcher each.
     assert_eq!(
         result,
         WorkspaceExport {
             strategy: "partition_tree".into(),
             float: vec![
-                float_matcher,
+                WindowMatcher {
+                    process: Some("float-window-alpha".into()),
+                    ..Default::default()
+                },
+                WindowMatcher {
+                    process: Some("float-window-beta".into()),
+                    ..Default::default()
+                },
                 WindowMatcher {
                     process: Some("orphan.exe".into()),
                     ..Default::default()
-                }
+                },
             ],
-            fullscreen: vec![fullscreen_matcher],
+            fullscreen: vec![WindowMatcher {
+                process: Some("fs-window-alpha".into()),
+                ..Default::default()
+            }],
             ..WorkspaceExport::default()
         }
     );
@@ -303,30 +316,76 @@ fn export_layout_writes_entry_for_empty_workspace() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("dome_export_empty_entry_{nanos}.toml"));
+    let path = std::env::temp_dir().join(format!("dome_export_empty_entry_{nanos}.lua"));
     let _cleanup = CleanupFile(path.clone());
 
     hub.export_layout(&path).unwrap();
 
-    let written = std::fs::read_to_string(&path).unwrap();
-    let doc: toml::Value = toml::from_str(&written).unwrap();
-    let entries = doc["workspace"].as_array().unwrap();
+    let parsed = LayoutConfig::load(path.to_str().unwrap())
+        .expect("exported layout.lua parses through the Lua loader");
 
-    let empty = entries
+    let empty = parsed
+        .workspace
         .iter()
-        .find(|s| s["name"].as_str() == Some("1"))
-        .unwrap();
-    assert_eq!(empty["strategy"].as_str(), Some("partition_tree"));
-    assert!(empty.get("tree").is_none());
-    assert!(empty.get("float").is_none());
-    assert!(empty.get("fullscreen").is_none());
+        .find(|w| w.name() == "1")
+        .expect("workspace 1 present");
+    match empty {
+        LayoutWorkspaceConfig::PartitionTree {
+            tree,
+            float,
+            fullscreen,
+            ..
+        } => {
+            assert!(tree.is_none());
+            assert!(float.is_empty());
+            assert!(fullscreen.is_empty());
+        }
+        _ => panic!("workspace 1 should be partition_tree"),
+    }
 
-    let filled = entries
+    let filled = parsed
+        .workspace
         .iter()
-        .find(|s| s["name"].as_str() == Some("2"))
-        .unwrap();
-    assert_eq!(filled["strategy"].as_str(), Some("partition_tree"));
-    assert!(filled.get("tree").is_some());
+        .find(|w| w.name() == "2")
+        .expect("workspace 2 present");
+    match filled {
+        LayoutWorkspaceConfig::PartitionTree { tree, .. } => {
+            assert!(tree.is_some());
+        }
+        _ => panic!("workspace 2 should be partition_tree"),
+    }
+}
+
+#[test]
+fn export_layout_backs_up_the_previous_file() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(LayoutConfigBuilder::new().build())
+        .build();
+    hub.focus_workspace("1", None);
+    hub.insert_window(titled("alpha"), default_rect(), WindowRestrictions::None);
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("dome_export_backup_{nanos}.lua"));
+    let backup = path.with_extension("lua.bak");
+    let _cleanup_path = CleanupFile(path.clone());
+    let _cleanup_backup = CleanupFile(backup.clone());
+
+    let prior = "-- prior hand-written file\nreturn { workspace = {} }\n";
+    std::fs::write(&path, prior).unwrap();
+
+    hub.export_layout(&path).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(&backup).unwrap(),
+        prior,
+        "the prior file is preserved in the .bak"
+    );
+    let rewritten = std::fs::read_to_string(&path).unwrap();
+    assert!(rewritten.starts_with("---@type dome.Layout\n"));
+    assert_ne!(rewritten, prior);
 }
 
 #[test]
@@ -370,43 +429,155 @@ fn export_float_toggled_to_tiling_returns_to_tree() {
 }
 
 #[test]
-fn export_layout_persists_tabbed_master_pane() {
-    let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .with_strategy(Strategy::Master)
-                .build(),
-        )
-        .with_preferred_layout(vec![
-            LayoutWorkspaceConfigBuilder::new("1")
-                .with_strategy(Strategy::Master)
-                .with_master_count(2)
-                .build(),
-        ])
-        .build();
-    hub.focus_workspace("1", None);
-    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
-    // Both windows land in the master pane.
-    hub.toggle_container_layout();
+fn render_layout_round_trips_master_and_nested_tree() {
+    let quoted = WindowMatcher {
+        title: Some("a\"b\\c".into()),
+        ..Default::default()
+    };
+    let master_ws = WorkspaceExport {
+        strategy: "master".into(),
+        master_ratio: Some(0.5),
+        master_count: Some(2),
+        master: PaneConfig::tiled(vec![WindowMatcher {
+            app: Some("Editor".into()),
+            title: Some("main".into()),
+            ..Default::default()
+        }]),
+        secondary: PaneConfig::tiled(vec![WindowMatcher {
+            process: Some("term".into()),
+            ..Default::default()
+        }]),
+        float: vec![quoted.clone()],
+        ..WorkspaceExport::default()
+    };
+    let tree = TreeLayoutNode::Container {
+        split: Some(SplitMode::Horizontal),
+        children: vec![
+            TreeLayoutNode::Leaf(WindowMatcher {
+                process: Some("editor".into()),
+                ..Default::default()
+            }),
+            TreeLayoutNode::Container {
+                split: None,
+                children: vec![
+                    TreeLayoutNode::Leaf(WindowMatcher {
+                        process: Some("terminal".into()),
+                        ..Default::default()
+                    }),
+                    TreeLayoutNode::Leaf(WindowMatcher {
+                        process: Some("logs".into()),
+                        ..Default::default()
+                    }),
+                ],
+            },
+        ],
+    };
+    let tree_ws = WorkspaceExport {
+        strategy: "partition_tree".into(),
+        tree: Some(tree.clone()),
+        ..WorkspaceExport::default()
+    };
+
+    let rendered =
+        crate::core::export::render_layout(&[("m".into(), master_ws), ("t".into(), tree_ws)]);
 
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("dome_export_tabbed_pane_{nanos}.toml"));
+    let path = std::env::temp_dir().join(format!("dome_export_roundtrip_{nanos}.lua"));
     let _cleanup = CleanupFile(path.clone());
-    hub.export_layout(&path).unwrap();
+    std::fs::write(&path, &rendered).unwrap();
 
-    let written = std::fs::read_to_string(&path).unwrap();
-    let doc: toml::Value = toml::from_str(&written).unwrap();
-    let entry = doc["workspace"]
-        .as_array()
-        .unwrap()
+    let parsed = LayoutConfig::load(path.to_str().unwrap())
+        .expect("rendered layout.lua parses through the Lua loader");
+
+    let m = parsed
+        .workspace
         .iter()
-        .find(|s| s["name"].as_str() == Some("1"))
-        .unwrap();
-    let master = &entry["master"];
-    assert_eq!(master["display"].as_str(), Some("tabbed"));
-    assert!(master["children"].as_array().is_some());
+        .find(|w| w.name() == "m")
+        .expect("workspace m present");
+    match m {
+        LayoutWorkspaceConfig::Master {
+            master_ratio,
+            master_count,
+            master,
+            secondary,
+            float,
+            fullscreen,
+            ..
+        } => {
+            assert_eq!(*master_ratio, Some(0.5));
+            assert_eq!(*master_count, Some(2));
+            assert_eq!(
+                master,
+                &PaneConfig::tiled(vec![WindowMatcher {
+                    app: Some("Editor".into()),
+                    title: Some("main".into()),
+                    ..Default::default()
+                }])
+            );
+            assert_eq!(
+                secondary,
+                &PaneConfig::tiled(vec![WindowMatcher {
+                    process: Some("term".into()),
+                    ..Default::default()
+                }])
+            );
+            assert_eq!(float, &vec![quoted]);
+            assert!(fullscreen.is_empty());
+        }
+        _ => panic!("workspace m should be master"),
+    }
+
+    let t = parsed
+        .workspace
+        .iter()
+        .find(|w| w.name() == "t")
+        .expect("workspace t present");
+    match t {
+        LayoutWorkspaceConfig::PartitionTree {
+            tree: parsed_tree, ..
+        } => {
+            assert_eq!(parsed_tree.as_ref(), Some(&tree));
+        }
+        _ => panic!("workspace t should be partition_tree"),
+    }
+}
+
+#[test]
+fn render_layout_regenerates_without_preserving_prior_content() {
+    // The Lua export is a full regenerate. A prior file's comments do not
+    // survive, which is why export_layout keeps a .bak. Here we only assert the
+    // rendered output carries the new state and the annotation header.
+    let rendered = crate::core::export::render_layout(&[(
+        "1".into(),
+        WorkspaceExport {
+            strategy: "master".into(),
+            master_count: Some(2),
+            ..WorkspaceExport::default()
+        },
+    )]);
+
+    assert!(rendered.starts_with("---@type dome.Layout\n"));
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("dome_export_regen_{nanos}.lua"));
+    let _cleanup = CleanupFile(path.clone());
+    std::fs::write(&path, &rendered).unwrap();
+    let parsed = LayoutConfig::load(path.to_str().unwrap())
+        .expect("rendered layout.lua parses through the Lua loader");
+
+    let ws1 = parsed
+        .workspace
+        .iter()
+        .find(|w| w.name() == "1")
+        .expect("workspace 1 present");
+    match ws1 {
+        LayoutWorkspaceConfig::Master { master_count, .. } => assert_eq!(*master_count, Some(2)),
+        _ => panic!("workspace 1 should be master"),
+    }
 }

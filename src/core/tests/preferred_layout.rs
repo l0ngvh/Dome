@@ -866,7 +866,7 @@ fn no_tiling_match_falls_back_to_current() {
 }
 
 #[test]
-fn sync_preferred_layout_reemits_matched_float_when_matcher_survives() {
+fn sync_preferred_layout_synthesises_float_when_matcher_survives() {
     let float_matcher = WindowMatcher {
         process: Some("/float.*/".into()),
         ..Default::default()
@@ -895,11 +895,16 @@ fn sync_preferred_layout_reemits_matched_float_when_matcher_survives() {
             .build(),
     ]);
 
+    // The matcher survives the sync so the window keeps its occupy binding, but
+    // export synthesises from live metadata rather than re-emitting the rule.
     assert_eq!(
         hub.export_workspace(ws_id),
         WorkspaceExport {
             strategy: "partition_tree".into(),
-            float: vec![float_matcher],
+            float: vec![WindowMatcher {
+                process: Some("float-live-window".into()),
+                ..Default::default()
+            }],
             ..WorkspaceExport::default()
         }
     );
@@ -978,11 +983,26 @@ fn sync_preferred_layout_adopts_manual_float_when_matcher_added() {
             .build(),
     ]);
 
+    // The added matcher adopts the manual float, binding its occupy handle ...
+    match hub.access.windows.get(window_id).mode {
+        DisplayMode::Float { occupy, .. } => {
+            assert!(
+                occupy.is_some(),
+                "sync should bind the manual float to the matcher"
+            )
+        }
+        other => panic!("expected float, got {other:?}"),
+    }
+
+    // ... but export still synthesises the matcher from live metadata.
     assert_eq!(
         hub.export_workspace(ws_id),
         WorkspaceExport {
             strategy: "partition_tree".into(),
-            float: vec![float_matcher],
+            float: vec![WindowMatcher {
+                process: Some("float-live-window".into()),
+                ..Default::default()
+            }],
             ..WorkspaceExport::default()
         }
     );

@@ -11,51 +11,24 @@ use crate::action::MonitorDetails;
 const DOME_WORKSPACES_PS1: &str =
     include_str!("../../resources/integrations/yasb/dome_workspaces.ps1");
 
-/// Bake dome's path into the plugin. Refuse a drifted template rather than write
-/// a plugin that still holds a placeholder.
-fn bake_plugin(template: &str, dome_path: &str) -> anyhow::Result<String> {
-    let hits = template.matches("__DOME__").count();
-    ensure!(
-        hits == 1,
-        "dome_workspaces.ps1 template should hold 1 __DOME__ placeholder, found {hits}"
-    );
-    Ok(template.replace("__DOME__", &ps_string(dome_path)))
-}
-
-/// A single-quoted PowerShell string. The one escape is `''` for a literal
-/// apostrophe, so a Windows path's backslashes pass through as written.
-fn ps_string(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
-}
-
-struct DomeEntries {
-    bar_lines: Vec<String>,
-    widget_lines: Vec<String>,
-}
-
-/// Query monitors, write the plugin, and edit the YASB config in place. Query
-/// and validate before touching disk, so a query failure never writes a partial
-/// config.
-pub(crate) fn generate(config_path: Option<&str>) -> anyhow::Result<()> {
+/// Query and validate before touching disk, so a query failure never writes a
+/// partial config.
+pub(crate) fn generate() -> anyhow::Result<()> {
     let dome = std::env::current_exe().context("resolve dome's own path")?;
     let dome = dome.to_string_lossy().into_owned();
 
-    let config = match config_path {
-        Some(p) => PathBuf::from(p),
-        None => default_yasb_config()?,
-    };
+    let config = default_yasb_config()?;
     let plugin = config
         .parent()
         .context("YASB config path has no parent directory")?
         .join("dome_workspaces.ps1");
     let plugin_str = plugin.to_string_lossy().into_owned();
     // YASB splits run_cmd on spaces with no quoting, so run_cmd names the plugin
-    // by path. A space in that path arrives truncated at the widget. Refuse
-    // rather than write a config that fails silently.
+    // by path. A space in that path arrives truncated at the widget.
     ensure!(
         !plugin_str.contains(' '),
         "the plugin path {plugin_str:?} contains a space, which YASB run_cmd cannot handle. \
-         Pass --config with a space-free directory."
+         Move your YASB config to a space-free directory."
     );
 
     let monitors = DomeClient
@@ -79,8 +52,29 @@ pub(crate) fn generate(config_path: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Write the config and the plugin. Back the config up once, so the pristine
-/// original survives a re-run.
+/// Refuse a drifted template rather than write a plugin that still holds a
+/// placeholder.
+fn bake_plugin(template: &str, dome_path: &str) -> anyhow::Result<String> {
+    let hits = template.matches("__DOME__").count();
+    ensure!(
+        hits == 1,
+        "dome_workspaces.ps1 template should hold 1 __DOME__ placeholder, found {hits}"
+    );
+    Ok(template.replace("__DOME__", &ps_string(dome_path)))
+}
+
+/// A single-quoted PowerShell string. The one escape is `''` for a literal
+/// apostrophe, so a Windows path's backslashes pass through as written.
+fn ps_string(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+struct DomeEntries {
+    bar_lines: Vec<String>,
+    widget_lines: Vec<String>,
+}
+
+/// Back the config up once, so the pristine original survives a re-run.
 fn install(
     config: &Path,
     plugin: &Path,
@@ -90,10 +84,6 @@ fn install(
     let mut bak = config.as_os_str().to_owned();
     bak.push(".bak");
     let bak = PathBuf::from(bak);
-    // Back up once. A re-run would otherwise overwrite the pristine original
-    // with an already-spliced config, losing the only recoverable copy.
-    // Back up once. A re-run would otherwise overwrite the pristine original
-    // with an already-spliced config, losing the only recoverable copy.
     if !bak.exists() {
         std::fs::copy(config, &bak).with_context(|| format!("back up {}", config.display()))?;
     }
@@ -109,7 +99,9 @@ fn install(
 fn default_yasb_config() -> anyhow::Result<PathBuf> {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
-        .context("USERPROFILE is not set. Pass --config with the YASB config path.")?;
+        .context(
+            "neither USERPROFILE nor HOME is set, so the YASB config location cannot be resolved",
+        )?;
     Ok(PathBuf::from(home)
         .join(".config")
         .join("yasb")
@@ -143,13 +135,6 @@ fn generate_yaml(monitors: &[MonitorDetails], plugin_path: &str) -> anyhow::Resu
         seen.insert(s, m.unique_name.clone());
     }
 
-    // device_name repeats across identical panels. A repeated screens: value
-    // needs Qt's (N) suffix, which YASB logs but dome cannot know here.
-    let mut device_counts: HashMap<&str, u32> = HashMap::new();
-    for m in monitors {
-        *device_counts.entry(m.device_name.as_str()).or_insert(0) += 1;
-    }
-
     let mut bar_lines = Vec::new();
     let mut widget_lines = Vec::new();
     for m in monitors {
@@ -159,27 +144,12 @@ fn generate_yaml(monitors: &[MonitorDetails], plugin_path: &str) -> anyhow::Resu
         bar_lines.push(format!("  dome-bar-{s}:"));
         bar_lines.push("    enabled: true".to_string());
         bar_lines.push(
-            "    # windows_app_bar registers the bar as a Windows appbar, so the OS reserves"
+            "    # windows_app_bar reserves this bar's screen space so tiled windows do not draw under it."
                 .to_string(),
         );
-        bar_lines.push(
-            "    # its screen space and tiled windows do not draw under it. Each per-monitor"
-                .to_string(),
-        );
-        bar_lines.push("    # bar needs it so every monitor reserves its own space.".to_string());
         bar_lines.push("    window_flags:".to_string());
         bar_lines.push("      windows_app_bar: true".to_string());
         bar_lines.push(format!("    screens: [{}]", yaml_scalar(&m.device_name)));
-        if device_counts[m.device_name.as_str()] > 1 {
-            bar_lines.push(format!(
-                "    # '{}' repeats. Append Qt's (N) suffix to this screens: value",
-                m.device_name
-            ));
-            bar_lines.push(
-                "    # by hand. YASB logs the real names in a \"screen not found\" warning."
-                    .to_string(),
-            );
-        }
         bar_lines.push("    widgets:".to_string());
         bar_lines.push(format!("      left: [{}]", yaml_scalar(&widget)));
 
@@ -230,7 +200,7 @@ fn apply_bars(lines: &mut Vec<String>, bar_lines: &[String]) {
             let target = block_indent(lines, idx + 1, end);
             // Drop commented dome bars left by earlier runs, so re-runs do not
             // stack them. Commenting the active bars next keeps the most recent
-            // copy, which re-exposes a center or right widget the user copied in.
+            // copy.
             let end = delete_commented_dome_bars(lines, idx + 1, end);
             comment_active_lines(lines, idx + 1, end);
             insert_lines(lines, idx + 1, &reindent(bar_lines, target));
@@ -291,7 +261,6 @@ fn reindent(block: &[String], target: usize) -> Vec<String> {
     block.iter().map(|line| format!("{pad}{line}")).collect()
 }
 
-/// Comment every active (uncommented, non-blank) line in [start, end).
 fn comment_active_lines(lines: &mut [String], start: usize, end: usize) {
     for line in &mut lines[start..end] {
         let trimmed = line.trim_start();
@@ -412,7 +381,7 @@ mod tests {
         let bars = g.bar_lines.join("\n");
         assert!(bars.contains("  dome-bar-dell-se2416h:"));
         assert!(bars.contains("      windows_app_bar: true"));
-        assert!(bars.contains("windows_app_bar registers the bar as a Windows appbar"));
+        assert!(bars.contains("windows_app_bar reserves this bar's screen space"));
         assert!(bars.contains("    screens: ['DELL SE2416H']"));
         let widgets = g.widget_lines.join("\n");
         assert!(widgets.contains("  dome_workspaces_dell_se2416h:"));

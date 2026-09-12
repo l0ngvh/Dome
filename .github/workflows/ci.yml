@@ -83,3 +83,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  lua-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install lua-language-server
+        run: |
+          curl -sSL -o lua-language-server.tar.gz https://github.com/LuaLS/lua-language-server/releases/download/3.19.1/lua-language-server-3.19.1-linux-x64.tar.gz
+          mkdir lua-language-server
+          tar -xzf lua-language-server.tar.gz -C lua-language-server
+          chmod +x lua-language-server/bin/lua-language-server
+      - name: Typecheck Lua against dome.meta.lua
+        run: |
+          ./lua-language-server/bin/lua-language-server --check tests/typecheck --checklevel=Warning
+          ./lua-language-server/bin/lua-language-server --check resources --checklevel=Warning

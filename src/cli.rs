@@ -37,7 +37,7 @@ enum CliCommand {
         #[command(subcommand)]
         target: CliMaster,
     },
-    Exec {
+    Execute {
         command: String,
     },
     Exit,
@@ -132,18 +132,9 @@ enum CliQuery {
 
 #[derive(Subcommand, Debug)]
 enum CliGenerate {
-    Yasb {
-        /// YASB config.yaml to edit. Defaults to the YASB config location.
-        #[arg(long)]
-        config: Option<String>,
-    },
+    Yasb,
     Sketchybar,
-    Zebar {
-        /// Directory to scaffold the widget pack into. Defaults to the Zebar
-        /// pack location.
-        #[arg(long)]
-        out: Option<String>,
-    },
+    Zebar,
 }
 
 #[derive(Debug)]
@@ -218,6 +209,47 @@ impl From<CliQuery> for Query {
     }
 }
 
+pub fn run() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    let dispatch = match cli.command {
+        None => Dispatch::Launch {
+            config: None,
+            layout: None,
+        },
+        Some(cmd) => Dispatch::from(cmd),
+    };
+
+    match dispatch {
+        Dispatch::Launch { config, layout } => crate::run_app(config, layout)?,
+        Dispatch::Action(action) => {
+            crate::DomeClient.action(&action)?;
+        }
+        Dispatch::Query(query) => {
+            let json = match query {
+                Query::Workspaces => serde_json::to_string(&crate::DomeClient.workspaces()?)?,
+                Query::MinimizedWindows => {
+                    serde_json::to_string(&crate::DomeClient.minimized_windows()?)?
+                }
+                Query::Monitors => serde_json::to_string(&crate::DomeClient.monitors()?)?,
+            };
+            println!("{json}");
+        }
+        Dispatch::Export => {
+            crate::DomeClient.export_layout()?;
+        }
+        Dispatch::Generate(CliGenerate::Yasb) => {
+            crate::integrations::yasb::generate()?;
+        }
+        Dispatch::Generate(CliGenerate::Sketchybar) => {
+            crate::integrations::sketchybar::generate()?;
+        }
+        Dispatch::Generate(CliGenerate::Zebar) => {
+            crate::integrations::zebar::generate()?;
+        }
+    }
+    Ok(())
+}
+
 fn cli_toggle_to_action(t: CliToggle) -> Action {
     match t {
         CliToggle::Spawn => Action::Toggle {
@@ -252,7 +284,7 @@ impl From<CliCommand> for Dispatch {
             CliCommand::Master { target } => Dispatch::Action(Action::Master {
                 target: target.into(),
             }),
-            CliCommand::Exec { command } => Dispatch::Action(Action::Exec { command }),
+            CliCommand::Execute { command } => Dispatch::Action(Action::Execute { command }),
             CliCommand::Exit => Dispatch::Action(Action::Exit),
             CliCommand::Close => Dispatch::Action(Action::Close),
             CliCommand::Mode { name } => Dispatch::Action(Action::Mode { name }),
@@ -269,47 +301,6 @@ impl From<CliCommand> for Dispatch {
             }
         }
     }
-}
-
-pub fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
-    let dispatch = match cli.command {
-        None => Dispatch::Launch {
-            config: None,
-            layout: None,
-        },
-        Some(cmd) => Dispatch::from(cmd),
-    };
-
-    match dispatch {
-        Dispatch::Launch { config, layout } => crate::run_app(config, layout)?,
-        Dispatch::Action(action) => {
-            crate::DomeClient.action(&action)?;
-        }
-        Dispatch::Query(query) => {
-            let json = match query {
-                Query::Workspaces => serde_json::to_string(&crate::DomeClient.workspaces()?)?,
-                Query::MinimizedWindows => {
-                    serde_json::to_string(&crate::DomeClient.minimized_windows()?)?
-                }
-                Query::Monitors => serde_json::to_string(&crate::DomeClient.monitors()?)?,
-            };
-            println!("{json}");
-        }
-        Dispatch::Export => {
-            crate::DomeClient.export_layout()?;
-        }
-        Dispatch::Generate(CliGenerate::Yasb { config }) => {
-            crate::integrations::yasb::generate(config.as_deref())?;
-        }
-        Dispatch::Generate(CliGenerate::Sketchybar) => {
-            crate::integrations::sketchybar::generate()?;
-        }
-        Dispatch::Generate(CliGenerate::Zebar { out }) => {
-            crate::integrations::zebar::generate(out.as_deref())?;
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -443,8 +434,8 @@ mod tests {
     #[test]
     fn cli_exec_passthrough() {
         assert_action(
-            &["dome", "exec", "open -a Terminal"],
-            "exec open -a Terminal",
+            &["dome", "execute", "open -a Terminal"],
+            "execute open -a Terminal",
         );
     }
 
@@ -504,8 +495,8 @@ mod tests {
     fn cli_generate_yasb() {
         let d = dispatch_from_argv(&["dome", "generate", "yasb"]);
         match d {
-            Dispatch::Generate(CliGenerate::Yasb { config: None }) => {}
-            other => panic!("expected Generate(Yasb) with no config, got {other:?}"),
+            Dispatch::Generate(CliGenerate::Yasb) => {}
+            other => panic!("expected Generate(Yasb), got {other:?}"),
         }
     }
 
@@ -522,17 +513,8 @@ mod tests {
     fn cli_generate_zebar() {
         let d = dispatch_from_argv(&["dome", "generate", "zebar"]);
         match d {
-            Dispatch::Generate(CliGenerate::Zebar { out: None }) => {}
-            other => panic!("expected Generate(Zebar) with no out, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn cli_generate_zebar_with_out() {
-        let d = dispatch_from_argv(&["dome", "generate", "zebar", "--out", "/tmp/pack"]);
-        match d {
-            Dispatch::Generate(CliGenerate::Zebar { out: Some(ref p) }) if p == "/tmp/pack" => {}
-            other => panic!("expected Generate(Zebar) with out, got {other:?}"),
+            Dispatch::Generate(CliGenerate::Zebar) => {}
+            other => panic!("expected Generate(Zebar), got {other:?}"),
         }
     }
 

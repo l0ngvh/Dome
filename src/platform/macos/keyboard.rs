@@ -3,7 +3,6 @@ use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
-use calloop::channel::Sender as CalloopSender;
 use objc2_core_foundation::{
     CFMachPort, CFRetained, CFRunLoop, kCFAllocatorDefault, kCFRunLoopDefaultMode,
 };
@@ -12,17 +11,16 @@ use objc2_core_graphics::{
     CGEventTapPlacement, CGEventTapProxy, CGEventType,
 };
 
-use super::dome::HubEvent;
-use super::send_hub_event;
 use crate::config::{Keymap, Modifiers};
 use crate::keymap::KeymapState;
+use crate::platform::macos::dome::HubEvent;
 
 pub(super) type SharedKeymapState = Arc<RwLock<KeymapState>>;
 
 struct KeyboardCtx {
     keymap_state: SharedKeymapState,
     is_suspended: Arc<AtomicBool>,
-    hub_sender: CalloopSender<HubEvent>,
+    event_sender: calloop::channel::Sender<HubEvent>,
     event_tap: OnceCell<CFRetained<CFMachPort>>,
 }
 
@@ -32,12 +30,12 @@ struct KeyboardCtx {
 pub(super) fn run_event_tap(
     keymap_state: SharedKeymapState,
     is_suspended: Arc<AtomicBool>,
-    hub_sender: CalloopSender<HubEvent>,
+    event_sender: calloop::channel::Sender<HubEvent>,
 ) {
     let ctx = KeyboardCtx {
         keymap_state,
         is_suspended,
-        hub_sender,
+        event_sender,
         event_tap: OnceCell::new(),
     };
 
@@ -122,24 +120,25 @@ fn handle_keyboard(ctx: &KeyboardCtx, event: *mut CGEvent) -> bool {
     }
 
     let keymap = Keymap { key, modifiers };
-    let actions = {
-        let Ok(mut ks) = ctx.keymap_state.write() else {
+    let resolved = {
+        let Ok(ks) = ctx.keymap_state.read() else {
             return false;
         };
         ks.resolve(&keymap)
     };
-    let Some(actions) = actions else {
+    let Some(id) = resolved else {
         return false;
     };
-
-    tracing::trace!(?keymap, %actions, "Keymap matched");
 
     if ctx.is_suspended.load(Ordering::Relaxed) {
         tracing::info!("Received keymap action, resuming window management");
         ctx.is_suspended.store(false, Ordering::Relaxed);
     }
 
-    send_hub_event(&ctx.hub_sender, HubEvent::Action(actions));
+    tracing::trace!(?keymap, ?id, "Keymap matched callback");
+    if ctx.event_sender.send(HubEvent::RunCallback(id)).is_err() {
+        tracing::warn!("Hub thread unavailable, callback dropped");
+    }
     true
 }
 

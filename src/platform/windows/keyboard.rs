@@ -16,11 +16,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
-use super::HubSender;
-use super::dome::HubEvent;
-use crate::action::Actions;
-use crate::config::{Keymap, Modifiers};
+use crate::config::{CallbackId, Keymap, Modifiers};
 use crate::keymap::KeymapState;
+use crate::platform::windows::dome::HubEvent;
+
+use super::HubSender;
 
 pub(super) struct KeyboardHookHandle {
     thread_id: u32,
@@ -28,8 +28,8 @@ pub(super) struct KeyboardHookHandle {
 }
 
 struct KeyboardState {
-    sender: HubSender,
     keymap_state: Arc<RwLock<KeymapState>>,
+    hub_sender: HubSender,
 }
 
 static STATE: OnceLock<KeyboardState> = OnceLock::new();
@@ -48,13 +48,13 @@ static STATE: OnceLock<KeyboardState> = OnceLock::new();
 static MODIFIERS: AtomicU8 = AtomicU8::new(0);
 
 pub(super) fn install_keyboard_hook(
-    sender: HubSender,
     keymap_state: Arc<RwLock<KeymapState>>,
+    hub_sender: HubSender,
 ) -> anyhow::Result<KeyboardHookHandle> {
     STATE
         .set(KeyboardState {
-            sender,
             keymap_state,
+            hub_sender,
         })
         .ok();
 
@@ -114,10 +114,11 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
             }
         } else if is_down {
             let modifiers = Modifiers::from_bits_truncate(MODIFIERS.load(Ordering::Relaxed));
-            if let Some(actions) = get_actions(vk, modifiers) {
-                if let Some(state) = STATE.get() {
-                    state.sender.send(HubEvent::Action(actions));
-                }
+            if let Some(state) = STATE.get()
+                && let Some(id) = resolve_key(vk, modifiers, &state.keymap_state)
+            {
+                tracing::trace!(?id, "Keymap matched callback");
+                state.hub_sender.send(HubEvent::RunCallback(id));
                 return LRESULT(1);
             }
         }
@@ -138,16 +139,16 @@ fn modifier_of(vk: VIRTUAL_KEY) -> Option<Modifiers> {
     }
 }
 
-fn get_actions(vk: VIRTUAL_KEY, modifiers: Modifiers) -> Option<Actions> {
+fn resolve_key(
+    vk: VIRTUAL_KEY,
+    modifiers: Modifiers,
+    keymap_state: &Arc<RwLock<KeymapState>>,
+) -> Option<CallbackId> {
     let key = vk_to_string(vk)?;
     let keymap = Keymap { key, modifiers };
 
-    let state = STATE.get()?;
-    let mut ks = state.keymap_state.write().ok()?;
-    let actions = ks.resolve(&keymap)?;
-    drop(ks);
-    tracing::trace!(?keymap, %actions, "Keymap matched");
-    Some(actions)
+    let ks = keymap_state.read().ok()?;
+    ks.resolve(&keymap)
 }
 
 fn vk_to_string(vk: VIRTUAL_KEY) -> Option<String> {
