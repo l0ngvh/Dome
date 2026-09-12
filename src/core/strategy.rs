@@ -192,6 +192,9 @@ pub(super) const VALIDATION_TOLERANCE: Length = Length::new(0.01);
 /// area, so each per-window limit gains `2 * border` here. The global
 /// `size_constraints` are already border-box and must not be outset, or what a
 /// percentage means would start depending on `border_size`.
+///
+/// A per-window max tightens the global max, it does not replace it. An app that
+/// declares a huge cap would otherwise escape the configured one.
 pub(crate) fn window_constraints(
     hub: &HubAccess,
     size_constraints: &SizeConstraints,
@@ -228,16 +231,16 @@ pub(crate) fn window_constraints(
     let win_max_w = outset_limit(limits.max_width);
     let win_max_h = outset_limit(limits.max_height);
 
-    let max_w = if win_max_w > Length::ZERO {
-        win_max_w
-    } else {
-        global_max_w
+    // Length::ZERO means "no cap", so it cannot take part in a plain `min`.
+    let tighter_max = |win: Length, global: Length| {
+        if win > Length::ZERO && global > Length::ZERO {
+            win.min(global)
+        } else {
+            win.max(global)
+        }
     };
-    let max_h = if win_max_h > Length::ZERO {
-        win_max_h
-    } else {
-        global_max_h
-    };
+    let max_w = tighter_max(win_max_w, global_max_w);
+    let max_h = tighter_max(win_max_h, global_max_h);
 
     let min_w = if max_w > Length::ZERO {
         win_min_w.max(global_min_w).min(max_w)
