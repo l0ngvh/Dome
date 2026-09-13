@@ -1,16 +1,16 @@
-use crate::config::{LayoutWorkspaceConfig, WindowMatcher};
 use crate::core::allocator::{Node, NodeId};
 use crate::core::hub::HubAccess;
 use crate::core::master::MasterStrategy;
 use crate::core::node::{Child, ContainerId, WindowId, WorkspaceId};
 use crate::core::strategy::TilingStrategy;
+use crate::core::{PreferredWorkspace, WindowMatcher};
 
 impl MasterStrategy {
     pub(super) fn sync_preferred_layout(
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        incoming: Option<&LayoutWorkspaceConfig>,
+        incoming: Option<&PreferredWorkspace>,
     ) {
         let Some(state) = self.workspaces.get(&ws_id) else {
             return;
@@ -18,7 +18,7 @@ impl MasterStrategy {
 
         let (new_count_opt, new_ratio_opt, incoming_master, incoming_secondary, incoming_displays) =
             match incoming {
-                Some(LayoutWorkspaceConfig::Master {
+                Some(PreferredWorkspace::Master {
                     master_count: incoming_count,
                     master_ratio: incoming_ratio,
                     master,

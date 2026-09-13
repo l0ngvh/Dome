@@ -1,11 +1,11 @@
 use insta::assert_snapshot;
 
-use crate::config::{MasterConfig, Strategy, WindowMatcher};
 use crate::core::WindowRestrictions;
 use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, snapshot,
     titled, titled_process,
 };
+use crate::core::{MasterConfig, Strategy, WindowMatcher};
 
 #[test]
 fn delete_window() {

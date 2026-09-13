@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::{GlobalLayoutConfig, Length, Pixels};
+use crate::core::{LayoutOptions, Length, Pixels};
 
 #[test]
 fn single_window_fills_screen() {
@@ -8,7 +8,7 @@ fn single_window_fills_screen() {
     assert_h_tiled(
         &[env.dim(w1)],
         default_monitor().work_area,
-        env.config.border_size,
+        env.config.layout.border_size,
     );
 }
 
@@ -20,14 +20,14 @@ fn two_windows_split_screen() {
     assert_h_tiled(
         &[env.dim(w1), env.dim(w2)],
         default_monitor().work_area,
-        env.config.border_size,
+        env.config.layout.border_size,
     );
 }
 
 #[test]
 fn three_windows_split_screen() {
     let config = Config::default();
-    let mut layout = GlobalLayoutConfig::default();
+    let mut layout = LayoutOptions::default();
     layout.partition_tree.automatic_tiling = false;
     let mut env = TestEnv::new_with_layout_settings(config, layout, Vec::new());
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
@@ -36,7 +36,7 @@ fn three_windows_split_screen() {
     assert_h_tiled(
         &[env.dim(w1), env.dim(w2), env.dim(w3)],
         default_monitor().work_area,
-        env.config.border_size,
+        env.config.layout.border_size,
     );
 }
 
@@ -53,7 +53,7 @@ fn reported_min_width_binds_while_zero_min_height_is_cleared() {
     // The zero height component reads as Cleared, not a zero-height minimum.
     assert_eq!(
         env.dim(w1).height,
-        SCREEN_HEIGHT - Length::from_pixels(env.config.border_size).to_unit(1.0) * 2.0
+        SCREEN_HEIGHT - Length::from_pixels(env.config.layout.border_size).to_unit(1.0) * 2.0
     );
 }
 
@@ -82,7 +82,7 @@ fn dropping_all_limits_restores_the_even_split() {
     assert_h_tiled(
         &[env.dim(w1), env.dim(w2)],
         default_monitor().work_area,
-        env.config.border_size,
+        env.config.layout.border_size,
     );
 }
 
@@ -128,7 +128,7 @@ fn resize_detects_fullscreen() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
-    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
+    let border = Length::from_pixels(env.config.layout.border_size).to_unit(1.0);
     let d = env.dim(w1);
     assert_eq!(d.x, border, "should start tiled with border inset");
 
@@ -181,14 +181,18 @@ fn dont_correct_float_move() {
 #[test]
 fn positions_are_rounded_not_truncated() {
     let config = Config::default();
-    let mut layout = GlobalLayoutConfig::default();
+    let mut layout = LayoutOptions::default();
     layout.partition_tree.automatic_tiling = false;
     let mut env = TestEnv::new_with_layout_settings(config, layout, Vec::new());
     let wins: Vec<HwndId> = (1..=7)
         .map(|i| env.open(i, "App", "app.exe", SPAWN_DIM))
         .collect();
     let dims: Vec<_> = wins.iter().map(|w| env.dim(*w)).collect();
-    assert_h_tiled(&dims, default_monitor().work_area, env.config.border_size);
+    assert_h_tiled(
+        &dims,
+        default_monitor().work_area,
+        env.config.layout.border_size,
+    );
 }
 
 fn scaled_monitor(scale: f32) -> MonitorInfo {
@@ -239,13 +243,13 @@ fn tiling_border_scales_with_dpi() {
     for scale in [1.0, 1.25, 1.5, 2.0] {
         let mut env = TestEnv::new_with_monitors(
             Config::default(),
-            LayoutConfig::default(),
+            PreferredLayouts::default(),
             vec![scaled_monitor(scale)],
         );
         let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
         let wp = only_recorded_tiling(&env);
         let expected_inset =
-            Pixels::new((env.config.border_size.value() as f32 * scale).round() as i32);
+            Pixels::new((env.config.layout.border_size.value() as f32 * scale).round() as i32);
 
         assert_eq!(env.dim(w1), wp.content_box.to_dimension(), "scale {scale}");
         assert_content_box_centered_in_border_box(&wp);
@@ -261,7 +265,7 @@ fn tiling_border_scales_with_dpi() {
 fn painted_thickness_matches_core_inset() {
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
-        LayoutConfig::default(),
+        PreferredLayouts::default(),
         vec![scaled_monitor(1.25)],
     );
     env.open(1, "App1", "app1.exe", SPAWN_DIM);
@@ -294,10 +298,13 @@ fn degenerate_content_box_hides_window() {
     // so core hands the shell an empty content box.
     let mut env = TestEnv::new_with_monitors(
         Config {
-            border_size: Pixels::new(600),
+            layout: LayoutOptions {
+                border_size: Pixels::new(600),
+                ..Config::default().layout
+            },
             ..Config::default()
         },
-        LayoutConfig::default(),
+        PreferredLayouts::default(),
         vec![scaled_monitor(1.0)],
     );
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
@@ -305,7 +312,7 @@ fn degenerate_content_box_hides_window() {
     assert!(env.is_offscreen(w1));
 
     let mut restored = env.config.clone();
-    restored.border_size = Config::default().border_size;
+    restored.layout.border_size = Config::default().layout.border_size;
     env.dome.config_changed(restored);
     env.dome.apply_layout();
 
@@ -348,13 +355,13 @@ fn show_tiling_places_at_200pct_offset_monitor() {
     };
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
-        LayoutConfig::default(),
+        PreferredLayouts::default(),
         vec![primary, secondary],
     );
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     env.run_actions("move monitor right");
     env.settle(10);
-    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
+    let border = Length::from_pixels(env.config.layout.border_size).to_unit(1.0);
     let scaled_border = border * 2.0;
     let d = env.dim(w1);
     // Hub places directly in physical coords on the secondary monitor.
@@ -368,7 +375,7 @@ fn show_tiling_places_at_200pct_offset_monitor() {
 fn show_float_places_at_125pct() {
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
-        LayoutConfig::default(),
+        PreferredLayouts::default(),
         vec![scaled_monitor(1.25)],
     );
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
@@ -393,7 +400,7 @@ fn show_float_places_at_125pct() {
 fn show_fullscreen_window_places_at_175pct() {
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
-        LayoutConfig::default(),
+        PreferredLayouts::default(),
         vec![scaled_monitor(1.75)],
     );
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
@@ -425,7 +432,7 @@ fn show_fullscreen_window_places_at_175pct() {
 fn float_round_trip_converges_at_125pct() {
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
-        LayoutConfig::default(),
+        PreferredLayouts::default(),
         vec![scaled_monitor(1.25)],
     );
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
@@ -462,7 +469,7 @@ fn float_round_trip_converges_at_125pct() {
 fn float_settle_does_not_drift_at_fractional_scaled_border() {
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
-        LayoutConfig::default(),
+        PreferredLayouts::default(),
         vec![scaled_monitor(1.3)],
     );
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
@@ -525,7 +532,7 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
     };
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
-        LayoutConfig::default(),
+        PreferredLayouts::default(),
         vec![primary, secondary],
     );
     let win = env.open(1, "App1", "app1.exe", SPAWN_DIM);
@@ -573,24 +580,24 @@ fn dpi_reconcile_reruns_layout_with_new_scale() {
         scale: 1.0,
     };
     let config = Config::default();
-    let mut layout = GlobalLayoutConfig::default();
+    let mut layout = LayoutOptions::default();
     layout.partition_tree.tab_bar_height = Pixels::new(30);
     let mut config = config;
-    config.strategy = layout.strategy;
-    config.partition_tree = layout.partition_tree;
-    config.master = layout.master.clone();
-    config.size_constraints = layout.size_constraints;
-    config.float = layout.float;
-    config.fullscreen = layout.fullscreen;
+    config.layout.strategy = layout.strategy;
+    config.layout.partition_tree = layout.partition_tree;
+    config.layout.master = layout.master.clone();
+    config.layout.size_constraints = layout.size_constraints;
+    config.layout.float = layout.float;
+    config.layout.fullscreen = layout.fullscreen;
     let mut env =
-        TestEnv::new_with_monitors(config, LayoutConfig::default(), vec![monitor.clone()]);
+        TestEnv::new_with_monitors(config, PreferredLayouts::default(), vec![monitor.clone()]);
     let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
     env.run_actions("toggle layout");
     env.settle(10);
 
     let d_before = env.dim(w2);
-    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
+    let border = Length::from_pixels(env.config.layout.border_size).to_unit(1.0);
     let tab_h_1x = Length::new(30.0);
     assert_eq!(d_before.y, (border + tab_h_1x));
 
@@ -615,7 +622,7 @@ fn dpi_reconcile_reruns_layout_with_new_scale() {
 fn handle_window_moved_signals_monitor_change() {
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
-        LayoutConfig::default(),
+        PreferredLayouts::default(),
         vec![default_monitor(), second_monitor()],
     );
     let w = env.open(1, "App1", "app1.exe", SPAWN_DIM);
@@ -657,7 +664,7 @@ fn handle_window_moved_signals_monitor_change() {
 fn float_move_monitor_same_dpi_preserves_content_rect() {
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
-        LayoutConfig::default(),
+        PreferredLayouts::default(),
         vec![default_monitor(), second_monitor()],
     );
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
@@ -678,7 +685,7 @@ fn float_move_monitor_same_dpi_preserves_content_rect() {
     };
 
     let overlay_dim = overlay_rect.to_dimension();
-    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
+    let border = Length::from_pixels(env.config.layout.border_size).to_unit(1.0);
     assert_eq!(overlay_dim.x, Length::new(200.0) - border);
     assert_eq!(overlay_dim.y, Length::new(150.0) - border);
     assert_eq!(overlay_dim.width, Length::new(600.0) + 2.0 * border);
@@ -737,7 +744,7 @@ fn float_move_monitor_different_dpi_rescales_border() {
     };
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
-        LayoutConfig::default(),
+        PreferredLayouts::default(),
         vec![primary, secondary],
     );
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
@@ -748,7 +755,7 @@ fn float_move_monitor_different_dpi_rescales_border() {
     env.dome.apply_layout();
     env.settle(10);
 
-    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
+    let border = Length::from_pixels(env.config.layout.border_size).to_unit(1.0);
     env.moves.lock().unwrap().clear();
     env.move_window_to(w1, dim(2020, 100, 400, 300));
 
@@ -816,10 +823,10 @@ fn dome_new_assigns_per_monitor_scale() {
     };
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
-        LayoutConfig::default(),
+        PreferredLayouts::default(),
         vec![primary, secondary],
     );
-    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
+    let border = Length::from_pixels(env.config.layout.border_size).to_unit(1.0);
 
     let w_a = env.open(1, "AppA", "a.exe", SPAWN_DIM);
     let d_a = env.dim(w_a);
@@ -852,7 +859,7 @@ fn float_drift_repositions_overlay() {
     env.flush_moves();
 
     // The overlay paints the emitted visible border box, not the raw managed-window rect.
-    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
+    let border = Length::from_pixels(env.config.layout.border_size).to_unit(1.0);
     let expected_outer = Dimension::new(
         Length::new(500.0) - border,
         Length::new(300.0) - border,
@@ -898,7 +905,7 @@ fn float_dragged_past_the_screen_origin_paints_a_clipped_overlay() {
 
     // Core stores the border box at (-border, -border, 400 + 2 * border, 250 + 2 * border) and
     // clips it to the screen before emitting, so the overlay loses one border off each extent.
-    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
+    let border = Length::from_pixels(env.config.layout.border_size).to_unit(1.0);
     let expected_clipped = Dimension::new(
         Length::ZERO,
         Length::ZERO,
@@ -965,7 +972,7 @@ fn float_overlay_geometry_is_stable_across_repeated_apply_layout() {
 }
 
 fn full_work_area(env: &TestEnv) -> Dimension {
-    let border = Length::from_pixels(env.config.border_size).to_unit(1.0);
+    let border = Length::from_pixels(env.config.layout.border_size).to_unit(1.0);
     Dimension::new(
         border,
         border,
@@ -1060,7 +1067,7 @@ fn destroy_bar_restores_work_area() {
 fn open_bar_adjust_multiple_monitors() {
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
-        LayoutConfig::default(),
+        PreferredLayouts::default(),
         vec![default_monitor(), second_monitor()],
     );
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);

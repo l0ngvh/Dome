@@ -1,4 +1,4 @@
-use crate::core::GlobalLayoutConfig;
+use crate::core::LayoutOptions;
 use crate::core::allocator::NodeId;
 use crate::core::node::{MonitorId, PixelRect, WindowId, WindowRestrictions};
 use crate::core::tests::{
@@ -7,7 +7,7 @@ use crate::core::tests::{
 use insta::assert_snapshot;
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
+fn layout_floating(titles: &[&str]) -> LayoutOptions {
     LayoutConfigBuilder::new()
         .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
         .build()

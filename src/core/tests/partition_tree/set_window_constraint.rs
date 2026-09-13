@@ -1,6 +1,6 @@
 use insta::assert_snapshot;
 
-use crate::config::SizeConstraint;
+use crate::core::SizeConstraint;
 
 use crate::core::node::{Length, LimitObservation, LimitUpdate, Pixels, WindowRestrictions};
 use crate::core::tests::{

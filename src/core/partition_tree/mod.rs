@@ -15,17 +15,17 @@ pub(crate) use types::*;
 
 use rustc_hash::FxHashMap;
 
-use crate::config::LayoutWorkspaceConfig;
-use crate::config::SizeConstraints;
-use crate::config::SplitMode;
-use crate::core::GlobalLayoutConfig;
+use crate::core::LayoutOptions;
+use crate::core::PreferredWorkspace;
+use crate::core::SizeConstraints;
+use crate::core::SplitMode;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
 use crate::core::node::{
     ContainerId, Logical, PixelRect, Pixels, WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::strategy::{
-    TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, translate,
+    StrategyAction, TilingPlacements, TilingStrategy, WorkspaceExport, translate,
 };
 
 /// i3-style manual tiling strategy. Manages a container tree where windows are
@@ -48,10 +48,10 @@ impl TilingStrategy for PartitionTreeStrategy {
         &mut self,
         _hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        preferred_layout: Option<&LayoutWorkspaceConfig>,
+        preferred_layout: Option<&PreferredWorkspace>,
     ) {
         let preferred_root = match preferred_layout {
-            Some(LayoutWorkspaceConfig::PartitionTree { tree, .. }) => {
+            Some(PreferredWorkspace::PartitionTree { tree, .. }) => {
                 tree.as_ref().map(|t| self.build_preferred_layout(t))
             }
             Some(_) => panic!("Preparing master workspace in partition tree strategy"),
@@ -141,27 +141,27 @@ impl TilingStrategy for PartitionTreeStrategy {
         translate(child_dim, offset_x, offset_y, work_area.x(), work_area.y())
     }
 
-    fn handle_action(&mut self, hub: &mut HubAccess, action: TilingAction) {
+    fn handle_action(&mut self, hub: &mut HubAccess, action: StrategyAction) {
         match action {
-            TilingAction::FocusDirection { direction, forward } => {
+            StrategyAction::FocusDirection { direction, forward } => {
                 self.focus_in_direction(hub, direction, forward)
             }
-            TilingAction::MoveDirection { direction, forward } => {
+            StrategyAction::MoveDirection { direction, forward } => {
                 self.move_in_direction(hub, direction, forward)
             }
-            TilingAction::ToggleSpawnMode => self.toggle_spawn_mode(hub),
-            TilingAction::ToggleDirection => self.toggle_focused_layout_direction(hub),
-            TilingAction::ToggleContainerLayout => self.toggle_container_layout(hub),
-            TilingAction::FocusParent => self.focus_parent(hub),
-            TilingAction::FocusTab { forward } => self.focus_tab(hub, forward),
-            TilingAction::TabClicked {
+            StrategyAction::ToggleSpawnMode => self.toggle_spawn_mode(hub),
+            StrategyAction::ToggleDirection => self.toggle_focused_layout_direction(hub),
+            StrategyAction::ToggleContainerLayout => self.toggle_container_layout(hub),
+            StrategyAction::FocusParent => self.focus_parent(hub),
+            StrategyAction::FocusTab { forward } => self.focus_tab(hub, forward),
+            StrategyAction::TabClicked {
                 container_id,
                 index,
             } => self.focus_tab_index(hub, container_id, index),
-            TilingAction::GrowMaster
-            | TilingAction::ShrinkMaster
-            | TilingAction::MoreMaster
-            | TilingAction::FewerMaster => {}
+            StrategyAction::GrowMaster
+            | StrategyAction::ShrinkMaster
+            | StrategyAction::MoreMaster
+            | StrategyAction::FewerMaster => {}
         }
     }
 
@@ -303,12 +303,12 @@ impl TilingStrategy for PartitionTreeStrategy {
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        incoming: Option<&LayoutWorkspaceConfig>,
+        incoming: Option<&PreferredWorkspace>,
     ) {
         self.sync_preferred_layout(hub, ws_id, incoming)
     }
 
-    fn apply_config(&mut self, hub: &mut HubAccess, layout: GlobalLayoutConfig) {
+    fn apply_config(&mut self, hub: &mut HubAccess, layout: LayoutOptions) {
         self.tab_bar_height = layout.partition_tree.tab_bar_height;
         self.automatic_tiling = layout.partition_tree.automatic_tiling;
         self.size_constraints = layout.size_constraints;

@@ -15,6 +15,109 @@ pub(crate) mod shell_menu;
 
 use crate::core::{Dimension, Length};
 
+impl From<&crate::action::MonitorTarget> for crate::core::MonitorSelector {
+    fn from(target: &crate::action::MonitorTarget) -> Self {
+        use crate::action::MonitorTarget;
+        match target {
+            MonitorTarget::Up => Self::Up,
+            MonitorTarget::Down => Self::Down,
+            MonitorTarget::Left => Self::Left,
+            MonitorTarget::Right => Self::Right,
+            MonitorTarget::Name(name) => Self::Name(name.clone()),
+        }
+    }
+}
+
+/// Translate a wire `Action` into the internal `TilingAction`. Returns `None`
+/// for a non-tiling action (execute, exit, close, unminimize, mode) that the
+/// runner handles as an effect instead.
+pub(crate) fn tiling_action(action: &crate::action::Action) -> Option<crate::core::TilingAction> {
+    use crate::action::{
+        Action, FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget,
+    };
+    use crate::core::{Direction, StrategyAction, TilingAction};
+
+    Some(match action {
+        Action::Focus { target } => match target {
+            FocusTarget::Up => StrategyAction::FocusDirection {
+                direction: Direction::Vertical,
+                forward: false,
+            }
+            .into(),
+            FocusTarget::Down => StrategyAction::FocusDirection {
+                direction: Direction::Vertical,
+                forward: true,
+            }
+            .into(),
+            FocusTarget::Left => StrategyAction::FocusDirection {
+                direction: Direction::Horizontal,
+                forward: false,
+            }
+            .into(),
+            FocusTarget::Right => StrategyAction::FocusDirection {
+                direction: Direction::Horizontal,
+                forward: true,
+            }
+            .into(),
+            FocusTarget::Parent => StrategyAction::FocusParent.into(),
+            FocusTarget::Tab { direction } => StrategyAction::FocusTab {
+                forward: matches!(direction, TabDirection::Next),
+            }
+            .into(),
+            FocusTarget::Workspace { name, monitor } => TilingAction::FocusWorkspace {
+                name: name.clone(),
+                monitor: monitor.clone(),
+            },
+            FocusTarget::Monitor { target } => TilingAction::FocusMonitor {
+                selector: target.into(),
+            },
+        },
+        Action::Move { target } => match target {
+            MoveTarget::Up => StrategyAction::MoveDirection {
+                direction: Direction::Vertical,
+                forward: false,
+            }
+            .into(),
+            MoveTarget::Down => StrategyAction::MoveDirection {
+                direction: Direction::Vertical,
+                forward: true,
+            }
+            .into(),
+            MoveTarget::Left => StrategyAction::MoveDirection {
+                direction: Direction::Horizontal,
+                forward: false,
+            }
+            .into(),
+            MoveTarget::Right => StrategyAction::MoveDirection {
+                direction: Direction::Horizontal,
+                forward: true,
+            }
+            .into(),
+            MoveTarget::Workspace { name, monitor } => TilingAction::MoveToWorkspace {
+                name: name.clone(),
+                monitor: monitor.clone(),
+            },
+            MoveTarget::Monitor { target } => TilingAction::MoveToMonitor {
+                selector: target.into(),
+            },
+        },
+        Action::Toggle { target } => match target {
+            ToggleTarget::Spawn => StrategyAction::ToggleSpawnMode.into(),
+            ToggleTarget::Direction => StrategyAction::ToggleDirection.into(),
+            ToggleTarget::Layout => StrategyAction::ToggleContainerLayout.into(),
+            ToggleTarget::Float => TilingAction::ToggleFloat,
+            ToggleTarget::Fullscreen => TilingAction::ToggleFullscreen,
+        },
+        Action::Master { target } => match target {
+            MasterTarget::Grow => StrategyAction::GrowMaster.into(),
+            MasterTarget::Shrink => StrategyAction::ShrinkMaster.into(),
+            MasterTarget::More => StrategyAction::MoreMaster.into(),
+            MasterTarget::Fewer => StrategyAction::FewerMaster.into(),
+        },
+        _ => return None,
+    })
+}
+
 /// Subtract an observed status-bar rect from a monitor's work area so tiled
 /// windows reflow around the bar.
 ///

@@ -40,7 +40,6 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
-use crate::config::{LayoutWorkspaceConfig, SplitMode, TreeLayoutNode, WindowMatcher};
 use crate::core::WindowMetadata;
 use crate::core::allocator::{Node, NodeId};
 use crate::core::hub::HubAccess;
@@ -48,6 +47,7 @@ use crate::core::node::{Child, ContainerId, Direction, WindowId, WorkspaceId};
 use crate::core::partition_tree::Parent;
 use crate::core::partition_tree::PartitionTreeStrategy;
 use crate::core::strategy::{TilingStrategy, WorkspaceExport};
+use crate::core::{PreferredWorkspace, SplitMode, TreeLayoutNode, WindowMatcher};
 
 impl PartitionTreeStrategy {
     pub(super) fn build_preferred_layout(&mut self, tree: &TreeLayoutNode) -> PreferredSlot {
@@ -392,13 +392,13 @@ impl PartitionTreeStrategy {
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        incoming: Option<&LayoutWorkspaceConfig>,
+        incoming: Option<&PreferredWorkspace>,
     ) {
         let Some(incoming) = incoming else {
             return;
         };
         let incoming_tree = match incoming {
-            LayoutWorkspaceConfig::PartitionTree {
+            PreferredWorkspace::PartitionTree {
                 tree: Some(tree), ..
             } => Some(tree),
             _ => None,
@@ -447,7 +447,7 @@ impl PartitionTreeStrategy {
         }
 
         let new_root = match incoming {
-            LayoutWorkspaceConfig::PartitionTree { tree, .. } => {
+            PreferredWorkspace::PartitionTree { tree, .. } => {
                 tree.as_ref().map(|t| self.build_preferred_layout(t))
             }
             _ => None,

@@ -1,5 +1,5 @@
 use super::preferred_layout::{PreferredContainerSlotId, PreferredSlot, PreferredWindowSlotId};
-use crate::config::SplitMode;
+use crate::core::SplitMode;
 use crate::core::hub::SpawnIndicator;
 use crate::core::node::Child;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WindowId, WorkspaceId};
@@ -121,12 +121,12 @@ impl SpawnMode {
     }
 }
 
-impl From<crate::config::SplitMode> for SpawnMode {
-    fn from(split: crate::config::SplitMode) -> Self {
+impl From<SplitMode> for SpawnMode {
+    fn from(split: SplitMode) -> Self {
         match split {
-            crate::config::SplitMode::Horizontal => SpawnMode::horizontal(),
-            crate::config::SplitMode::Vertical => SpawnMode::vertical(),
-            crate::config::SplitMode::Tabbed => SpawnMode::tabbed(),
+            SplitMode::Horizontal => SpawnMode::horizontal(),
+            SplitMode::Vertical => SpawnMode::vertical(),
+            SplitMode::Tabbed => SpawnMode::tabbed(),
         }
     }
 }

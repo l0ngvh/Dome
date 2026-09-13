@@ -1,8 +1,43 @@
-use crate::config::{LayoutWorkspaceConfig, WindowMatcher, WindowMode};
+use serde::Deserialize;
 
 use super::allocator::{Node, NodeId};
 use super::hub::Hub;
+use super::layout::PreferredWorkspace;
 use super::node::{DisplayMode, WindowId, WindowMetadata, WorkspaceId};
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Deserialize)]
+pub(crate) struct WindowMatcher {
+    #[serde(default)]
+    pub(crate) app: Option<String>,
+    #[serde(default)]
+    pub(crate) bundle_id: Option<String>,
+    #[serde(default)]
+    pub(crate) title: Option<String>,
+    #[serde(default)]
+    pub(crate) process: Option<String>,
+    #[serde(default)]
+    pub(crate) class: Option<String>,
+    #[serde(default)]
+    pub(crate) aumid: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum WindowMode {
+    Tiling,
+    Float,
+    Fullscreen,
+}
+
+pub(crate) fn pattern_matches(pattern: &str, text: &str) -> bool {
+    if let Some(regex) = pattern.strip_prefix('/').and_then(|p| p.strip_suffix('/')) {
+        regex::Regex::new(regex)
+            .map(|r| r.is_match(text))
+            .unwrap_or(false)
+    } else {
+        pattern == text
+    }
+}
 
 /// Handle to a matcher in the pool. A window's `DisplayMode` keeps it so the
 /// export path can re-find the matcher after the tree has mutated.
@@ -107,7 +142,7 @@ impl Hub {
     /// global, from the current config. Runs on both config entry points so
     /// neither per-workspace matchers (via the arg) nor global matchers (via
     /// `self.access.layout`) go stale.
-    pub(super) fn index_matchers(&mut self, preferred_layouts: &[LayoutWorkspaceConfig]) {
+    pub(super) fn index_matchers(&mut self, preferred_layouts: &[PreferredWorkspace]) {
         for id in self.float_fullscreen_matchers.sorted_ids() {
             self.float_fullscreen_matchers.delete(id);
         }
@@ -204,15 +239,15 @@ struct Matchers {
     float: Vec<WindowMatcher>,
 }
 
-fn workspace_matchers(entry: &LayoutWorkspaceConfig) -> Matchers {
+fn workspace_matchers(entry: &PreferredWorkspace) -> Matchers {
     match entry {
-        LayoutWorkspaceConfig::PartitionTree {
+        PreferredWorkspace::PartitionTree {
             fullscreen, float, ..
         } => Matchers {
             fullscreen: fullscreen.clone(),
             float: float.clone(),
         },
-        LayoutWorkspaceConfig::Master {
+        PreferredWorkspace::Master {
             fullscreen, float, ..
         } => Matchers {
             fullscreen: fullscreen.clone(),

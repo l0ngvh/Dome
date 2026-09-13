@@ -27,7 +27,7 @@ impl std::fmt::Display for ManagedWindow {
 
 /// Allow querying by CGWindowID for interaction between Dome and external events/UI, and by
 /// WindowId for Dome internal handling after confirming the window exist
-pub(super) struct WindowRegistry {
+pub(in crate::platform::macos) struct WindowRegistry {
     windows: HashMap<CGWindowID, ManagedWindow>,
     id_to_cg: HashMap<WindowId, CGWindowID>,
     pid_to_cg: HashMap<i32, Vec<CGWindowID>>,
@@ -72,6 +72,15 @@ impl WindowRegistry {
         self.id_to_cg
             .get(&window_id)
             .and_then(|&cg_id| self.windows.get(&cg_id))
+    }
+
+    pub(in crate::platform::macos) fn close_window(&self, window_id: WindowId) {
+        let Some(window) = self.by_id(window_id) else {
+            return;
+        };
+        if let Err(e) = window.ext.close() {
+            tracing::warn!(%window_id, "close failed: {e:#}");
+        }
     }
 
     pub(super) fn by_id_mut(&mut self, window_id: WindowId) -> Option<&mut ManagedWindow> {

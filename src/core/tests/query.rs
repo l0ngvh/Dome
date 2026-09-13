@@ -1,6 +1,6 @@
-use crate::action::MonitorTarget;
 use crate::action::{MonitorDetails, MonitorFrame, WorkspaceInfo, WorkspaceState};
-use crate::core::GlobalLayoutConfig;
+use crate::core::LayoutOptions;
+use crate::core::MonitorSelector;
 use crate::core::ReportedMonitor;
 use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{
@@ -9,7 +9,7 @@ use crate::core::tests::{
 };
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
+fn layout_floating(titles: &[&str]) -> LayoutOptions {
     LayoutConfigBuilder::new()
         .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
         .build()
@@ -89,7 +89,7 @@ fn focused_vs_visible_multi_monitor() {
         PixelRect::new(200, 0, 100, 30),
         1.0,
     ));
-    hub.focus_monitor(&MonitorTarget::Name("secondary".into()));
+    hub.focus_monitor(&MonitorSelector::Name("secondary".into()));
     hub.insert_window(titled("w10"), default_rect(), WindowRestrictions::None);
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);

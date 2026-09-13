@@ -1,9 +1,9 @@
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
 use std::ptr::NonNull;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::mpsc::Receiver;
 
-use calloop::channel::Sender as CalloopSender;
 use objc2_core_foundation::{
     CFMachPort, CFRetained, CFRunLoop, kCFAllocatorDefault, kCFRunLoopDefaultMode,
 };
@@ -12,17 +12,14 @@ use objc2_core_graphics::{
     CGEventTapPlacement, CGEventTapProxy, CGEventType,
 };
 
-use super::dome::HubEvent;
-use super::send_hub_event;
-use crate::config::{Keymap, Modifiers};
-use crate::keymap::KeymapState;
-
-pub(super) type SharedKeymapState = Arc<RwLock<KeymapState>>;
+use crate::keybinding::{Keymap, KeymapState, ModalKeymaps, Modifiers};
+use crate::platform::macos::dome::HubEvent;
 
 struct KeyboardCtx {
-    keymap_state: SharedKeymapState,
+    keymap_rx: Receiver<KeymapState>,
+    keymap: RefCell<KeymapState>,
     is_suspended: Arc<AtomicBool>,
-    hub_sender: CalloopSender<HubEvent>,
+    event_sender: calloop::channel::Sender<HubEvent>,
     event_tap: OnceCell<CFRetained<CFMachPort>>,
 }
 
@@ -30,14 +27,15 @@ struct KeyboardCtx {
 /// a run loop's configuration should only be altered from the thread that owns
 /// it.
 pub(super) fn run_event_tap(
-    keymap_state: SharedKeymapState,
+    keymap_rx: Receiver<KeymapState>,
     is_suspended: Arc<AtomicBool>,
-    hub_sender: CalloopSender<HubEvent>,
+    event_sender: calloop::channel::Sender<HubEvent>,
 ) {
     let ctx = KeyboardCtx {
-        keymap_state,
+        keymap_rx,
+        keymap: RefCell::new(KeymapState::new(ModalKeymaps::default())),
         is_suspended,
-        hub_sender,
+        event_sender,
         event_tap: OnceCell::new(),
     };
 
@@ -122,24 +120,23 @@ fn handle_keyboard(ctx: &KeyboardCtx, event: *mut CGEvent) -> bool {
     }
 
     let keymap = Keymap { key, modifiers };
-    let actions = {
-        let Ok(mut ks) = ctx.keymap_state.write() else {
-            return false;
-        };
-        ks.resolve(&keymap)
-    };
-    let Some(actions) = actions else {
+    while let Ok(next) = ctx.keymap_rx.try_recv() {
+        *ctx.keymap.borrow_mut() = next;
+    }
+    let resolved = ctx.keymap.borrow().resolve(&keymap);
+    let Some(id) = resolved else {
         return false;
     };
-
-    tracing::trace!(?keymap, %actions, "Keymap matched");
 
     if ctx.is_suspended.load(Ordering::Relaxed) {
         tracing::info!("Received keymap action, resuming window management");
         ctx.is_suspended.store(false, Ordering::Relaxed);
     }
 
-    send_hub_event(&ctx.hub_sender, HubEvent::Action(actions));
+    tracing::trace!(?keymap, ?id, "Keymap matched callback");
+    if ctx.event_sender.send(HubEvent::RunCallback(id)).is_err() {
+        tracing::warn!("Hub thread unavailable, callback dropped");
+    }
     true
 }
 

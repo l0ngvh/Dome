@@ -1,10 +1,10 @@
-use crate::config::{Strategy, WindowMatcher};
 use crate::core::node::PixelRect;
 use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect,
     setup_logger_with_level, snapshot, titled, titled_matcher, titled_process,
 };
 use crate::core::{Hub, MonitorLayout, Pixels, WindowId, WindowRestrictions};
+use crate::core::{Strategy, WindowMatcher};
 use insta::assert_snapshot;
 
 #[test]

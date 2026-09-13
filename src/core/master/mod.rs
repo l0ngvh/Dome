@@ -8,8 +8,7 @@ mod validate;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
-use crate::config::{LayoutWorkspaceConfig, SizeConstraints};
-use crate::core::GlobalLayoutConfig;
+use crate::core::LayoutOptions;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
 use crate::core::master::preferred_layout::{Slot, SlotId};
@@ -18,9 +17,10 @@ use crate::core::node::{
     WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::strategy::{
-    TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, distribute_space, translate,
+    StrategyAction, TilingPlacements, TilingStrategy, WorkspaceExport, distribute_space, translate,
     window_constraints,
 };
+use crate::core::{PreferredWorkspace, SizeConstraints};
 
 /// XMonad-style tiling: a master area on the left and a stack on the right.
 /// Each pane scrolls vertically and independently when per-window min heights push the
@@ -43,12 +43,12 @@ impl TilingStrategy for MasterStrategy {
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        preferred_layout: Option<&LayoutWorkspaceConfig>,
+        preferred_layout: Option<&PreferredWorkspace>,
     ) {
         // Reject a non-master config before allocating, so the panic path cannot
         // leak the pane containers.
         let master_cfg = match preferred_layout {
-            Some(LayoutWorkspaceConfig::Master {
+            Some(PreferredWorkspace::Master {
                 master_count,
                 master_ratio,
                 master,
@@ -187,7 +187,7 @@ impl TilingStrategy for MasterStrategy {
         self.collect_tiling_placements(hub, ws_id, focused)
     }
 
-    fn handle_action(&mut self, hub: &mut HubAccess, action: TilingAction) {
+    fn handle_action(&mut self, hub: &mut HubAccess, action: StrategyAction) {
         let ws_id = hub.monitors.get(hub.focused_monitor).active_workspace;
 
         let Some((kind, idx)) = self.focused_position(hub, ws_id) else {
@@ -201,7 +201,7 @@ impl TilingStrategy for MasterStrategy {
         let stack_len = Self::pane_len(hub, secondary_cid);
 
         match action {
-            TilingAction::FocusDirection { direction, forward } => {
+            StrategyAction::FocusDirection { direction, forward } => {
                 if master_len + stack_len <= 1 {
                     return;
                 }
@@ -244,7 +244,7 @@ impl TilingStrategy for MasterStrategy {
                 }
                 self.scroll_into_view(hub, ws_id);
             }
-            TilingAction::MoveDirection { direction, forward } => {
+            StrategyAction::MoveDirection { direction, forward } => {
                 if master_len + stack_len <= 1 {
                     return;
                 }
@@ -303,21 +303,21 @@ impl TilingStrategy for MasterStrategy {
                 }
                 self.compute_placement(hub, ws_id);
             }
-            TilingAction::GrowMaster => {
+            StrategyAction::GrowMaster => {
                 let state = self.workspaces.get_mut(&ws_id).unwrap();
                 let global_ratio = self.master_ratio;
                 let current = state.master_ratio.unwrap_or(global_ratio);
                 state.master_ratio = Some((current + 0.05).clamp(0.1, 0.9));
                 self.compute_placement(hub, ws_id);
             }
-            TilingAction::ShrinkMaster => {
+            StrategyAction::ShrinkMaster => {
                 let state = self.workspaces.get_mut(&ws_id).unwrap();
                 let global_ratio = self.master_ratio;
                 let current = state.master_ratio.unwrap_or(global_ratio);
                 state.master_ratio = Some((current - 0.05).clamp(0.1, 0.9));
                 self.compute_placement(hub, ws_id);
             }
-            TilingAction::MoreMaster => {
+            StrategyAction::MoreMaster => {
                 let global_count = self.master_count;
                 {
                     let state = self.workspaces.get_mut(&ws_id).unwrap();
@@ -327,7 +327,7 @@ impl TilingStrategy for MasterStrategy {
                 self.reconcile_master_count(hub, ws_id);
                 self.compute_placement(hub, ws_id);
             }
-            TilingAction::FewerMaster => {
+            StrategyAction::FewerMaster => {
                 let global_count = self.master_count;
                 let current = self
                     .workspaces
@@ -344,7 +344,7 @@ impl TilingStrategy for MasterStrategy {
                 self.reconcile_master_count(hub, ws_id);
                 self.compute_placement(hub, ws_id);
             }
-            TilingAction::ToggleContainerLayout => {
+            StrategyAction::ToggleContainerLayout => {
                 let pane = self.workspaces.get_mut(&ws_id).unwrap().pane_mut(kind);
                 pane.display = match pane.display {
                     PaneDisplay::Tiled => PaneDisplay::Tabbed,
@@ -352,7 +352,7 @@ impl TilingStrategy for MasterStrategy {
                 };
                 self.compute_placement(hub, ws_id);
             }
-            TilingAction::FocusTab { forward } => {
+            StrategyAction::FocusTab { forward } => {
                 let cid = if kind == PaneKind::Master {
                     master_cid
                 } else {
@@ -371,7 +371,7 @@ impl TilingStrategy for MasterStrategy {
                     .record_focus(target);
                 self.compute_placement(hub, ws_id);
             }
-            TilingAction::TabClicked {
+            StrategyAction::TabClicked {
                 container_id,
                 index,
             } => {
@@ -483,12 +483,12 @@ impl TilingStrategy for MasterStrategy {
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        incoming: Option<&LayoutWorkspaceConfig>,
+        incoming: Option<&PreferredWorkspace>,
     ) {
         self.sync_preferred_layout(hub, ws_id, incoming)
     }
 
-    fn apply_config(&mut self, hub: &mut HubAccess, layout: GlobalLayoutConfig) {
+    fn apply_config(&mut self, hub: &mut HubAccess, layout: LayoutOptions) {
         let old_master_count = self.master_count;
         self.master_ratio = layout.master.master_ratio;
         self.master_count = layout.master.master_count;

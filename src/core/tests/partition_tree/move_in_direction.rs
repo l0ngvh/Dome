@@ -1,11 +1,11 @@
-use crate::core::GlobalLayoutConfig;
+use crate::core::LayoutOptions;
 use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{
     LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
 };
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
+fn layout_floating(titles: &[&str]) -> LayoutOptions {
     LayoutConfigBuilder::new()
         .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
         .build()

@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -12,13 +11,14 @@ use objc2_app_kit::NSWorkspace;
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::{Action, Actions};
-use crate::keymap::KeymapState;
+use crate::logging::Logger;
 use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::dispatcher::GcdDispatcher;
 use crate::platform::macos::dome::{
     DebounceBurst, Dome, ExternalBarProbe, HubEvent, MacOSMetadata, NewWindow, PendingAdd,
     WindowMove, compute_reconcile_all, compute_reconciliation, compute_window_positions,
 };
+use crate::platform::macos::login_item;
 use crate::platform::macos::running_application::RunningApp;
 
 const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
@@ -36,7 +36,10 @@ pub(super) struct DomeRunner {
     move_state: HashMap<i32, (RegistrationToken, DebounceBurst)>,
     handle: LoopHandle<'static, DomeRunner>,
     signal: LoopSignal,
-    keymap_state: Arc<RwLock<KeymapState>>,
+    logger: Logger,
+    bundle_path: Option<String>,
+    /// Environment overrides for the commands `Action::Execute` spawns.
+    env: HashMap<String, String>,
     /// Pending display-settle timer, replaced when a new display change arrives
     /// mid-settle so coverage restarts from the latest change.
     settle_token: Option<RegistrationToken>,
@@ -45,7 +48,9 @@ pub(super) struct DomeRunner {
 pub(super) fn run_dome(
     dome: Dome,
     channel: Channel<HubEvent>,
-    keymap_state: Arc<RwLock<KeymapState>>,
+    logger: Logger,
+    bundle_path: Option<String>,
+    env: HashMap<String, String>,
 ) {
     install_signal_handlers();
     let mut event_loop =
@@ -62,7 +67,9 @@ pub(super) fn run_dome(
         move_state: HashMap::new(),
         handle: handle.clone(),
         signal,
-        keymap_state,
+        logger,
+        bundle_path,
+        env,
         settle_token: None,
     };
 
@@ -116,8 +123,16 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
             tracing::info!("Shutdown requested");
             runner.signal.stop();
         }
-        HubEvent::ConfigChanged(new_config) => {
-            runner.dome.config_changed(*new_config);
+        HubEvent::RunCallback(id) => {
+            runner.dome.run_callback(id, &runner.env, &runner.signal);
+        }
+        HubEvent::ReloadConfig => {
+            if let Some(config) = runner.dome.reload() {
+                runner.logger.set_level(config.log_level);
+                runner.env = config.env.clone();
+                login_item::sync_login_item(config.start_at_login, runner.bundle_path.as_deref());
+                runner.dome.config_changed(*config);
+            }
         }
         HubEvent::LayoutConfigChanged(new_layout) => {
             runner.dome.layout_changed(*new_layout);
@@ -187,26 +202,17 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
 
 fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
     for action in actions {
+        if let Some(tiling) = crate::platform::tiling_action(action) {
+            runner.dome.handle_tiling_action(tiling);
+            runner.dome.flush_layout();
+            continue;
+        }
         match action {
-            Action::Focus { target: t } => {
-                runner.dome.apply_focus(t);
-                runner.dome.flush_layout();
-            }
-            Action::Move { target: t } => {
-                runner.dome.apply_move(t);
-                runner.dome.flush_layout();
-            }
-            Action::Toggle { target: t } => {
-                runner.dome.apply_toggle(t);
-                runner.dome.flush_layout();
-            }
-            Action::Master { target: t } => {
-                runner.dome.apply_master(t);
-                runner.dome.flush_layout();
-            }
-            Action::Exec { command } => {
-                if let Err(e) = crate::platform::macos::spawn::spawn_disclaimed_sh(command) {
-                    tracing::warn!(%command, "Failed to exec: {e}");
+            Action::Execute { command } => {
+                if let Err(e) =
+                    crate::platform::macos::spawn::spawn_disclaimed_sh(command, &runner.env)
+                {
+                    tracing::warn!(%command, "Failed to execute: {e}");
                 }
             }
             Action::Exit => {
@@ -220,9 +226,13 @@ fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
                 runner.dome.unminimize_window(*id);
             }
             Action::Mode { name } => {
-                runner.keymap_state.write().unwrap().switch_mode(name);
+                runner.dome.switch_mode(name);
                 tracing::debug!(mode = %name, "Switching to mode");
             }
+            Action::Focus { .. }
+            | Action::Move { .. }
+            | Action::Toggle { .. }
+            | Action::Master { .. } => unreachable!("tiling actions handled above"),
         }
     }
 }

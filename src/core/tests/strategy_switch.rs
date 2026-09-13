@@ -1,11 +1,10 @@
-use crate::config::{
-    LayoutWorkspaceConfig, MasterConfig, PaneConfig, SplitMode, Strategy, TreeLayoutNode,
-};
-use crate::core::GlobalLayoutConfig;
+use crate::core::LayoutOptions;
 use crate::core::ReportedMonitor;
 use crate::core::hub::Hub;
+use crate::core::layout::PaneConfig;
 use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::setup_logger_with_level;
+use crate::core::{MasterConfig, PreferredWorkspace, SplitMode, Strategy, TreeLayoutNode};
 
 use super::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, default_rect, setup_hub, setup_with_layout,
@@ -22,7 +21,7 @@ fn layout(
     count: usize,
     floats: &[&str],
     fullscreens: &[&str],
-) -> GlobalLayoutConfig {
+) -> LayoutOptions {
     LayoutConfigBuilder::new()
         .with_strategy(strategy)
         .with_master_config(MasterConfig {
@@ -36,7 +35,7 @@ fn layout(
         .build()
 }
 
-fn setup_hub_with_layout(layout: GlobalLayoutConfig, overrides: Vec<LayoutWorkspaceConfig>) -> Hub {
+fn setup_hub_with_layout(layout: LayoutOptions, overrides: Vec<PreferredWorkspace>) -> Hub {
     Hub::new(
         ReportedMonitor {
             device_name: "primary".to_string(),
@@ -58,7 +57,7 @@ fn sync_config_no_op_when_layout_unchanged() {
     let ws = hub.current_workspace();
     let focus_before = hub.focused_window(ws);
     let snap_before = snapshot(&hub);
-    hub.sync_configuration(GlobalLayoutConfig::default());
+    hub.sync_configuration(LayoutOptions::default());
     assert_eq!(hub.focused_window(ws), focus_before);
     assert_eq!(snapshot(&hub), snap_before);
 }
@@ -186,7 +185,7 @@ fn sync_config_switches_master_to_partition_tree() {
     hub.insert_window(titled("w10"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w11"), default_rect(), WindowRestrictions::None);
 
-    hub.sync_configuration(GlobalLayoutConfig::default());
+    hub.sync_configuration(LayoutOptions::default());
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
@@ -456,7 +455,7 @@ fn sync_config_swap_iterates_every_active_workspace() {
 fn per_workspace_switch_leaves_sibling_unchanged() {
     let mut hub = setup_hub_with_layout(
         LayoutConfigBuilder::new().build(),
-        vec![LayoutWorkspaceConfig::Master {
+        vec![PreferredWorkspace::Master {
             name: "1".to_string(),
             master_ratio: None,
             master_count: None,
@@ -669,7 +668,7 @@ fn switching_a_workspace_to_master_frees_its_containers() {
 fn setup_master_on_workspace_one() -> Hub {
     setup_hub_with_layout(
         LayoutConfigBuilder::new().build(),
-        vec![LayoutWorkspaceConfig::Master {
+        vec![PreferredWorkspace::Master {
             name: "1".to_string(),
             master_ratio: None,
             master_count: Some(1),

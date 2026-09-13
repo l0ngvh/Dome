@@ -8,27 +8,53 @@ pub(super) mod window;
 
 pub(super) use self::monitor::{MonitorInfo, QueryDisplay, Win32Display};
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Instant;
 
+use windows::Win32::Foundation::{LPARAM, WPARAM};
+use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessageW, WM_QUIT};
+
 use crate::action::Query;
-use crate::action::{
-    Actions, FocusTarget, MasterTarget, MinimizedWindow, MoveTarget, TabDirection, ToggleTarget,
-    WorkspaceInfo,
-};
-use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
-use crate::core::GlobalLayoutConfig;
+use crate::action::{Actions, MinimizedWindow, WorkspaceInfo};
+use crate::config::{Appearance, Config, PreferredLayouts};
 use crate::core::{
-    ContainerId, Direction, Hub, LimitObservation, MonitorId, MonitorLayout, Physical, PixelRect,
+    ContainerId, Hub, LimitObservation, MonitorId, MonitorLayout, Physical, PixelRect,
     TilingAction, WindowId, WindowRestrictions,
 };
+use crate::core::{LayoutOptions, PreferredWorkspace};
+use crate::keybinding::{CallbackId, KeymapPublisher};
 
 use self::placement_tracker::PlacementTracker;
 use self::recovery::Recovery;
-use self::registry::{ManagedWindow, WindowRegistry};
+use self::registry::ManagedWindow;
+pub(in crate::platform::windows) use self::registry::WindowRegistry;
 use self::window::{PositionedState, WindowState};
 use crate::platform::windows::ui::overlay::{FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi};
+use crate::scripting::{ActionContext, LuaRuntime, PlatformEffects};
+
+struct WinPlatformEffects<'a> {
+    registry: &'a mut WindowRegistry,
+    env: &'a HashMap<String, String>,
+    main_thread_id: u32,
+}
+
+impl PlatformEffects for WinPlatformEffects<'_> {
+    fn close(&mut self, id: WindowId) {
+        self.registry.close_window(id);
+    }
+
+    fn execute(&mut self, command: &str) {
+        if let Err(e) = crate::platform::windows::spawn::spawn(command, self.env) {
+            tracing::warn!(%command, "Failed to execute: {e:#}");
+        }
+    }
+
+    fn exit(&mut self) {
+        unsafe { PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+        unsafe { PostQuitMessage(0) };
+    }
+}
 
 pub(super) use self::window::NewWindow;
 pub(super) use self::window::WindowsMetadata;
@@ -68,8 +94,9 @@ pub(super) enum HubEvent {
         query: Query,
         sender: std::sync::mpsc::SyncSender<String>,
     },
-    ConfigChanged(Box<Config>),
-    LayoutConfigChanged(Box<LayoutConfig>),
+    RunCallback(CallbackId),
+    ReloadConfig,
+    LayoutConfigChanged(Box<PreferredLayouts>),
     ExportLayout(String),
     TabClicked(ContainerId, usize),
     /// A monitor's effective DPI changed (WM_DPICHANGED).
@@ -84,19 +111,19 @@ pub(super) enum HubEvent {
 pub(in crate::platform::windows) trait CreateOverlay {
     fn create_tiling_overlay(
         &self,
-        config: Config,
+        appearance: Appearance,
         monitor: PixelRect,
         scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>>;
     fn create_float_overlay(
         &self,
-        config: Config,
+        appearance: Appearance,
         scale: f32,
         visible_border_box: PixelRect,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>>;
     fn create_tab_bar(
         &self,
-        config: Config,
+        appearance: Appearance,
         container_id: ContainerId,
         rect: PixelRect,
         scale: f32,
@@ -115,7 +142,6 @@ pub(super) struct Dome {
     /// The windows Dome currently has on screen. Owned here rather than per monitor entry
     /// so it survives a monitor removal.
     displayed_windows: HashSet<WindowId>,
-    config: Config,
     taskbar: Rc<dyn ManageTaskbar>,
     display: Box<dyn QueryDisplay>,
     window: Box<dyn SceneSender>,
@@ -125,6 +151,8 @@ pub(super) struct Dome {
     placement_tracker: PlacementTracker,
     recovery: Recovery,
     status_bars: StatusBars,
+    keymap: KeymapPublisher,
+    runtime: LuaRuntime,
 }
 
 impl Drop for Dome {
@@ -135,11 +163,13 @@ impl Drop for Dome {
 
 impl Dome {
     pub(super) fn new(
-        config: Config,
-        workspace_overrides: Vec<LayoutWorkspaceConfig>,
+        layout: LayoutOptions,
+        workspace_overrides: Vec<PreferredWorkspace>,
         taskbar: Rc<dyn ManageTaskbar>,
         display: Box<dyn QueryDisplay>,
         mut window: Box<dyn SceneSender>,
+        keymap: KeymapPublisher,
+        runtime: LuaRuntime,
     ) -> anyhow::Result<Self> {
         let monitors = display.get_all_monitors()?;
         anyhow::ensure!(!monitors.is_empty(), "No monitors detected");
@@ -147,11 +177,7 @@ impl Dome {
             .iter()
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
-        let mut hub = Hub::new(
-            primary.into(),
-            GlobalLayoutConfig::from(&config),
-            workspace_overrides.clone(),
-        );
+        let mut hub = Hub::new(primary.into(), layout, workspace_overrides.clone());
         let primary_monitor_id = hub.primary_monitor();
         let mut monitors_reg = MonitorRegistry::new();
         let mut new_overlays: Vec<NewTilingOverlay> = Vec::new();
@@ -209,7 +235,6 @@ impl Dome {
             hub,
             registry: WindowRegistry::new(),
             monitors: monitors_reg,
-            config,
             taskbar: taskbar.clone(),
             display,
             window,
@@ -220,19 +245,19 @@ impl Dome {
             displayed_windows: HashSet::new(),
             recovery: Recovery::new(taskbar),
             status_bars: StatusBars::default(),
+            keymap,
+            runtime,
         })
     }
 
     pub(super) fn config_changed(&mut self, new_config: Config) {
-        self.hub
-            .sync_configuration(GlobalLayoutConfig::from(&new_config));
-        self.config = new_config;
-        self.dispatch(HubMessage::ConfigChanged(Box::new(self.config.clone())));
+        self.hub.sync_configuration(new_config.layout);
+        self.dispatch(HubMessage::AppearanceChanged(new_config.appearance));
         tracing::info!("Config reloaded");
         self.apply_layout();
     }
 
-    pub(super) fn layout_changed(&mut self, new_layout: LayoutConfig) {
+    pub(super) fn layout_changed(&mut self, new_layout: PreferredLayouts) {
         self.hub.sync_preferred_layout(new_layout.workspace);
         tracing::info!("Layout reloaded");
         self.apply_layout();
@@ -461,81 +486,7 @@ impl Dome {
         serde_json::to_string(&entries).expect("MinimizedWindow is infallibly serializable")
     }
 
-    pub(super) fn apply_focus(&mut self, target: &FocusTarget) {
-        match target {
-            FocusTarget::Up => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                direction: Direction::Vertical,
-                forward: false,
-            }),
-            FocusTarget::Down => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                direction: Direction::Vertical,
-                forward: true,
-            }),
-            FocusTarget::Left => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                direction: Direction::Horizontal,
-                forward: false,
-            }),
-            FocusTarget::Right => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                direction: Direction::Horizontal,
-                forward: true,
-            }),
-            FocusTarget::Parent => self.hub.handle_tiling_action(TilingAction::FocusParent),
-            FocusTarget::Tab { direction } => {
-                self.hub.handle_tiling_action(TilingAction::FocusTab {
-                    forward: matches!(direction, TabDirection::Next),
-                })
-            }
-            FocusTarget::Workspace { name, monitor } => {
-                self.hub.focus_workspace(name, monitor.as_deref())
-            }
-            FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
-        }
-    }
-
-    pub(super) fn apply_move(&mut self, target: &MoveTarget) {
-        match target {
-            MoveTarget::Up => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                direction: Direction::Vertical,
-                forward: false,
-            }),
-            MoveTarget::Down => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                direction: Direction::Vertical,
-                forward: true,
-            }),
-            MoveTarget::Left => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                direction: Direction::Horizontal,
-                forward: false,
-            }),
-            MoveTarget::Right => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                direction: Direction::Horizontal,
-                forward: true,
-            }),
-            MoveTarget::Workspace { name, monitor } => {
-                self.hub.move_focused_to_workspace(name, monitor.as_deref())
-            }
-            MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
-        }
-    }
-
-    pub(super) fn apply_toggle(&mut self, target: &ToggleTarget) {
-        match target {
-            ToggleTarget::Spawn => self.hub.handle_tiling_action(TilingAction::ToggleSpawnMode),
-            ToggleTarget::Direction => self.hub.handle_tiling_action(TilingAction::ToggleDirection),
-            ToggleTarget::Layout => self
-                .hub
-                .handle_tiling_action(TilingAction::ToggleContainerLayout),
-            ToggleTarget::Float => self.hub.toggle_float(),
-            ToggleTarget::Fullscreen => self.hub.toggle_fullscreen(),
-        }
-    }
-
-    pub(super) fn apply_master(&mut self, target: &MasterTarget) {
-        let action = match target {
-            MasterTarget::Grow => TilingAction::GrowMaster,
-            MasterTarget::Shrink => TilingAction::ShrinkMaster,
-            MasterTarget::More => TilingAction::MoreMaster,
-            MasterTarget::Fewer => TilingAction::FewerMaster,
-        };
+    pub(super) fn handle_tiling_action(&mut self, action: TilingAction) {
         self.hub.handle_tiling_action(action);
     }
 
@@ -559,10 +510,39 @@ impl Dome {
         let Some(window_id) = self.hub.focused_window(self.hub.current_workspace()) else {
             return;
         };
-        let Some(entry) = self.registry.get(window_id) else {
-            return;
-        };
-        entry.ext.close();
+        self.registry.close_window(window_id);
+    }
+
+    pub(super) fn run_callback(
+        &mut self,
+        id: CallbackId,
+        env: &HashMap<String, String>,
+        main_thread_id: u32,
+    ) {
+        {
+            let mut effects = WinPlatformEffects {
+                registry: &mut self.registry,
+                env,
+                main_thread_id,
+            };
+            let mut cx = ActionContext {
+                hub: &mut self.hub,
+                effects: &mut effects,
+                keymap: &mut self.keymap,
+            };
+            self.runtime.run_callback(id, &mut cx);
+        }
+        self.apply_layout();
+    }
+
+    pub(super) fn reload(&mut self) -> Option<Box<Config>> {
+        let config = self.runtime.reload()?;
+        self.keymap.update_keymaps(config.keymaps.clone());
+        Some(config)
+    }
+
+    pub(super) fn switch_mode(&mut self, name: &str) {
+        self.keymap.switch_mode(name);
     }
 
     #[tracing::instrument(level = "trace", skip_all)]

@@ -1,4 +1,4 @@
-use crate::config::Strategy;
+use crate::core::Strategy;
 use crate::core::WindowRestrictions;
 use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, snapshot,

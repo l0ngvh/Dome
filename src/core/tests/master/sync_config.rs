@@ -1,10 +1,10 @@
-use crate::config::{MasterConfig, Strategy};
 use crate::core::WindowRestrictions;
-use crate::core::strategy::TilingAction;
+use crate::core::strategy::StrategyAction;
 use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, snapshot,
     titled,
 };
+use crate::core::{MasterConfig, Strategy};
 use insta::assert_snapshot;
 
 #[test]
@@ -162,9 +162,9 @@ fn sync_config_preserves_runtime_tuned_master_ratio() {
     hub.insert_window(titled("w50"), default_rect(), WindowRestrictions::None);
 
     // GrowMaster 3 times: 0.5 -> 0.55 -> 0.60 -> 0.65
-    hub.handle_tiling_action(TilingAction::GrowMaster);
-    hub.handle_tiling_action(TilingAction::GrowMaster);
-    hub.handle_tiling_action(TilingAction::GrowMaster);
+    hub.handle_tiling_action(StrategyAction::GrowMaster);
+    hub.handle_tiling_action(StrategyAction::GrowMaster);
+    hub.handle_tiling_action(StrategyAction::GrowMaster);
 
     // Hot-reload with a different file value does NOT override runtime tuning.
     let l = LayoutConfigBuilder::new()
@@ -234,7 +234,7 @@ fn sync_config_preserves_runtime_tuned_master_count() {
     hub.insert_window(titled("w54"), default_rect(), WindowRestrictions::None);
 
     // MoreMaster: master_count 1 -> 2
-    hub.handle_tiling_action(TilingAction::MoreMaster);
+    hub.handle_tiling_action(StrategyAction::MoreMaster);
 
     // Hot-reload with a different file value does NOT override runtime tuning.
     let l = LayoutConfigBuilder::new()
