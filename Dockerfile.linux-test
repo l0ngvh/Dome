@@ -1,0 +1,13 @@
+FROM dome-linux-check
+
+RUN apt-get update && apt-get install -y \
+    xvfb \
+    libgl1-mesa-dri \
+    libegl-mesa0 \
+    libglx-mesa0 \
+    libxkbcommon-x11-0 \
+    x11-apps \
+    imagemagick \
+    foot \
+    fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*

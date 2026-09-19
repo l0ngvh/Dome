@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = [".", "crates/dome-bar", "crates/dome-ipc", "crates/dome-auxiliary-window"]
+members = [".", "crates/dome-bar", "crates/dome-ipc", "crates/dome-auxiliary-window", "crates/dome-wlcs"]
 
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -38,6 +38,12 @@ pollster = "0.4"
 calloop = { version = "0.14", features = ["executor"] }
 rustc-hash = "2"
 
+[features]
+# Headless WLCS conformance backend (Linux only). Off by default. Turns on
+# smithay's empty renderer_test feature (DummyRenderer) and compiles
+# src/platform/linux/wlcs_backend.rs.
+wlcs = ["smithay/renderer_test"]
+
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"
 dispatch2 = "0.3"
@@ -62,6 +68,20 @@ dome-auxiliary-window = { path = "crates/dome-auxiliary-window" }
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_Storage_EnhancedStorage", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_IO", "Win32_UI_HiDpi", "Win32_System_Console", "Win32_Graphics_DirectComposition", "Win32_Devices_Display"] }
 rayon = "1.10"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+smithay = { version = "0.7", default-features = false, features = [
+    "backend_drm", "backend_libinput", "backend_session_libseat",
+    "backend_gbm", "backend_egl", "backend_winit", "backend_udev",
+    "renderer_glow", "renderer_multi",
+    "wayland_frontend", "desktop", "use_system_lib",
+] }
+smithay-drm-extras = "0.1.0"
+libc = "0.2"
+xcursor = "0.3"
+# egui-glow must match the shared egui version pulled in by [dependencies]
+egui_glow = "0.34"
+glow = "0.17"
 
 [build-dependencies]
 embed-resource = "3"

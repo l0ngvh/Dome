@@ -1,0 +1,15 @@
+[package]
+name = "dome-wlcs"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+dome = { path = "../..", features = ["wlcs"] }
+wlcs = "0.1"
+wayland-sys = { version = "0.31", features = ["client", "server"] }
+libc = "0.2"
+calloop = { version = "0.14", features = ["executor"] }

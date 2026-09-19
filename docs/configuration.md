@@ -86,6 +86,7 @@ them.
 |----------|-----------------|
 | macOS | `app`, `bundle_id` (exact only), `title` |
 | Windows | `process`, `title`, `class` (Win32), `aumid` |
+| Linux (Wayland) | `app_id`, `title` |
 
 ```toml
 ignore = [

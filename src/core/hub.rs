@@ -290,6 +290,15 @@ impl Hub {
             .active_workspace
     }
 
+    /// Read-only accessor for the focused monitor id. Added for the Linux shell,
+    /// which needs it on the pointer-motion hot path where building
+    /// `VisiblePlacements` would be too heavy. macOS and Windows read it from
+    /// `VisiblePlacements::focused_monitor` instead.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn focused_monitor(&self) -> MonitorId {
+        self.access.focused_monitor
+    }
+
     /// The top most fullscreen window will get the focus, if any, as fullscreen windows take over
     /// the whole workspaces they are in.
     /// If none is present, focus between float and tiling windows will be decided by is_float_focused

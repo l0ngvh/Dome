@@ -1,5 +1,6 @@
 /target
 .vscode
 /scripts
+/test-out
 /lcov.info
 integrations/flow-launcher/lib/

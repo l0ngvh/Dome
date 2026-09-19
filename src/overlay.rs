@@ -231,7 +231,7 @@ pub(crate) fn paint_tab_bar(
 }
 
 /// `origin` is the visible_frame's top-left in canvas coordinates (same as `paint_window_border`).
-fn show_container(
+pub(crate) fn show_container(
     ui: &mut egui::Ui,
     placement: &LogicalTiledContainer,
     theme: &Theme,

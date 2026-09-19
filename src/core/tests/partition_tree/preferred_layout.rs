@@ -2065,7 +2065,8 @@ fn export_container_with_single_multi_matched_slot() {
                         title: Some("w0".into()),
                         process: None,
                         class: None,
-                        aumid: None
+                        aumid: None,
+                        app_id: None
                     }),
                     TreeLayoutNode::Container {
                         split: Some(SplitMode::Vertical),
@@ -2078,7 +2079,8 @@ fn export_container_with_single_multi_matched_slot() {
                                     title: Some("/A.*/".into()),
                                     process: None,
                                     class: None,
-                                    aumid: None
+                                    aumid: None,
+                                    app_id: None
                                 })]
                             },
                             TreeLayoutNode::Leaf(WindowMatcher {
@@ -2087,7 +2089,8 @@ fn export_container_with_single_multi_matched_slot() {
                                 title: Some("CCC".into()),
                                 process: None,
                                 class: None,
-                                aumid: None
+                                aumid: None,
+                                app_id: None
                             })
                         ]
                     }

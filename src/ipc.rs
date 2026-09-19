@@ -90,6 +90,16 @@ where
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn remove_socket_file() {
+    let path = dome_ipc::socket::socket_path();
+    match std::fs::remove_file(&path) {
+        Ok(()) => tracing::info!("removed the IPC socket {}", path.display()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => tracing::warn!("failed to remove the IPC socket {}: {e}", path.display()),
+    }
+}
+
 fn serve<F>(listener: interprocess::local_socket::Listener, on_message: F)
 where
     F: Fn(IpcMessage) -> Response + Send + Clone + 'static,

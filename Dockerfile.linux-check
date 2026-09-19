@@ -1,0 +1,17 @@
+FROM rust:1.92-trixie
+
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libwayland-dev \
+    libxkbcommon-dev \
+    libudev-dev \
+    libinput-dev \
+    libgbm-dev \
+    libdrm-dev \
+    libseat-dev \
+    libegl-dev \
+    libgles2-mesa-dev \
+    libdisplay-info-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app

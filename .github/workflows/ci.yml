@@ -68,6 +68,89 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --lib
 
+  # Informational WLCS (Wayland Conformance Test Suite) run against dome's
+  # headless integration (the `wlcs` feature plus crates/dome-wlcs). It runs the
+  # tiling-independent subset that passes clean. Non-required (continue-on-error)
+  # until the tiling and configure-timing follow-ups land. RUSTFLAGS is cleared
+  # for the same reason as test-core-linux: the Linux build leaves helpers dead.
+  wlcs:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      RUSTFLAGS: ""
+      # The commit smithay 0.7.0 pins, so the C runner ABI matches the wlcs crate.
+      WLCS_SHA: 12234affdc0a4cc104fbaf8a502efc5f822b973b
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dome and WLCS build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config libwayland-dev libxkbcommon-dev libudev-dev libinput-dev \
+            libgbm-dev libdrm-dev libseat-dev libegl-dev libgles2-mesa-dev \
+            libdisplay-info-dev cmake libgtest-dev libgmock-dev libboost-dev
+      - name: Cache WLCS runner
+        id: cache-wlcs
+        uses: actions/cache@v4
+        with:
+          path: wlcs
+          key: wlcs-${{ runner.os }}-${{ env.WLCS_SHA }}
+      - name: Build WLCS runner
+        if: steps.cache-wlcs.outputs.cache-hit != 'true'
+        run: |
+          git clone https://github.com/MirServer/wlcs.git
+          cd wlcs
+          git reset --hard "$WLCS_SHA"
+          # WLCS at this commit hardcodes -Werror and newer GCC fails the build.
+          sed -i 's/ -Werror//g' CMakeLists.txt
+          cmake -DWLCS_BUILD_ASAN=False -DWLCS_BUILD_TSAN=False -DWLCS_BUILD_UBSAN=False -DCMAKE_EXPORT_COMPILE_COMMANDS=1 .
+          make -j"$(nproc)"
+      - name: Build dome WLCS module
+        run: cargo build -p dome-wlcs
+      - name: Run WLCS green subset
+        run: |
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg-runtime"
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          export LIBGL_ALWAYS_SOFTWARE=1
+          ./wlcs/wlcs target/debug/libdome_wlcs.so \
+            --gtest_filter="SelfTest*:FrameSubmission*:XdgOutputV1Test*:RelativePointer*"
+
+  # RUSTFLAGS is cleared for the same reason as test-core-linux: the Linux build
+  # leaves helpers dead.
+  udev-integration:
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dome build deps, software GL, vkms module, a demo client, and XWayland
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config libwayland-dev libxkbcommon-dev libudev-dev libinput-dev \
+            libgbm-dev libdrm-dev libseat-dev libegl-dev libgles2-mesa-dev \
+            libdisplay-info-dev libgl1-mesa-dri weston wl-clipboard "linux-modules-extra-$(uname -r)" \
+            xwayland x11-apps clang libxcb1-dev libxcb-cursor-dev
+      - name: Build and install xwayland-satellite
+        run: |
+          cargo install --git https://github.com/Supreeeme/xwayland-satellite --tag v0.8.2 --locked
+          sudo ln -sf "$HOME/.cargo/bin/xwayland-satellite" /usr/local/bin/xwayland-satellite
+      - name: Build dome
+        run: cargo build --bin dome
+      - name: Run the udev integration suite (software GL matrix)
+        run: |
+          phases=all
+          for drv in llvmpipe softpipe; do
+            echo "== GALLIUM_DRIVER=$drv =="
+            sudo TEST_PHASES="$phases" GALLIUM_DRIVER="$drv" XDG_RUNTIME_DIR="$RUNNER_TEMP/dome-xdg" bash ci/udev-integration.sh target/debug/dome
+            phases=driver
+          done
+
   audit:
     runs-on: ubuntu-latest
     permissions:

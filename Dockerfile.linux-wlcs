@@ -1,0 +1,31 @@
+FROM dome-linux-check
+
+# WLCS build + runtime deps on top of the dome build base.
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    git \
+    pkg-config \
+    cmake \
+    libgtest-dev \
+    libgmock-dev \
+    libboost-dev \
+    libxkbcommon-dev \
+    libwayland-dev \
+    libdisplay-info-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build the WLCS runner from the commit smithay 0.7.0 pins, so the C runner ABI
+# matches the Rust wlcs 0.1.0 crate. In-source cmake build drops the `wlcs`
+# binary at the repo root, so copy it to /opt/wlcs/wlcs.
+ARG WLCS_SHA=12234affdc0a4cc104fbaf8a502efc5f822b973b
+RUN git clone https://github.com/MirServer/wlcs.git /opt/wlcs-src \
+    && cd /opt/wlcs-src \
+    && git reset --hard ${WLCS_SHA} \
+    && sed -i 's/ -Werror//g' CMakeLists.txt \
+    && cmake -DWLCS_BUILD_ASAN=False -DWLCS_BUILD_TSAN=False -DWLCS_BUILD_UBSAN=False \
+       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 . \
+    && make -j"$(nproc)" \
+    && mkdir -p /opt/wlcs \
+    && cp wlcs /opt/wlcs/wlcs
+
+WORKDIR /app

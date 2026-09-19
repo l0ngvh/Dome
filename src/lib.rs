@@ -26,10 +26,14 @@ pub use dome_ipc::{
 #[cfg(target_os = "macos")]
 pub use platform::macos::run_app;
 
+#[cfg(target_os = "linux")]
+pub use platform::linux::run_app;
+#[cfg(all(target_os = "linux", feature = "wlcs"))]
+pub use platform::linux::wlcs_backend::{WlcsEvent, run as wlcs_run};
 #[cfg(target_os = "windows")]
 pub use platform::windows::run_app;
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 pub fn run_app(_config_path: Option<String>, _layout_path: Option<String>) -> anyhow::Result<()> {
     anyhow::bail!("dome has no window backend on this platform")
 }

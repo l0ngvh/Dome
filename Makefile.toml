@@ -91,6 +91,33 @@ echo "For specific type: malloc_history $PID NSRunningApplication"
 ./target/debug/dome exit 2>/dev/null || kill $PID 2>/dev/null || true
 '''
 
+[tasks.vm-integration]
+description = "Run the Linux udev/DRM integration suite inside a macOS Lima VM. Set KMS=vkms (default) or KMS=virtio to pick the DRM backend."
+# Run once at the workspace root, not per member. See [tasks.bundle].
+workspace = false
+run_task = [
+    { name = "vm-integration-macos", condition = { platforms = ["mac"] } },
+]
+
+[tasks.vm-integration-macos]
+private = true
+command = "bash"
+args = ["tests/integration/mac-vm.sh"]
+
+[tasks.winit-integration]
+description = "Run the winit-backend integration suite in a container (Xvfb, software GL, screenshot to test-out/). Needs finch with its VM started."
+workspace = false
+script_runner = "@shell"
+script = '''
+finch build -t dome-linux-test -f Dockerfile.linux-test .
+finch run --rm \
+  -v "$(pwd):/app" \
+  -v dome-cargo-registry:/usr/local/cargo/registry \
+  -v dome-target:/app/target \
+  -v "$(pwd)/test-out:/out" \
+  dome-linux-test /app/tests/integration/winit.sh
+'''
+
 [tasks.setup]
 description = "Install all development tools"
 dependencies = ["setup-rustup", "setup-cargo-tools"]
