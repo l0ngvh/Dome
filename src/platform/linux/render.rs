@@ -5,10 +5,10 @@ use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement
 use smithay::backend::renderer::element::surface::{
     WaylandSurfaceRenderElement, render_elements_from_surface_tree,
 };
-use smithay::backend::renderer::{ImportAll, ImportMem};
+use smithay::backend::renderer::{Frame, ImportAll, ImportMem, Renderer};
 use smithay::desktop::layer_map_for_output;
 use smithay::input::pointer::CursorImageStatus;
-use smithay::utils::{Physical, Rectangle};
+use smithay::utils::{Physical, Rectangle, Transform};
 
 use crate::core::{Dimension, Length, Logical, MonitorLayout};
 use crate::overlay;
@@ -82,9 +82,25 @@ impl DomeState {
                 [0.1, 0.1, 0.1, 1.0],
             )
             .expect("failed to render output");
-        }
 
-        self.render_egui_overlays(size.w as u32, size.h as u32);
+            self.render_egui_overlays(size.w as u32, size.h as u32);
+
+            // Binding a second time loses the EGL surface, so a capture has to read
+            // this framebuffer while it is still bound.
+            let copies = self.take_pending_copies(&winit_data.output);
+            if !copies.is_empty() {
+                super::screencopy::serve_framebuffer(renderer, &framebuffer, size, &copies);
+                // Reading pixels back leaves the renderer's own context current, and a
+                // swap against a surface that is not current loses the EGL surface.
+                // An empty render pass makes the window current again.
+                if let Err(e) = renderer
+                    .render(&mut framebuffer, size, Transform::Normal)
+                    .and_then(|frame| frame.finish().map(|_| ()))
+                {
+                    tracing::warn!("cannot rebind the window after a capture: {e}");
+                }
+            }
+        }
 
         winit_data
             .backend

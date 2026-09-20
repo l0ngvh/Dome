@@ -26,7 +26,7 @@ XVFB_PID=$!
 cleanup() {
   "$DOME" exit >/dev/null 2>&1 || true
   pkill -x foot >/dev/null 2>&1 || true
-  kill "${DOME_PID:-}" "$XVFB_PID" >/dev/null 2>&1 || true
+  kill "${FIXTURE_PID:-}" "${DOME_PID:-}" "$XVFB_PID" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -95,6 +95,45 @@ echo "window count 1 (after dome close) ok"
 pkill -x foot >/dev/null 2>&1 || true
 wait_count 0 || fail "window count did not drop to 0 after both clients exited, got $(wc_count)"
 echo "window count 0 (after both clients exited) ok"
+
+# A capture on this backend reads the window framebuffer back, so it takes a
+# different path from the udev one and can arrive upside down on its own.
+wd=$(grep -o 'Wayland socket: "[^"]*"' "$LOG" | head -1 | cut -d'"' -f2)
+[ -n "$wd" ] || fail "could not read the wayland socket name from the log:"
+expected=$("$DOME" query monitors | grep -o '"width":[0-9]*,"height":[0-9]*' | head -1 \
+  | sed 's/"width"://; s/,"height":/x/')
+
+# The fixture paints red rows at the top of its window, so red below means flipped.
+WAYLAND_DISPLAY="$wd" foot sh -c \
+  'printf "\033[41m"; for _ in 1 2 3 4 5 6 7 8; do printf "%120s\n" " "; done; printf "\033[0m"; sleep 600' \
+  >/tmp/dome-fixture.log 2>&1 &
+FIXTURE_PID=$!
+wait_count 1 || fail "the capture fixture did not map, got $(wc_count)"
+sleep 1
+
+shot=/tmp/winit-shot.png region=/tmp/winit-region.png crop=/tmp/winit-crop.png
+WAYLAND_DISPLAY="$wd" grim "$shot" || fail "grim could not capture the output:"
+[ "$(identify -format '%wx%h' "$shot")" = "$expected" ] \
+  || fail "the capture is $(identify -format '%wx%h' "$shot"), not the output size $expected:"
+[ "$(identify -format '%k' "$shot")" -gt 1 ] \
+  || fail "the capture holds one colour, so it missed the client:"
+top=$(convert "$shot" -gravity North -crop 100%x40% +repage -format '%[fx:mean.r]' info:)
+bottom=$(convert "$shot" -gravity South -crop 100%x40% +repage -format '%[fx:mean.r]' info:)
+awk -v t="$top" -v b="$bottom" 'BEGIN{exit !(t > b + 0.01)}' \
+  || fail "the capture holds more red below than above (top=$top bottom=$bottom), so it is upside down:"
+echo "capture is $expected, holds the client, and is not flipped (top=$top bottom=$bottom)"
+
+WAYLAND_DISPLAY="$wd" grim -g "40,30 160x120" "$region" || fail "grim could not capture a region:"
+[ "$(identify -format '%wx%h' "$region")" = 160x120 ] \
+  || fail "the region capture is $(identify -format '%wx%h' "$region"), not 160x120:"
+convert "$shot" -crop 160x120+40+30 +repage "$crop"
+[ "$(compare -metric AE "$region" "$crop" null: 2>&1)" = 0 ] \
+  || fail "the region capture differs from the same crop of the whole output:"
+echo "region capture matches the same crop of the whole output"
+
+kill "$FIXTURE_PID" >/dev/null 2>&1 || true
+FIXTURE_PID=""
+wait_count 0 || fail "the capture fixture did not exit, got $(wc_count)"
 
 check_panic "the winit checks"
 echo "winit checks passed"

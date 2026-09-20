@@ -292,8 +292,6 @@ impl DomeState {
         }
     }
 
-    /// Collect the Action::Exec children that have finished, so they do not linger as
-    /// zombies for the compositor's lifetime.
     pub(super) fn take_pending_copies(
         &mut self,
         output: &Output,
@@ -311,6 +309,15 @@ impl DomeState {
         mine
     }
 
+    /// Only the udev backend can render into a client's dmabuf. The winit backend
+    /// reads back the window framebuffer it has already drawn, so a capture there
+    /// lands in shared memory.
+    pub(super) fn can_capture_into_dmabuf(&self) -> bool {
+        self.winit_data.is_none()
+    }
+
+    /// Collect the Action::Exec children that have finished, so they do not linger as
+    /// zombies for the compositor's lifetime.
     pub(super) fn reap_exec_children(&mut self) {
         if self.exec_children.is_empty() {
             return;
@@ -590,7 +597,9 @@ impl DomeState {
                     state.bounds = Some(bounds);
                     set_toplevel_layout_states(&mut state.states, wi.is_fullscreen, wi.is_float);
                 });
-                toplevel.send_configure();
+                // Some clients, Chromium among them, commit in reply to every configure,
+                // and a commit can rerun this sync, so an unchanged state must not go out.
+                toplevel.send_pending_configure();
             }
             self.space
                 .map_element(window.clone(), (content_x, content_y), false);

@@ -72,7 +72,7 @@ impl GlobalDispatch<ZwlrScreencopyManagerV1, ()> for DomeState {
 
 impl Dispatch<ZwlrScreencopyManagerV1, ()> for DomeState {
     fn request(
-        _state: &mut Self,
+        state: &mut Self,
         _client: &Client,
         _manager: &ZwlrScreencopyManagerV1,
         request: zwlr_screencopy_manager_v1::Request,
@@ -80,12 +80,13 @@ impl Dispatch<ZwlrScreencopyManagerV1, ()> for DomeState {
         _handle: &DisplayHandle,
         data_init: &mut DataInit<'_, Self>,
     ) {
+        let dmabuf = state.can_capture_into_dmabuf();
         match request {
             zwlr_screencopy_manager_v1::Request::CaptureOutput {
                 frame,
                 overlay_cursor,
                 output,
-            } => init_frame(frame, overlay_cursor != 0, &output, None, data_init),
+            } => init_frame(frame, overlay_cursor != 0, &output, None, dmabuf, data_init),
             zwlr_screencopy_manager_v1::Request::CaptureOutputRegion {
                 frame,
                 overlay_cursor,
@@ -96,7 +97,14 @@ impl Dispatch<ZwlrScreencopyManagerV1, ()> for DomeState {
                 height,
             } => {
                 let region = Rectangle::new((x, y).into(), (width, height).into());
-                init_frame(frame, overlay_cursor != 0, &output, Some(region), data_init)
+                init_frame(
+                    frame,
+                    overlay_cursor != 0,
+                    &output,
+                    Some(region),
+                    dmabuf,
+                    data_init,
+                )
             }
             _ => {}
         }
@@ -151,6 +159,7 @@ fn init_frame(
     overlay_cursor: bool,
     wl_output: &WlOutput,
     requested: Option<Rectangle<i32, Physical>>,
+    dmabuf: bool,
     data_init: &mut DataInit<'_, DomeState>,
 ) {
     let capture = Output::from_resource(wl_output).and_then(|output| {
@@ -178,9 +187,11 @@ fn init_frame(
         (size.w * BYTES_PER_PIXEL) as u32,
     );
     if frame.version() >= 3 {
-        // A client that can allocate a dmabuf gets the frame rendered straight into
-        // it, with no read back through the CPU.
-        frame.linux_dmabuf(FOURCC as u32, size.w as u32, size.h as u32);
+        if dmabuf {
+            // A client that can allocate a dmabuf gets the frame rendered straight
+            // into it, with no read back through the CPU.
+            frame.linux_dmabuf(FOURCC as u32, size.w as u32, size.h as u32);
+        }
         frame.buffer_done();
     }
 }
@@ -252,6 +263,53 @@ fn check_buffer(buffer: &WlBuffer, size: Size<i32, Physical>) -> Result<(), Stri
 pub(super) fn fail_all(copies: &[PendingCopy]) {
     for copy in copies {
         copy.frame.failed();
+    }
+}
+
+/// Answers every copy waiting on one output by reading the framebuffer that was
+/// just rendered into. The winit backend has no frame result to re-composite and
+/// no DRM planes to work around, so one read serves every copy. The cursor belongs
+/// to the host window system there, so `overlay_cursor` cannot be honoured.
+pub(super) fn serve_framebuffer<R>(
+    renderer: &mut R,
+    framebuffer: &R::Framebuffer<'_>,
+    output_size: Size<i32, Physical>,
+    copies: &[PendingCopy],
+) where
+    R: Renderer + ExportMem,
+{
+    let live: Vec<&PendingCopy> = copies.iter().filter(|c| c.frame.is_alive()).collect();
+    if live.is_empty() {
+        return;
+    }
+
+    let buffer_size = output_size.to_logical(1).to_buffer(1, Transform::Normal);
+    let mapping =
+        match renderer.copy_framebuffer(framebuffer, Rectangle::from_size(buffer_size), FOURCC) {
+            Ok(mapping) => mapping,
+            Err(e) => {
+                tracing::warn!("cannot read the output back for screencopy: {e}");
+                fail_all(copies);
+                return;
+            }
+        };
+    let bottom_up = !TextureMapping::flipped(&mapping);
+    let pixels = match renderer.map_texture(&mapping) {
+        Ok(pixels) => pixels,
+        Err(e) => {
+            tracing::warn!("cannot map the captured pixels: {e}");
+            fail_all(copies);
+            return;
+        }
+    };
+
+    for copy in live {
+        if get_dmabuf(&copy.buffer).is_ok() {
+            tracing::warn!("this backend cannot capture into a dmabuf");
+            copy.frame.failed();
+            continue;
+        }
+        deliver(copy, pixels, output_size, bottom_up);
     }
 }
 

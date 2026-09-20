@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     libxkbcommon-x11-0 \
     x11-apps \
     imagemagick \
+    grim \
     foot \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
