@@ -2,6 +2,7 @@ mod focus;
 mod handlers;
 mod input;
 mod render;
+mod screencopy;
 mod signals;
 mod state;
 mod udev_backend;

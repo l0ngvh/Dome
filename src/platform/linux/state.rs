@@ -15,6 +15,7 @@ use calloop::{EventLoop, LoopSignal};
 use smithay::desktop::{PopupManager, Space, Window, layer_map_for_output};
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
+use smithay::reexports::wayland_protocols_wlr::screencopy::v1::server::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
 use smithay::reexports::wayland_server::{Display, DisplayHandle};
 use smithay::utils::{Logical, Point, Rectangle};
@@ -48,6 +49,7 @@ pub(super) struct DomeState {
     pub(super) start_time: Instant,
     pub(super) visible_windows: HashSet<WindowId>,
     pub(super) monitor_outputs: HashMap<MonitorId, Output>,
+    pub(super) pending_copies: Vec<super::screencopy::PendingCopy>,
 
     // Smithay protocol state
     pub(super) compositor_state: CompositorState,
@@ -116,6 +118,7 @@ impl DomeState {
         smithay::wayland::relative_pointer::RelativePointerManagerState::new::<Self>(&dh);
         smithay::wayland::cursor_shape::CursorShapeManagerState::new::<Self>(&dh);
         smithay::wayland::pointer_constraints::PointerConstraintsState::new::<Self>(&dh);
+        dh.create_global::<Self, ZwlrScreencopyManagerV1, _>(super::screencopy::VERSION, ());
 
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "dome");
         seat.add_keyboard(Default::default(), 200, 25)?;
@@ -148,6 +151,7 @@ impl DomeState {
             start_time: Instant::now(),
             visible_windows: HashSet::new(),
             monitor_outputs: HashMap::new(),
+            pending_copies: Vec::new(),
             compositor_state,
             xdg_shell_state,
             xdg_decoration_state,
@@ -290,6 +294,23 @@ impl DomeState {
 
     /// Collect the Action::Exec children that have finished, so they do not linger as
     /// zombies for the compositor's lifetime.
+    pub(super) fn take_pending_copies(
+        &mut self,
+        output: &Output,
+    ) -> Vec<super::screencopy::PendingCopy> {
+        let mut mine = Vec::new();
+        let mut others = Vec::new();
+        for copy in self.pending_copies.drain(..) {
+            if &copy.output == output {
+                mine.push(copy);
+            } else {
+                others.push(copy);
+            }
+        }
+        self.pending_copies = others;
+        mine
+    }
+
     pub(super) fn reap_exec_children(&mut self) {
         if self.exec_children.is_empty() {
             return;

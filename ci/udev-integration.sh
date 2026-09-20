@@ -29,6 +29,7 @@
 set -euo pipefail
 
 DOME="${1:-target/debug/dome}"
+DMABUF_CLIENT="${DMABUF_CLIENT:-$(dirname "$DOME")/examples/screencopy_dmabuf_client}"
 CRC=/sys/kernel/debug/dri/0/crtc-0/crc
 LOG=/tmp/dome-udev.log
 
@@ -39,7 +40,7 @@ export LIBGL_ALWAYS_SOFTWARE=1
 export GALLIUM_DRIVER="${GALLIUM_DRIVER:-llvmpipe}"
 KMS="${KMS:-vkms}"
 
-ALL_PHASES=(render windows clipboard xwayland xwayland_absent shutdown vt hotplug)
+ALL_PHASES=(render windows clipboard screencopy xwayland xwayland_absent shutdown vt hotplug)
 DRIVER_PHASES=(render windows)
 
 case "${TEST_PHASES:-all}" in
@@ -70,6 +71,10 @@ if selected render || selected windows; then
 fi
 if selected clipboard; then
   need wl-copy || { echo "wl-copy missing (install wl-clipboard)" >&2; exit 1; }
+fi
+if selected screencopy; then
+  need grim || { echo "grim missing (install grim)" >&2; exit 1; }
+  need identify || { echo "identify missing (install imagemagick)" >&2; exit 1; }
 fi
 
 if [ "$KMS" = vkms ]; then
@@ -276,6 +281,100 @@ phase_xwayland_absent() {
   rm -f "$XDG_RUNTIME_DIR"/wayland-* 2>/dev/null || true
   rmdir "$nopath" 2>/dev/null || true
   pass xwayland_absent
+}
+
+# The screencopy fixture puts red in the upper-left, so a capture with more red below
+# than above arrived upside down.
+assert_red_above() {
+  local image=$1 label=$2 top bottom
+  top=$(convert "$image" -gravity North -crop 100%x40% +repage -format '%[fx:mean.r]' info:)
+  bottom=$(convert "$image" -gravity South -crop 100%x40% +repage -format '%[fx:mean.r]' info:)
+  awk -v t="$top" -v b="$bottom" 'BEGIN{exit !(t > b + 0.01)}' \
+    || fail "$label holds more red below than above (top=$top bottom=$bottom), so it is upside down" "$LOG"
+  echo "$label is not flipped (top=$top bottom=$bottom)"
+}
+
+# The left window shows a static image whose top-left corner is red. Red above proves
+# the capture is not flipped. A still window also lets two captures match byte for byte.
+# The right window animates, which keeps the renderer busy. A torn capture only appears
+# under a busy renderer.
+phase_screencopy() {
+  local shot=/tmp/dome-shot.png region=/tmp/dome-shot-region.png crop=/tmp/dome-shot-crop.png
+  local fixture=/tmp/dome-fixture.png geometry colours
+  local static_half=/tmp/dome-shot-static.png dmabuf_half=/tmp/dome-dmabuf-static.png
+  expect_empty screencopy
+  convert -size 400x300 xc:black -fill red -draw 'rectangle 0,0 199,149' "$fixture" \
+    || fail "could not build the fixture image" "$LOG"
+  WAYLAND_DISPLAY="$wd" weston-image "$fixture" > /tmp/dome-client.log 2>&1 &
+  CLIENT_PID=$!
+  wait_count 1 || fail "expected 1 window before the capture, got $(wc_count)"
+  WAYLAND_DISPLAY="$wd" weston-simple-egl > /tmp/dome-term.log 2>&1 &
+  TERM_PID=$!
+  wait_count 2 || fail "expected 2 windows before the capture, got $(wc_count)"
+  sleep 1
+
+  rm -f "$shot" "$region" "$crop"
+  WAYLAND_DISPLAY="$wd" grim "$shot" 2>/tmp/dome-grim.log \
+    || fail "grim could not capture the output:" /tmp/dome-grim.log
+  geometry=$(identify -format '%wx%h' "$shot" 2>/dev/null || true)
+  [ -n "$geometry" ] || fail "grim wrote a file identify cannot read:" /tmp/dome-grim.log
+  echo "captured the whole output at $geometry"
+
+  colours=$(identify -format '%k' "$shot" 2>/dev/null || echo 0)
+  [ "$colours" -gt 1 ] || fail "the capture holds one colour, so it missed the client:" "$LOG"
+  echo "capture holds $colours colours, so the client reached it"
+
+  # The fixture's red corner sits in the upper-left of the window, so an upside-down
+  # capture would report more red in the lower half.
+  assert_red_above "$shot" "the shared-memory capture"
+
+  WAYLAND_DISPLAY="$wd" grim -g "40,30 160x120" "$region" 2>/tmp/dome-grim.log \
+    || fail "grim could not capture a region:" /tmp/dome-grim.log
+  [ "$(identify -format '%wx%h' "$region")" = "160x120" ] \
+    || fail "the region capture is $(identify -format '%wx%h' "$region"), not 160x120" "$LOG"
+
+  convert "$shot" -crop 160x120+40+30 +repage "$crop"
+  [ "$(compare -metric AE "$region" "$crop" null: 2>&1)" = 0 ] \
+    || fail "the region capture differs from the same crop of the whole output" "$LOG"
+  echo "region capture matches the same crop of the whole output"
+
+  # A recorder hands the compositor a dmabuf instead of shared memory, which dome
+  # renders into rather than reading back. The two paths have to agree pixel for pixel.
+  local dump=/tmp/dome-shot-dmabuf.raw png=/tmp/dome-shot-dmabuf.png size
+  rm -f "$dump" "$png"
+  if [ ! -x "$DMABUF_CLIENT" ]; then
+    echo "note no dmabuf client at $DMABUF_CLIENT, skipping the dmabuf copy path"
+  else
+    WAYLAND_DISPLAY="$wd" "$DMABUF_CLIENT" "$dump" > /tmp/dome-dmabuf.log 2>&1 \
+      || fail "the dmabuf capture client failed:" /tmp/dome-dmabuf.log
+    grep -q 'over dmabuf' /tmp/dome-dmabuf.log \
+      || fail "dome did not offer the dmabuf path to the client:" /tmp/dome-dmabuf.log
+    size=$(identify -format '%wx%h' "$shot")
+    convert -size "$size" -depth 8 "bgra:$dump" -alpha off "$png"
+    assert_red_above "$png" "the dmabuf capture"
+    # Only the left window holds still, so the animated half is free to differ.
+    convert "$shot" -crop 45%x100%+0+0 +repage "$static_half"
+    convert "$png" -crop 45%x100%+0+0 +repage "$dmabuf_half"
+    [ "$(compare -metric AE "$dmabuf_half" "$static_half" null: 2>&1)" = 0 ] \
+      || fail "the dmabuf capture differs from the shared-memory capture over the static window" "$LOG"
+    echo "dmabuf capture matches the shared-memory capture over the static window"
+
+    # A region capture over dmabuf takes a different path inside dome, through an
+    # offscreen buffer, because the re-composite cannot render at an offset.
+    WAYLAND_DISPLAY="$wd" "$DMABUF_CLIENT" "$dump" 40 30 160 120 > /tmp/dome-dmabuf.log 2>&1 \
+      || fail "the dmabuf region capture failed:" /tmp/dome-dmabuf.log
+    convert -size 160x120 -depth 8 "bgra:$dump" -alpha off "$png"
+    [ "$(compare -metric AE "$png" "$region" null: 2>&1)" = 0 ] \
+      || fail "the dmabuf region capture differs from the shared-memory region capture" "$LOG"
+    echo "dmabuf region capture matches the shared-memory region capture"
+  fi
+
+  kill "$CLIENT_PID" "$TERM_PID" 2>/dev/null || true
+  wait "$CLIENT_PID" "$TERM_PID" 2>/dev/null || true
+  CLIENT_PID=""; TERM_PID=""
+  wait_count 0 || fail "window count did not drop to 0 after the capture client exited, got $(wc_count)"
+  check_panic "$LOG" "the screencopy phase"
+  pass screencopy
 }
 
 # A terminate signal has to reach dome's own shutdown path. The default disposition

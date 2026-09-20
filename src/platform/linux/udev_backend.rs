@@ -42,6 +42,7 @@ use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
 use super::CalloopData;
+use super::screencopy;
 use super::state::DomeState;
 use crate::core::MonitorId;
 
@@ -833,10 +834,21 @@ fn render_surface(state: &mut DomeState, node: DrmNode, crtc: crtc::Handle) {
     };
 
     let udev = state.udev_data.as_mut().unwrap();
+    let Some(device) = udev.backends.get(&node) else {
+        return;
+    };
+    let Some(copy_output) = device.surfaces.get(&crtc).map(|s| s.output.clone()) else {
+        return;
+    };
+    let pending_copies = state.take_pending_copies(&copy_output);
+
+    let udev = state.udev_data.as_mut().unwrap();
     let Some(device) = udev.backends.get_mut(&node) else {
+        screencopy::fail_all(&pending_copies);
         return;
     };
     let Some(surface) = device.surfaces.get_mut(&crtc) else {
+        screencopy::fail_all(&pending_copies);
         return;
     };
     let render_node = device.render_node.unwrap_or(udev.primary_gpu);
@@ -846,11 +858,13 @@ fn render_surface(state: &mut DomeState, node: DrmNode, crtc: crtc::Handle) {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("Failed to get renderer: {e}");
+            screencopy::fail_all(&pending_copies);
             return;
         }
     };
 
     let mut elements: Vec<DrmRenderElement<_>> = Vec::new();
+    let cursor_start = elements.len();
 
     // Cursor — only on the output containing the pointer
     let pointer_loc = state.seat.get_pointer().unwrap().current_location();
@@ -925,6 +939,10 @@ fn render_surface(state: &mut DomeState, node: DrmNode, crtc: crtc::Handle) {
     }
 
     // Egui overlays (borders, tab bars) — between cursor and space
+    let cursor_ids: Vec<smithay::backend::renderer::element::Id> = elements[cursor_start..]
+        .iter()
+        .map(|e| smithay::backend::renderer::element::Element::id(e).clone())
+        .collect();
     if let Some(ref egui_buf) = egui_buf {
         let elem = MemoryRenderBufferRenderElement::from_buffer(
             &mut renderer,
@@ -968,6 +986,19 @@ fn render_surface(state: &mut DomeState, node: DrmNode, crtc: crtc::Handle) {
 
     match result {
         Ok(render_result) => {
+            if !pending_copies.is_empty() {
+                let size = output
+                    .current_mode()
+                    .map(|mode| mode.size)
+                    .unwrap_or_default();
+                screencopy::serve(
+                    &mut renderer,
+                    &render_result,
+                    size,
+                    &pending_copies,
+                    &cursor_ids,
+                );
+            }
             if !render_result.is_empty {
                 if let Err(e) = surface.drm_output.queue_frame(()) {
                     tracing::warn!("queue_frame error: {e:?}");
@@ -983,7 +1014,10 @@ fn render_surface(state: &mut DomeState, node: DrmNode, crtc: crtc::Handle) {
                     .ok();
             }
         }
-        Err(e) => tracing::warn!("render_frame error: {e:?}"),
+        Err(e) => {
+            screencopy::fail_all(&pending_copies);
+            tracing::warn!("render_frame error: {e:?}")
+        }
     }
 
     // Send frame callbacks
