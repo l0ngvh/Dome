@@ -24,20 +24,20 @@ use windows::Win32::UI::HiDpi::{
     GetDpiForWindow, GetWindowDpiAwarenessContext, MDT_EFFECTIVE_DPI, SetThreadDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GW_HWNDPREV, GW_OWNER, GWL_EXSTYLE,
-    GWL_STYLE, GetAncestor, GetClassNameW, GetWindow, GetWindowLongW, GetWindowRect,
-    GetWindowThreadProcessId, HWND_BOTTOM, IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO,
-    PostMessageW, SMTO_ABORTIFHUNG, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, SetWindowPos,
-    ShowWindow, ShowWindowAsync, WM_CLOSE, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH,
-    WS_CHILD, WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
+    EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GW_OWNER, GWL_EXSTYLE, GWL_STYLE,
+    GetAncestor, GetClassNameW, GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
+    HWND_BOTTOM, IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO, PostMessageW, SMTO_ABORTIFHUNG,
+    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, SetWindowPos, ShowWindow, ShowWindowAsync,
+    WM_CLOSE, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CHILD, WS_EX_APPWINDOW,
+    WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX,
+    WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
 use crate::core::{Dimension, Length, LimitObservation, LimitUpdate, PixelRect, Pixels};
 use crate::platform::windows::external::{
-    HwndId, InspectExternalWindow, ManageExternalWindow, ShowCmd, ZOrder,
+    HwndId, InspectExternalWindow, ManageExternalWindow, ManageOverlay, ShowCmd, ZOrder,
 };
 use crate::platform::windows::foreground::force_set_foreground;
 
@@ -45,38 +45,6 @@ use crate::platform::windows::foreground::force_set_foreground;
 pub(crate) const OFFSCREEN_POS: Pixels = Pixels::new(-32000);
 
 const MSG_TIMEOUT_MS: u32 = 100;
-
-pub(in crate::platform::windows) trait ManageZOrder {
-    fn window_above(&self, hwnd: HwndId) -> Option<HwndId>;
-    /// `overlay` belongs to the window thread, so this call only completes while that
-    /// thread pumps messages.
-    fn demote_below(&self, overlay: HwndId, managed: HwndId);
-}
-
-pub(in crate::platform::windows) struct Win32ZOrder;
-
-impl ManageZOrder for Win32ZOrder {
-    fn window_above(&self, hwnd: HwndId) -> Option<HwndId> {
-        let prev = unsafe { GetWindow(hwnd.into(), GW_HWNDPREV) }.ok();
-        prev.map(HwndId::from)
-    }
-
-    fn demote_below(&self, overlay: HwndId, managed: HwndId) {
-        let target: HWND = managed.into();
-        unsafe {
-            SetWindowPos(
-                overlay.into(),
-                Some(target),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            )
-            .ok();
-        }
-    }
-}
 
 /// A buggy WndProc can return garbage from WM_GETTEXTLENGTH.
 const MAX_WINDOW_TITLE_U16: usize = 32 * 1024;
@@ -94,6 +62,28 @@ unsafe impl Sync for ExternalHwnd {}
 impl ExternalHwnd {
     pub(crate) fn new(hwnd: HWND) -> Self {
         Self(hwnd)
+    }
+}
+
+pub(crate) struct OverlayHwnd(HWND);
+
+unsafe impl Send for OverlayHwnd {}
+
+unsafe impl Sync for OverlayHwnd {}
+
+impl OverlayHwnd {
+    pub(crate) fn new(hwnd: HWND) -> Self {
+        Self(hwnd)
+    }
+}
+
+impl ManageOverlay for OverlayHwnd {
+    fn set_z_order(&self, z: ZOrder) {
+        write_z_order(self.0, z);
+    }
+
+    fn focus(&self) {
+        force_set_foreground(self.0);
     }
 }
 
@@ -236,6 +226,10 @@ impl ManageExternalWindow for ExternalHwnd {
                 }
             });
         }
+    }
+
+    fn set_z_order(&self, z: ZOrder) {
+        write_z_order(self.0, z);
     }
 
     fn move_offscreen(&self) {
@@ -850,6 +844,17 @@ fn is_token_elevated_or_high_integrity(token: windows::Win32::Foundation::HANDLE
     }
     let rid = unsafe { *rid_ptr };
     rid > 0x2000
+}
+
+fn write_z_order(hwnd: HWND, z: ZOrder) {
+    let insert_after: Option<HWND> = z.into();
+    let mut flags = SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS | SWP_NOMOVE | SWP_NOSIZE;
+    if insert_after.is_none() {
+        flags |= SWP_NOZORDER;
+    }
+    if let Err(e) = unsafe { SetWindowPos(hwnd, insert_after, 0, 0, 0, 0, flags) } {
+        tracing::trace!(?hwnd, "SetWindowPos (z-order only) failed: {e}");
+    }
 }
 
 fn for_each_owned<F: FnMut(HWND)>(hwnd: HWND, callback: F) {

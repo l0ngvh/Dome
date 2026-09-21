@@ -1,4 +1,5 @@
 mod export;
+mod options;
 mod placement;
 mod preferred_layout;
 mod scroll;
@@ -6,21 +7,25 @@ mod scroll;
 mod validate;
 
 use rustc_hash::FxHashMap;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-use crate::config::{LayoutWorkspaceConfig, SizeConstraints};
-use crate::core::GlobalLayoutConfig;
+pub(crate) use options::{MasterConfig, read_master_count_override, read_master_ratio_override};
+pub(crate) use preferred_layout::PaneConfig;
+
+use crate::core::TilingConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
+use crate::core::master::options::{MIN_MASTER_COUNT, clamp_master_ratio};
 use crate::core::master::preferred_layout::{Slot, SlotId};
 use crate::core::node::{
     Child, Container, ContainerId, Dimension, Direction, Length, Logical, PixelRect, Pixels,
     WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::strategy::{
-    TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, distribute_space, translate,
+    TilingPlacements, TilingStrategy, WorkspaceExport, distribute_space, translate,
     window_constraints,
 };
+use crate::core::{PreferredWorkspace, SizeConstraints};
 
 /// XMonad-style tiling: a master area on the left and a stack on the right.
 /// Each pane scrolls vertically and independently when per-window min heights push the
@@ -43,12 +48,12 @@ impl TilingStrategy for MasterStrategy {
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        preferred_layout: Option<&LayoutWorkspaceConfig>,
+        preferred_layout: Option<&PreferredWorkspace>,
     ) {
         // Reject a non-master config before allocating, so the panic path cannot
         // leak the pane containers.
         let master_cfg = match preferred_layout {
-            Some(LayoutWorkspaceConfig::Master {
+            Some(PreferredWorkspace::Master {
                 master_count,
                 master_ratio,
                 master,
@@ -187,223 +192,208 @@ impl TilingStrategy for MasterStrategy {
         self.collect_tiling_placements(hub, ws_id, focused)
     }
 
-    fn handle_action(&mut self, hub: &mut HubAccess, action: TilingAction) {
-        let ws_id = hub.monitors.get(hub.focused_monitor).active_workspace;
-
-        let Some((kind, idx)) = self.focused_position(hub, ws_id) else {
+    fn focus_direction(&mut self, hub: &mut HubAccess, direction: Direction, forward: bool) {
+        let Some(FocusedPanes {
+            ws_id,
+            kind,
+            idx,
+            master_container,
+            secondary_container,
+            master_len,
+            stack_len,
+        }) = self.focused_panes(hub)
+        else {
             return;
         };
-        let (master_cid, secondary_cid) = {
-            let state = self.workspaces.get(&ws_id).unwrap();
-            (state.master.container, state.secondary.container)
-        };
-        let master_len = Self::pane_len(hub, master_cid);
-        let stack_len = Self::pane_len(hub, secondary_cid);
-
-        match action {
-            TilingAction::FocusDirection { direction, forward } => {
-                if master_len + stack_len <= 1 {
-                    return;
-                }
-                match (direction, forward) {
-                    (Direction::Horizontal, false) => {
-                        if kind == PaneKind::Secondary && master_len > 0 {
-                            let target = self.last_focused_in(hub, ws_id, PaneKind::Master);
-                            self.workspaces
-                                .get_mut(&ws_id)
-                                .unwrap()
-                                .record_focus(target);
-                        }
-                    }
-                    (Direction::Horizontal, true) => {
-                        if kind == PaneKind::Master && stack_len > 0 {
-                            let target = self.last_focused_in(hub, ws_id, PaneKind::Secondary);
-                            self.workspaces
-                                .get_mut(&ws_id)
-                                .unwrap()
-                                .record_focus(target);
-                        }
-                    }
-                    (Direction::Vertical, _) => {
-                        let cid = if kind == PaneKind::Master {
-                            master_cid
-                        } else {
-                            secondary_cid
-                        };
-                        let members = Self::pane_windows(hub, cid);
-                        let len = members.len();
-                        if len <= 1 {
-                            return;
-                        }
-                        let target = members[wrap_index(idx, len, forward)];
-                        self.workspaces
-                            .get_mut(&ws_id)
-                            .unwrap()
-                            .record_focus(target);
-                    }
-                }
-                self.scroll_into_view(hub, ws_id);
-            }
-            TilingAction::MoveDirection { direction, forward } => {
-                if master_len + stack_len <= 1 {
-                    return;
-                }
-                let (master_matchers, secondary_matchers, effective) = {
-                    let state = self.workspaces.get(&ws_id).unwrap();
-                    (
-                        state.master.matchers.clone(),
-                        state.secondary.matchers.clone(),
-                        state.master_count.unwrap_or(self.master_count),
-                    )
-                };
-                match (direction, forward) {
-                    (Direction::Horizontal, false) => {
-                        if kind == PaneKind::Secondary {
-                            let moved = Self::remove_from_pane(hub, secondary_cid, idx);
-                            if Self::pane_len(hub, master_cid) >= effective && master_len > 0 {
-                                let swapped = Self::pop_from_pane(hub, master_cid).unwrap();
-                                Self::push_to_pane(hub, master_cid, moved);
-                                Self::push_to_pane(hub, secondary_cid, swapped);
-                                self.remap_slot_on_pane_change(hub, ws_id, moved, &master_matchers);
-                                self.remap_slot_on_pane_change(
-                                    hub,
-                                    ws_id,
-                                    swapped,
-                                    &secondary_matchers,
-                                );
-                            } else if Self::pane_len(hub, master_cid) < effective {
-                                Self::push_to_pane(hub, master_cid, moved);
-                                self.remap_slot_on_pane_change(hub, ws_id, moved, &master_matchers);
-                            }
-                        }
-                    }
-                    (Direction::Horizontal, true) => {
-                        if kind == PaneKind::Master && stack_len > 0 {
-                            let moved = Self::remove_from_pane(hub, master_cid, idx);
-                            let swapped = Self::remove_from_pane(hub, secondary_cid, 0);
-                            Self::push_to_pane(hub, master_cid, swapped);
-                            Self::push_to_pane(hub, secondary_cid, moved);
-                            self.remap_slot_on_pane_change(hub, ws_id, moved, &secondary_matchers);
-                            self.remap_slot_on_pane_change(hub, ws_id, swapped, &master_matchers);
-                        }
-                    }
-                    (Direction::Vertical, _) => {
-                        let cid = if kind == PaneKind::Master {
-                            master_cid
-                        } else {
-                            secondary_cid
-                        };
-                        let len = Self::pane_len(hub, cid);
-                        if len <= 1 {
-                            return;
-                        }
-                        let target = wrap_index(idx, len, forward);
-                        hub.containers.get_mut(cid).children.swap(idx, target);
-                    }
-                }
-                self.compute_placement(hub, ws_id);
-            }
-            TilingAction::GrowMaster => {
-                let state = self.workspaces.get_mut(&ws_id).unwrap();
-                let global_ratio = self.master_ratio;
-                let current = state.master_ratio.unwrap_or(global_ratio);
-                state.master_ratio = Some((current + 0.05).clamp(0.1, 0.9));
-                self.compute_placement(hub, ws_id);
-            }
-            TilingAction::ShrinkMaster => {
-                let state = self.workspaces.get_mut(&ws_id).unwrap();
-                let global_ratio = self.master_ratio;
-                let current = state.master_ratio.unwrap_or(global_ratio);
-                state.master_ratio = Some((current - 0.05).clamp(0.1, 0.9));
-                self.compute_placement(hub, ws_id);
-            }
-            TilingAction::MoreMaster => {
-                let global_count = self.master_count;
-                {
-                    let state = self.workspaces.get_mut(&ws_id).unwrap();
-                    let current = state.master_count.unwrap_or(global_count);
-                    state.master_count = Some(current + 1);
-                }
-                self.reconcile_master_count(hub, ws_id);
-                self.compute_placement(hub, ws_id);
-            }
-            TilingAction::FewerMaster => {
-                let global_count = self.master_count;
-                let current = self
-                    .workspaces
-                    .get(&ws_id)
-                    .and_then(|s| s.master_count)
-                    .unwrap_or(global_count);
-                if current <= 1 {
-                    return;
-                }
-                {
-                    let state = self.workspaces.get_mut(&ws_id).unwrap();
-                    state.master_count = Some(current - 1);
-                }
-                self.reconcile_master_count(hub, ws_id);
-                self.compute_placement(hub, ws_id);
-            }
-            TilingAction::ToggleContainerLayout => {
-                let pane = self.workspaces.get_mut(&ws_id).unwrap().pane_mut(kind);
-                pane.display = match pane.display {
-                    PaneDisplay::Tiled => PaneDisplay::Tabbed,
-                    PaneDisplay::Tabbed => PaneDisplay::Tiled,
-                };
-                self.compute_placement(hub, ws_id);
-            }
-            TilingAction::FocusTab { forward } => {
-                let cid = if kind == PaneKind::Master {
-                    master_cid
-                } else {
-                    secondary_cid
-                };
-                let is_tabbed =
-                    self.workspaces.get(&ws_id).unwrap().pane(kind).display == PaneDisplay::Tabbed;
-                let members = Self::pane_windows(hub, cid);
-                if !is_tabbed || members.len() < 2 {
-                    return;
-                }
-                let target = members[wrap_index(idx, members.len(), forward)];
-                self.workspaces
-                    .get_mut(&ws_id)
-                    .unwrap()
-                    .record_focus(target);
-                self.compute_placement(hub, ws_id);
-            }
-            TilingAction::TabClicked {
-                container_id,
-                index,
-            } => {
-                let clicked_kind = if container_id == master_cid {
-                    PaneKind::Master
-                } else if container_id == secondary_cid {
-                    PaneKind::Secondary
-                } else {
-                    return;
-                };
-                let is_tabbed = self
-                    .workspaces
-                    .get(&ws_id)
-                    .unwrap()
-                    .pane(clicked_kind)
-                    .display
-                    == PaneDisplay::Tabbed;
-                let members = Self::pane_windows(hub, container_id);
-                if !is_tabbed || members.len() < 2 {
-                    return;
-                }
-                let Some(&target) = members.get(index) else {
-                    return;
-                };
-                self.workspaces
-                    .get_mut(&ws_id)
-                    .unwrap()
-                    .record_focus(target);
-                self.compute_placement(hub, ws_id);
-            }
-            _ => {}
+        if master_len + stack_len <= 1 {
+            return;
         }
+        match (direction, forward) {
+            (Direction::Horizontal, false) => {
+                if kind == PaneKind::Secondary && master_len > 0 {
+                    let target = self.last_focused_in(hub, ws_id, PaneKind::Master);
+                    self.workspaces
+                        .get_mut(&ws_id)
+                        .unwrap()
+                        .record_focus(target);
+                }
+            }
+            (Direction::Horizontal, true) => {
+                if kind == PaneKind::Master && stack_len > 0 {
+                    let target = self.last_focused_in(hub, ws_id, PaneKind::Secondary);
+                    self.workspaces
+                        .get_mut(&ws_id)
+                        .unwrap()
+                        .record_focus(target);
+                }
+            }
+            (Direction::Vertical, _) => {
+                let cid = if kind == PaneKind::Master {
+                    master_container
+                } else {
+                    secondary_container
+                };
+                let members = Self::pane_windows(hub, cid);
+                let len = members.len();
+                if len <= 1 {
+                    return;
+                }
+                let target = members[wrap_index(idx, len, forward)];
+                self.workspaces
+                    .get_mut(&ws_id)
+                    .unwrap()
+                    .record_focus(target);
+            }
+        }
+        self.scroll_into_view(hub, ws_id);
+    }
+
+    fn move_direction(&mut self, hub: &mut HubAccess, direction: Direction, forward: bool) {
+        let Some(FocusedPanes {
+            ws_id,
+            kind,
+            idx,
+            master_container,
+            secondary_container,
+            master_len,
+            stack_len,
+        }) = self.focused_panes(hub)
+        else {
+            return;
+        };
+        if master_len + stack_len <= 1 {
+            return;
+        }
+        let (master_matchers, secondary_matchers, effective) = {
+            let state = self.workspaces.get(&ws_id).unwrap();
+            (
+                state.master.matchers.clone(),
+                state.secondary.matchers.clone(),
+                state.master_count.unwrap_or(self.master_count),
+            )
+        };
+        match (direction, forward) {
+            (Direction::Horizontal, false) => {
+                if kind == PaneKind::Secondary {
+                    let moved = Self::remove_from_pane(hub, secondary_container, idx);
+                    if Self::pane_len(hub, master_container) >= effective && master_len > 0 {
+                        let swapped = Self::pop_from_pane(hub, master_container).unwrap();
+                        Self::push_to_pane(hub, master_container, moved);
+                        Self::push_to_pane(hub, secondary_container, swapped);
+                        self.remap_slot_on_pane_change(hub, ws_id, moved, &master_matchers);
+                        self.remap_slot_on_pane_change(hub, ws_id, swapped, &secondary_matchers);
+                    } else if Self::pane_len(hub, master_container) < effective {
+                        Self::push_to_pane(hub, master_container, moved);
+                        self.remap_slot_on_pane_change(hub, ws_id, moved, &master_matchers);
+                    }
+                }
+            }
+            (Direction::Horizontal, true) => {
+                if kind == PaneKind::Master && stack_len > 0 {
+                    let moved = Self::remove_from_pane(hub, master_container, idx);
+                    let swapped = Self::remove_from_pane(hub, secondary_container, 0);
+                    Self::push_to_pane(hub, master_container, swapped);
+                    Self::push_to_pane(hub, secondary_container, moved);
+                    self.remap_slot_on_pane_change(hub, ws_id, moved, &secondary_matchers);
+                    self.remap_slot_on_pane_change(hub, ws_id, swapped, &master_matchers);
+                }
+            }
+            (Direction::Vertical, _) => {
+                let cid = if kind == PaneKind::Master {
+                    master_container
+                } else {
+                    secondary_container
+                };
+                let len = Self::pane_len(hub, cid);
+                if len <= 1 {
+                    return;
+                }
+                let target = wrap_index(idx, len, forward);
+                hub.containers.get_mut(cid).children.swap(idx, target);
+            }
+        }
+        self.compute_placement(hub, ws_id);
+    }
+
+    fn toggle_container_layout(&mut self, hub: &mut HubAccess) {
+        let Some(FocusedPanes { ws_id, kind, .. }) = self.focused_panes(hub) else {
+            return;
+        };
+        let pane = self.workspaces.get_mut(&ws_id).unwrap().pane_mut(kind);
+        pane.display = match pane.display {
+            PaneDisplay::Tiled => PaneDisplay::Tabbed,
+            PaneDisplay::Tabbed => PaneDisplay::Tiled,
+        };
+        self.compute_placement(hub, ws_id);
+    }
+
+    fn focus_tab(&mut self, hub: &mut HubAccess, forward: bool) {
+        let Some(FocusedPanes {
+            ws_id,
+            kind,
+            idx,
+            master_container,
+            secondary_container,
+            ..
+        }) = self.focused_panes(hub)
+        else {
+            return;
+        };
+        let cid = if kind == PaneKind::Master {
+            master_container
+        } else {
+            secondary_container
+        };
+        let is_tabbed =
+            self.workspaces.get(&ws_id).unwrap().pane(kind).display == PaneDisplay::Tabbed;
+        let members = Self::pane_windows(hub, cid);
+        if !is_tabbed || members.len() < 2 {
+            return;
+        }
+        let target = members[wrap_index(idx, members.len(), forward)];
+        self.workspaces
+            .get_mut(&ws_id)
+            .unwrap()
+            .record_focus(target);
+        self.compute_placement(hub, ws_id);
+    }
+
+    fn tab_clicked(&mut self, hub: &mut HubAccess, container_id: ContainerId, index: usize) {
+        let Some(FocusedPanes {
+            ws_id,
+            master_container,
+            secondary_container,
+            ..
+        }) = self.focused_panes(hub)
+        else {
+            return;
+        };
+        let clicked_kind = if container_id == master_container {
+            PaneKind::Master
+        } else if container_id == secondary_container {
+            PaneKind::Secondary
+        } else {
+            return;
+        };
+        let is_tabbed = self
+            .workspaces
+            .get(&ws_id)
+            .unwrap()
+            .pane(clicked_kind)
+            .display
+            == PaneDisplay::Tabbed;
+        let members = Self::pane_windows(hub, container_id);
+        if !is_tabbed || members.len() < 2 {
+            return;
+        }
+        let Some(&target) = members.get(index) else {
+            return;
+        };
+        self.workspaces
+            .get_mut(&ws_id)
+            .unwrap()
+            .record_focus(target);
+        self.compute_placement(hub, ws_id);
     }
 
     fn compute_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
@@ -483,17 +473,17 @@ impl TilingStrategy for MasterStrategy {
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        incoming: Option<&LayoutWorkspaceConfig>,
+        incoming: Option<&PreferredWorkspace>,
     ) {
         self.sync_preferred_layout(hub, ws_id, incoming)
     }
 
-    fn apply_config(&mut self, hub: &mut HubAccess, layout: GlobalLayoutConfig) {
+    fn apply_config(&mut self, hub: &mut HubAccess, tiling: TilingConfig) {
         let old_master_count = self.master_count;
-        self.master_ratio = layout.master.master_ratio;
-        self.master_count = layout.master.master_count;
-        self.size_constraints = layout.size_constraints;
-        self.tab_bar_height = layout.partition_tree.tab_bar_height;
+        self.master_ratio = tiling.master.master_ratio;
+        self.master_count = tiling.master.master_count;
+        self.size_constraints = tiling.size_constraints;
+        self.tab_bar_height = tiling.partition_tree.tab_bar_height;
         for ws_id in self.workspaces.keys().copied().collect::<Vec<_>>() {
             let needs_reconcile = self
                 .workspaces
@@ -530,10 +520,74 @@ impl MasterStrategy {
         }
     }
 
+    /// Raises this workspace's master ratio by one step, up to the ratio cap. Does nothing on a
+    /// workspace with no focused tiling window.
+    pub(super) fn grow(&mut self, hub: &mut HubAccess) {
+        let Some(FocusedPanes { ws_id, .. }) = self.focused_panes(hub) else {
+            return;
+        };
+        let state = self.workspaces.get_mut(&ws_id).unwrap();
+        let global_ratio = self.master_ratio;
+        let current = state.master_ratio.unwrap_or(global_ratio);
+        state.master_ratio = Some(clamp_master_ratio(current + 0.05));
+        self.compute_placement(hub, ws_id);
+    }
+
+    /// Lowers this workspace's master ratio by one step, down to the ratio floor. Does nothing on
+    /// a workspace with no focused tiling window.
+    pub(super) fn shrink(&mut self, hub: &mut HubAccess) {
+        let Some(FocusedPanes { ws_id, .. }) = self.focused_panes(hub) else {
+            return;
+        };
+        let state = self.workspaces.get_mut(&ws_id).unwrap();
+        let global_ratio = self.master_ratio;
+        let current = state.master_ratio.unwrap_or(global_ratio);
+        state.master_ratio = Some(clamp_master_ratio(current - 0.05));
+        self.compute_placement(hub, ws_id);
+    }
+
+    /// Raises this workspace's master count by one and refills the master pane from the stack.
+    /// Does nothing on a workspace with no focused tiling window.
+    pub(super) fn more(&mut self, hub: &mut HubAccess) {
+        let Some(FocusedPanes { ws_id, .. }) = self.focused_panes(hub) else {
+            return;
+        };
+        let global_count = self.master_count;
+        {
+            let state = self.workspaces.get_mut(&ws_id).unwrap();
+            let current = state.master_count.unwrap_or(global_count);
+            state.master_count = Some(current + 1);
+        }
+        self.reconcile_master_count(hub, ws_id);
+        self.compute_placement(hub, ws_id);
+    }
+
+    /// Lowers this workspace's master count by one and spills the surplus onto the stack. Does
+    /// nothing at `MIN_MASTER_COUNT`, or on a workspace with no focused tiling window.
+    pub(super) fn fewer(&mut self, hub: &mut HubAccess) {
+        let Some(FocusedPanes { ws_id, .. }) = self.focused_panes(hub) else {
+            return;
+        };
+        let global_count = self.master_count;
+        let current = self
+            .workspaces
+            .get(&ws_id)
+            .and_then(|s| s.master_count)
+            .unwrap_or(global_count);
+        if current <= MIN_MASTER_COUNT {
+            return;
+        }
+        {
+            let state = self.workspaces.get_mut(&ws_id).unwrap();
+            state.master_count = Some(current - 1);
+        }
+        self.reconcile_master_count(hub, ws_id);
+        self.compute_placement(hub, ws_id);
+    }
+
     fn tab_bar_length(&self, scale: f32) -> Length {
         Length::from_pixels(self.tab_bar_height).to_unit(scale)
     }
-
     fn pane_windows(hub: &HubAccess, container: ContainerId) -> Vec<WindowId> {
         hub.containers
             .get(container)
@@ -602,6 +656,24 @@ impl MasterStrategy {
         let i = Self::position_in_pane(hub, secondary, id)
             .unwrap_or_else(|| panic!("window {id:?} is in neither master nor secondary pane"));
         (PaneKind::Secondary, i)
+    }
+
+    fn focused_panes(&self, hub: &HubAccess) -> Option<FocusedPanes> {
+        let ws_id = hub.monitors.get(hub.focused_monitor).active_workspace;
+        let (kind, idx) = self.focused_position(hub, ws_id)?;
+        let (master_container, secondary_container) = {
+            let state = self.workspaces.get(&ws_id).unwrap();
+            (state.master.container, state.secondary.container)
+        };
+        Some(FocusedPanes {
+            ws_id,
+            kind,
+            idx,
+            master_container,
+            secondary_container,
+            master_len: Self::pane_len(hub, master_container),
+            stack_len: Self::pane_len(hub, secondary_container),
+        })
     }
 
     /// `None` only for an empty workspace.
@@ -800,13 +872,20 @@ impl WorkspaceState {
 
 /// One side of the master-stack split. Windows live in `container`, a flat `Container`
 /// of `Child::Window` that never nests.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum PaneDisplay {
     #[default]
     Tiled,
     Tabbed,
 }
+
+crate::config::lua::deserializer::string_enum!(
+    PaneDisplay,
+    "\"tiled\" or \"tabbed\"",
+    "tiled" => PaneDisplay::Tiled,
+    "tabbed" => PaneDisplay::Tabbed,
+);
 
 #[derive(Debug)]
 struct Pane {
@@ -838,6 +917,16 @@ struct WindowState {
 enum PaneKind {
     Master,
     Secondary,
+}
+
+struct FocusedPanes {
+    ws_id: WorkspaceId,
+    kind: PaneKind,
+    idx: usize,
+    master_container: ContainerId,
+    secondary_container: ContainerId,
+    master_len: usize,
+    stack_len: usize,
 }
 
 fn wrap_index(idx: usize, len: usize, forward: bool) -> usize {

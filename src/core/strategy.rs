@@ -2,20 +2,22 @@ use rustc_hash::FxHashMap;
 #[cfg(test)]
 use rustc_hash::FxHashSet;
 
-use crate::config::{
-    LayoutWorkspaceConfig, PaneConfig, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
-};
-use crate::core::GlobalLayoutConfig;
+use crate::core::MonitorSelector;
+use crate::core::TilingConfig;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::master::MasterStrategy;
+use crate::core::master::PaneConfig;
 use crate::core::node::{
     Child, Constraints, ContainerId, Dimension, Direction, Length, PixelRect, Pixels, Unit,
     WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
+use crate::core::{
+    PreferredLayouts, PreferredWorkspace, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
+};
 
 #[derive(Debug)]
-pub(crate) enum TilingAction {
+pub(crate) enum StrategyAction {
     FocusDirection {
         direction: Direction,
         forward: bool,
@@ -41,6 +43,109 @@ pub(crate) enum TilingAction {
     FewerMaster,
 }
 
+#[derive(Debug)]
+pub(crate) enum TilingAction {
+    Strategy(StrategyAction),
+    FocusWorkspace {
+        name: String,
+        monitor: Option<String>,
+    },
+    MoveToWorkspace {
+        name: String,
+        monitor: Option<String>,
+    },
+    FocusMonitor {
+        selector: MonitorSelector,
+    },
+    MoveToMonitor {
+        selector: MonitorSelector,
+    },
+    ToggleFloat,
+    ToggleFullscreen,
+}
+
+impl From<StrategyAction> for TilingAction {
+    fn from(action: StrategyAction) -> Self {
+        Self::Strategy(action)
+    }
+}
+
+impl From<&crate::action::FocusTarget> for TilingAction {
+    fn from(target: &crate::action::FocusTarget) -> Self {
+        use crate::action::{FocusTarget, TabDirection};
+
+        let directional =
+            |direction, forward| StrategyAction::FocusDirection { direction, forward }.into();
+        match target {
+            FocusTarget::Up => directional(Direction::Vertical, false),
+            FocusTarget::Down => directional(Direction::Vertical, true),
+            FocusTarget::Left => directional(Direction::Horizontal, false),
+            FocusTarget::Right => directional(Direction::Horizontal, true),
+            FocusTarget::Parent => StrategyAction::FocusParent.into(),
+            FocusTarget::Tab { direction } => StrategyAction::FocusTab {
+                forward: matches!(direction, TabDirection::Next),
+            }
+            .into(),
+            FocusTarget::Workspace { name, monitor } => Self::FocusWorkspace {
+                name: name.clone(),
+                monitor: monitor.clone(),
+            },
+            FocusTarget::Monitor { target } => Self::FocusMonitor {
+                selector: target.into(),
+            },
+        }
+    }
+}
+
+impl From<&crate::action::MoveTarget> for TilingAction {
+    fn from(target: &crate::action::MoveTarget) -> Self {
+        use crate::action::MoveTarget;
+
+        let directional =
+            |direction, forward| StrategyAction::MoveDirection { direction, forward }.into();
+        match target {
+            MoveTarget::Up => directional(Direction::Vertical, false),
+            MoveTarget::Down => directional(Direction::Vertical, true),
+            MoveTarget::Left => directional(Direction::Horizontal, false),
+            MoveTarget::Right => directional(Direction::Horizontal, true),
+            MoveTarget::Workspace { name, monitor } => Self::MoveToWorkspace {
+                name: name.clone(),
+                monitor: monitor.clone(),
+            },
+            MoveTarget::Monitor { target } => Self::MoveToMonitor {
+                selector: target.into(),
+            },
+        }
+    }
+}
+
+impl From<&crate::action::ToggleTarget> for TilingAction {
+    fn from(target: &crate::action::ToggleTarget) -> Self {
+        use crate::action::ToggleTarget;
+
+        match target {
+            ToggleTarget::Spawn => StrategyAction::ToggleSpawnMode.into(),
+            ToggleTarget::Direction => StrategyAction::ToggleDirection.into(),
+            ToggleTarget::Layout => StrategyAction::ToggleContainerLayout.into(),
+            ToggleTarget::Float => Self::ToggleFloat,
+            ToggleTarget::Fullscreen => Self::ToggleFullscreen,
+        }
+    }
+}
+
+impl From<&crate::action::MasterTarget> for TilingAction {
+    fn from(target: &crate::action::MasterTarget) -> Self {
+        use crate::action::MasterTarget;
+
+        match target {
+            MasterTarget::Grow => StrategyAction::GrowMaster.into(),
+            MasterTarget::Shrink => StrategyAction::ShrinkMaster.into(),
+            MasterTarget::More => StrategyAction::MoreMaster.into(),
+            MasterTarget::Fewer => StrategyAction::FewerMaster.into(),
+        }
+    }
+}
+
 /// Tiling window and container placements collected by the strategy for a
 /// single workspace.
 pub(crate) struct TilingPlacements {
@@ -48,7 +153,6 @@ pub(crate) struct TilingPlacements {
     pub(crate) containers: Vec<ContainerPlacement>,
 }
 
-/// Per-strategy export payload for serialization to layout.toml.
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct WorkspaceExport {
     pub(crate) strategy: String,
@@ -62,16 +166,14 @@ pub(crate) struct WorkspaceExport {
 }
 
 impl WorkspaceExport {
-    pub(crate) fn to_layout_workspace_config(&self, name: &str) -> LayoutWorkspaceConfig {
+    pub(crate) fn to_layout_workspace_config(&self) -> PreferredWorkspace {
         match self.strategy.as_str() {
-            "partition_tree" => LayoutWorkspaceConfig::PartitionTree {
-                name: name.to_owned(),
+            "partition_tree" => PreferredWorkspace::PartitionTree {
                 tree: self.tree.clone(),
                 float: self.float.clone(),
                 fullscreen: self.fullscreen.clone(),
             },
-            "master" => LayoutWorkspaceConfig::Master {
-                name: name.to_owned(),
+            "master" => PreferredWorkspace::Master {
                 master_ratio: self.master_ratio,
                 master_count: self.master_count,
                 master: self.master.clone(),
@@ -93,7 +195,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        preferred_layout: Option<&LayoutWorkspaceConfig>,
+        preferred_layout: Option<&PreferredWorkspace>,
     );
 
     /// Insert a window into the tiling tree for the given workspace. Does not
@@ -105,10 +207,15 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// because detach triggers layout, which can change viewport_offset).
     fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> PixelRect;
 
-    /// Dispatch a tiling-specific action. Reads the current workspace from
-    /// `hub.focused_monitor` internally. Both mutates state and triggers
-    /// layout as needed.
-    fn handle_action(&mut self, hub: &mut HubAccess, action: TilingAction);
+    fn focus_direction(&mut self, hub: &mut HubAccess, direction: Direction, forward: bool);
+
+    fn move_direction(&mut self, hub: &mut HubAccess, direction: Direction, forward: bool);
+
+    fn toggle_container_layout(&mut self, hub: &mut HubAccess);
+
+    fn focus_tab(&mut self, hub: &mut HubAccess, forward: bool);
+
+    fn tab_clicked(&mut self, hub: &mut HubAccess, container_id: ContainerId, index: usize);
 
     /// Compute layout for all tiling windows in the workspace.
     fn compute_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId);
@@ -163,11 +270,11 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        incoming: Option<&LayoutWorkspaceConfig>,
+        incoming: Option<&PreferredWorkspace>,
     );
 
     /// Refresh config-derived internal state and relayout the given workspace.
-    fn apply_config(&mut self, hub: &mut HubAccess, layout: GlobalLayoutConfig);
+    fn apply_config(&mut self, hub: &mut HubAccess, tiling: TilingConfig);
 
     /// Export the current layout for a workspace, updating the strategy's
     /// internal preferred-layout representation to match the live tree.
@@ -406,17 +513,17 @@ pub(super) struct StrategySet {
 }
 
 impl StrategySet {
-    pub(super) fn new(layout: &GlobalLayoutConfig) -> Self {
+    pub(super) fn new(tiling: &TilingConfig) -> Self {
         let partition_tree = PartitionTreeStrategy::new(
-            layout.partition_tree.tab_bar_height,
-            layout.partition_tree.automatic_tiling,
-            layout.size_constraints,
+            tiling.partition_tree.tab_bar_height,
+            tiling.partition_tree.automatic_tiling,
+            tiling.size_constraints,
         );
         let master = MasterStrategy::new(
-            layout.master.master_count,
-            layout.master.master_ratio,
-            layout.size_constraints,
-            layout.partition_tree.tab_bar_height,
+            tiling.master.master_count,
+            tiling.master.master_ratio,
+            tiling.size_constraints,
+            tiling.partition_tree.tab_bar_height,
         );
         Self {
             partition_tree,
@@ -427,19 +534,16 @@ impl StrategySet {
 
     pub(super) fn register(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
         let ws_name = hub.workspaces.get(ws_id).name.clone();
+        let monitor = hub.origin_monitor_name(ws_id);
         // Clone so the `&mut hub` below does not alias a borrow into `hub.preferred_layouts`.
-        let preferred = hub
-            .preferred_layouts
-            .iter()
-            .find(|w| w.name() == ws_name)
-            .cloned();
+        let preferred = hub.preferred_layouts.workspace(&monitor, &ws_name).cloned();
         let preferred_strategy = preferred
             .as_ref()
             .map(|w| match w {
-                LayoutWorkspaceConfig::PartitionTree { .. } => Strategy::PartitionTree,
-                LayoutWorkspaceConfig::Master { .. } => Strategy::Master,
+                PreferredWorkspace::PartitionTree { .. } => Strategy::PartitionTree,
+                PreferredWorkspace::Master { .. } => Strategy::Master,
             })
-            .unwrap_or(hub.layout.strategy);
+            .unwrap_or(hub.tiling.layout);
 
         self.kinds.insert(ws_id, preferred_strategy);
         let kind = self.kind_of(ws_id);
@@ -477,12 +581,72 @@ impl StrategySet {
         self.get_mut(kind)
     }
 
+    pub(super) fn handle_action(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        action: StrategyAction,
+    ) {
+        let kind = self.kind_of(ws_id);
+        match action {
+            StrategyAction::FocusDirection { direction, forward } => {
+                self.get_mut(kind).focus_direction(hub, direction, forward)
+            }
+            StrategyAction::MoveDirection { direction, forward } => {
+                self.get_mut(kind).move_direction(hub, direction, forward)
+            }
+            StrategyAction::ToggleContainerLayout => {
+                self.get_mut(kind).toggle_container_layout(hub)
+            }
+            StrategyAction::FocusTab { forward } => self.get_mut(kind).focus_tab(hub, forward),
+            StrategyAction::TabClicked {
+                container_id,
+                index,
+            } => self.get_mut(kind).tab_clicked(hub, container_id, index),
+            StrategyAction::GrowMaster => {
+                if let Some(master) = self.master_for(kind) {
+                    master.grow(hub)
+                }
+            }
+            StrategyAction::ShrinkMaster => {
+                if let Some(master) = self.master_for(kind) {
+                    master.shrink(hub)
+                }
+            }
+            StrategyAction::MoreMaster => {
+                if let Some(master) = self.master_for(kind) {
+                    master.more(hub)
+                }
+            }
+            StrategyAction::FewerMaster => {
+                if let Some(master) = self.master_for(kind) {
+                    master.fewer(hub)
+                }
+            }
+            StrategyAction::ToggleSpawnMode => {
+                if let Some(tree) = self.tree_for(kind) {
+                    tree.toggle_spawn_mode(hub)
+                }
+            }
+            StrategyAction::ToggleDirection => {
+                if let Some(tree) = self.tree_for(kind) {
+                    tree.toggle_focused_layout_direction(hub)
+                }
+            }
+            StrategyAction::FocusParent => {
+                if let Some(tree) = self.tree_for(kind) {
+                    tree.focus_parent(hub)
+                }
+            }
+        }
+    }
+
     /// Recompute kinds and drive the full sync. All cross-kind rebuilds and
     /// same-kind syncs happen here.
     pub(super) fn resync(
         &mut self,
         hub: &mut HubAccess,
-        preferred_layouts: &[LayoutWorkspaceConfig],
+        preferred_layouts: &PreferredLayouts,
         default_strategy: Strategy,
     ) {
         for ws_id in hub.workspaces.sorted_ids() {
@@ -491,18 +655,15 @@ impl StrategySet {
                 .get(&ws_id)
                 .unwrap_or_else(|| panic!("workspace {ws_id:?} not registered with StrategySet"));
             let ws_name = hub.workspaces.get(ws_id).name.clone();
-            let new = preferred_layouts
-                .iter()
-                .find(|w| w.name() == ws_name)
+            let monitor = hub.origin_monitor_name(ws_id);
+            let incoming = preferred_layouts.workspace(&monitor, &ws_name);
+            let new = incoming
                 .map(|w| match w {
-                    LayoutWorkspaceConfig::PartitionTree { .. } => Strategy::PartitionTree,
-                    LayoutWorkspaceConfig::Master { .. } => Strategy::Master,
+                    PreferredWorkspace::PartitionTree { .. } => Strategy::PartitionTree,
+                    PreferredWorkspace::Master { .. } => Strategy::Master,
                 })
                 .unwrap_or(default_strategy);
             self.kinds.insert(ws_id, new);
-            let incoming = preferred_layouts
-                .iter()
-                .find(|o| o.name() == ws_name.as_str());
             if old != new {
                 tracing::debug!(
                     ws_id = %ws_id,
@@ -551,6 +712,26 @@ impl StrategySet {
 
         self.partition_tree.validate(hub);
         self.master.validate(hub);
+    }
+
+    fn master_for(&mut self, kind: Strategy) -> Option<&mut MasterStrategy> {
+        match kind {
+            Strategy::Master => Some(&mut self.master),
+            Strategy::PartitionTree => {
+                tracing::debug!("Master action on a partition-tree workspace");
+                None
+            }
+        }
+    }
+
+    fn tree_for(&mut self, kind: Strategy) -> Option<&mut PartitionTreeStrategy> {
+        match kind {
+            Strategy::PartitionTree => Some(&mut self.partition_tree),
+            Strategy::Master => {
+                tracing::debug!("Partition-tree action on a master workspace");
+                None
+            }
+        }
     }
 }
 

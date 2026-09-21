@@ -1,16 +1,16 @@
-use crate::action::MonitorTarget;
-use crate::core::GlobalLayoutConfig;
+use crate::core::MonitorSelector;
+use crate::core::TilingConfig;
 use crate::core::node::PixelRect;
 use crate::core::node::WindowRestrictions;
 use crate::core::tests::{
-    LayoutConfigBuilder, default_rect, reported_monitor, setup, setup_with_layout, snapshot,
+    TilingConfigBuilder, default_rect, reported_monitor, setup, setup_with_tiling, snapshot,
     titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
-    LayoutConfigBuilder::new()
+fn tiling_floating(titles: &[&str]) -> TilingConfig {
+    TilingConfigBuilder::new()
         .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
         .build()
 }
@@ -19,8 +19,8 @@ fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
 fn insert_fullscreen_sets_focus() {
     // Exact title, so the `titled("w0")` insert below stays tiling and the
     // focus assertion still means something.
-    let mut hub = setup_with_layout(
-        LayoutConfigBuilder::new()
+    let mut hub = setup_with_tiling(
+        TilingConfigBuilder::new()
             .with_fullscreen(vec![titled_matcher("w1")])
             .build(),
     );
@@ -123,7 +123,7 @@ fn set_fullscreen_from_tiling() {
 
 #[test]
 fn set_fullscreen_from_float() {
-    let mut hub = setup_with_layout(layout_floating(&["w5"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w5"]));
     hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
     let w2 = hub
         .insert_window(
@@ -471,7 +471,7 @@ fn toggle_fullscreen_on_off() {
 
 #[test]
 fn insert_doesnt_steal_focus_from_fullscreen() {
-    let mut hub = setup_with_layout(layout_floating(&["w18"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w18"]));
     hub.insert_window(titled("w16"), default_rect(), WindowRestrictions::None);
     hub.toggle_fullscreen();
 
@@ -640,10 +640,10 @@ fn block_all_blocks_user_commands() {
     hub.move_focused_to_workspace("1", None);
     assert_eq!(snapshot(&hub), before);
 
-    hub.move_focused_to_monitor(&MonitorTarget::Right);
+    hub.move_focused_to_monitor(&MonitorSelector::Right);
     assert_eq!(snapshot(&hub), before);
 
-    hub.focus_monitor(&MonitorTarget::Right);
+    hub.focus_monitor(&MonitorSelector::Right);
     assert_eq!(snapshot(&hub), before);
 
     hub.focus_next_tab();
@@ -977,12 +977,12 @@ fn block_all_on_unfocused_window_does_not_block() {
         1.0,
     ));
     // Put a tiling window on the second monitor's workspace.
-    hub.focus_monitor(&MonitorTarget::Right);
+    hub.focus_monitor(&MonitorSelector::Right);
     let w0 = hub
         .insert_window(titled("w30"), default_rect(), WindowRestrictions::None)
         .unwrap();
     // Switch back and insert the BlockAll fullscreen on workspace 0.
-    hub.focus_monitor(&MonitorTarget::Left);
+    hub.focus_monitor(&MonitorSelector::Left);
     hub.insert_window(titled("w31"), default_rect(), WindowRestrictions::BlockAll)
         .unwrap();
     // set_focus is a lifecycle op not guarded by restrictions, so it can
@@ -1134,7 +1134,7 @@ fn protect_fullscreen_blocks_display_mode_and_monitor_move() {
     hub.toggle_float();
     assert_eq!(snapshot(&hub), before);
 
-    hub.move_focused_to_monitor(&MonitorTarget::Right);
+    hub.move_focused_to_monitor(&MonitorSelector::Right);
     assert_eq!(snapshot(&hub), before);
 }
 

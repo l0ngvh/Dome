@@ -1,13 +1,13 @@
-use crate::core::GlobalLayoutConfig;
+use crate::core::TilingConfig;
 use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
+    TilingConfigBuilder, default_rect, setup, setup_with_tiling, snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
-    LayoutConfigBuilder::new()
+fn tiling_floating(titles: &[&str]) -> TilingConfig {
+    TilingConfigBuilder::new()
         .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
         .build()
 }
@@ -524,7 +524,7 @@ fn toggle_direction_noop() {
     hub.toggle_direction();
     assert_eq!(before, snapshot(&hub));
 
-    let mut hub = setup_with_layout(layout_floating(&["w8"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w8"]));
     hub.insert_window(
         titled("w8"),
         PixelRect::new(10, 5, 30, 20),

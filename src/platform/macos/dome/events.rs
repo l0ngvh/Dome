@@ -8,7 +8,7 @@ use objc2_foundation::NSRect;
 use crate::action::Actions;
 use crate::action::Query;
 use crate::action::WorkspaceInfo;
-use crate::config::{Config, LayoutConfig};
+use crate::config::{Appearance, Keystroke, PreferredLayouts};
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, MonitorId,
     TilingWindowPlacement, WindowId,
@@ -45,8 +45,12 @@ pub(in crate::platform::macos) enum HubEvent {
         query: Query,
         sender: std::sync::mpsc::SyncSender<String>,
     },
-    ConfigChanged(Box<Config>),
-    LayoutConfigChanged(Box<LayoutConfig>),
+    RunBinding {
+        keymap: String,
+        keystroke: Keystroke,
+    },
+    ReloadConfig,
+    LayoutConfigChanged(Box<PreferredLayouts>),
     ExportLayout(String),
     /// Periodic sync to catch missed AX notifications, as AX notifications are unreliable. Only
     /// syncs window state, not focus, as focus changes should come from user interactions. Beside
@@ -79,7 +83,10 @@ impl fmt::Display for HubEvent {
             }
             Self::Action(actions) => write!(f, "Action({actions})"),
             Self::Query { query, .. } => write!(f, "Query({query:?})"),
-            Self::ConfigChanged(_) => write!(f, "ConfigChanged"),
+            Self::RunBinding { keymap, keystroke } => {
+                write!(f, "RunBinding(keymap={keymap}, keystroke={keystroke})")
+            }
+            Self::ReloadConfig => write!(f, "ReloadConfig"),
             Self::LayoutConfigChanged(_) => write!(f, "LayoutConfigChanged"),
             Self::ExportLayout(_) => write!(f, "ExportLayout"),
             Self::Sync => write!(f, "Sync"),
@@ -103,7 +110,7 @@ impl fmt::Display for HubEvent {
 pub(in crate::platform::macos) enum HubMessage {
     Scene(RenderScene),
     RefreshObservers,
-    ConfigChanged(Box<Config>),
+    AppearanceChanged(Appearance),
     Shutdown,
 }
 

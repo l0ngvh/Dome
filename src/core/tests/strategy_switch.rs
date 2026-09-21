@@ -1,29 +1,26 @@
-use crate::config::{
-    LayoutWorkspaceConfig, MasterConfig, PaneConfig, SplitMode, Strategy, TreeLayoutNode,
-};
-use crate::core::GlobalLayoutConfig;
+use crate::config::tests as fixtures;
 use crate::core::ReportedMonitor;
+use crate::core::TilingConfig;
 use crate::core::hub::Hub;
+use crate::core::master::PaneConfig;
 use crate::core::node::{PixelRect, WindowRestrictions};
-use crate::core::tests::setup_logger_with_level;
+use crate::core::tests::{PRIMARY_MONITOR, preferred_layout, setup_logger_with_level};
+use crate::core::{MasterConfig, PreferredWorkspace, SplitMode, Strategy, TreeLayoutNode};
 
 use super::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, default_rect, setup_hub, setup_with_layout,
+    LayoutWorkspaceConfigBuilder, TilingConfigBuilder, default_rect, setup_hub, setup_with_tiling,
     snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
-/// Layout config for this file, threaded through so the same config serves both
-/// hub-build and `sync_configuration`. Titles are exact because this file also
-/// inserts tiling windows named `wN`.
-fn layout(
+fn tiling(
     strategy: Strategy,
     ratio: f32,
     count: usize,
     floats: &[&str],
     fullscreens: &[&str],
-) -> GlobalLayoutConfig {
-    LayoutConfigBuilder::new()
+) -> TilingConfig {
+    TilingConfigBuilder::new()
         .with_strategy(strategy)
         .with_master_config(MasterConfig {
             master_ratio: ratio,
@@ -36,31 +33,21 @@ fn layout(
         .build()
 }
 
-fn setup_hub_with_layout(layout: GlobalLayoutConfig, overrides: Vec<LayoutWorkspaceConfig>) -> Hub {
+fn setup_hub_with_tiling(
+    tiling: TilingConfig,
+    overrides: impl IntoIterator<Item = (String, PreferredWorkspace)>,
+) -> Hub {
     Hub::new(
         ReportedMonitor {
-            device_name: "primary".to_string(),
+            device_name: PRIMARY_MONITOR.to_string(),
             work_area: PixelRect::new(0, 0, 150, 30),
             scale: 1.0,
             cg_display_id: None,
             gdi_device: None,
         },
-        layout,
-        overrides,
+        tiling,
+        preferred_layout(overrides),
     )
-}
-
-#[test]
-fn sync_config_no_op_when_layout_unchanged() {
-    let mut hub = setup_hub();
-    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
-    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
-    let ws = hub.current_workspace();
-    let focus_before = hub.focused_window(ws);
-    let snap_before = snapshot(&hub);
-    hub.sync_configuration(GlobalLayoutConfig::default());
-    assert_eq!(hub.focused_window(ws), focus_before);
-    assert_eq!(snapshot(&hub), snap_before);
 }
 
 #[test]
@@ -74,7 +61,7 @@ fn sync_config_inactive_master_field_change_preserves_tree() {
     let focus_before = hub.focused_window(ws);
 
     // Change master-stack params while partition-tree is active.
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_master_config(MasterConfig {
             master_ratio: 0.3,
             master_count: 2,
@@ -133,7 +120,7 @@ fn sync_config_switches_partition_tree_to_master() {
     hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w7"), default_rect(), WindowRestrictions::None);
 
-    let l = layout(Strategy::Master, 0.5, 1, &[], &[]);
+    let l = tiling(Strategy::Master, 0.5, 1, &[], &[]);
     hub.sync_configuration(l);
 
     assert_snapshot!(snapshot(&hub), @"
@@ -180,13 +167,13 @@ fn sync_config_switches_partition_tree_to_master() {
 
 #[test]
 fn sync_config_switches_master_to_partition_tree() {
-    let mut hub = setup_hub_with_layout(layout(Strategy::Master, 0.5, 1, &[], &[]), Vec::new());
+    let mut hub = setup_hub_with_tiling(tiling(Strategy::Master, 0.5, 1, &[], &[]), Vec::new());
     hub.insert_window(titled("w8"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w9"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w10"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w11"), default_rect(), WindowRestrictions::None);
 
-    hub.sync_configuration(GlobalLayoutConfig::default());
+    hub.sync_configuration(fixtures::tiling_config());
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
@@ -233,7 +220,7 @@ fn sync_config_switches_master_to_partition_tree() {
 
 #[test]
 fn sync_config_swap_preserves_float_and_fullscreen() {
-    let mut hub = setup_with_layout(layout(Strategy::PartitionTree, 0.5, 1, &["w13"], &["w14"]));
+    let mut hub = setup_with_tiling(tiling(Strategy::PartitionTree, 0.5, 1, &["w13"], &["w14"]));
     let float_dim = PixelRect::new(10, 5, 30, 20);
     hub.insert_window(titled("w12"), default_rect(), WindowRestrictions::None);
     let _float_id = hub
@@ -282,7 +269,7 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
 
-    let l = layout(Strategy::Master, 0.5, 1, &["w13"], &["w14"]);
+    let l = tiling(Strategy::Master, 0.5, 1, &["w13"], &["w14"]);
     hub.sync_configuration(l);
 
     // Remove fullscreen to expose tiling + float layer.
@@ -332,7 +319,7 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
 fn sync_config_swap_empty_workspace_no_panic() {
     let mut hub = setup_hub();
     // No windows inserted.
-    let l = layout(Strategy::Master, 0.5, 1, &[], &[]);
+    let l = tiling(Strategy::Master, 0.5, 1, &[], &[]);
     hub.sync_configuration(l);
 
     assert_snapshot!(snapshot(&hub), @"
@@ -343,7 +330,7 @@ fn sync_config_swap_empty_workspace_no_panic() {
 
 #[test]
 fn sync_config_swap_iterates_every_active_workspace() {
-    let mut hub = setup_with_layout(layout(Strategy::PartitionTree, 0.5, 1, &["w23"], &[]));
+    let mut hub = setup_with_tiling(tiling(Strategy::PartitionTree, 0.5, 1, &["w23"], &[]));
     // Workspace "0": two tiling windows.
     hub.insert_window(titled("w15"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w16"), default_rect(), WindowRestrictions::None);
@@ -363,7 +350,7 @@ fn sync_config_swap_iterates_every_active_workspace() {
     // Go back to workspace "0" so post-swap snapshot shows it.
     hub.focus_workspace("0", None);
 
-    let l = layout(Strategy::Master, 0.5, 1, &["w23"], &[]);
+    let l = tiling(Strategy::Master, 0.5, 1, &["w23"], &[]);
     hub.sync_configuration(l);
 
     // Workspace "0" re-laid-out by master-stack.
@@ -454,17 +441,19 @@ fn sync_config_swap_iterates_every_active_workspace() {
 
 #[test]
 fn per_workspace_switch_leaves_sibling_unchanged() {
-    let mut hub = setup_hub_with_layout(
-        LayoutConfigBuilder::new().build(),
-        vec![LayoutWorkspaceConfig::Master {
-            name: "1".to_string(),
-            master_ratio: None,
-            master_count: None,
-            master: PaneConfig::tiled(Vec::new()),
-            secondary: PaneConfig::tiled(Vec::new()),
-            float: Vec::new(),
-            fullscreen: Vec::new(),
-        }],
+    let mut hub = setup_hub_with_tiling(
+        TilingConfigBuilder::new().build(),
+        [(
+            "1".to_string(),
+            PreferredWorkspace::Master {
+                master_ratio: None,
+                master_count: None,
+                master: PaneConfig::tiled(Vec::new()),
+                secondary: PaneConfig::tiled(Vec::new()),
+                float: Vec::new(),
+                fullscreen: Vec::new(),
+            },
+        )],
     );
 
     hub.insert_window(titled("w26"), default_rect(), WindowRestrictions::None);
@@ -475,7 +464,7 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
     hub.insert_window(titled("w29"), default_rect(), WindowRestrictions::None);
 
     // Reload with same config: workspace "1" stays master, "0" stays partition-tree.
-    let l = LayoutConfigBuilder::new().build();
+    let l = TilingConfigBuilder::new().build();
     hub.sync_configuration(l);
 
     // Workspace "1" uses master layout (big left pane + stack).
@@ -563,8 +552,8 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
 
 #[test]
 fn switch_into_preferred_tree_layout_focuses_every_migrated_window_in_turn() {
-    let mut hub = setup_hub_with_layout(
-        layout(Strategy::Master, 0.5, 1, &[], &[]),
+    let mut hub = setup_hub_with_tiling(
+        tiling(Strategy::Master, 0.5, 1, &[], &[]),
         vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
@@ -584,17 +573,15 @@ fn switch_into_preferred_tree_layout_focuses_every_migrated_window_in_turn() {
 
     // Only w30 and w31 match a slot, so w31 reaches the tree through a
     // preferred-layout attach helper, not the spawn-mode path.
-    hub.sync_preferred_layout(vec![
-        LayoutWorkspaceConfigBuilder::new("0")
-            .with_tree(TreeLayoutNode::Container {
-                split: Some(SplitMode::Vertical),
-                children: vec![
-                    TreeLayoutNode::Leaf(titled_matcher("w30")),
-                    TreeLayoutNode::Leaf(titled_matcher("w31")),
-                ],
-            })
-            .build(),
-    ]);
+    hub.sync_preferred_layout(preferred_layout([LayoutWorkspaceConfigBuilder::new("0")
+        .with_tree(TreeLayoutNode::Container {
+            split: Some(SplitMode::Vertical),
+            children: vec![
+                TreeLayoutNode::Leaf(titled_matcher("w30")),
+                TreeLayoutNode::Leaf(titled_matcher("w31")),
+            ],
+        })
+        .build()]));
 
     // Migration attaches all three but focuses one. Closing the focused window has
     // to land on another migrated window until none are left.
@@ -621,7 +608,7 @@ fn switching_a_workspace_to_master_frees_its_containers() {
     // whether or not it frees anything.
     assert_eq!(hub.access.containers.all_active().len(), 1);
 
-    hub.sync_configuration(layout(Strategy::Master, 0.5, 1, &[], &[]));
+    hub.sync_configuration(tiling(Strategy::Master, 0.5, 1, &[], &[]));
 
     // `snapshot` runs the arena reachability assertion, which is what checks the free.
     assert_snapshot!(snapshot(&hub), @"
@@ -667,17 +654,19 @@ fn switching_a_workspace_to_master_frees_its_containers() {
 /// Workspace "0" stays partition tree, "1" runs master with one slot so the pane split is
 /// observable with two windows.
 fn setup_master_on_workspace_one() -> Hub {
-    setup_hub_with_layout(
-        LayoutConfigBuilder::new().build(),
-        vec![LayoutWorkspaceConfig::Master {
-            name: "1".to_string(),
-            master_ratio: None,
-            master_count: Some(1),
-            master: PaneConfig::tiled(Vec::new()),
-            secondary: PaneConfig::tiled(Vec::new()),
-            float: Vec::new(),
-            fullscreen: Vec::new(),
-        }],
+    setup_hub_with_tiling(
+        TilingConfigBuilder::new().build(),
+        [(
+            "1".to_string(),
+            PreferredWorkspace::Master {
+                master_ratio: None,
+                master_count: Some(1),
+                master: PaneConfig::tiled(Vec::new()),
+                secondary: PaneConfig::tiled(Vec::new()),
+                float: Vec::new(),
+                fullscreen: Vec::new(),
+            },
+        )],
     )
 }
 

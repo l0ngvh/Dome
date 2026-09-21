@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use crate::action::{Action, Actions};
 use crate::core::ReportedMonitor;
-use crate::platform::macos::dome::{ExtRefresh, MacOSMetadata, NewWindow, PendingAdd};
+use crate::platform::macos::dome::ExtRefresh;
 
 use super::*;
 
@@ -11,30 +10,6 @@ fn core_scale_is_one_despite_the_backing_factor() {
     // `MonitorInfo.scale` is the NSScreen backing factor, 2.0 in the harness.
     // Core scale is always 1.0 on macOS, so the conversion must not carry it.
     assert_eq!(ReportedMonitor::from(&default_monitor()).scale, 1.0);
-}
-
-#[test]
-fn discover_native_fullscreen_window() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let ax = macos.window(cg1);
-    ax.set_native_fullscreen(true);
-    let nw = PendingAdd::NativeFullscreen {
-        new: NewWindow {
-            ax: Arc::new(ax.clone()),
-            metadata: MacOSMetadata {
-                app_name: Some("Safari".to_owned()),
-                bundle_id: None,
-                title: Some("Google".to_owned()),
-            },
-        },
-    };
-    dome.reconcile_windows(&[], &[], &[], vec![nw], &[], &[]);
-    macos.settle(&mut dome, 10);
-
-    assert!(dome.tracked_window(cg1).is_some());
 }
 
 #[test]
@@ -173,18 +148,6 @@ fn window_removed_fills_screen() {
 }
 
 #[test]
-fn render_frame_focused_state() {
-    let mut macos = MacOS::new();
-    let cg1 = macos.spawn_window(1, "App1", "Win1");
-    let mut dome = macos.setup_dome();
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
-
-    let state = macos.last_scene_state();
-    assert!(state.focused_window.is_some());
-    assert!(state.focused_monitor_id.is_some());
-}
-
-#[test]
 fn render_frame_focused_none_after_last_window_removed() {
     let mut macos = MacOS::new();
     let cg1 = macos.spawn_window(1, "App1", "Win1");
@@ -232,7 +195,7 @@ fn render_frame_focused_none_on_empty_workspace() {
 
 #[test]
 fn render_frame_focused_monitor_changes_on_focus_monitor() {
-    let macos = MacOS::new();
+    let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
     dome.monitors_changed(vec![default_monitor(), second_monitor()]);
 
@@ -241,100 +204,6 @@ fn render_frame_focused_monitor_changes_on_focus_monitor() {
     let after = macos.last_scene_state();
 
     assert_ne!(before.focused_monitor_id, after.focused_monitor_id);
-}
-
-#[test]
-fn multi_action_sequence_applies_each_hub_action() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
-
-    let actions = Actions::new(vec![
-        "focus workspace 1".parse().unwrap(),
-        "focus workspace 0".parse().unwrap(),
-    ]);
-    for action in &actions {
-        match action {
-            Action::Focus { target: t } => {
-                dome.apply_focus(t);
-                dome.flush_layout();
-            }
-            Action::Move { target: t } => {
-                dome.apply_move(t);
-                dome.flush_layout();
-            }
-            Action::Toggle { target: t } => {
-                dome.apply_toggle(t);
-                dome.flush_layout();
-            }
-            Action::Master { target: t } => {
-                dome.apply_master(t);
-                dome.flush_layout();
-            }
-            _ => {}
-        }
-    }
-
-    assert!(!macos.is_offscreen(cg1));
-    assert!(!macos.is_offscreen(cg2));
-}
-
-// These verify observable behavior at the Dome::reconcile_windows boundary.
-// The internal compute_reconciliation logic (is_valid fast path, app.windows()
-// membership, per-PID fullscreen guard) is tested indirectly: its output maps
-// to the refresh/to_remove/no-op slices passed to reconcile_windows.
-
-#[test]
-fn reconcile_keeps_window_when_is_valid_true() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
-    macos.settle(&mut dome, 10);
-
-    let wid_before = dome.tracked_window(cg1).unwrap().window_id;
-
-    // Fast path: is_valid stays true, no removal requested.
-    dome.reconcile_windows(&[], &[], &[], vec![], &[], &[]);
-
-    let entry = dome
-        .tracked_window(cg1)
-        .expect("window must remain tracked");
-    assert_eq!(entry.window_id, wid_before);
-}
-
-#[test]
-fn reconcile_keeps_window_when_app_windows_errs() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
-    macos.settle(&mut dome, 10);
-
-    // When app.windows(marker) returns Err, compute_reconciliation returns
-    // all-empty (no removes, no adds, no refresh).
-    // set_valid(false) documents the scenario trigger even though this test
-    // bypasses compute_reconciliation and feeds reconcile_windows directly.
-    macos.window(cg1).set_valid(false);
-    dome.reconcile_windows(&[], &[], &[], vec![], &[], &[]);
-
-    assert!(
-        dome.tracked_window(cg1).is_some(),
-        "AX-app-unavailable must keep tracked entries"
-    );
 }
 
 #[test]
@@ -376,36 +245,6 @@ fn reconcile_keeps_and_refreshes_when_cg_id_present() {
         !Arc::ptr_eq(&ext_before, &entry.ext),
         "ext handle must be swapped after refresh"
     );
-}
-
-#[test]
-fn reconcile_keeps_when_cg_id_absent_but_pid_has_fullscreen() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let cg2 = macos.spawn_window(100, "Safari", "Tabs");
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
-    macos.enter_native_fullscreen(&mut dome, cg2);
-
-    // Space-switch scenario: is_valid false on cg1, app.windows() empty.
-    // Fullscreen guard keeps the entry.
-    macos.window(cg1).set_valid(false);
-    dome.reconcile_windows(&[], &[], &[], vec![], &[], &[]);
-
-    assert!(
-        dome.tracked_window(cg1).is_some(),
-        "fullscreen guard must keep window when same-PID has native fullscreen"
-    );
-    assert!(dome.tracked_window(cg2).is_some());
 }
 
 #[test]
@@ -521,7 +360,7 @@ fn parked_monitor_windows_unhide_on_visit() {
 
 #[test]
 fn primary_monitor_answers_to_its_display_name() {
-    let macos = MacOS::new();
+    let mut macos = MacOS::new();
     let dome = macos.setup_dome();
 
     let monitors = dome.query_monitors_json();
@@ -557,7 +396,7 @@ fn primary_change_to_a_new_display_carries_the_workspaces() {
 
 #[test]
 fn primary_change_to_a_tracked_display_parks_the_displaced_workspaces() {
-    let macos = MacOS::new();
+    let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
     dome.monitors_changed(vec![default_monitor(), second_monitor()]);
     macos.settle(&mut dome, 10);

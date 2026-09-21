@@ -1,11 +1,11 @@
-use crate::config::Strategy;
 use crate::core::ContainerId;
 use crate::core::PaneDisplay;
+use crate::core::Strategy;
 use crate::core::WindowRestrictions;
 use crate::core::allocator::NodeId;
 use crate::core::node::Pixels;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder,
+    LayoutWorkspaceConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder, TilingConfigBuilder,
     default_rect, snapshot, titled,
 };
 use insta::assert_snapshot;
@@ -15,8 +15,8 @@ fn tabbed_pane_keeps_min_height_when_tab_bar_exceeds_screen() {
     // snapshot() runs validate_hub, which asserts each window keeps its min height.
     // That invariant, not the rendered text, is what this test guards.
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .with_partition_tree_config(
                     PartitionTreeConfigBuilder::new()
@@ -49,8 +49,8 @@ fn tabbed_pane_keeps_min_height_when_tab_bar_exceeds_screen() {
 #[test]
 fn toggle_master_pane_to_tabbed() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -107,8 +107,8 @@ fn toggle_master_pane_to_tabbed() {
 #[test]
 fn single_window_pane_tabbed_shows_no_bar() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -163,8 +163,8 @@ fn single_window_pane_tabbed_shows_no_bar() {
 #[test]
 fn secondary_pane_tabbed() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -224,8 +224,8 @@ fn secondary_pane_tabbed() {
 #[test]
 fn focus_tab_cycles_active_window() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -258,8 +258,8 @@ fn focus_tab_cycles_active_window() {
 #[test]
 fn focus_tab_wraps_backward() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -289,8 +289,8 @@ fn focus_tab_wraps_backward() {
 #[test]
 fn tab_click_focuses_window() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -320,8 +320,8 @@ fn tab_click_focuses_window() {
 #[test]
 fn tab_click_out_of_range_is_noop() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -347,8 +347,8 @@ fn tab_click_out_of_range_is_noop() {
 #[test]
 fn focus_tab_is_noop_on_tiled_pane() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -374,8 +374,8 @@ fn focus_tab_is_noop_on_tiled_pane() {
 #[test]
 fn toggle_off_restores_tiled() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )

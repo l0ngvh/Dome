@@ -1,17 +1,17 @@
 use insta::assert_snapshot;
 
-use crate::config::{MasterConfig, Strategy, WindowMatcher};
 use crate::core::WindowRestrictions;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, snapshot,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect, snapshot,
     titled, titled_process,
 };
+use crate::core::{MasterConfig, Strategy, WindowMatcher};
 
 #[test]
 fn delete_window() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -108,8 +108,8 @@ fn delete_window() {
 #[test]
 fn detach_refills_master_from_unmatched_secondary() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -164,8 +164,8 @@ fn detach_refills_master_from_unmatched_secondary() {
 #[test]
 fn detach_keeps_matched_secondary_pinned() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -247,8 +247,8 @@ fn detach_keeps_matched_secondary_pinned() {
 #[test]
 fn detach_focused_child_refills_master() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -303,8 +303,8 @@ fn detach_focused_child_refills_master() {
 #[test]
 fn detach_refills_when_master_count_above_one() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .with_master_config(MasterConfig {
                     master_ratio: 0.5,

@@ -1,17 +1,18 @@
-use crate::config::{PaneConfig, Strategy, WindowMatcher};
 use crate::core::PaneDisplay;
 use crate::core::WindowRestrictions;
+use crate::core::master::PaneConfig;
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, titled,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect, titled,
     titled_process,
 };
+use crate::core::{Strategy, WindowMatcher};
 
 #[test]
 fn export_master_empty_workspace() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -32,8 +33,8 @@ fn export_master_empty_workspace() {
 #[test]
 fn export_master_single_window() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -63,8 +64,8 @@ fn export_master_matched_preserves_slot_matcher() {
         ..Default::default()
     };
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -98,8 +99,8 @@ fn export_master_mixed_matched_and_unmatched() {
         ..Default::default()
     };
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -134,8 +135,8 @@ fn export_master_mixed_matched_and_unmatched() {
 #[test]
 fn export_two_windows_one_slot_emits_single_matcher() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -178,8 +179,8 @@ fn export_two_windows_one_slot_emits_single_matcher() {
 #[test]
 fn export_reload_restores_tabbed_pane() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -199,14 +200,14 @@ fn export_reload_restores_tabbed_pane() {
     let export = hub.export_workspace(ws);
     assert_eq!(export.master.display, PaneDisplay::Tabbed);
 
-    let config = export.to_layout_workspace_config("1");
+    let config = export.to_layout_workspace_config();
     let mut reloaded = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_preferred_layout(vec![config])
+        .with_preferred_layout([("1".to_string(), config)])
         .build();
     reloaded.focus_workspace("1", None);
     let rws = reloaded.current_workspace();

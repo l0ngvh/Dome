@@ -2,25 +2,21 @@
 
 ## YASB
 
-Generate the YASB config file with:
-
 ```powershell
 dome generate yasb
 ```
 
-Then reload YASB for the change to take effect.
+Then reload YASB.
 
 ## SketchyBar
 
-Generate the SketchyBar plugin with (requires `jq`):
+Requires `jq`:
 
 ```bash
 dome generate sketchybar
 ```
 
 ## Zebar
-
-Scaffold the widget pack with:
 
 ```powershell
 dome generate zebar

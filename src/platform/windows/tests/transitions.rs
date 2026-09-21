@@ -3,8 +3,8 @@ use super::*;
 #[test]
 fn toggle_fullscreen_hides_siblings() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w1 = env.open();
+    let w2 = env.open();
 
     // w2 is focused (last added). Toggle fullscreen.
     env.run_actions("toggle fullscreen");
@@ -21,8 +21,8 @@ fn toggle_fullscreen_hides_siblings() {
 #[test]
 fn toggle_fullscreen_on_and_off() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w1 = env.open();
+    let w2 = env.open();
 
     let before1 = env.dim(w1);
     let before2 = env.dim(w2);
@@ -42,8 +42,8 @@ fn toggle_fullscreen_on_and_off() {
 #[test]
 fn toggle_float() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w1 = env.open();
+    let w2 = env.open();
 
     // w2 is focused. Toggle float.
     env.run_actions("toggle float");
@@ -54,9 +54,8 @@ fn toggle_float() {
     assert!(!env.is_topmost(w1));
     assert!(env.is_topmost(w2));
     let d1 = env.dim(w1);
-    let border = Length::from_pixels(env.config.border_size).logical();
     assert!(
-        (d1.width - (SCREEN_WIDTH - Length::new(2.0 * border))).abs() < Length::new(1.0),
+        (d1.width - (SCREEN_WIDTH - env.border() * 2.0)).abs() < Length::new(1.0),
         "w1 should fill screen width, got {}",
         d1.width
     );
@@ -65,8 +64,8 @@ fn toggle_float() {
 #[test]
 fn fullscreen_restored_after_workspace_switch() {
     let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let _w1 = env.open();
+    let w2 = env.open();
 
     env.run_actions("toggle fullscreen");
     let fs_dim = env.dim(w2);
@@ -83,10 +82,10 @@ fn fullscreen_restored_after_workspace_switch() {
 #[test]
 fn window_created_as_fullscreen_borderless() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w1 = env.open();
 
     // Second window arrives already fullscreen
-    let _w2 = env.open(2, "Game", "game.exe", fullscreen_dim());
+    let _w2 = env.window().spawned_at(fullscreen_dim()).open();
 
     // w1 should be hidden (fullscreen window takes over)
     assert!(env.is_offscreen(w1));
@@ -95,8 +94,8 @@ fn window_created_as_fullscreen_borderless() {
 #[test]
 fn move_window_to_other_workspace() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w1 = env.open();
+    let w2 = env.open();
 
     // Move w2 (focused) to workspace 1
     env.run_actions("move workspace 1");
@@ -104,17 +103,13 @@ fn move_window_to_other_workspace() {
     // w2 should be offscreen, w1 should fill the screen
     assert!(env.is_offscreen(w2));
     assert!(env.is_bottom(w2));
-    assert_h_tiled(
-        &[env.dim(w1)],
-        default_monitor().work_area,
-        env.config.border_size,
-    );
+    env.assert_horizontally_tiled(&[env.dim(w1)]);
 }
 
 #[test]
 fn fullscreen_exclusive_not_repositioned() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "Game", "game.exe", SPAWN_DIM);
+    let w1 = env.open();
 
     env.enter_exclusive_fullscreen(w1);
     let after_exclusive = env.dim(w1);
@@ -127,7 +122,7 @@ fn fullscreen_exclusive_not_repositioned() {
 #[test]
 fn borderless_fullscreen_restored_on_workspace_switch_back() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "Game", "game.exe", fullscreen_dim());
+    let w1 = env.window().spawned_at(fullscreen_dim()).open();
     assert!(!env.is_minimized(w1));
     assert_eq!(env.dim(w1), fullscreen_dim());
 
@@ -142,7 +137,7 @@ fn borderless_fullscreen_restored_on_workspace_switch_back() {
 #[test]
 fn dome_minimized_window_survives_minimize_event() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "Game", "game.exe", fullscreen_dim());
+    let w1 = env.window().spawned_at(fullscreen_dim()).open();
 
     env.run_actions("focus workspace 1");
     assert!(env.is_minimized(w1));
@@ -154,8 +149,8 @@ fn dome_minimized_window_survives_minimize_event() {
 #[test]
 fn float_restored_from_offscreen_is_topmost() {
     let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let _w1 = env.open();
+    let w2 = env.open();
 
     // Float w2, then switch away
     env.run_actions("toggle float");
@@ -174,8 +169,8 @@ fn float_restored_from_offscreen_is_topmost() {
 #[test]
 fn float_to_tiling_loses_topmost() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w1 = env.open();
+    let w2 = env.open();
 
     env.run_actions("toggle float");
     assert!(env.is_topmost(w2));
@@ -188,8 +183,8 @@ fn float_to_tiling_loses_topmost() {
 #[test]
 fn float_focus_change_retops() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w1 = env.open();
+    let w2 = env.open();
 
     // Float both
     env.run_actions("toggle float");
@@ -207,9 +202,9 @@ fn float_focus_change_retops() {
 #[test]
 fn tiling_windows_not_topmost() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    let w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
+    let w1 = env.open();
+    let w2 = env.open();
+    let w3 = env.open();
 
     assert!(!env.is_topmost(w1));
     assert!(!env.is_topmost(w2));
@@ -219,12 +214,12 @@ fn tiling_windows_not_topmost() {
 #[test]
 fn float_survives_sibling_add() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w1 = env.open();
 
     env.run_actions("toggle float");
     assert!(env.is_topmost(w1));
 
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w2 = env.open();
 
     // w1 should still be float and topmost
     assert!(env.is_topmost(w1));
@@ -234,7 +229,7 @@ fn float_survives_sibling_add() {
 #[test]
 fn exclusive_fullscreen_blocks_all_commands() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "Game", "game.exe", SPAWN_DIM);
+    let w1 = env.open();
 
     env.enter_exclusive_fullscreen(w1);
     let dim_before = env.dim(w1);
@@ -270,7 +265,7 @@ fn exclusive_fullscreen_blocks_all_commands() {
 #[test]
 fn borderless_fullscreen_blocks_toggle_float_but_allows_workspace_move() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "Game", "game.exe", fullscreen_dim());
+    let w1 = env.window().spawned_at(fullscreen_dim()).open();
     let dim_before = env.dim(w1);
     assert_eq!(dim_before, fullscreen_dim());
 
@@ -286,7 +281,7 @@ fn borderless_fullscreen_blocks_toggle_float_but_allows_workspace_move() {
 #[test]
 fn borderless_fullscreen_exit_unblocks_commands() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "Game", "game.exe", fullscreen_dim());
+    let w1 = env.window().spawned_at(fullscreen_dim()).open();
     let dim_before = env.dim(w1);
     assert_eq!(dim_before, fullscreen_dim());
 
@@ -306,8 +301,8 @@ fn borderless_fullscreen_exit_unblocks_commands() {
 #[test]
 fn borderless_fullscreen_exit_reflows_siblings() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "Game", "game.exe", fullscreen_dim());
+    let w1 = env.open();
+    let w2 = env.window().spawned_at(fullscreen_dim()).open();
 
     assert!(env.is_offscreen(w1));
 
@@ -327,8 +322,8 @@ fn borderless_fullscreen_exit_reflows_siblings() {
 #[test]
 fn focusing_another_float_raises_it_with_its_overlay() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w1 = env.open();
+    let w2 = env.open();
     env.run_actions("toggle float");
     env.focus_window(w1);
     env.run_actions("toggle float");
@@ -338,12 +333,7 @@ fn focusing_another_float_raises_it_with_its_overlay() {
 
     // Each overlay is a larger window directly beneath its float, so its edges form the border.
     let z = env.z_order();
-    let overlays: Vec<HwndId> = env
-        .float_overlays()
-        .iter()
-        .filter(|f| f.state.is_visible())
-        .map(|f| f.overlay_id)
-        .collect();
+    let overlays = env.float_overlay_ids();
     assert_eq!(
         z[0], w1,
         "newly focused float must be raised to the top: {z:?}"
@@ -363,24 +353,30 @@ fn focusing_another_float_raises_it_with_its_overlay() {
 #[test]
 fn float_overlay_updates_on_focus_to_tiling() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w1 = env.open();
+    let _w2 = env.open();
     env.run_actions("toggle float");
 
-    let before = visible_float_state(&env);
+    assert_eq!(
+        highlighted_float(&env),
+        Some(true),
+        "the focused float must paint its border as the highlighted one",
+    );
+
     env.focus_window(w1);
-    assert_ne!(
-        visible_float_state(&env),
-        before,
-        "float overlay state must change when focus moves from a float to a tiling window",
+
+    assert_eq!(
+        highlighted_float(&env),
+        Some(false),
+        "a float losing focus to a tiling window must keep its overlay and drop the highlight",
     );
 }
 
 #[test]
 fn float_focus_away_does_not_change_topmost() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w1 = env.open();
+    let w2 = env.open();
     env.run_actions("toggle float");
     env.focus_window(w1);
     env.run_actions("toggle float");
@@ -393,8 +389,8 @@ fn float_focus_away_does_not_change_topmost() {
 #[test]
 fn tiling_state_preserved_through_user_minimize() {
     let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let _w1 = env.open();
+    let w2 = env.open();
 
     let dim_before = env.dim(w2);
     assert!(!env.is_minimized(w2));
@@ -412,12 +408,30 @@ fn tiling_state_preserved_through_user_minimize() {
 }
 
 #[test]
+fn tiling_state_restored_by_the_unminimize_action() {
+    let mut env = TestEnv::new();
+    let _w1 = env.open();
+    let w2 = env.open();
+
+    let dim_before = env.dim(w2);
+
+    env.minimize_window(w2);
+    assert!(env.is_minimized(w2));
+
+    env.run_unminimize(w2);
+
+    assert!(!env.is_minimized(w2));
+    assert!(!env.is_offscreen(w2));
+    assert_eq!(env.dim(w2), dim_before);
+}
+
+#[test]
 fn float_state_preserved_through_user_minimize() {
     // A float window user-minimized via the OS should return to its
     // original float position and retain topmost z-order when restored.
     let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let _w1 = env.open();
+    let w2 = env.open();
 
     // w2 is focused (last added). Toggle to float.
     env.run_actions("toggle float");
@@ -444,7 +458,7 @@ fn fullscreen_borderless_state_preserved_through_user_minimize() {
     // from the dome-minimize path tested by
     // borderless_fullscreen_restored_on_workspace_switch_back.
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "Game", "game.exe", fullscreen_dim());
+    let w1 = env.window().spawned_at(fullscreen_dim()).open();
 
     let dim_before = env.dim(w1);
     assert_eq!(dim_before, fullscreen_dim());
@@ -461,9 +475,23 @@ fn fullscreen_borderless_state_preserved_through_user_minimize() {
 }
 
 #[test]
+fn borderless_fullscreen_restored_by_the_unminimize_action() {
+    let mut env = TestEnv::new();
+    let w1 = env.window().spawned_at(fullscreen_dim()).open();
+
+    env.minimize_window(w1);
+    assert!(env.is_minimized(w1));
+
+    env.run_unminimize(w1);
+
+    assert!(!env.is_minimized(w1));
+    assert_eq!(env.dim(w1), fullscreen_dim());
+}
+
+#[test]
 fn minimized_borderless_fullscreen_dont_get_affect_by_stale_move_event() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "Game", "game.exe", fullscreen_dim());
+    let w1 = env.window().spawned_at(fullscreen_dim()).open();
 
     env.run_actions("focus workspace 1");
     assert!(env.is_minimized(w1));
@@ -481,7 +509,7 @@ fn minimized_borderless_fullscreen_dont_get_affect_by_stale_move_event() {
 #[test]
 fn fullscreen_exclusive_state_preserved_through_user_minimize() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "Game", "game.exe", SPAWN_DIM);
+    let w1 = env.open();
 
     env.enter_exclusive_fullscreen(w1);
     let dim_after_exclusive = env.dim(w1);
@@ -511,8 +539,8 @@ fn fullscreen_exclusive_state_preserved_through_user_minimize() {
 #[test]
 fn dome_issued_fullscreen_placement_does_not_flip_to_borderless_fullscreen() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w1 = env.open();
+    let w2 = env.open();
 
     // Toggle fullscreen on w2 -> show_fullscreen_window places at monitor.dim.
     env.run_actions("toggle fullscreen");
@@ -532,10 +560,7 @@ fn dome_issued_fullscreen_placement_does_not_flip_to_borderless_fullscreen() {
     assert!(!env.is_offscreen(w1), "sibling should be re-tiled");
 }
 
-fn visible_float_state(env: &TestEnv) -> FloatOverlayState {
-    env.float_overlays()
-        .iter()
-        .find(|f| f.state.is_visible())
-        .map(|f| f.state)
-        .unwrap_or(FloatOverlayState::Hidden)
+/// Whether the newest scene paints its float border as the highlighted one.
+fn highlighted_float(env: &TestEnv) -> Option<bool> {
+    env.painted_float().map(|wp| wp.is_highlighted)
 }

@@ -16,24 +16,26 @@ mod strategy_switch;
 
 use std::collections::HashSet;
 
-use crate::config::{
-    LayoutWorkspaceConfig, MasterConfig, PaneConfig, PartitionTreeConfig, SizeConstraint,
-    SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
-};
-use crate::core::GlobalLayoutConfig;
 use crate::core::PaneDisplay;
-use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
+use crate::core::TilingConfig;
+use crate::core::hub::{Hub, MonitorLayout};
+use crate::core::master::PaneConfig;
 use crate::core::node::{Direction, Logical, Pixels, WindowId};
-use crate::core::strategy::TilingAction;
+use crate::core::strategy::StrategyAction;
 use crate::core::{
     ContainerPlacement, FloatWindowPlacement, PixelRect, ReportedMonitor, TilingWindowPlacement,
     WindowMetadata,
+};
+use crate::core::{
+    MasterConfig, PartitionTreeConfig, PreferredLayouts, PreferredWorkspace, SizeConstraint,
+    SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
 };
 
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;
 const TAB_BAR_HEIGHT: i32 = 2;
 const BORDER_SIZE: i32 = 1;
+pub(super) const PRIMARY_MONITOR: &str = "primary";
 
 pub(super) fn snapshot(hub: &Hub) -> String {
     validate_hub(hub);
@@ -205,18 +207,11 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
     s
 }
 
-fn fmt_spawn(indicator: &SpawnIndicator) -> String {
-    let dirs: Vec<&str> = [
-        (indicator.top, "top"),
-        (indicator.right, "right"),
-        (indicator.bottom, "bottom"),
-        (indicator.left, "left"),
-    ]
-    .iter()
-    .filter(|(on, _)| *on)
-    .map(|(_, name)| *name)
-    .collect();
-    dirs.join("+")
+fn fmt_spawn(direction: Direction) -> &'static str {
+    match direction {
+        Direction::Horizontal => "right",
+        Direction::Vertical => "bottom",
+    }
 }
 
 fn fmt_tiling_placement(wp: &TilingWindowPlacement) -> String {
@@ -228,8 +223,8 @@ fn fmt_tiling_placement(wp: &TilingWindowPlacement) -> String {
     if wp.is_highlighted {
         parts.push_str(", highlighted");
     }
-    if let Some(ref si) = wp.spawn_indicator {
-        parts.push_str(&format!(", spawn={}", fmt_spawn(si)));
+    if let Some(direction) = wp.spawn_direction {
+        parts.push_str(&format!(", spawn={}", fmt_spawn(direction)));
     }
     parts.push_str(")\n");
     parts
@@ -261,8 +256,8 @@ fn fmt_container_placement(cp: &ContainerPlacement) -> String {
     if cp.is_highlighted {
         parts.push_str(", highlighted");
     }
-    if let Some(ref si) = cp.spawn_indicator {
-        parts.push_str(&format!(", spawn={}", fmt_spawn(si)));
+    if let Some(direction) = cp.spawn_direction {
+        parts.push_str(&format!(", spawn={}", fmt_spawn(direction)));
     }
     let titles = cp.titles.join(", ");
     parts.push_str(&format!(", titles=[{}]", titles));
@@ -564,83 +559,83 @@ fn validate_minimized(hub: &Hub) {
 
 impl Hub {
     pub(crate) fn focus_left(&mut self) {
-        self.handle_tiling_action(TilingAction::FocusDirection {
+        self.handle_tiling_action(StrategyAction::FocusDirection {
             direction: Direction::Horizontal,
             forward: false,
         });
     }
 
     pub(crate) fn focus_right(&mut self) {
-        self.handle_tiling_action(TilingAction::FocusDirection {
+        self.handle_tiling_action(StrategyAction::FocusDirection {
             direction: Direction::Horizontal,
             forward: true,
         });
     }
 
     pub(crate) fn focus_up(&mut self) {
-        self.handle_tiling_action(TilingAction::FocusDirection {
+        self.handle_tiling_action(StrategyAction::FocusDirection {
             direction: Direction::Vertical,
             forward: false,
         });
     }
 
     pub(crate) fn focus_down(&mut self) {
-        self.handle_tiling_action(TilingAction::FocusDirection {
+        self.handle_tiling_action(StrategyAction::FocusDirection {
             direction: Direction::Vertical,
             forward: true,
         });
     }
 
     pub(crate) fn focus_parent(&mut self) {
-        self.handle_tiling_action(TilingAction::FocusParent);
+        self.handle_tiling_action(StrategyAction::FocusParent);
     }
 
     pub(crate) fn focus_next_tab(&mut self) {
-        self.handle_tiling_action(TilingAction::FocusTab { forward: true });
+        self.handle_tiling_action(StrategyAction::FocusTab { forward: true });
     }
 
     pub(crate) fn focus_prev_tab(&mut self) {
-        self.handle_tiling_action(TilingAction::FocusTab { forward: false });
+        self.handle_tiling_action(StrategyAction::FocusTab { forward: false });
     }
 
     pub(crate) fn move_left(&mut self) {
-        self.handle_tiling_action(TilingAction::MoveDirection {
+        self.handle_tiling_action(StrategyAction::MoveDirection {
             direction: Direction::Horizontal,
             forward: false,
         });
     }
 
     pub(crate) fn move_right(&mut self) {
-        self.handle_tiling_action(TilingAction::MoveDirection {
+        self.handle_tiling_action(StrategyAction::MoveDirection {
             direction: Direction::Horizontal,
             forward: true,
         });
     }
 
     pub(crate) fn move_up(&mut self) {
-        self.handle_tiling_action(TilingAction::MoveDirection {
+        self.handle_tiling_action(StrategyAction::MoveDirection {
             direction: Direction::Vertical,
             forward: false,
         });
     }
 
     pub(crate) fn move_down(&mut self) {
-        self.handle_tiling_action(TilingAction::MoveDirection {
+        self.handle_tiling_action(StrategyAction::MoveDirection {
             direction: Direction::Vertical,
             forward: true,
         });
     }
 
     pub(crate) fn toggle_spawn_mode(&mut self) {
-        self.handle_tiling_action(TilingAction::ToggleSpawnMode);
+        self.handle_tiling_action(StrategyAction::ToggleSpawnMode);
     }
 
     pub(crate) fn toggle_direction(&mut self) {
-        self.handle_tiling_action(TilingAction::ToggleDirection);
+        self.handle_tiling_action(StrategyAction::ToggleDirection);
     }
 
     pub(crate) fn toggle_container_layout(&mut self) {
-        self.handle_tiling_action(TilingAction::ToggleContainerLayout);
+        self.handle_tiling_action(StrategyAction::ToggleContainerLayout);
     }
 }
 
@@ -652,27 +647,42 @@ pub(super) fn setup_logger_with_level(level: &str) {
 
 #[derive(Clone)]
 struct TestHubBuilder {
-    layout: GlobalLayoutConfig,
-    preferred_layout: Vec<LayoutWorkspaceConfig>,
+    tiling: TilingConfig,
+    preferred_layout: PreferredLayouts,
     scale: f32,
 }
 
 impl TestHubBuilder {
     fn new() -> Self {
         Self {
-            layout: LayoutConfigBuilder::new().build(),
-            preferred_layout: Vec::new(),
+            tiling: TilingConfigBuilder::new().build(),
+            preferred_layout: PreferredLayouts::default(),
             scale: 1.0,
         }
     }
 
-    fn with_layout(self, layout: GlobalLayoutConfig) -> Self {
-        Self { layout, ..self }
+    fn with_tiling(self, tiling: TilingConfig) -> Self {
+        Self { tiling, ..self }
     }
 
-    fn with_preferred_layout(self, preferred_layout: Vec<LayoutWorkspaceConfig>) -> Self {
+    fn with_preferred_layout(
+        self,
+        preferred_layout: impl IntoIterator<Item = (String, PreferredWorkspace)>,
+    ) -> Self {
+        self.with_preferred_layout_on(PRIMARY_MONITOR, preferred_layout)
+    }
+
+    fn with_preferred_layout_on(
+        self,
+        monitor: &str,
+        preferred_layout: impl IntoIterator<Item = (String, PreferredWorkspace)>,
+    ) -> Self {
+        let mut layouts = self.preferred_layout;
+        for (name, entry) in preferred_layout {
+            layouts.insert(monitor, &name, entry);
+        }
         Self {
-            preferred_layout,
+            preferred_layout: layouts,
             ..self
         }
     }
@@ -691,19 +701,19 @@ impl TestHubBuilder {
     fn build(self) -> Hub {
         Hub::new(
             ReportedMonitor {
-                device_name: "primary".to_string(),
+                device_name: PRIMARY_MONITOR.to_string(),
                 work_area: PixelRect::new(0, 0, ASCII_WIDTH as i32, ASCII_HEIGHT as i32),
                 scale: self.scale,
                 cg_display_id: None,
                 gdi_device: None,
             },
-            self.layout,
+            self.tiling,
             self.preferred_layout,
         )
     }
 }
 
-struct LayoutConfigBuilder {
+struct TilingConfigBuilder {
     strategy: Strategy,
     border_size: Pixels<Logical>,
     master: MasterConfig,
@@ -713,7 +723,7 @@ struct LayoutConfigBuilder {
     fullscreen: Vec<WindowMatcher>,
 }
 
-impl LayoutConfigBuilder {
+impl TilingConfigBuilder {
     fn new() -> Self {
         Self {
             strategy: Strategy::PartitionTree,
@@ -806,9 +816,9 @@ impl LayoutConfigBuilder {
         Self { fullscreen, ..self }
     }
 
-    fn build(self) -> GlobalLayoutConfig {
-        GlobalLayoutConfig {
-            strategy: self.strategy,
+    fn build(self) -> TilingConfig {
+        TilingConfig {
+            layout: self.strategy,
             border_size: self.border_size,
             partition_tree: self.partition_tree,
             master: self.master,
@@ -941,10 +951,9 @@ impl LayoutWorkspaceConfigBuilder {
         }
     }
 
-    fn build(self) -> LayoutWorkspaceConfig {
-        match self.strategy {
-            Strategy::Master => LayoutWorkspaceConfig::Master {
-                name: self.name,
+    fn build(self) -> (String, PreferredWorkspace) {
+        let entry = match self.strategy {
+            Strategy::Master => PreferredWorkspace::Master {
                 master_count: self.master_count,
                 master_ratio: self.master_ratio,
                 master: PaneConfig {
@@ -958,13 +967,13 @@ impl LayoutWorkspaceConfigBuilder {
                 float: self.float,
                 fullscreen: self.fullscreen,
             },
-            Strategy::PartitionTree => LayoutWorkspaceConfig::PartitionTree {
-                name: self.name,
+            Strategy::PartitionTree => PreferredWorkspace::PartitionTree {
                 tree: self.tree,
                 float: self.float,
                 fullscreen: self.fullscreen,
             },
-        }
+        };
+        (self.name, entry)
     }
 }
 
@@ -972,16 +981,31 @@ pub(super) fn setup_hub() -> Hub {
     TestHubBuilder::new().build()
 }
 
+pub(super) fn preferred_layout(
+    entries: impl IntoIterator<Item = (String, PreferredWorkspace)>,
+) -> PreferredLayouts {
+    preferred_layout_on(PRIMARY_MONITOR, entries)
+}
+
+pub(super) fn preferred_layout_on(
+    monitor: &str,
+    entries: impl IntoIterator<Item = (String, PreferredWorkspace)>,
+) -> PreferredLayouts {
+    let mut layouts = PreferredLayouts::default();
+    for (name, entry) in entries {
+        layouts.insert(monitor, &name, entry);
+    }
+    layouts
+}
+
 pub(super) fn setup() -> Hub {
     setup_logger_with_level("warn");
     setup_hub()
 }
 
-/// `setup()` with a caller-supplied layout config. An open-coded
-/// `TestHubBuilder` chain would lose the logger initialisation.
-pub(super) fn setup_with_layout(layout: GlobalLayoutConfig) -> Hub {
+pub(super) fn setup_with_tiling(tiling: TilingConfig) -> Hub {
     setup_logger_with_level("warn");
-    TestHubBuilder::new().with_layout(layout).build()
+    TestHubBuilder::new().with_tiling(tiling).build()
 }
 
 pub(super) fn titled_matcher(title: &str) -> WindowMatcher {
@@ -1017,7 +1041,7 @@ impl WindowMetadata for TestMetadata {
         Box::new(self.clone())
     }
 
-    fn matches_window_matcher(&self, matcher: &crate::config::WindowMatcher) -> bool {
+    fn matches_window_matcher(&self, matcher: &WindowMatcher) -> bool {
         let title = self.title.as_deref();
         let process = self.process.as_deref();
 
@@ -1034,25 +1058,40 @@ impl WindowMetadata for TestMetadata {
             return false;
         }
         if let Some(p) = matcher.process.as_deref()
-            && !process.is_some_and(|s| crate::config::pattern_matches(p, s))
+            && !process.is_some_and(|s| crate::core::pattern_matches(p, s))
         {
             return false;
         }
         if let Some(p) = matcher.title.as_deref()
-            && !title.is_some_and(|t| crate::config::pattern_matches(p, t))
+            && !title.is_some_and(|t| crate::core::pattern_matches(p, t))
         {
             return false;
         }
         matcher.process.is_some() || matcher.title.is_some()
     }
 
-    fn to_window_matcher(&self) -> crate::config::WindowMatcher {
-        crate::config::WindowMatcher {
+    fn to_window_matcher(&self) -> WindowMatcher {
+        WindowMatcher {
             title: self.title.clone(),
             process: self.process.clone(),
             ..Default::default()
         }
     }
+}
+
+pub(crate) fn parse_exported_layout(path: &str) -> PreferredLayouts {
+    use crate::config::lua::deserializer::{FromLuaValue, LoadContext};
+
+    let src = std::fs::read_to_string(path).expect("exported layout.lua is readable");
+    let lua = mlua::Lua::new();
+    let value: mlua::Value = lua
+        .load(&src)
+        .set_name(path)
+        .eval()
+        .expect("exported layout.lua evaluates as Lua");
+    let mut cx = LoadContext::new();
+    PreferredLayouts::from_lua_value(&value, &mut cx)
+        .expect("exported layout.lua reads as the layout vocabulary")
 }
 
 /// Rect for test inserts where geometry is not under assertion. Tiling ignores it.

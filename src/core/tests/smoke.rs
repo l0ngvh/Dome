@@ -4,19 +4,21 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect,
     reported_monitor, setup_logger_with_level, titled, titled_matcher, validate_hub,
 };
 use crate::action::MonitorTarget;
-use crate::config::{
-    LayoutWorkspaceConfig, SizeConstraint, SplitMode, Strategy, TreeLayoutNode, WindowMatcher,
-};
-use crate::core::hub::{GlobalLayoutConfig, Hub};
+use crate::core::hub::Hub;
 use crate::core::node::{
     Length, LimitObservation, LimitUpdate, MonitorId, PixelRect, Pixels, WindowId,
     WindowRestrictions,
 };
-use crate::core::strategy::TilingAction;
+use crate::core::strategy::StrategyAction;
+use crate::core::tiling::TilingConfig;
+use crate::core::{
+    PreferredLayouts, PreferredWorkspace, SizeConstraint, SplitMode, Strategy, TreeLayoutNode,
+    WindowMatcher,
+};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
@@ -53,7 +55,7 @@ impl SmokeStrategy {
 
     fn build_hub(self) -> Hub {
         TestHubBuilder::new()
-            .with_layout(initial_layout(self))
+            .with_tiling(initial_tiling(self))
             .build()
     }
 }
@@ -79,10 +81,10 @@ fn pref_title_pool() -> Vec<String> {
     (0..PREF_TITLE_POOL_SIZE).map(pref_title).collect()
 }
 
-fn initial_layout(strategy: SmokeStrategy) -> GlobalLayoutConfig {
+fn initial_tiling(strategy: SmokeStrategy) -> TilingConfig {
     match strategy {
-        SmokeStrategy::PartitionTree => LayoutConfigBuilder::new().build(),
-        SmokeStrategy::Master => LayoutConfigBuilder::new()
+        SmokeStrategy::PartitionTree => TilingConfigBuilder::new().build(),
+        SmokeStrategy::Master => TilingConfigBuilder::new()
             .with_strategy(Strategy::Master)
             .build(),
     }
@@ -346,7 +348,7 @@ enum RecordedOp {
     DecrementMasterCount,
     QueryWorkspaces,
     ConfigReload {
-        layout: GlobalLayoutConfig,
+        tiling: TilingConfig,
     },
     SyncPreferredLayout {
         workspace_name: String,
@@ -371,7 +373,7 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, strategy: SmokeStrategy, a
     }
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let mut hub = strategy.build_hub();
-    let mut current_layout = initial_layout(strategy);
+    let mut current_tiling = initial_tiling(strategy);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run_iteration(
             &mut hub,
@@ -379,7 +381,7 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, strategy: SmokeStrategy, a
             |_| {},
             &mut rng,
             ops_per_run,
-            &mut current_layout,
+            &mut current_tiling,
         );
     }));
 
@@ -412,7 +414,7 @@ fn run_iteration<F>(
     mut observer: F,
     rng: &mut ChaCha8Rng,
     ops_per_run: usize,
-    current_layout: &mut GlobalLayoutConfig,
+    current_tiling: &mut TilingConfig,
 ) where
     F: FnMut(&RecordedOp),
 {
@@ -438,7 +440,7 @@ fn run_iteration<F>(
             &monitors,
             &monitor_origin,
             next_op_index,
-            current_layout,
+            current_tiling,
             &workspace_names,
         ) else {
             continue;
@@ -453,8 +455,8 @@ fn run_iteration<F>(
             &mut monitors,
             &mut monitor_origin,
         );
-        if let RecordedOp::ConfigReload { layout } = &op {
-            *current_layout = layout.clone();
+        if let RecordedOp::ConfigReload { tiling } = &op {
+            *current_tiling = tiling.clone();
         }
         match &op {
             RecordedOp::MoveToWorkspace { name } | RecordedOp::FocusWorkspace { name }
@@ -496,7 +498,7 @@ fn build_op(
     monitors: &[MonitorId],
     monitor_origin: &[usize],
     next_op_index: usize,
-    current_layout: &mut GlobalLayoutConfig,
+    current_tiling: &mut TilingConfig,
     workspace_names: &[String],
 ) -> Option<RecordedOp> {
     match kind {
@@ -698,42 +700,42 @@ fn build_op(
             })
         }
         OpKind::ConfigReload => {
-            let mut layout = current_layout.clone();
+            let mut tiling = current_tiling.clone();
             match rng.random_range(0..8u8) {
                 0 => {
-                    layout.partition_tree.automatic_tiling =
-                        !layout.partition_tree.automatic_tiling;
+                    tiling.partition_tree.automatic_tiling =
+                        !tiling.partition_tree.automatic_tiling;
                 }
                 1 => {
                     let h = rng.random_range(10i32..50);
-                    layout.partition_tree.tab_bar_height = Pixels::new(h);
+                    tiling.partition_tree.tab_bar_height = Pixels::new(h);
                 }
                 2 => {
-                    layout.master.master_ratio = rng.random_range(0.2f32..0.8);
+                    tiling.master.master_ratio = rng.random_range(0.2f32..0.8);
                 }
                 3 => {
-                    layout.master.master_count = rng.random_range(1..=4);
+                    tiling.master.master_count = rng.random_range(1..=4);
                 }
                 4 => {
                     let v = rng.random_range(10..200);
-                    layout.size_constraints.minimum_width = SizeConstraint::Pixels(Pixels::new(v));
+                    tiling.size_constraints.minimum_width = SizeConstraint::Pixels(Pixels::new(v));
                 }
                 5 => {
-                    layout.strategy = match layout.strategy {
+                    tiling.layout = match tiling.layout {
                         Strategy::PartitionTree => Strategy::Master,
                         Strategy::Master => Strategy::PartitionTree,
                     };
                 }
                 6 => {
                     let (float, _) = generate_matcher_titles(rng, &pref_title_pool());
-                    layout.float = float.iter().map(|t| titled_matcher(t)).collect();
+                    tiling.float = float.iter().map(|t| titled_matcher(t)).collect();
                 }
                 _ => {
                     let (_, fullscreen) = generate_matcher_titles(rng, &pref_title_pool());
-                    layout.fullscreen = fullscreen.iter().map(|t| titled_matcher(t)).collect();
+                    tiling.fullscreen = fullscreen.iter().map(|t| titled_matcher(t)).collect();
                 }
             }
-            Some(RecordedOp::ConfigReload { layout })
+            Some(RecordedOp::ConfigReload { tiling })
         }
         OpKind::SyncPreferredLayout => {
             if workspace_names.is_empty() {
@@ -741,7 +743,7 @@ fn build_op(
             }
             let workspace_name =
                 workspace_names[rng.random_range(0..workspace_names.len())].clone();
-            let strategy = current_layout.strategy;
+            let strategy = current_tiling.layout;
             let (float, fullscreen) = generate_matcher_titles(rng, &pref_title_pool());
             let mut tree_ops = Vec::new();
             let mut master = Vec::new();
@@ -917,10 +919,10 @@ fn apply_op(
             hub.focus_workspace(name, None);
         }
         RecordedOp::FocusMonitor { target } => {
-            hub.focus_monitor(target);
+            hub.focus_monitor(&target.into());
         }
         RecordedOp::MoveToMonitor { target } => {
-            hub.move_focused_to_monitor(target);
+            hub.move_focused_to_monitor(&target.into());
         }
         RecordedOp::FocusLeft => hub.focus_left(),
         RecordedOp::FocusRight => hub.focus_right(),
@@ -939,22 +941,22 @@ fn apply_op(
         RecordedOp::ToggleFloat => hub.toggle_float(),
         RecordedOp::ToggleFullscreen => hub.toggle_fullscreen(),
         RecordedOp::IncreaseMasterRatio => {
-            hub.handle_tiling_action(TilingAction::GrowMaster);
+            hub.handle_tiling_action(StrategyAction::GrowMaster);
         }
         RecordedOp::DecreaseMasterRatio => {
-            hub.handle_tiling_action(TilingAction::ShrinkMaster);
+            hub.handle_tiling_action(StrategyAction::ShrinkMaster);
         }
         RecordedOp::IncrementMasterCount => {
-            hub.handle_tiling_action(TilingAction::MoreMaster);
+            hub.handle_tiling_action(StrategyAction::MoreMaster);
         }
         RecordedOp::DecrementMasterCount => {
-            hub.handle_tiling_action(TilingAction::FewerMaster);
+            hub.handle_tiling_action(StrategyAction::FewerMaster);
         }
         RecordedOp::QueryWorkspaces => {
             hub.query_workspaces();
         }
-        RecordedOp::ConfigReload { layout } => {
-            hub.sync_configuration(layout.clone());
+        RecordedOp::ConfigReload { tiling } => {
+            hub.sync_configuration(tiling.clone());
         }
         RecordedOp::SyncPreferredLayout {
             workspace_name,
@@ -965,15 +967,19 @@ fn apply_op(
             float,
             fullscreen,
         } => {
-            hub.sync_preferred_layout(vec![preferred_workspace_config(
-                workspace_name,
-                *strategy,
-                tree_ops,
-                master,
-                secondary,
-                float,
-                fullscreen,
-            )]);
+            let layouts = preferred_layout_everywhere(
+                hub,
+                preferred_workspace_config(
+                    workspace_name,
+                    *strategy,
+                    tree_ops,
+                    master,
+                    secondary,
+                    float,
+                    fullscreen,
+                ),
+            );
+            hub.sync_preferred_layout(layouts);
         }
     }
 }
@@ -1127,7 +1133,7 @@ fn record(
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let mut hub = strategy.build_hub();
     let mut ops: Vec<RecordedOp> = Vec::new();
-    let mut current_layout = initial_layout(strategy);
+    let mut current_tiling = initial_tiling(strategy);
     let signature = capture_panic(|| {
         run_iteration(
             &mut hub,
@@ -1135,7 +1141,7 @@ fn record(
             |op| ops.push(op.clone()),
             &mut rng,
             ops_per_run,
-            &mut current_layout,
+            &mut current_tiling,
         );
     });
     (
@@ -1264,10 +1270,10 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 hub.focus_workspace(name, None);
             }
             RecordedOp::FocusMonitor { target } => {
-                hub.focus_monitor(target);
+                hub.focus_monitor(&target.into());
             }
             RecordedOp::MoveToMonitor { target } => {
-                hub.move_focused_to_monitor(target);
+                hub.move_focused_to_monitor(&target.into());
             }
             RecordedOp::FocusLeft => hub.focus_left(),
             RecordedOp::FocusRight => hub.focus_right(),
@@ -1286,22 +1292,22 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
             RecordedOp::ToggleFloat => hub.toggle_float(),
             RecordedOp::ToggleFullscreen => hub.toggle_fullscreen(),
             RecordedOp::IncreaseMasterRatio => {
-                hub.handle_tiling_action(TilingAction::GrowMaster);
+                hub.handle_tiling_action(StrategyAction::GrowMaster);
             }
             RecordedOp::DecreaseMasterRatio => {
-                hub.handle_tiling_action(TilingAction::ShrinkMaster);
+                hub.handle_tiling_action(StrategyAction::ShrinkMaster);
             }
             RecordedOp::IncrementMasterCount => {
-                hub.handle_tiling_action(TilingAction::MoreMaster);
+                hub.handle_tiling_action(StrategyAction::MoreMaster);
             }
             RecordedOp::DecrementMasterCount => {
-                hub.handle_tiling_action(TilingAction::FewerMaster);
+                hub.handle_tiling_action(StrategyAction::FewerMaster);
             }
             RecordedOp::QueryWorkspaces => {
                 hub.query_workspaces();
             }
-            RecordedOp::ConfigReload { layout } => {
-                hub.sync_configuration(layout.clone());
+            RecordedOp::ConfigReload { tiling } => {
+                hub.sync_configuration(tiling.clone());
             }
             RecordedOp::SyncPreferredLayout {
                 workspace_name,
@@ -1312,15 +1318,19 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 float,
                 fullscreen,
             } => {
-                hub.sync_preferred_layout(vec![preferred_workspace_config(
-                    workspace_name,
-                    *strategy,
-                    tree_ops,
-                    master,
-                    secondary,
-                    float,
-                    fullscreen,
-                )]);
+                let layouts = preferred_layout_everywhere(
+                    &hub,
+                    preferred_workspace_config(
+                        workspace_name,
+                        *strategy,
+                        tree_ops,
+                        master,
+                        secondary,
+                        float,
+                        fullscreen,
+                    ),
+                );
+                hub.sync_preferred_layout(layouts);
             }
         }
         validate_hub(&hub);
@@ -1536,6 +1546,24 @@ fn reconstruct_tree(ops: &[PrefTreeBuildOp]) -> Option<TreeLayoutNode> {
     build_node_recursive(root_id, &leaves, &containers)
 }
 
+/// Spreads one entry across every connected monitor. A recorded op names a
+/// workspace and no monitor. An entry under the primary alone would apply to
+/// nothing once the run adds a monitor.
+fn preferred_layout_everywhere(hub: &Hub, entry: (String, PreferredWorkspace)) -> PreferredLayouts {
+    let names: Vec<String> = hub
+        .access
+        .monitors
+        .sorted_ids()
+        .into_iter()
+        .map(|id| hub.access.monitors.get(id).unique_name.clone())
+        .collect();
+    let mut layouts = PreferredLayouts::default();
+    for monitor in names {
+        layouts.insert(&monitor, &entry.0, entry.1.clone());
+    }
+    layouts
+}
+
 /// Only the fields the chosen strategy actually consumes are set, because
 /// `LayoutWorkspaceConfigBuilder::build` silently discards a tree under
 /// `Strategy::Master`, and generated input a builder throws away is fake coverage.
@@ -1547,7 +1575,7 @@ fn preferred_workspace_config(
     secondary: &[String],
     float: &[String],
     fullscreen: &[String],
-) -> LayoutWorkspaceConfig {
+) -> (String, PreferredWorkspace) {
     let mut builder = LayoutWorkspaceConfigBuilder::new(workspace_name)
         .with_strategy(strategy)
         .with_float(float.iter().map(|t| titled_matcher(t)).collect())
@@ -1694,7 +1722,7 @@ mod tests {
 
     fn master_hub() -> Hub {
         TestHubBuilder::new()
-            .with_layout(initial_layout(SmokeStrategy::Master))
+            .with_tiling(initial_tiling(SmokeStrategy::Master))
             .build()
     }
 

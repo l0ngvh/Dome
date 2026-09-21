@@ -8,40 +8,65 @@ pub(super) mod window;
 
 pub(super) use self::monitor::{MonitorInfo, QueryDisplay, Win32Display};
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 
+use windows::Win32::Foundation::{LPARAM, WPARAM};
+use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessageW, WM_QUIT};
+
 use crate::action::Query;
-use crate::action::{
-    Actions, FocusTarget, MasterTarget, MinimizedWindow, MoveTarget, TabDirection, ToggleTarget,
-    WorkspaceInfo,
+use crate::action::{Actions, MinimizedWindow, WorkspaceInfo};
+use crate::config::{
+    Appearance, Config, KeymapRuntime, Keystroke, PlatformEffects, PreferredLayouts,
 };
-use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
-use crate::core::GlobalLayoutConfig;
+use crate::core::TilingConfig;
 use crate::core::{
-    ContainerId, Direction, Hub, LimitObservation, MonitorId, MonitorLayout, Physical, PixelRect,
-    TilingAction, WindowId, WindowRestrictions,
+    ContainerId, Hub, LimitObservation, MonitorId, MonitorLayout, Physical, PixelRect,
+    TilingAction, TilingWindowPlacement, WindowId, WindowRestrictions,
 };
 
 use self::placement_tracker::PlacementTracker;
 use self::recovery::Recovery;
-use self::registry::{ManagedWindow, WindowRegistry};
+use self::registry::ManagedWindow;
+pub(in crate::platform::windows) use self::registry::WindowRegistry;
 use self::window::{PositionedState, WindowState};
-use crate::platform::windows::ui::overlay::{FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi};
+
+struct WinPlatformEffects<'a> {
+    registry: &'a mut WindowRegistry,
+    main_thread_id: u32,
+}
+
+impl PlatformEffects for WinPlatformEffects<'_> {
+    fn close(&mut self, id: WindowId) {
+        self.registry.close_window(id);
+    }
+
+    fn execute(&mut self, command: &str) {
+        if let Err(e) = crate::platform::windows::spawn::spawn(command) {
+            tracing::warn!(%command, "Failed to execute: {e:#}");
+        }
+    }
+
+    fn exit(&mut self) {
+        unsafe { PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+        unsafe { PostQuitMessage(0) };
+    }
+}
 
 pub(super) use self::window::NewWindow;
 pub(super) use self::window::WindowsMetadata;
 
 use self::events::{
-    FloatOverlayAction, HubMessage, MonitorScene, MonitorSetChange, NewTilingOverlay,
-    PendingPlacement, PlacementAction, RenderScene, SceneSender,
+    FloatOverlayAction, HubMessage, MonitorScene, MonitorSetChange, NewTilingOverlay, RenderScene,
+    SceneSender,
 };
 use self::external_bar::StatusBars;
 use crate::platform::reserve_for_bar;
 
 use self::monitor::MonitorRegistry;
-use super::external::{HwndId, ShowCmd};
+use super::external::{HwndId, ManageExternalWindow, ManageOverlay, ShowCmd, ZOrder};
 use super::taskbar::ManageTaskbar;
 
 pub(super) enum HubEvent {
@@ -68,8 +93,12 @@ pub(super) enum HubEvent {
         query: Query,
         sender: std::sync::mpsc::SyncSender<String>,
     },
-    ConfigChanged(Box<Config>),
-    LayoutConfigChanged(Box<LayoutConfig>),
+    RunBinding {
+        keymap: String,
+        keystroke: Keystroke,
+    },
+    ReloadConfig,
+    LayoutConfigChanged(Box<PreferredLayouts>),
     ExportLayout(String),
     TabClicked(ContainerId, usize),
     /// A monitor's effective DPI changed (WM_DPICHANGED).
@@ -78,29 +107,15 @@ pub(super) enum HubEvent {
     WorkAreaChanged,
     /// A monitor was added, removed, or reconfigured (WM_DISPLAYCHANGE).
     DisplayChanged,
+    TilingOverlayReady {
+        monitor: MonitorId,
+        overlay: Arc<dyn ManageOverlay>,
+    },
+    FloatOverlayReady {
+        window: WindowId,
+        overlay: Arc<dyn ManageOverlay>,
+    },
     Shutdown,
-}
-
-pub(in crate::platform::windows) trait CreateOverlay {
-    fn create_tiling_overlay(
-        &self,
-        config: Config,
-        monitor: PixelRect,
-        scale: f32,
-    ) -> anyhow::Result<Box<dyn TilingOverlayApi>>;
-    fn create_float_overlay(
-        &self,
-        config: Config,
-        scale: f32,
-        visible_border_box: PixelRect,
-    ) -> anyhow::Result<Box<dyn FloatOverlayApi>>;
-    fn create_tab_bar(
-        &self,
-        config: Config,
-        container_id: ContainerId,
-        rect: PixelRect,
-        scale: f32,
-    ) -> anyhow::Result<Box<dyn TabBarOverlayApi>>;
 }
 
 /// Platform-specific state machine that bridges Win32 window events with the core tree
@@ -115,7 +130,6 @@ pub(super) struct Dome {
     /// The windows Dome currently has on screen. Owned here rather than per monitor entry
     /// so it survives a monitor removal.
     displayed_windows: HashSet<WindowId>,
-    config: Config,
     taskbar: Rc<dyn ManageTaskbar>,
     display: Box<dyn QueryDisplay>,
     window: Box<dyn SceneSender>,
@@ -123,8 +137,13 @@ pub(super) struct Dome {
     last_focused_monitor: Option<MonitorId>,
     pending_created: Vec<WindowId>,
     placement_tracker: PlacementTracker,
+    /// Handles for the overlays the window thread built. The domain cannot read the handle
+    /// of a window it does not own, so each one arrives as a report.
+    tiling_overlays: HashMap<MonitorId, Arc<dyn ManageOverlay>>,
+    float_overlays: HashMap<WindowId, Arc<dyn ManageOverlay>>,
     recovery: Recovery,
     status_bars: StatusBars,
+    runtime: KeymapRuntime,
 }
 
 impl Drop for Dome {
@@ -135,11 +154,12 @@ impl Drop for Dome {
 
 impl Dome {
     pub(super) fn new(
-        config: Config,
-        workspace_overrides: Vec<LayoutWorkspaceConfig>,
+        tiling: TilingConfig,
+        workspace_overrides: PreferredLayouts,
         taskbar: Rc<dyn ManageTaskbar>,
         display: Box<dyn QueryDisplay>,
         mut window: Box<dyn SceneSender>,
+        runtime: KeymapRuntime,
     ) -> anyhow::Result<Self> {
         let monitors = display.get_all_monitors()?;
         anyhow::ensure!(!monitors.is_empty(), "No monitors detected");
@@ -147,11 +167,7 @@ impl Dome {
             .iter()
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
-        let mut hub = Hub::new(
-            primary.into(),
-            GlobalLayoutConfig::from(&config),
-            workspace_overrides.clone(),
-        );
+        let mut hub = Hub::new(primary.into(), tiling, workspace_overrides.clone());
         let primary_monitor_id = hub.primary_monitor();
         let mut monitors_reg = MonitorRegistry::new();
         let mut new_overlays: Vec<NewTilingOverlay> = Vec::new();
@@ -209,7 +225,6 @@ impl Dome {
             hub,
             registry: WindowRegistry::new(),
             monitors: monitors_reg,
-            config,
             taskbar: taskbar.clone(),
             display,
             window,
@@ -217,23 +232,42 @@ impl Dome {
             last_focused_monitor: None,
             pending_created: Vec::new(),
             placement_tracker: PlacementTracker::new(),
+            tiling_overlays: HashMap::new(),
+            float_overlays: HashMap::new(),
             displayed_windows: HashSet::new(),
             recovery: Recovery::new(taskbar),
             status_bars: StatusBars::default(),
+            runtime,
         })
     }
 
-    pub(super) fn config_changed(&mut self, new_config: Config) {
-        self.hub
-            .sync_configuration(GlobalLayoutConfig::from(&new_config));
-        self.config = new_config;
-        self.dispatch(HubMessage::ConfigChanged(Box::new(self.config.clone())));
+    pub(super) fn tiling_overlay_ready(
+        &mut self,
+        monitor: MonitorId,
+        overlay: Arc<dyn ManageOverlay>,
+    ) {
+        if self.monitors.contains(monitor) {
+            self.tiling_overlays.insert(monitor, overlay);
+        }
+    }
+
+    pub(super) fn float_overlay_ready(
+        &mut self,
+        window: WindowId,
+        overlay: Arc<dyn ManageOverlay>,
+    ) {
+        self.float_overlays.insert(window, overlay);
+    }
+
+    pub(super) fn config_changed(&mut self, tiling: TilingConfig, appearance: Appearance) {
+        self.hub.sync_configuration(tiling);
+        self.dispatch(HubMessage::AppearanceChanged(appearance));
         tracing::info!("Config reloaded");
         self.apply_layout();
     }
 
-    pub(super) fn layout_changed(&mut self, new_layout: LayoutConfig) {
-        self.hub.sync_preferred_layout(new_layout.workspace);
+    pub(super) fn layout_changed(&mut self, new_layout: PreferredLayouts) {
+        self.hub.sync_preferred_layout(new_layout);
         tracing::info!("Layout reloaded");
         self.apply_layout();
     }
@@ -461,97 +495,21 @@ impl Dome {
         serde_json::to_string(&entries).expect("MinimizedWindow is infallibly serializable")
     }
 
-    pub(super) fn apply_focus(&mut self, target: &FocusTarget) {
-        match target {
-            FocusTarget::Up => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                direction: Direction::Vertical,
-                forward: false,
-            }),
-            FocusTarget::Down => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                direction: Direction::Vertical,
-                forward: true,
-            }),
-            FocusTarget::Left => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                direction: Direction::Horizontal,
-                forward: false,
-            }),
-            FocusTarget::Right => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                direction: Direction::Horizontal,
-                forward: true,
-            }),
-            FocusTarget::Parent => self.hub.handle_tiling_action(TilingAction::FocusParent),
-            FocusTarget::Tab { direction } => {
-                self.hub.handle_tiling_action(TilingAction::FocusTab {
-                    forward: matches!(direction, TabDirection::Next),
-                })
-            }
-            FocusTarget::Workspace { name, monitor } => {
-                self.hub.focus_workspace(name, monitor.as_deref())
-            }
-            FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
-        }
-    }
-
-    pub(super) fn apply_move(&mut self, target: &MoveTarget) {
-        match target {
-            MoveTarget::Up => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                direction: Direction::Vertical,
-                forward: false,
-            }),
-            MoveTarget::Down => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                direction: Direction::Vertical,
-                forward: true,
-            }),
-            MoveTarget::Left => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                direction: Direction::Horizontal,
-                forward: false,
-            }),
-            MoveTarget::Right => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                direction: Direction::Horizontal,
-                forward: true,
-            }),
-            MoveTarget::Workspace { name, monitor } => {
-                self.hub.move_focused_to_workspace(name, monitor.as_deref())
-            }
-            MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
-        }
-    }
-
-    pub(super) fn apply_toggle(&mut self, target: &ToggleTarget) {
-        match target {
-            ToggleTarget::Spawn => self.hub.handle_tiling_action(TilingAction::ToggleSpawnMode),
-            ToggleTarget::Direction => self.hub.handle_tiling_action(TilingAction::ToggleDirection),
-            ToggleTarget::Layout => self
-                .hub
-                .handle_tiling_action(TilingAction::ToggleContainerLayout),
-            ToggleTarget::Float => self.hub.toggle_float(),
-            ToggleTarget::Fullscreen => self.hub.toggle_fullscreen(),
-        }
-    }
-
-    pub(super) fn apply_master(&mut self, target: &MasterTarget) {
-        let action = match target {
-            MasterTarget::Grow => TilingAction::GrowMaster,
-            MasterTarget::Shrink => TilingAction::ShrinkMaster,
-            MasterTarget::More => TilingAction::MoreMaster,
-            MasterTarget::Fewer => TilingAction::FewerMaster,
-        };
+    pub(super) fn handle_tiling_action(&mut self, action: TilingAction) {
         self.hub.handle_tiling_action(action);
     }
 
+    /// Ask the OS to take a window out of the taskbar. The hub keeps the window
+    /// minimized until the restore event reports it back.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn unminimize_window(&mut self, id: WindowId) {
-        self.hub.unminimize_window(id);
-        let Some(entry) = self.registry.get_mut(id) else {
+        let Some(entry) = self.registry.get(id) else {
             return;
         };
-        if entry.is_minimized {
-            entry.ext.show_cmd(ShowCmd::Restore);
-            entry.is_minimized = false;
-            // entry.state holds the prior Positioned(Tiling/Float/Offscreen) or
-            // BorderlessFullscreen variant. That state is deliberately preserved
-            // so the next apply_layout dispatches against it.
+        if !entry.is_minimized {
+            return;
         }
+        entry.ext.show_cmd(ShowCmd::Restore);
     }
 
     #[tracing::instrument(skip(self))]
@@ -559,10 +517,27 @@ impl Dome {
         let Some(window_id) = self.hub.focused_window(self.hub.current_workspace()) else {
             return;
         };
-        let Some(entry) = self.registry.get(window_id) else {
-            return;
-        };
-        entry.ext.close();
+        self.registry.close_window(window_id);
+    }
+
+    pub(super) fn run_binding(&mut self, keymap: &str, keystroke: &Keystroke, main_thread_id: u32) {
+        {
+            let mut effects = WinPlatformEffects {
+                registry: &mut self.registry,
+                main_thread_id,
+            };
+            self.runtime
+                .dispatch(keymap, keystroke, &mut self.hub, &mut effects);
+        }
+        self.apply_layout();
+    }
+
+    pub(super) fn reload(&mut self) -> Option<Box<Config>> {
+        self.runtime.reload()
+    }
+
+    pub(super) fn switch_mode(&mut self, name: &str) {
+        self.runtime.switch_mode(name);
     }
 
     #[tracing::instrument(level = "trace", skip_all)]
@@ -576,7 +551,6 @@ impl Dome {
 
         let mut per_monitor: Vec<MonitorScene> = Vec::new();
         let mut new_window_ids: HashSet<WindowId> = HashSet::new();
-        let mut placements: Vec<PendingPlacement> = Vec::new();
         let mut float_actions: Vec<FloatOverlayAction> = Vec::new();
 
         for mp in result.monitors {
@@ -587,7 +561,7 @@ impl Dome {
             match &mp.layout {
                 MonitorLayout::Fullscreen(id) => {
                     window_ids.insert(*id);
-                    placements.extend(self.show_fullscreen_window(*id, work_area, mp.monitor_id));
+                    self.show_fullscreen_window(*id, work_area, mp.monitor_id);
                 }
                 MonitorLayout::Normal {
                     tiling_windows,
@@ -611,9 +585,7 @@ impl Dome {
                                 border_box = ?wp.border_box,
                                 "Content box entirely border, hiding window"
                             );
-                            let (placement, float_action) = self.hide_window(wp.id);
-                            placements.extend(placement);
-                            float_actions.extend(float_action);
+                            float_actions.extend(self.hide_window(wp.id));
                             continue;
                         }
                         placed_tiling.push(*wp);
@@ -629,9 +601,7 @@ impl Dome {
                                 border_box = ?wp.border_box,
                                 "Float content box entirely border, hiding window"
                             );
-                            let (placement, float_action) = self.hide_window(wp.id);
-                            placements.extend(placement);
-                            float_actions.extend(float_action);
+                            float_actions.extend(self.hide_window(wp.id));
                             continue;
                         }
                         placed_floats.push(*wp);
@@ -678,22 +648,16 @@ impl Dome {
             {
                 self.taskbar.delete_tab(entry.ext.id());
             }
-            let (placement, float_action) = self.hide_window(id);
-            placements.extend(placement);
-            float_actions.extend(float_action);
+            float_actions.extend(self.hide_window(id));
         }
 
         for &id in &created {
             if !self.displayed_windows.contains(&id) {
-                let (placement, float_action) = self.hide_window(id);
-                placements.extend(placement);
-                float_actions.extend(float_action);
+                float_actions.extend(self.hide_window(id));
             }
         }
 
-        let (positioned, positioned_floats) = self.position_windows(&per_monitor, focused);
-        placements.extend(positioned);
-        float_actions.extend(positioned_floats);
+        float_actions.extend(self.position_windows(&per_monitor, focused));
 
         for &id in &tabs_to_add {
             if let Some(entry) = self.registry.get(id) {
@@ -713,23 +677,29 @@ impl Dome {
                 if let Some(entry) = self.registry.get(id)
                     && !matches!(entry.state, WindowState::ExclusiveFullscreen)
                 {
-                    placements.push(PendingPlacement {
-                        ext: entry.ext.clone(),
-                        action: PlacementAction::SetForegroundWindow,
-                    });
+                    entry.ext.set_foreground_window();
                 }
             } else {
                 focus_monitor = Some(focused_monitor);
             }
         }
+        if let Some(monitor) = focus_monitor
+            && let Some(overlay) = self.tiling_overlays.get(&monitor)
+        {
+            overlay.focus();
+        }
         self.last_focused_monitor = Some(current_monitor);
+
+        let live_floats: HashSet<WindowId> = per_monitor
+            .iter()
+            .flat_map(|m| m.float_windows.iter().map(|wp| wp.id))
+            .collect();
+        self.float_overlays.retain(|id, _| live_floats.contains(id));
 
         let scene = RenderScene {
             monitors: per_monitor,
             float_overlays: float_actions,
-            focus_monitor,
             workspaces: self.query_workspaces(),
-            placements,
         };
         self.dispatch(HubMessage::Scene(scene));
     }
@@ -751,9 +721,7 @@ impl Dome {
             entry.monitor = monitor_handle;
             changed
         });
-        if let Some(placement) = self.window_moved(id, new_placement, monitor_handle, observed_at) {
-            self.dispatch(HubMessage::Placements(vec![placement]));
-        }
+        self.window_moved(id, new_placement, monitor_handle, observed_at);
         self.apply_layout();
         monitor_changed
     }
@@ -843,15 +811,18 @@ impl Dome {
 
     pub(super) fn retry_drifted_windows(&mut self) {
         let window_ids: Vec<(HwndId, WindowId)> = self.registry.iter().collect();
-        let placements: Vec<PendingPlacement> = window_ids
-            .into_iter()
-            .filter_map(|(_hwnd_id, window_id)| self.retry_drift(window_id))
-            .collect();
-        self.dispatch(HubMessage::Placements(placements));
+        for (_hwnd_id, window_id) in window_ids {
+            self.retry_drift(window_id);
+        }
     }
 
     pub(super) fn is_managed(&self, id_key: HwndId) -> bool {
         self.registry.contains_hwnd(id_key)
+    }
+
+    #[cfg(test)]
+    pub(super) fn window_id_for(&self, hwnd: HwndId) -> Option<WindowId> {
+        self.registry.get_id(hwnd)
     }
 
     fn dispatch(&mut self, msg: HubMessage) {
@@ -863,9 +834,8 @@ impl Dome {
         &mut self,
         per_monitor: &[MonitorScene],
         focused: Option<WindowId>,
-    ) -> (Vec<PendingPlacement>, Vec<FloatOverlayAction>) {
+    ) -> Vec<FloatOverlayAction> {
         let focus_changed = focused != self.last_focused;
-        let mut placements: Vec<PendingPlacement> = Vec::new();
         let mut float_actions: Vec<FloatOverlayAction> = Vec::new();
 
         for data in per_monitor {
@@ -878,33 +848,61 @@ impl Dome {
                 if self.placement_tracker.is_moving(hwnd_id) {
                     continue;
                 }
-                let (placement, float_action) = self.show_float(
+                float_actions.extend(self.show_float(
                     wp.id,
                     wp,
                     focus_changed,
                     focused == Some(wp.id),
                     data.monitor_id,
                     data.border_thickness,
-                );
-                placements.extend(placement);
-                float_actions.extend(float_action);
+                ));
             }
 
-            for wp in &data.tiling_windows {
-                let Some(entry) = self.registry.get(wp.id) else {
-                    tracing::debug!(id = ?wp.id, "position_windows: tiling window missing from registry");
-                    continue;
-                };
-                let hwnd_id = entry.ext.id();
-                // Mid-move: skip SetWindowPos but the overlay still gets the target rect,
-                // which apply_scene applies unconditionally.
-                if self.placement_tracker.is_moving(hwnd_id) {
-                    continue;
+            let reference = self.tiling_reference(data);
+            if let Some((wp, ext)) = &reference {
+                self.position_tiling_window(wp, data.monitor_id, ZOrder::Unchanged);
+                // The overlay goes in before the loop below. Each window that loop inserts
+                // against the same reference moves the overlay one place lower, so the overlay
+                // ends up below every window on this monitor.
+                if let Some(overlay) = self.tiling_overlays.get(&data.monitor_id) {
+                    overlay.set_z_order(ZOrder::After(ext.id()));
                 }
-                placements.extend(self.show_tiling(wp.id, wp, data.monitor_id));
+            }
+
+            let z = reference.map_or(ZOrder::Unchanged, |(_, ext)| ZOrder::After(ext.id()));
+            for wp in data.tiling_windows.iter().filter(|wp| !wp.is_highlighted) {
+                self.position_tiling_window(wp, data.monitor_id, z);
             }
         }
-        (placements, float_actions)
+        float_actions
+    }
+
+    /// The z-order reference for one monitor, the tiling window that carries the focus
+    /// highlight. `None` leaves this monitor's order alone, which covers a monitor without
+    /// focus, a focused container, and a focused float.
+    fn tiling_reference<'a>(
+        &self,
+        data: &'a MonitorScene,
+    ) -> Option<(&'a TilingWindowPlacement, Arc<dyn ManageExternalWindow>)> {
+        let wp = data.tiling_windows.iter().find(|wp| wp.is_highlighted)?;
+        let entry = self.registry.get(wp.id)?;
+        Some((wp, Arc::clone(&entry.ext)))
+    }
+
+    fn position_tiling_window(
+        &mut self,
+        wp: &TilingWindowPlacement,
+        monitor: MonitorId,
+        z: ZOrder,
+    ) {
+        let Some(entry) = self.registry.get(wp.id) else {
+            tracing::debug!(id = ?wp.id, "position_windows: tiling window missing from registry");
+            return;
+        };
+        if self.placement_tracker.is_moving(entry.ext.id()) {
+            return;
+        }
+        self.show_tiling(wp.id, wp, monitor, z);
     }
 
     fn update_monitors(&mut self, mut monitors: Vec<MonitorInfo>) -> Vec<HwndId> {
@@ -926,6 +924,9 @@ impl Dome {
                 }
             })
             .collect();
+        for &monitor_id in &change.removed {
+            self.tiling_overlays.remove(&monitor_id);
+        }
         self.dispatch(HubMessage::MonitorsChanged(MonitorSetChange {
             added,
             removed: change.removed,

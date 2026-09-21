@@ -4,8 +4,6 @@ mod core;
 mod font;
 mod integrations;
 mod ipc;
-mod keymap;
-mod log_dedup;
 mod logging;
 mod overlay;
 mod platform;
@@ -15,7 +13,7 @@ mod theme;
     unused_imports,
     reason = "debug_once and warn_once reserved for future callers"
 )]
-pub(crate) use log_dedup::{debug_once, trace_once, warn_once};
+pub(crate) use logging::{debug_once, trace_once, warn_once};
 
 pub use dome_ipc::action;
 pub use dome_ipc::{

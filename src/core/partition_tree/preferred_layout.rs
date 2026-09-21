@@ -11,10 +11,10 @@
 //! matching branch:
 //!
 //! - No preferred root is configured, or the window does not match any
-//!   slot. The window lands through the workspace's ordinary spawn mode
+//!   slot. The window lands through the workspace's ordinary spawn direction
 //!   and the preferred layout is not involved.
 //! - No slot is occupied yet. This is the first matching window
-//!   workspace-wide. It lands through spawn mode, the slot becomes the
+//!   workspace-wide. It lands through spawn direction, the slot becomes the
 //!   occupied root, and the workspace records it as
 //!   `occupied_preferred_root`.
 //! - Other windows already match this slot. The window joins the existing
@@ -40,14 +40,57 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
-use crate::config::{LayoutWorkspaceConfig, SplitMode, TreeLayoutNode, WindowMatcher};
+use crate::config::lua::deserializer::{FromLuaValue, LoadContext, as_table};
 use crate::core::WindowMetadata;
 use crate::core::allocator::{Node, NodeId};
 use crate::core::hub::HubAccess;
 use crate::core::node::{Child, ContainerId, Direction, WindowId, WorkspaceId};
 use crate::core::partition_tree::Parent;
 use crate::core::partition_tree::PartitionTreeStrategy;
+use crate::core::partition_tree::SplitMode;
 use crate::core::strategy::{TilingStrategy, WorkspaceExport};
+use crate::core::{PreferredWorkspace, WindowMatcher};
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum TreeLayoutNode {
+    Leaf(WindowMatcher),
+    Container {
+        split: Option<SplitMode>,
+        children: Vec<TreeLayoutNode>,
+    },
+}
+
+/// A matcher's keys never collide with `split` or `children`.
+impl FromLuaValue for TreeLayoutNode {
+    fn from_lua_value(value: &mlua::Value, cx: &mut LoadContext) -> mlua::Result<Self> {
+        let table = as_table(
+            value,
+            "a window matcher, a list of children, or a container",
+        )?;
+        let has_split = table.contains_key("split")?;
+        let has_children = table.contains_key("children")?;
+        if has_children {
+            return Ok(TreeLayoutNode::Container {
+                split: cx.field(table, "split"),
+                children: cx.field(table, "children"),
+            });
+        }
+        if has_split {
+            return Err(mlua::Error::runtime(
+                "a container with split must also have children",
+            ));
+        }
+        if table.raw_len() > 0 {
+            return Ok(TreeLayoutNode::Container {
+                split: None,
+                children: Vec::from_lua_value(value, cx)?,
+            });
+        }
+        Ok(TreeLayoutNode::Leaf(WindowMatcher::from_lua_value(
+            value, cx,
+        )?))
+    }
+}
 
 impl PartitionTreeStrategy {
     pub(super) fn build_preferred_layout(&mut self, tree: &TreeLayoutNode) -> PreferredSlot {
@@ -161,7 +204,7 @@ impl PartitionTreeStrategy {
                 let c_id = self.replace_anchor_with_container(hub, last_sibling, children, split);
                 self.occupy_container_slot(parent_slot, c_id);
             } else {
-                let split_mode = self.child_spawn_mode(last_sibling).into();
+                let split_mode = self.child_spawn_direction(last_sibling).into();
                 self.replace_anchor_with_container(hub, last_sibling, children, split_mode);
             }
         } else {
@@ -392,13 +435,13 @@ impl PartitionTreeStrategy {
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        incoming: Option<&LayoutWorkspaceConfig>,
+        incoming: Option<&PreferredWorkspace>,
     ) {
         let Some(incoming) = incoming else {
             return;
         };
         let incoming_tree = match incoming {
-            LayoutWorkspaceConfig::PartitionTree {
+            PreferredWorkspace::PartitionTree {
                 tree: Some(tree), ..
             } => Some(tree),
             _ => None,
@@ -447,7 +490,7 @@ impl PartitionTreeStrategy {
         }
 
         let new_root = match incoming {
-            LayoutWorkspaceConfig::PartitionTree { tree, .. } => {
+            PreferredWorkspace::PartitionTree { tree, .. } => {
                 tree.as_ref().map(|t| self.build_preferred_layout(t))
             }
             _ => None,

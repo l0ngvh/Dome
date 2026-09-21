@@ -1,17 +1,17 @@
-use crate::config::{Strategy, WindowMatcher};
 use crate::core::node::PixelRect;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect,
-    setup_logger_with_level, snapshot, titled, titled_matcher, titled_process,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect,
+    preferred_layout, setup_logger_with_level, snapshot, titled, titled_matcher, titled_process,
 };
 use crate::core::{Hub, MonitorLayout, Pixels, WindowId, WindowRestrictions};
+use crate::core::{Strategy, WindowMatcher};
 use insta::assert_snapshot;
 
 #[test]
 fn swap_secondary_and_master() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -64,8 +64,8 @@ fn swap_secondary_and_master() {
 #[test]
 fn move_direction_up_down() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -120,8 +120,8 @@ fn move_direction_up_down() {
 #[test]
 fn move_direction_up_down_wraps_within_three_window_pane() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -170,8 +170,8 @@ fn move_direction_up_down_wraps_within_three_window_pane() {
 #[test]
 fn focus_and_move_noop() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -194,8 +194,8 @@ fn focus_and_move_noop() {
     // Nothing renders while the float holds focus, though master does hoist
     // focus_history underneath.
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .with_float(vec![titled_matcher("w17")])
                 .build(),
@@ -228,8 +228,8 @@ fn move_window_to_workspace() {
     // Move master to another workspace
     {
         let mut hub = TestHubBuilder::new()
-            .with_layout(
-                LayoutConfigBuilder::new()
+            .with_tiling(
+                TilingConfigBuilder::new()
                     .with_strategy(Strategy::Master)
                     .build(),
             )
@@ -319,8 +319,8 @@ fn move_window_to_workspace() {
     // Move stack window to another workspace
     {
         let mut hub = TestHubBuilder::new()
-            .with_layout(
-                LayoutConfigBuilder::new()
+            .with_tiling(
+                TilingConfigBuilder::new()
                     .with_strategy(Strategy::Master)
                     .build(),
             )
@@ -412,8 +412,8 @@ fn move_window_to_workspace() {
 #[test]
 fn move_only_window_to_workspace() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -473,8 +473,8 @@ fn move_only_window_to_workspace() {
 fn promote_secondary_to_master_when_there_is_room() {
     setup_logger_with_level("trace");
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -550,8 +550,8 @@ fn promote_secondary_to_master_when_there_is_room() {
 #[test]
 fn move_matched_master_to_secondary_rematches() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -700,8 +700,8 @@ fn move_matched_master_to_secondary_rematches() {
 #[test]
 fn move_matched_secondary_to_master_rematches() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -870,8 +870,8 @@ fn top_to_bottom(hub: &Hub, ids: &[WindowId]) -> Vec<WindowId> {
 #[test]
 fn move_window_into_workspace_whose_synced_layout_matches_it_to_secondary() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
@@ -884,15 +884,13 @@ fn move_window_into_workspace_whose_synced_layout_matches_it_to_secondary() {
         WindowRestrictions::None,
     );
 
-    hub.sync_preferred_layout(vec![
-        LayoutWorkspaceConfigBuilder::new("0")
-            .with_strategy(Strategy::Master)
-            .with_secondary(vec![WindowMatcher {
-                process: Some("terminal.exe".into()),
-                ..Default::default()
-            }])
-            .build(),
-    ]);
+    hub.sync_preferred_layout(preferred_layout([LayoutWorkspaceConfigBuilder::new("0")
+        .with_strategy(Strategy::Master)
+        .with_secondary(vec![WindowMatcher {
+            process: Some("terminal.exe".into()),
+            ..Default::default()
+        }])
+        .build()]));
 
     hub.move_focused_to_workspace("0", None);
     hub.focus_workspace("0", None);

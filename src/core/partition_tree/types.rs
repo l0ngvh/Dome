@@ -1,143 +1,30 @@
 use super::preferred_layout::{PreferredContainerSlotId, PreferredSlot, PreferredWindowSlotId};
-use crate::config::SplitMode;
-use crate::core::hub::SpawnIndicator;
+use crate::config::lua::deserializer::string_enum;
 use crate::core::node::Child;
-use crate::core::node::{ContainerId, Dimension, Direction, Length, WindowId, WorkspaceId};
+use crate::core::node::{
+    ContainerId, Dimension, Direction, Length, Logical, Pixels, WindowId, WorkspaceId,
+};
 
-/// Spawn mode of a container or window: where the next sibling will be
-/// inserted relative to it.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SpawnMode {
-    current: SpawnState,
-    previous: SpawnState,
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PartitionTreeConfig {
+    pub(crate) tab_bar_height: Pixels<Logical>,
+    pub(crate) automatic_tiling: bool,
 }
 
-impl SpawnMode {
-    pub(crate) fn horizontal() -> Self {
-        Self {
-            current: SpawnState::Horizontal,
-            previous: SpawnState::Horizontal,
-        }
-    }
-
-    pub(crate) fn vertical() -> Self {
-        Self {
-            current: SpawnState::Vertical,
-            previous: SpawnState::Vertical,
-        }
-    }
-
-    pub(crate) fn tabbed() -> Self {
-        Self {
-            current: SpawnState::Tab,
-            previous: SpawnState::Tab,
-        }
-    }
-
-    pub(crate) fn from_direction(direction: Direction) -> Self {
-        match direction {
-            Direction::Horizontal => Self::horizontal(),
-            Direction::Vertical => Self::vertical(),
-        }
-    }
-
-    pub(crate) fn is_tab(&self) -> bool {
-        self.current == SpawnState::Tab
-    }
-
-    pub(crate) fn is_horizontal(&self) -> bool {
-        self.current == SpawnState::Horizontal
-    }
-
-    pub(crate) fn is_vertical(&self) -> bool {
-        self.current == SpawnState::Vertical
-    }
-
-    pub(crate) fn as_direction(&self) -> Option<Direction> {
-        match self.current {
-            SpawnState::Horizontal => Some(Direction::Horizontal),
-            SpawnState::Vertical => Some(Direction::Vertical),
-            SpawnState::Tab => None,
-        }
-    }
-
-    pub(crate) fn switch_to(&self, other: SpawnMode) -> Self {
-        Self {
-            current: other.current,
-            previous: self.current,
-        }
-    }
-
-    /// Advance through the three-cycle. Rotation table (`(previous, current)
-    /// -> next`):
-    ///
-    /// ```text
-    /// prev \ curr   H        V        Tab
-    ///     H         V       Tab        V
-    ///     V        Tab        H        H
-    ///     Tab       V        H         H
-    /// ```
-    ///
-    /// From H or V, toggling flips axis unless the previous state was the
-    /// opposite axis (meaning the user already flipped once), in which case it
-    /// advances to Tab. From Tab, return to whichever axis was not the
-    /// immediate predecessor.
-    pub(crate) fn toggle(self) -> Self {
-        use SpawnState::*;
-        let next = match self.current {
-            Horizontal => {
-                if matches!(self.previous, Vertical) {
-                    Tab
-                } else {
-                    Vertical
-                }
-            }
-            Vertical => {
-                if matches!(self.previous, Horizontal) {
-                    Tab
-                } else {
-                    Horizontal
-                }
-            }
-            Tab => match self.previous {
-                Horizontal => Vertical,
-                Vertical => Horizontal,
-                Tab => Horizontal,
-            },
-        };
-        Self {
-            current: next,
-            previous: self.current,
-        }
-    }
-
-    /// Reset rotation history (`previous == current`) so it cannot leak into the
-    /// next `toggle`.
-    pub(crate) fn without_history(other: SpawnMode) -> Self {
-        Self {
-            current: other.current,
-            previous: other.current,
-        }
-    }
-}
-
-impl From<crate::config::SplitMode> for SpawnMode {
-    fn from(split: crate::config::SplitMode) -> Self {
-        match split {
-            crate::config::SplitMode::Horizontal => SpawnMode::horizontal(),
-            crate::config::SplitMode::Vertical => SpawnMode::vertical(),
-            crate::config::SplitMode::Tabbed => SpawnMode::tabbed(),
-        }
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SpawnState {
-    #[default]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SplitMode {
     Horizontal,
     Vertical,
-    Tab,
+    Tabbed,
 }
+
+string_enum!(
+    SplitMode,
+    "\"horizontal\", \"vertical\" or \"tabbed\"",
+    "horizontal" => SplitMode::Horizontal,
+    "vertical" => SplitMode::Vertical,
+    "tabbed" => SplitMode::Tabbed,
+);
 
 /// Parent role in the partition tree. A `Container` parents other nodes. A
 /// `Workspace` parents only the root node.
@@ -161,7 +48,7 @@ impl std::fmt::Display for Parent {
 pub(super) struct TilingWindowData {
     pub(super) parent: Parent,
     pub(super) dimension: Dimension,
-    pub(super) spawn_mode: SpawnMode,
+    pub(super) spawn_direction: Direction,
     pub(super) occupy: Option<PreferredWindowSlotId>,
 }
 
@@ -178,7 +65,7 @@ impl TilingWindowData {
         TilingWindowData {
             parent,
             dimension: Dimension::default(),
-            spawn_mode: SpawnMode::default(),
+            spawn_direction: Direction::default(),
             occupy: None,
         }
     }
@@ -199,11 +86,9 @@ pub(super) struct TilingContainerData {
     /// `is_tabbed` is set. A value is stored while tabbed to keep the field
     /// initialised, but it is unused until the container converts back to split.
     direction: Direction,
-    /// Spawn mode for new children inserted under this container. Mutate via
-    /// `set_spawn_mode_reset` (drops history) or `set_spawn_mode_keep_history`
-    /// (preserves history). Direct field write would lose the `H <-> V <-> Tab`
-    /// rotation state.
-    spawn_mode: SpawnMode,
+    /// Direction the next child extends. Automatic tiling derives it from the
+    /// container's shape, so it can differ from `direction`.
+    spawn_direction: Direction,
     pub(super) is_tabbed: bool,
     pub(super) active_tab_index: usize,
     pub(super) min_width: Length,
@@ -214,17 +99,17 @@ pub(super) struct TilingContainerData {
 
 impl TilingContainerData {
     pub(super) fn new(parent: Parent, workspace: WorkspaceId, split_mode: SplitMode) -> Self {
-        let (direction, spawn_mode, is_tabbed) = match split_mode {
-            SplitMode::Horizontal => (Direction::Horizontal, SpawnMode::horizontal(), false),
-            SplitMode::Vertical => (Direction::Vertical, SpawnMode::vertical(), false),
-            SplitMode::Tabbed => (Direction::Horizontal, SpawnMode::tabbed(), true),
+        let (direction, is_tabbed) = match split_mode {
+            SplitMode::Horizontal => (Direction::Horizontal, false),
+            SplitMode::Vertical => (Direction::Vertical, false),
+            SplitMode::Tabbed => (Direction::Horizontal, true),
         };
         Self {
             parent,
             workspace,
             dimension: Dimension::default(),
             direction,
-            spawn_mode,
+            spawn_direction: direction,
             is_tabbed,
             active_tab_index: 0,
             min_width: Length::ZERO,
@@ -253,13 +138,6 @@ impl TilingContainerData {
         }
     }
 
-    pub(super) fn can_accommodate(&self, spawn_mode: SpawnMode) -> bool {
-        spawn_mode
-            .as_direction()
-            .is_some_and(|d| self.has_direction(d))
-            || (spawn_mode.is_tab() && self.is_tabbed())
-    }
-
     pub(super) fn has_direction(&self, direction: Direction) -> bool {
         if self.is_tabbed {
             false
@@ -268,16 +146,12 @@ impl TilingContainerData {
         }
     }
 
-    pub(super) fn spawn_mode(&self) -> SpawnMode {
-        self.spawn_mode
+    pub(super) fn spawn_direction(&self) -> Direction {
+        self.spawn_direction
     }
 
-    pub(super) fn set_spawn_mode_reset(&mut self, spawn_mode: SpawnMode) {
-        self.spawn_mode = SpawnMode::without_history(spawn_mode)
-    }
-
-    pub(super) fn set_spawn_mode_keep_history(&mut self, spawn_mode: SpawnMode) {
-        self.spawn_mode = self.spawn_mode.switch_to(spawn_mode)
+    pub(super) fn set_spawn_direction(&mut self, spawn_direction: Direction) {
+        self.spawn_direction = spawn_direction
     }
 
     pub(super) fn toggle_direction(&mut self) -> Direction {
@@ -329,23 +203,11 @@ impl WorkspaceTilingState {
     }
 }
 
-impl From<SpawnMode> for SpawnIndicator {
-    fn from(mode: SpawnMode) -> Self {
-        Self {
-            top: mode.is_tab(),
-            right: mode.is_horizontal(),
-            bottom: mode.is_vertical(),
-            left: false,
-        }
-    }
-}
-
-impl From<SpawnMode> for SplitMode {
-    fn from(mode: SpawnMode) -> Self {
-        match mode.current {
-            SpawnState::Horizontal => SplitMode::Horizontal,
-            SpawnState::Vertical => SplitMode::Vertical,
-            SpawnState::Tab => SplitMode::Tabbed,
+impl From<Direction> for SplitMode {
+    fn from(direction: Direction) -> Self {
+        match direction {
+            Direction::Horizontal => SplitMode::Horizontal,
+            Direction::Vertical => SplitMode::Vertical,
         }
     }
 }

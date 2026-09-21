@@ -100,7 +100,7 @@ if [ -n "$SENDER" ]; then
                   | select(($cells | index($l.item)) | not)
                   | ( "--add", "item", $l.item, "left",
                       "--set", $l.item, ("script=\u0027" + ($plugin | q) + "\u0027"),
-                      ("click_script=\u0027" + ($dome | q) + "\u0027 focus workspace \u0027" + ($l.name | q) + "\u0027 --monitor \u0027" + ($l.w.monitor | q) + "\u0027; sketchybar --trigger dome_update"),
+                      ("click_script=\u0027" + ($dome | q) + "\u0027 focus-workspace \u0027" + ($l.name | q) + "\u0027 --monitor \u0027" + ($l.w.monitor | q) + "\u0027; sketchybar --trigger dome_update"),
                       $style_tokens[],
                       "--subscribe", $l.item, "mouse.entered", "mouse.exited" ) ),
                 # Paint every live cell.
@@ -129,7 +129,7 @@ if [ -n "$SENDER" ]; then
                   | ( if ($entries | index($it)) then empty
                       else ( "--add", "item", $it, "popup.dome.parked",
                              "--set", $it, ("label=" + $p.n),
-                             ("click_script=\u0027" + ($dome | q) + "\u0027 focus workspace \u0027" + ($p.n | q) + "\u0027 --monitor \u0027" + ($p.origin | q) + "\u0027; sketchybar --set dome.parked popup.drawing=off; sketchybar --trigger dome_update"),
+                             ("click_script=\u0027" + ($dome | q) + "\u0027 focus-workspace \u0027" + ($p.n | q) + "\u0027 --monitor \u0027" + ($p.origin | q) + "\u0027; sketchybar --set dome.parked popup.drawing=off; sketchybar --trigger dome_update"),
                              ("label.color=" + $parked_fg), "label.padding_left=24", "label.padding_right=8", "background.drawing=off" ) end ),
                     ( "--set", $it, "drawing=on" ) ),
                 # Hide parked entries and headings no longer present.

@@ -1,8 +1,72 @@
-use crate::config::{LayoutWorkspaceConfig, WindowMatcher, WindowMode};
+use crate::config::lua::deserializer::{FromLuaValue, LoadContext, as_table, string_enum};
 
 use super::allocator::{Node, NodeId};
 use super::hub::Hub;
 use super::node::{DisplayMode, WindowId, WindowMetadata, WorkspaceId};
+use super::preferred_layout::{PreferredLayouts, PreferredWorkspace};
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub(crate) struct WindowMatcher {
+    pub(crate) app: Option<String>,
+    pub(crate) bundle_id: Option<String>,
+    pub(crate) title: Option<String>,
+    pub(crate) process: Option<String>,
+    pub(crate) class: Option<String>,
+    pub(crate) aumid: Option<String>,
+}
+
+impl FromLuaValue for WindowMatcher {
+    fn from_lua_value(value: &mlua::Value, cx: &mut LoadContext) -> mlua::Result<Self> {
+        let table = as_table(value, "a window matcher table")?;
+        Ok(WindowMatcher {
+            app: read_pattern(table, "app", cx),
+            bundle_id: read_pattern(table, "bundle_id", cx),
+            title: read_pattern(table, "title", cx),
+            process: read_pattern(table, "process", cx),
+            class: read_pattern(table, "class", cx),
+            aumid: read_pattern(table, "aumid", cx),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum WindowMode {
+    Tiling,
+    Float,
+    Fullscreen,
+}
+
+string_enum!(
+    WindowMode,
+    "\"tiling\", \"float\" or \"fullscreen\"",
+    "tiling" => WindowMode::Tiling,
+    "float" => WindowMode::Float,
+    "fullscreen" => WindowMode::Fullscreen,
+);
+
+pub(crate) fn pattern_matches(pattern: &str, text: &str) -> bool {
+    if let Some(regex) = pattern.strip_prefix('/').and_then(|p| p.strip_suffix('/')) {
+        regex::Regex::new(regex)
+            .map(|r| r.is_match(text))
+            .unwrap_or(false)
+    } else {
+        pattern == text
+    }
+}
+
+fn read_pattern(table: &mlua::Table, key: &str, cx: &mut LoadContext) -> Option<String> {
+    let pattern: Option<String> = cx.field(table, key);
+    let pattern = pattern?;
+    if let Some(regex) = pattern.strip_prefix('/').and_then(|p| p.strip_suffix('/'))
+        && let Err(e) = regex::Regex::new(regex)
+    {
+        cx.push(key);
+        cx.warn_value(&format!("is not a valid regex: {e}"));
+        cx.pop();
+        return None;
+    }
+    Some(pattern)
+}
 
 /// Handle to a matcher in the pool. A window's `DisplayMode` keeps it so the
 /// export path can re-find the matcher after the tree has mutated.
@@ -104,10 +168,9 @@ impl Hub {
     }
 
     /// Rebuilds the matcher pool and every routing vec, per-workspace and
-    /// global, from the current config. Runs on both config entry points so
-    /// neither per-workspace matchers (via the arg) nor global matchers (via
-    /// `self.access.layout`) go stale.
-    pub(super) fn index_matchers(&mut self, preferred_layouts: &[LayoutWorkspaceConfig]) {
+    /// global, from the current config. Skips a preferred-layout entry whose
+    /// monitor is absent.
+    pub(super) fn index_matchers(&mut self, preferred_layouts: &PreferredLayouts) {
         for id in self.float_fullscreen_matchers.sorted_ids() {
             self.float_fullscreen_matchers.delete(id);
         }
@@ -121,12 +184,17 @@ impl Hub {
         }
 
         // Clone globals up front: the allocation loop needs `&mut
-        // self.float_fullscreen_matchers` while these borrow `&self.access.layout`.
-        let global_fullscreen = self.access.layout.fullscreen.clone();
-        let global_float = self.access.layout.float.clone();
+        // self.float_fullscreen_matchers` while these borrow `&self.access.tiling`.
+        let global_fullscreen = self.access.tiling.fullscreen.clone();
+        let global_float = self.access.tiling.float.clone();
 
-        for entry in preferred_layouts {
-            let ws_id = self.get_or_create_workspace_on(entry.name(), None);
+        // The `entries()` order fixes the workspace ids allocated below, and a
+        // lower workspace id wins a matcher tie in `resolve_matcher`.
+        for (monitor, name, entry) in preferred_layouts.entries() {
+            let Some(monitor_id) = self.monitor_id_by_disambiguated_name(monitor) else {
+                continue;
+            };
+            let ws_id = self.get_or_create_workspace_on(name, Some(monitor_id));
             let matchers = workspace_matchers(entry);
             for m in matchers.fullscreen {
                 let id = self.float_fullscreen_matchers.allocate(m);
@@ -204,15 +272,15 @@ struct Matchers {
     float: Vec<WindowMatcher>,
 }
 
-fn workspace_matchers(entry: &LayoutWorkspaceConfig) -> Matchers {
+fn workspace_matchers(entry: &PreferredWorkspace) -> Matchers {
     match entry {
-        LayoutWorkspaceConfig::PartitionTree {
+        PreferredWorkspace::PartitionTree {
             fullscreen, float, ..
         } => Matchers {
             fullscreen: fullscreen.clone(),
             float: float.clone(),
         },
-        LayoutWorkspaceConfig::Master {
+        PreferredWorkspace::Master {
             fullscreen, float, ..
         } => Matchers {
             fullscreen: fullscreen.clone(),

@@ -2,50 +2,48 @@ pub(in crate::platform::windows) mod overlay;
 
 use std::collections::{HashMap, HashSet};
 
-use self::overlay::{FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi};
-use crate::config::Config;
+use self::overlay::{FloatOverlay, TabBarOverlay, TilingOverlay, WgpuOverlayFactory};
+use crate::config::Appearance;
 use crate::core::{ContainerId, MonitorId, WindowId};
-use crate::platform::windows::dome::CreateOverlay;
+use crate::platform::windows::HubSender;
 use crate::platform::windows::dome::events::{
-    FloatOverlayAction, HubMessage, MonitorSetChange, PendingPlacement, PlacementAction,
-    RenderScene, SceneSender,
+    FloatOverlayAction, HubMessage, MonitorSetChange, RenderScene, SceneSender,
 };
-use crate::platform::windows::external::ZOrder;
-use crate::platform::windows::handle::ManageZOrder;
 
 /// Owns every Dome-created window and the only code that touches one.
 pub(in crate::platform::windows) struct WindowThread {
-    config: Config,
-    overlay_factory: Box<dyn CreateOverlay>,
-    tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>>,
-    tab_bars: HashMap<ContainerId, Box<dyn TabBarOverlayApi>>,
-    float_overlays: HashMap<WindowId, Box<dyn FloatOverlayApi>>,
-    z_order: Box<dyn ManageZOrder>,
+    appearance: Appearance,
+    overlay_factory: WgpuOverlayFactory,
+    tiling_overlays: HashMap<MonitorId, Box<TilingOverlay>>,
+    tab_bars: HashMap<ContainerId, Box<TabBarOverlay>>,
+    float_overlays: HashMap<WindowId, Box<FloatOverlay>>,
+    report: HubSender,
 }
 
 impl WindowThread {
     pub(in crate::platform::windows) fn new(
-        config: Config,
-        overlay_factory: Box<dyn CreateOverlay>,
-        z_order: Box<dyn ManageZOrder>,
+        appearance: Appearance,
+        overlay_factory: WgpuOverlayFactory,
+        report: HubSender,
     ) -> Self {
         Self {
-            config,
+            appearance,
             overlay_factory,
             tiling_overlays: HashMap::new(),
             tab_bars: HashMap::new(),
             float_overlays: HashMap::new(),
-            z_order,
+            report,
         }
     }
 
     pub(in crate::platform::windows) fn apply_monitor_change(&mut self, change: MonitorSetChange) {
         for spec in change.added {
-            if let Ok(overlay) = self.overlay_factory.create_tiling_overlay(
-                self.config.clone(),
+            if let Ok((overlay, handle)) = self.overlay_factory.create_tiling_overlay(
+                self.appearance.clone(),
                 spec.work_area,
                 spec.scale,
             ) {
+                self.report.tiling_overlay_ready(spec.monitor_id, handle);
                 self.tiling_overlays.insert(spec.monitor_id, overlay);
             }
         }
@@ -54,65 +52,24 @@ impl WindowThread {
         }
     }
 
-    pub(in crate::platform::windows) fn apply_config(&mut self, config: &Config) {
-        self.config = config.clone();
+    pub(in crate::platform::windows) fn apply_appearance(&mut self, appearance: &Appearance) {
+        self.appearance = appearance.clone();
         for overlay in self.tiling_overlays.values_mut() {
-            overlay.set_config(config);
+            overlay.set_appearance(appearance);
         }
         for overlay in self.float_overlays.values_mut() {
-            overlay.set_config(config);
+            overlay.set_appearance(appearance);
         }
         for overlay in self.tab_bars.values_mut() {
-            overlay.set_config(config);
-        }
-    }
-
-    pub(in crate::platform::windows) fn apply_placements(
-        &mut self,
-        placements: &[PendingPlacement],
-    ) {
-        for placement in placements {
-            let ext = &placement.ext;
-            match &placement.action {
-                PlacementAction::SetPosition { z_order, rect } => ext.set_position(*z_order, *rect),
-                PlacementAction::AnchorAboveOverlay {
-                    monitor_id,
-                    rect,
-                    escape_topmost,
-                } => {
-                    let Some(overlay) = self.tiling_overlays.get(monitor_id) else {
-                        continue;
-                    };
-                    let overlay_hwnd = overlay.id();
-                    // Read the reference before the escape write. NotTopmost lands the window at
-                    // the top of the normal band, so a later read would return the window itself.
-                    let above = self.z_order.window_above(overlay_hwnd);
-                    if *escape_topmost {
-                        ext.set_position(ZOrder::NotTopmost, *rect);
-                    }
-                    match above {
-                        Some(prev) => ext.set_position(ZOrder::After(prev), *rect),
-                        None => {
-                            if !*escape_topmost {
-                                ext.set_position(ZOrder::Unchanged, *rect);
-                            }
-                            self.z_order.demote_below(overlay_hwnd, ext.id());
-                        }
-                    }
-                }
-                PlacementAction::MoveOffscreen => ext.move_offscreen(),
-                PlacementAction::ShowCmd(cmd) => ext.show_cmd(*cmd),
-                PlacementAction::SetForegroundWindow => ext.set_foreground_window(),
-            }
+            overlay.set_appearance(appearance);
         }
     }
 
     #[tracing::instrument(level = "trace", skip_all)]
     pub(in crate::platform::windows) fn apply_scene(&mut self, scene: RenderScene) {
-        self.apply_placements(&scene.placements);
         for action in &scene.float_overlays {
             match action {
-                FloatOverlayAction::Update {
+                FloatOverlayAction::Create {
                     window_id,
                     placement,
                     z_order,
@@ -121,12 +78,14 @@ impl WindowThread {
                 } => {
                     if !self.float_overlays.contains_key(window_id) {
                         match self.overlay_factory.create_float_overlay(
-                            self.config.clone(),
+                            self.appearance.clone(),
                             *scale,
                             placement.visible_border_box,
+                            *z_order,
                         ) {
-                            Ok(o) => {
-                                self.float_overlays.insert(*window_id, o);
+                            Ok((overlay, handle)) => {
+                                self.report.float_overlay_ready(*window_id, handle);
+                                self.float_overlays.insert(*window_id, overlay);
                             }
                             Err(e) => {
                                 tracing::warn!("Failed to create float overlay: {e:#}");
@@ -137,7 +96,17 @@ impl WindowThread {
                     self.float_overlays
                         .get_mut(window_id)
                         .expect("float overlay inserted above")
-                        .update(placement, *z_order, *scale, *border_thickness);
+                        .update(placement, *scale, *border_thickness);
+                }
+                FloatOverlayAction::Update {
+                    window_id,
+                    placement,
+                    scale,
+                    border_thickness,
+                } => {
+                    if let Some(overlay) = self.float_overlays.get_mut(window_id) {
+                        overlay.update(placement, *scale, *border_thickness);
+                    }
                 }
                 FloatOverlayAction::Hide(window_id) => {
                     if let Some(overlay) = self.float_overlays.get_mut(window_id) {
@@ -182,7 +151,7 @@ impl WindowThread {
                     std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
                     std::collections::hash_map::Entry::Vacant(e) => {
                         match self.overlay_factory.create_tab_bar(
-                            self.config.clone(),
+                            self.appearance.clone(),
                             placement.id,
                             rect,
                             data.scale,
@@ -212,12 +181,6 @@ impl WindowThread {
             .flat_map(|d| d.containers.iter().filter(|p| p.is_tabbed).map(|p| p.id))
             .collect();
         self.tab_bars.retain(|id, _| active.contains(id));
-
-        if let Some(monitor_id) = scene.focus_monitor
-            && let Some(overlay) = self.tiling_overlays.get(&monitor_id)
-        {
-            overlay.focus();
-        }
     }
 }
 
@@ -226,8 +189,7 @@ impl SceneSender for WindowThread {
         match msg {
             HubMessage::Scene(scene) => self.apply_scene(scene),
             HubMessage::MonitorsChanged(change) => self.apply_monitor_change(change),
-            HubMessage::ConfigChanged(config) => self.apply_config(&config),
-            HubMessage::Placements(placements) => self.apply_placements(&placements),
+            HubMessage::AppearanceChanged(appearance) => self.apply_appearance(&appearance),
         }
     }
 }

@@ -1,15 +1,15 @@
 use crate::core::ContainerId;
-use crate::core::GlobalLayoutConfig;
+use crate::core::TilingConfig;
 use crate::core::allocator::NodeId;
 use crate::core::node::{Length, LimitObservation, LimitUpdate, PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_rect, setup, setup_with_layout, snapshot, titled, titled_matcher,
+    TilingConfigBuilder, default_rect, setup, setup_with_tiling, snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
-    LayoutConfigBuilder::new()
+fn tiling_floating(titles: &[&str]) -> TilingConfig {
+    TilingConfigBuilder::new()
         .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
         .build()
 }
@@ -1449,7 +1449,7 @@ fn focus_tab_noop() {
     hub.focus_prev_tab();
     assert_eq!(before, snapshot(&hub));
 
-    let mut hub = setup_with_layout(layout_floating(&["w6"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w6"]));
     hub.insert_window(
         titled("w6"),
         PixelRect::new(10, 5, 30, 20),
@@ -1484,7 +1484,7 @@ fn toggle_container_layout_noop() {
     hub.toggle_container_layout();
     assert_eq!(before, snapshot(&hub));
 
-    let mut hub = setup_with_layout(layout_floating(&["w10"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w10"]));
     hub.insert_window(
         titled("w10"),
         PixelRect::new(10, 5, 30, 20),

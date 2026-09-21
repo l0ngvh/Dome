@@ -1,5 +1,3 @@
-use crate::action::MonitorTarget;
-
 use super::allocator::{Node, NodeId};
 use super::hub::{Hub, RestrictedAction};
 use super::node::{MonitorId, PixelRect, Pixels, WorkspaceId};
@@ -45,9 +43,34 @@ pub(crate) struct ReportedMonitor {
     pub(crate) gdi_device: Option<String>,
 }
 
+/// Selects a monitor by direction from the focused one, or by its stable unique
+/// name. The core counterpart to the wire `MonitorTarget`.
+#[derive(Debug, Clone)]
+pub(crate) enum MonitorSelector {
+    Up,
+    Down,
+    Left,
+    Right,
+    Name(String),
+}
+
+impl From<&crate::action::MonitorTarget> for MonitorSelector {
+    fn from(target: &crate::action::MonitorTarget) -> Self {
+        use crate::action::MonitorTarget;
+
+        match target {
+            MonitorTarget::Up => Self::Up,
+            MonitorTarget::Down => Self::Down,
+            MonitorTarget::Left => Self::Left,
+            MonitorTarget::Right => Self::Right,
+            MonitorTarget::Name(name) => Self::Name(name.clone()),
+        }
+    }
+}
+
 impl Hub {
     #[tracing::instrument(skip(self))]
-    pub(crate) fn focus_monitor(&mut self, target: &MonitorTarget) {
+    pub(crate) fn focus_monitor(&mut self, target: &MonitorSelector) {
         if self.is_restricted(RestrictedAction::TilingNavigation) {
             return;
         }
@@ -62,7 +85,7 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn move_focused_to_monitor(&mut self, target: &MonitorTarget) {
+    pub(crate) fn move_focused_to_monitor(&mut self, target: &MonitorSelector) {
         if self.is_restricted(RestrictedAction::MonitorMove) {
             return;
         }
@@ -169,6 +192,10 @@ impl Hub {
             }
         };
         self.access.monitors.get_mut(monitor_id).active_workspace = active;
+
+        let preferred = self.access.preferred_layouts.clone();
+        self.index_matchers(&preferred);
+
         monitor_id
     }
 
@@ -319,9 +346,9 @@ impl Hub {
             .find(|&id| self.access.monitors.get(id).unique_name == *name)
     }
 
-    fn find_monitor_by_target(&self, target: &MonitorTarget) -> Option<MonitorId> {
+    fn find_monitor_by_target(&self, target: &MonitorSelector) -> Option<MonitorId> {
         match target {
-            MonitorTarget::Name(name) => self
+            MonitorSelector::Name(name) => self
                 .access
                 .monitors
                 .sorted_ids()
@@ -349,11 +376,11 @@ impl Hub {
                         let dy = 2 * m.y() + m.height() - cy2;
 
                         let valid = match direction {
-                            MonitorTarget::Left => dx < Pixels::ZERO,
-                            MonitorTarget::Right => dx > Pixels::ZERO,
-                            MonitorTarget::Up => dy < Pixels::ZERO,
-                            MonitorTarget::Down => dy > Pixels::ZERO,
-                            MonitorTarget::Name(_) => false,
+                            MonitorSelector::Left => dx < Pixels::ZERO,
+                            MonitorSelector::Right => dx > Pixels::ZERO,
+                            MonitorSelector::Up => dy < Pixels::ZERO,
+                            MonitorSelector::Down => dy > Pixels::ZERO,
+                            MonitorSelector::Name(_) => false,
                         };
                         let dx = i64::from(dx.value());
                         let dy = i64::from(dy.value());

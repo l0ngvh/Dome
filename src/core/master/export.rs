@@ -1,13 +1,11 @@
 use std::collections::HashMap;
 
-use crate::{
-    config::{PaneConfig, WindowMatcher},
-    core::{
-        hub::HubAccess,
-        master::{MasterStrategy, preferred_layout::Slot, preferred_layout::SlotId},
-        node::{WindowId, WorkspaceId},
-        strategy::WorkspaceExport,
-    },
+use crate::core::{
+    WindowMatcher,
+    hub::HubAccess,
+    master::{MasterStrategy, PaneConfig, preferred_layout::Slot, preferred_layout::SlotId},
+    node::{WindowId, WorkspaceId},
+    strategy::WorkspaceExport,
 };
 
 impl MasterStrategy {

@@ -1,6 +1,6 @@
 use crate::core::hub::HubAccess;
 use crate::core::node::{ContainerId, Direction, WorkspaceId};
-use crate::core::partition_tree::{Child, Parent, SpawnMode};
+use crate::core::partition_tree::{Child, Parent};
 
 use super::PartitionTreeStrategy;
 
@@ -89,8 +89,7 @@ impl PartitionTreeStrategy {
             } else {
                 vec![child, root]
             };
-            let spawn_mode = SpawnMode::from_direction(direction);
-            self.replace_anchor_with_container(hub, root, children, spawn_mode.into());
+            self.replace_anchor_with_container(hub, root, children, direction.into());
             self.compute_placement(hub, current_ws);
             self.set_focus(hub, child);
         }
@@ -137,7 +136,7 @@ impl PartitionTreeStrategy {
         }
     }
 
-    pub(super) fn toggle_focused_layout_direction(&mut self, hub: &mut HubAccess) {
+    pub(in crate::core) fn toggle_focused_layout_direction(&mut self, hub: &mut HubAccess) {
         let workspace_id = hub.monitors.get(hub.focused_monitor).active_workspace;
         let Some(focused) = self.focused_child_in(hub, workspace_id) else {
             return;
@@ -202,39 +201,41 @@ impl PartitionTreeStrategy {
         self.compute_placement(hub, ws);
     }
 
-    pub(super) fn toggle_spawn_mode(&mut self, hub: &mut HubAccess) {
+    pub(in crate::core) fn toggle_spawn_mode(&mut self, hub: &mut HubAccess) {
         let ws_id = hub.monitors.get(hub.focused_monitor).active_workspace;
         let Some(focused) = self.workspaces.get(&ws_id).and_then(|s| s.focused_tiling) else {
             return;
         };
 
-        let current_mode = match focused {
-            Child::Container(id) => self.tiling_containers.get(&id).unwrap().spawn_mode(),
+        let current_direction = match focused {
+            Child::Container(id) => self.tiling_containers.get(&id).unwrap().spawn_direction(),
             Child::Window(id) => {
                 let w = hub.windows.get(id);
                 if w.is_float() || w.is_fullscreen() {
                     return;
                 }
-                self.tiling_windows.get(&id).unwrap().spawn_mode
+                self.tiling_windows.get(&id).unwrap().spawn_direction
             }
         };
-        let new_mode = current_mode.toggle();
+        let new_direction = match current_direction {
+            Direction::Horizontal => Direction::Vertical,
+            Direction::Vertical => Direction::Horizontal,
+        };
 
         match focused {
             Child::Container(id) => self
                 .tiling_containers
                 .get_mut(&id)
                 .unwrap()
-                .set_spawn_mode_keep_history(new_mode),
+                .set_spawn_direction(new_direction),
             Child::Window(id) => {
-                let td = self.tiling_windows.get_mut(&id).unwrap();
-                td.spawn_mode = td.spawn_mode.switch_to(new_mode);
+                self.tiling_windows.get_mut(&id).unwrap().spawn_direction = new_direction;
             }
         }
-        tracing::debug!(?focused, ?new_mode, "Toggled spawn mode");
+        tracing::debug!(?focused, ?new_direction, "Toggled spawn direction");
     }
 
-    pub(super) fn toggle_container_layout(&mut self, hub: &mut HubAccess) {
+    pub(super) fn toggle_focused_container_layout(&mut self, hub: &mut HubAccess) {
         let ws_id = hub.monitors.get(hub.focused_monitor).active_workspace;
         let Some(focused) = self.workspaces.get(&ws_id).and_then(|s| s.focused_tiling) else {
             return;
@@ -255,7 +256,7 @@ impl PartitionTreeStrategy {
         self.convert_container_layout(hub, container_id);
     }
 
-    pub(super) fn focus_tab(&mut self, hub: &mut HubAccess, forward: bool) {
+    pub(super) fn focus_tab_in_direction(&mut self, hub: &mut HubAccess, forward: bool) {
         let Some(focused) = self.focused_child(hub) else {
             return;
         };
@@ -285,7 +286,7 @@ impl PartitionTreeStrategy {
     /// `focused_tiling` to `Child::Container`, entering container-highlight mode.
     /// No managed windows should receive keyboard focus in this mode.
     /// Move-to-workspace operates on the whole container.
-    pub(super) fn focus_parent(&mut self, hub: &mut HubAccess) {
+    pub(in crate::core) fn focus_parent(&mut self, hub: &mut HubAccess) {
         let Some(focused) = self.focused_child(hub) else {
             return;
         };

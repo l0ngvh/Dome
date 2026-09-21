@@ -1,18 +1,18 @@
 use crate::core::allocator::NodeId;
 
 use super::{
-    LayoutConfigBuilder, PixelRect, default_rect, setup, setup_with_layout, snapshot, titled,
+    PixelRect, TilingConfigBuilder, default_rect, setup, setup_with_tiling, snapshot, titled,
     titled_matcher,
 };
-use crate::core::GlobalLayoutConfig;
+use crate::core::TilingConfig;
 use crate::core::node::{
     Length, LimitObservation, LimitUpdate, MinimizedWindowEntry, MonitorId, WindowRestrictions,
 };
 use insta::assert_snapshot;
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
-    LayoutConfigBuilder::new()
+fn tiling_floating(titles: &[&str]) -> TilingConfig {
+    TilingConfigBuilder::new()
         .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
         .build()
 }
@@ -69,7 +69,7 @@ fn minimize_tiling_window() {
 
 #[test]
 fn minimize_float_window() {
-    let mut hub = setup_with_layout(layout_floating(&["w3"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w3"]));
     let _w0 = hub
         .insert_window(titled("w2"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -375,7 +375,7 @@ fn minimize_last_window_on_workspace() {
 
 #[test]
 fn minimize_last_tiling_with_floats_present() {
-    let mut hub = setup_with_layout(layout_floating(&["w18"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w18"]));
     let w0 = hub
         .insert_window(titled("w17"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -434,7 +434,7 @@ fn set_window_constraint_on_minimized_no_panic() {
 #[test]
 #[should_panic(expected = "non-minimized float window has a workspace")]
 fn update_float_rect_on_minimized_panics() {
-    let mut hub = setup_with_layout(layout_floating(&["w20"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w20"]));
     let dim = PixelRect::new(10, 5, 40, 10);
     let w0 = hub
         .insert_window(titled("w20"), dim, WindowRestrictions::None)
@@ -519,7 +519,7 @@ fn unminimize_deleted_window_is_noop() {
 
 #[test]
 fn unminimize_float_window_restores_mode_and_dimension() {
-    let mut hub = setup_with_layout(layout_floating(&["w28"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w28"]));
     let _w0 = hub
         .insert_window(titled("w27"), default_rect(), WindowRestrictions::None)
         .unwrap();

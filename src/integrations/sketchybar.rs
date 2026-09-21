@@ -11,35 +11,13 @@ use crate::action::MonitorDetails;
 /// into it, then writes the result as `dome.sh`.
 const DOME_SH: &str = include_str!("../../resources/integrations/sketchybar/dome.sh");
 
-// The number row is pre-created for every connected monitor so it keeps a fixed
-// order. The tick adds a cell for any other workspace name on first sight.
 const WORKSPACES: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
-/// Run the `sketchybar` CLI. A spawn failure with NotFound means SketchyBar is
-/// not installed, which is fatal for every path here. A non-zero exit from a
-/// running binary is tolerated, because the bar may be mid-reload.
-fn run_sketchybar(args: &[&str]) -> anyhow::Result<std::process::Output> {
-    std::process::Command::new("sketchybar")
-        .args(args)
-        .output()
-        .map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => {
-                anyhow!("sketchybar not found on PATH. Install SketchyBar first.")
-            }
-            _ => anyhow::Error::new(e).context("run sketchybar"),
-        })
-}
-
-/// Single-quote a value for the `sh -c` that SketchyBar runs a script through.
-/// The one escape is `'\''` for a literal apostrophe.
-fn sh_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-/// Query dome state, write `dome.sh`, source it from `sketchybarrc`, then reload
-/// if the bar is running. dome does not query SketchyBar, so this works before
-/// SketchyBar starts. Every query runs before any write, so a failed query
-/// leaves both files untouched.
+/// Query dome's connected monitors, compose `dome.sh`, source it from
+/// sketchybarrc, and reload SketchyBar.
+///
+/// dome does not query SketchyBar, so this works before SketchyBar starts. Every
+/// query runs before any write, so a failed query leaves both files untouched.
 pub(crate) fn generate() -> anyhow::Result<()> {
     let dome = std::env::current_exe().context("resolve dome's own path")?;
     let dome = dome.to_string_lossy().into_owned();
@@ -70,6 +48,26 @@ pub(crate) fn generate() -> anyhow::Result<()> {
         }
     );
     Ok(())
+}
+
+/// A spawn failure with NotFound means SketchyBar is not installed, which is
+/// fatal. A non-zero exit is tolerated, because the bar may be mid-reload.
+fn run_sketchybar(args: &[&str]) -> anyhow::Result<std::process::Output> {
+    std::process::Command::new("sketchybar")
+        .args(args)
+        .output()
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                anyhow!("sketchybar not found on PATH. Install SketchyBar first.")
+            }
+            _ => anyhow::Error::new(e).context("run sketchybar"),
+        })
+}
+
+/// Single-quote a value for the `sh -c` that SketchyBar runs a script through.
+/// The one escape is `'\''` for a literal apostrophe.
+fn sh_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn default_sketchybarrc() -> anyhow::Result<PathBuf> {
@@ -123,8 +121,8 @@ fn connected_monitors(monitors: &[MonitorDetails]) -> Vec<(&str, String)> {
     out
 }
 
-/// Build the item setup lines. Pure over the queried data, so the tests pin the
-/// emitted items without SketchyBar.
+/// Build the sketchybar `--add` / `--set` / `--subscribe` lines for every
+/// connected monitor.
 fn build_setup(monitors: &[MonitorDetails]) -> String {
     let mut out = String::new();
     out.push_str("sketchybar --add event dome_update\n");
@@ -156,7 +154,7 @@ fn build_setup(monitors: &[MonitorDetails]) -> String {
              item=\"dome.{s}.ws.$n\"\n  \
              sketchybar --add item \"$item\" left --set \"$item\" drawing=off \
              script=\"'$PLUGIN'\" \
-             click_script=\"'$DOME' focus workspace '$n' --monitor {name_q}; \
+             click_script=\"'$DOME' focus-workspace '$n' --monitor {name_q}; \
              sketchybar --trigger dome_update\" $WORKSPACE_STYLE \
              --subscribe \"$item\" mouse.entered mouse.exited\ndone\n",
             name_q = sh_quote(name),
@@ -174,9 +172,9 @@ fn build_setup(monitors: &[MonitorDetails]) -> String {
 }
 
 /// Write `dome.sh` and add one `source` line to `sketchybarrc`. Backs the config
-/// up once, the way `generate yasb` does, so the pristine original survives a
-/// re-run. The source line is idempotent, so a re-run does not duplicate it. A
-/// missing sketchybarrc is created holding just the source line.
+/// up once, so the pristine original survives a re-run. The source line is
+/// idempotent, so a re-run does not duplicate it. A missing sketchybarrc is
+/// created holding just the source line.
 fn install(dome_sh: &Path, rc: &Path, content: &str) -> anyhow::Result<()> {
     if let Some(parent) = dome_sh.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
@@ -279,7 +277,7 @@ mod tests {
         assert!(s.contains("for n in 0 1 2 3 4 5 6 7 8 9; do"));
         assert!(s.contains("item=\"dome.dell-se2416h.ws.$n\""));
         assert!(s.contains("--add item \"$item\" left"));
-        // display= is not baked. The tick sets it live.
+        // The tick sets display= live.
         assert!(!s.contains("display="));
 
         // A monitor with no name gets no loop.
@@ -304,7 +302,7 @@ mod tests {
             })
             .expect("loop emits a sketchybar line");
         assert!(sb.contains(
-            "click_script=\"'$DOME' focus workspace '$n' --monitor 'DELL SE2416H'; \
+            "click_script=\"'$DOME' focus-workspace '$n' --monitor 'DELL SE2416H'; \
              sketchybar --trigger dome_update\""
         ));
         assert!(
@@ -322,7 +320,7 @@ mod tests {
         assert!(!s.contains("dome.parked.heading."));
         assert!(!s.contains("--add item dome.parked.dell-se2416h"));
         // A cell click focuses by the monitor's unique name and repaints at once.
-        assert!(s.contains("'$DOME' focus workspace '$n' --monitor 'DELL SE2416H'"));
+        assert!(s.contains("'$DOME' focus-workspace '$n' --monitor 'DELL SE2416H'"));
         assert!(s.contains("; sketchybar --trigger dome_update"));
     }
 
@@ -396,7 +394,7 @@ mod tests {
     fn install_bootstraps_missing_sketchybarrc() {
         let dir = scratch("bootstrap");
         std::fs::create_dir_all(&dir).unwrap();
-        let rc = dir.join("sketchybarrc"); // does not exist
+        let rc = dir.join("sketchybarrc");
         let dome_sh = dir.join("dome").join("dome.sh");
 
         install(&dome_sh, &rc, "PLUGIN").unwrap();

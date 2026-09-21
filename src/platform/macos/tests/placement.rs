@@ -19,10 +19,10 @@ fn a_fractional_work_area_keeps_the_window_inside_it() {
     let mut macos = MacOS::new();
     // Zero border so the sole tile fills the work area exactly, leaving no inset to
     // absorb a sub-point rounding error.
-    let mut dome = macos.setup_dome_with_config(Config {
-        border_size: Pixels::ZERO,
-        ..Config::default()
-    });
+    let mut dome = macos
+        .dome_builder()
+        .tiling(|tiling| tiling.border_size = Pixels::ZERO)
+        .build();
 
     let mut monitor = default_monitor();
     monitor.work_area = PixelRect::from_dimension_inward(FRACTIONAL_WORK_AREA);
@@ -39,10 +39,10 @@ fn a_fractional_work_area_keeps_the_window_inside_it() {
 fn degenerate_content_box_parks_window() {
     let mut macos = MacOS::new();
     // Each edge exceeds half of SCREEN_HEIGHT, so no content height remains.
-    let mut dome = macos.setup_dome_with_config(Config {
-        border_size: Pixels::new(600),
-        ..Config::default()
-    });
+    let mut dome = macos
+        .dome_builder()
+        .tiling(|tiling| tiling.border_size = Pixels::new(600))
+        .build();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
@@ -50,7 +50,9 @@ fn degenerate_content_box_parks_window() {
 
     assert!(macos.is_offscreen(cg1));
 
-    dome.config_changed(Config::default());
+    macos.change_config(&mut dome, |config| {
+        config.tiling.border_size = baseline_config().tiling.border_size
+    });
     macos.settle(&mut dome, 10);
 
     assert!(!macos.is_offscreen(cg1));
@@ -167,7 +169,7 @@ fn float_window_moved_by_user() {
     // Float should stay at the user-chosen position, not be corrected
     assert_eq!(macos.window_frame(cg2), (200, 150, 600, 400));
 
-    let border = Length::from_pixels(Config::default().border_size).logical();
+    let border = macos.border();
     let snap = macos
         .last_float_snapshot(cg2)
         .expect("float snapshot should be present for focused float");
@@ -224,11 +226,9 @@ fn float_window_reshaped_on_border_size_change() {
 
     // A border several points above the default, so the delta cannot be
     // mistaken for rounding noise.
-    let new_config = Config {
-        border_size: Pixels::new(12),
-        ..Default::default()
-    };
-    dome.config_changed(new_config);
+    macos.change_config(&mut dome, |config| {
+        config.tiling.border_size = Pixels::new(12)
+    });
 
     // Check before settle because settle drains the move log.
     let reshape_moves: Vec<_> = macos
@@ -361,10 +361,10 @@ fn a_fractional_reserved_bar_keeps_the_window_inside_the_reserved_area() {
     let mut macos = MacOS::new();
     // Zero border so the sole tile fills the work area exactly, leaving no inset to
     // absorb a sub-point rounding error.
-    let mut dome = macos.setup_dome_with_config(Config {
-        border_size: Pixels::ZERO,
-        ..Config::default()
-    });
+    let mut dome = macos
+        .dome_builder()
+        .tiling(|tiling| tiling.border_size = Pixels::ZERO)
+        .build();
 
     let win = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);

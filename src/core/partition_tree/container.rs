@@ -1,6 +1,6 @@
 use crate::core::hub::HubAccess;
 use crate::core::node::ContainerId;
-use crate::core::partition_tree::{Child, Parent, PartitionTreeStrategy, SpawnMode};
+use crate::core::partition_tree::{Child, Parent, PartitionTreeStrategy};
 
 impl PartitionTreeStrategy {
     /// Partition-tree invariant: a container holds at least two children. When one child
@@ -46,14 +46,13 @@ impl PartitionTreeStrategy {
         } else {
             parent.children.push(child);
         }
-        let container_spawn_mode = self
+        let container_spawn_direction = self
             .tiling_containers
             .get(&container_id)
             .unwrap()
-            .spawn_mode();
+            .spawn_direction();
         if let Child::Window(wid) = child {
-            self.tiling_windows.get_mut(&wid).unwrap().spawn_mode =
-                SpawnMode::without_history(container_spawn_mode);
+            self.tiling_windows.get_mut(&wid).unwrap().spawn_direction = container_spawn_direction;
         }
         self.set_parent(child, Parent::Container(container_id));
         self.maintain_direction_invariance(hub, Parent::Container(container_id));

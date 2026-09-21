@@ -1,16 +1,16 @@
-use crate::action::MonitorTarget;
 use crate::action::{MonitorDetails, MonitorFrame, WorkspaceInfo, WorkspaceState};
-use crate::core::GlobalLayoutConfig;
+use crate::core::MonitorSelector;
 use crate::core::ReportedMonitor;
+use crate::core::TilingConfig;
 use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_rect, reported_monitor, setup, setup_with_layout, titled,
+    TilingConfigBuilder, default_rect, reported_monitor, setup, setup_with_tiling, titled,
     titled_matcher, work_area_at,
 };
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
-    LayoutConfigBuilder::new()
+fn tiling_floating(titles: &[&str]) -> TilingConfig {
+    TilingConfigBuilder::new()
         .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
         .build()
 }
@@ -62,7 +62,7 @@ fn multiple_workspaces() {
 
 #[test]
 fn workspace_with_floats_and_fullscreen() {
-    let mut hub = setup_with_layout(layout_floating(&["w7"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w7"]));
     hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
     hub.insert_window(
         titled("w7"),
@@ -89,7 +89,7 @@ fn focused_vs_visible_multi_monitor() {
         PixelRect::new(200, 0, 100, 30),
         1.0,
     ));
-    hub.focus_monitor(&MonitorTarget::Name("secondary".into()));
+    hub.focus_monitor(&MonitorSelector::Name("secondary".into()));
     hub.insert_window(titled("w10"), default_rect(), WindowRestrictions::None);
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);
@@ -182,7 +182,7 @@ fn monitor_details_json_shape() {
 
 #[test]
 fn workspace_with_only_floats() {
-    let mut hub = setup_with_layout(layout_floating(&["w12", "w13"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w12", "w13"]));
     hub.insert_window(
         titled("w12"),
         PixelRect::new(0, 0, 200, 100),

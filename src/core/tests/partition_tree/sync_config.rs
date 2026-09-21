@@ -2,14 +2,14 @@ use insta::assert_snapshot;
 
 use crate::core::node::{Pixels, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder, default_rect, snapshot, titled,
+    PartitionTreeConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect, snapshot, titled,
 };
 
 #[test]
 fn sync_config_updates_tab_bar_height() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_partition_tree_config(
                     PartitionTreeConfigBuilder::new()
                         .with_tab_bar_height(Pixels::new(5))
@@ -24,7 +24,7 @@ fn sync_config_updates_tab_bar_height() {
     hub.toggle_container_layout();
 
     hub.sync_configuration(
-        LayoutConfigBuilder::new()
+        TilingConfigBuilder::new()
             .with_partition_tree_config(
                 PartitionTreeConfigBuilder::new()
                     .with_tab_bar_height(Pixels::new(10))
@@ -77,8 +77,8 @@ fn sync_config_updates_tab_bar_height() {
 #[test]
 fn sync_config_recalculates_all_workspaces() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_partition_tree_config(
                     PartitionTreeConfigBuilder::new()
                         .with_tab_bar_height(Pixels::new(10))
@@ -98,7 +98,7 @@ fn sync_config_recalculates_all_workspaces() {
     hub.toggle_container_layout();
 
     hub.sync_configuration(
-        LayoutConfigBuilder::new()
+        TilingConfigBuilder::new()
             .with_partition_tree_config(
                 PartitionTreeConfigBuilder::new()
                     .with_tab_bar_height(Pixels::new(5))

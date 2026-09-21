@@ -119,7 +119,7 @@
 
           focusWorkspace.current = async (name, monitor) => {
             try {
-              await zebar.shellExec('dome', ['focus', 'workspace', name, '--monitor', monitor]);
+              await zebar.shellExec('dome', ['focus-workspace', name, '--monitor', monitor]);
               await refresh();
             } catch {}
           };

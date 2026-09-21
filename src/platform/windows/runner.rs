@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{LPARAM, WPARAM};
@@ -6,11 +6,12 @@ use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessage
 
 use crate::action::{Action, Actions};
 use crate::core::{Physical, PixelRect};
-use crate::keymap::KeymapState;
+use crate::logging::Logger;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
 use crate::platform::windows::dome::{Dome, HubEvent, NewWindow, WindowsMetadata};
 use crate::platform::windows::external::{HwndId, InspectExternalWindow, ManageExternalWindow};
 use crate::platform::windows::handle::ExternalHwnd;
+use crate::platform::windows::login_item;
 use crate::platform::windows::throttle::{Throttle, ThrottleResult};
 use crate::platform::windows::timer_registry::{TimerKind, TimerRegistry, Win32Timer};
 
@@ -28,16 +29,11 @@ pub(super) struct Runner {
     // the registry. KillTimer is idempotent on already-fired one-shots.
     timers: TimerRegistry,
     main_thread_id: u32,
-    keymap_state: Arc<RwLock<KeymapState>>,
+    logger: Logger,
 }
 
 impl Runner {
-    pub(super) fn new(
-        dome: Dome,
-        thread_id: u32,
-        main_thread_id: u32,
-        keymap_state: Arc<RwLock<KeymapState>>,
-    ) -> Self {
+    pub(super) fn new(dome: Dome, thread_id: u32, main_thread_id: u32, logger: Logger) -> Self {
         let mut timers = TimerRegistry::new(Box::new(Win32Timer));
         timers.schedule_drift_retry(DRIFT_RETRY_INTERVAL);
         Self {
@@ -46,7 +42,7 @@ impl Runner {
             focus_throttle: Throttle::new(FOCUS_THROTTLE_INTERVAL),
             timers,
             main_thread_id,
-            keymap_state,
+            logger,
         }
     }
 
@@ -77,8 +73,16 @@ impl Runner {
                 tracing::info!("Shutdown requested");
                 unsafe { PostQuitMessage(0) };
             }
-            HubEvent::ConfigChanged(c) => {
-                self.dome.config_changed(*c);
+            HubEvent::RunBinding { keymap, keystroke } => {
+                self.dome
+                    .run_binding(&keymap, &keystroke, self.main_thread_id);
+            }
+            HubEvent::ReloadConfig => {
+                if let Some(config) = self.dome.reload() {
+                    self.logger.set_level(config.log_level);
+                    login_item::sync_login_item(config.start_at_login);
+                    self.dome.config_changed(config.tiling, config.appearance);
+                }
             }
             HubEvent::LayoutConfigChanged(c) => {
                 self.dome.layout_changed(*c);
@@ -171,49 +175,13 @@ impl Runner {
                 let to_refresh = self.dome.handle_display_change();
                 self.refresh_and_relayout(to_refresh);
             }
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn handle_actions(&mut self, actions: &Actions) {
-        for action in actions {
-            match action {
-                Action::Focus { target: t } => {
-                    self.dome.apply_focus(t);
-                }
-                Action::Move { target: t } => {
-                    self.dome.apply_move(t);
-                }
-                Action::Toggle { target: t } => {
-                    self.dome.apply_toggle(t);
-                }
-                Action::Master { target: t } => {
-                    self.dome.apply_master(t);
-                }
-                Action::Exec { command } => {
-                    if let Err(e) = crate::platform::windows::spawn::spawn(command) {
-                        tracing::warn!(%command, "Failed to exec: {e:#}");
-                    }
-                }
-                Action::Exit => {
-                    unsafe {
-                        PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok()
-                    };
-                    unsafe { PostQuitMessage(0) };
-                }
-                Action::Close => {
-                    self.dome.close_focused_window();
-                }
-                Action::UnminimizeWindow { id } => {
-                    self.dome.unminimize_window(*id);
-                }
-                Action::Mode { name } => {
-                    self.keymap_state.write().unwrap().switch_mode(name);
-                    tracing::debug!(mode = %name, "Switching to mode");
-                }
+            HubEvent::TilingOverlayReady { monitor, overlay } => {
+                self.dome.tiling_overlay_ready(monitor, overlay);
+            }
+            HubEvent::FloatOverlayReady { window, overlay } => {
+                self.dome.float_overlay_ready(window, overlay);
             }
         }
-        self.dome.apply_layout();
     }
 
     pub(super) fn dispatch_window_created(&mut self, hwnd_id: HwndId) {
@@ -262,6 +230,40 @@ impl Runner {
                 CreatedWindow::Skip => {}
             },
         );
+    }
+
+    #[tracing::instrument(skip(self))]
+    fn handle_actions(&mut self, actions: &Actions) {
+        for action in actions {
+            match action {
+                Action::Focus { target } => self.dome.handle_tiling_action(target.into()),
+                Action::Move { target } => self.dome.handle_tiling_action(target.into()),
+                Action::Toggle { target } => self.dome.handle_tiling_action(target.into()),
+                Action::Master { target } => self.dome.handle_tiling_action(target.into()),
+                Action::Execute { command } => {
+                    if let Err(e) = crate::platform::windows::spawn::spawn(command) {
+                        tracing::warn!(%command, "Failed to execute: {e:#}");
+                    }
+                }
+                Action::Exit => {
+                    unsafe {
+                        PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok()
+                    };
+                    unsafe { PostQuitMessage(0) };
+                }
+                Action::Close => {
+                    self.dome.close_focused_window();
+                }
+                Action::UnminimizeWindow { id } => {
+                    self.dome.unminimize_window(*id);
+                }
+                Action::Mode { name } => {
+                    self.dome.switch_mode(name);
+                    tracing::debug!(mode = %name, "Switching to mode");
+                }
+            }
+        }
+        self.dome.apply_layout();
     }
 
     fn dispatch_placement_read(&mut self, hwnd_id: HwndId, observed_at: Instant) {

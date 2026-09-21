@@ -11,22 +11,20 @@ mod validate;
 use self::preferred_layout::{PreferredContainerSlot, PreferredSlot, PreferredWindowSlot};
 pub(crate) use crate::core::node::Child;
 pub(crate) use crate::core::node::Container;
+pub(crate) use preferred_layout::TreeLayoutNode;
 pub(crate) use types::*;
 
 use rustc_hash::FxHashMap;
 
-use crate::config::LayoutWorkspaceConfig;
-use crate::config::SizeConstraints;
-use crate::config::SplitMode;
-use crate::core::GlobalLayoutConfig;
+use crate::core::PreferredWorkspace;
+use crate::core::SizeConstraints;
+use crate::core::TilingConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
 use crate::core::node::{
-    ContainerId, Logical, PixelRect, Pixels, WindowId, WindowMetadata, WorkspaceId,
+    ContainerId, Direction, Logical, PixelRect, Pixels, WindowId, WindowMetadata, WorkspaceId,
 };
-use crate::core::strategy::{
-    TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, translate,
-};
+use crate::core::strategy::{TilingPlacements, TilingStrategy, WorkspaceExport, translate};
 
 /// i3-style manual tiling strategy. Manages a container tree where windows are
 /// leaves and containers define split direction (horizontal/vertical) or tabbed
@@ -48,10 +46,10 @@ impl TilingStrategy for PartitionTreeStrategy {
         &mut self,
         _hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        preferred_layout: Option<&LayoutWorkspaceConfig>,
+        preferred_layout: Option<&PreferredWorkspace>,
     ) {
         let preferred_root = match preferred_layout {
-            Some(LayoutWorkspaceConfig::PartitionTree { tree, .. }) => {
+            Some(PreferredWorkspace::PartitionTree { tree, .. }) => {
                 tree.as_ref().map(|t| self.build_preferred_layout(t))
             }
             Some(_) => panic!("Preparing master workspace in partition tree strategy"),
@@ -73,12 +71,12 @@ impl TilingStrategy for PartitionTreeStrategy {
 
         let preferred_root = self.workspaces.get(&ws_id).unwrap().preferred_root;
         let Some(root) = preferred_root else {
-            self.attach_child_according_to_spawn_mode(hub, Child::Window(window_id), ws_id);
+            self.attach_child_according_to_spawn_direction(hub, Child::Window(window_id), ws_id);
             return;
         };
         let Some(slot_id) = self.find_window_slot(root, metadata) else {
-            tracing::debug!(%window_id, "No preferred layout slot matched, falling back to spawn mode");
-            self.attach_child_according_to_spawn_mode(hub, Child::Window(window_id), ws_id);
+            tracing::debug!(%window_id, "No preferred layout slot matched, falling back to spawn direction");
+            self.attach_child_according_to_spawn_direction(hub, Child::Window(window_id), ws_id);
             return;
         };
         tracing::debug!(%window_id, ?slot_id, "Window matched preferred layout slot");
@@ -109,8 +107,7 @@ impl TilingStrategy for PartitionTreeStrategy {
             return;
         }
 
-        // First matched window, insert via spawn mode and mark slot occupied
-        self.attach_child_according_to_spawn_mode(hub, Child::Window(window_id), ws_id);
+        self.attach_child_according_to_spawn_direction(hub, Child::Window(window_id), ws_id);
 
         self.occupy_window_slot(slot_id, window_id);
         self.workspaces
@@ -141,28 +138,24 @@ impl TilingStrategy for PartitionTreeStrategy {
         translate(child_dim, offset_x, offset_y, work_area.x(), work_area.y())
     }
 
-    fn handle_action(&mut self, hub: &mut HubAccess, action: TilingAction) {
-        match action {
-            TilingAction::FocusDirection { direction, forward } => {
-                self.focus_in_direction(hub, direction, forward)
-            }
-            TilingAction::MoveDirection { direction, forward } => {
-                self.move_in_direction(hub, direction, forward)
-            }
-            TilingAction::ToggleSpawnMode => self.toggle_spawn_mode(hub),
-            TilingAction::ToggleDirection => self.toggle_focused_layout_direction(hub),
-            TilingAction::ToggleContainerLayout => self.toggle_container_layout(hub),
-            TilingAction::FocusParent => self.focus_parent(hub),
-            TilingAction::FocusTab { forward } => self.focus_tab(hub, forward),
-            TilingAction::TabClicked {
-                container_id,
-                index,
-            } => self.focus_tab_index(hub, container_id, index),
-            TilingAction::GrowMaster
-            | TilingAction::ShrinkMaster
-            | TilingAction::MoreMaster
-            | TilingAction::FewerMaster => {}
-        }
+    fn focus_direction(&mut self, hub: &mut HubAccess, direction: Direction, forward: bool) {
+        self.focus_in_direction(hub, direction, forward)
+    }
+
+    fn move_direction(&mut self, hub: &mut HubAccess, direction: Direction, forward: bool) {
+        self.move_in_direction(hub, direction, forward)
+    }
+
+    fn toggle_container_layout(&mut self, hub: &mut HubAccess) {
+        self.toggle_focused_container_layout(hub)
+    }
+
+    fn focus_tab(&mut self, hub: &mut HubAccess, forward: bool) {
+        self.focus_tab_in_direction(hub, forward)
+    }
+
+    fn tab_clicked(&mut self, hub: &mut HubAccess, container_id: ContainerId, index: usize) {
+        self.focus_tab_index(hub, container_id, index)
     }
 
     fn compute_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
@@ -251,7 +244,7 @@ impl TilingStrategy for PartitionTreeStrategy {
                 self.maintain_direction_invariance(hub, Parent::Container(root));
             }
         }
-        self.attach_child_according_to_spawn_mode(hub, child, ws_id);
+        self.attach_child_according_to_spawn_direction(hub, child, ws_id);
         self.set_focus(hub, child);
     }
 
@@ -303,15 +296,15 @@ impl TilingStrategy for PartitionTreeStrategy {
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-        incoming: Option<&LayoutWorkspaceConfig>,
+        incoming: Option<&PreferredWorkspace>,
     ) {
         self.sync_preferred_layout(hub, ws_id, incoming)
     }
 
-    fn apply_config(&mut self, hub: &mut HubAccess, layout: GlobalLayoutConfig) {
-        self.tab_bar_height = layout.partition_tree.tab_bar_height;
-        self.automatic_tiling = layout.partition_tree.automatic_tiling;
-        self.size_constraints = layout.size_constraints;
+    fn apply_config(&mut self, hub: &mut HubAccess, tiling: TilingConfig) {
+        self.tab_bar_height = tiling.partition_tree.tab_bar_height;
+        self.automatic_tiling = tiling.partition_tree.automatic_tiling;
+        self.size_constraints = tiling.size_constraints;
         for ws_id in self.workspaces.keys().copied().collect::<Vec<_>>() {
             self.compute_placement(hub, ws_id);
         }

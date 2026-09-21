@@ -5,6 +5,9 @@ pub mod macos;
 pub mod windows;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) mod keymap;
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) mod render;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

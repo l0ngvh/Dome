@@ -1,12 +1,13 @@
 use insta::assert_snapshot;
 
-use super::LayoutConfigBuilder;
+use super::TilingConfigBuilder;
 #[cfg(target_os = "windows")]
 use super::{PartitionTreeConfigBuilder, TestHubBuilder};
-use crate::action::{MonitorTarget, WorkspaceState};
+use crate::action::WorkspaceState;
+use crate::core::MonitorSelector;
 #[cfg(target_os = "windows")]
-use crate::config::SizeConstraint;
-use crate::core::GlobalLayoutConfig;
+use crate::core::SizeConstraint;
+use crate::core::TilingConfig;
 #[cfg(target_os = "windows")]
 use crate::core::hub::MonitorLayout;
 #[cfg(target_os = "windows")]
@@ -14,13 +15,13 @@ use crate::core::node::Pixels;
 use crate::core::node::{PixelRect, WindowRestrictions};
 
 use crate::core::tests::{
-    default_rect, focused_monitor_name, reported_monitor, setup, setup_with_layout, snapshot,
+    default_rect, focused_monitor_name, reported_monitor, setup, setup_with_tiling, snapshot,
     snapshot_text, titled, titled_matcher, work_area_at,
 };
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
-    LayoutConfigBuilder::new()
+fn tiling_floating(titles: &[&str]) -> TilingConfig {
+    TilingConfigBuilder::new()
         .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
         .build()
 }
@@ -36,7 +37,7 @@ fn add_monitor_creates_workspace_on_new_monitor() {
         1.0,
     ));
 
-    hub.focus_monitor(&MonitorTarget::Name("monitor-1".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("monitor-1".to_string()));
     hub.focus_workspace("0", None);
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
 
@@ -151,9 +152,9 @@ fn unplugging_unfocused_monitor_leaves_focus_unchanged() {
         1.0,
     ));
 
-    hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
     hub.focus_workspace("1", None);
-    hub.focus_monitor(&MonitorTarget::Name("primary".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("primary".to_string()));
 
     hub.remove_monitor(external);
 
@@ -172,7 +173,7 @@ fn replugging_monitor_moves_workspaces_back_to_it() {
 
     // Two sibling workspaces on B, each with a distinctly-titled window, so the
     // placement shows exactly which of B's workspaces are live at each stage.
-    hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
     hub.focus_workspace("1", None);
     hub.insert_window(titled("b1"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("b2"), default_rect(), WindowRestrictions::None);
@@ -204,7 +205,7 @@ fn replugging_monitor_moves_workspaces_back_to_it() {
         work_area_at(150, 0),
         1.0,
     ));
-    hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
     hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @r#"
     Hub(focused=WindowId(1))
@@ -236,7 +237,7 @@ fn replug_cycles_do_not_accumulate_default_workspaces() {
 
     // A window on external's own workspace, so a returning workspace stays
     // distinguishable from a freshly minted one.
-    hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
     hub.insert_window(titled("e1"), default_rect(), WindowRestrictions::None);
 
     hub.remove_monitor(external);
@@ -277,7 +278,7 @@ fn replug_shows_a_returning_workspace_that_holds_windows() {
 
     // external keeps its empty default "0" and puts its window on "2", so the
     // lowest-named returning workspace is not the one worth showing.
-    hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
     hub.focus_workspace("2", None);
     hub.insert_window(titled("e1"), default_rect(), WindowRestrictions::None);
 
@@ -318,14 +319,14 @@ fn parked_workspace_is_not_reachable_by_name() {
         work_area_at(150, 0),
         1.0,
     ));
-    hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
     hub.focus_workspace("1", None);
     hub.insert_window(titled("b1"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("b2"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("b3"), default_rect(), WindowRestrictions::None);
     hub.remove_monitor(b);
 
-    hub.focus_monitor(&MonitorTarget::Name("primary".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("primary".to_string()));
     hub.focus_workspace("1", None);
 
     // Name resolution lands on primary's own attached "1", never the parked one.
@@ -390,7 +391,7 @@ fn unplugging_focused_monitor_moves_focus_to_primary() {
 
     // Focus a non-primary monitor and give it a distinctly-titled window so its
     // presence in the placement tracks whether its workspace is live.
-    hub.focus_monitor(&MonitorTarget::Name("third".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("third".to_string()));
     assert_eq!(focused_monitor_name(&hub), "third");
 
     hub.remove_monitor(third);
@@ -414,7 +415,7 @@ fn visiting_parked_workspace_shows_its_windows() {
         work_area_at(150, 0),
         1.0,
     ));
-    hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
     hub.insert_window(titled("bwin"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("bwin1"), default_rect(), WindowRestrictions::None);
     hub.remove_monitor(b);
@@ -558,12 +559,12 @@ fn focusing_another_monitor_leaves_visitor_in_place() {
     ));
 
     // A window on gamma's own workspace so gamma stays visible throughout.
-    hub.focus_monitor(&MonitorTarget::Name("gamma".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("gamma".to_string()));
     hub.insert_window(titled("cwin"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("cigwin"), default_rect(), WindowRestrictions::None);
 
     // Window on B, then unplug only B so its workspace parks onto primary.
-    hub.focus_monitor(&MonitorTarget::Name("beta".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("beta".to_string()));
     hub.insert_window(titled("bwin"), default_rect(), WindowRestrictions::None);
     hub.remove_monitor(b);
 
@@ -616,7 +617,7 @@ fn focusing_another_monitor_leaves_visitor_in_place() {
 
     // Focus a workspace on a different surviving monitor. The primary's active
     // workspace never switches off the visitor, so bwin stays on screen.
-    hub.focus_monitor(&MonitorTarget::Name("gamma".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("gamma".to_string()));
     hub.focus_workspace("0", None);
     assert_snapshot!(snapshot(&hub), @r#"
     Hub(focused=WindowId(1))
@@ -673,7 +674,7 @@ fn workspace_returns_to_the_right_monitor_among_same_named() {
         work_area_at(200, 0),
         1.0,
     ));
-    hub.focus_monitor(&MonitorTarget::Name("DELL".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("DELL".to_string()));
     hub.focus_workspace("7", None);
     hub.insert_window(titled("d1win"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("d1win"), default_rect(), WindowRestrictions::None);
@@ -685,7 +686,7 @@ fn workspace_returns_to_the_right_monitor_among_same_named() {
         work_area_at(400, 0),
         1.0,
     ));
-    hub.focus_monitor(&MonitorTarget::Name("DELL #2".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("DELL #2".to_string()));
     hub.insert_window(titled("d2win"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("d2win"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("d2win"), default_rect(), WindowRestrictions::None);
@@ -729,7 +730,7 @@ fn workspace_returns_to_the_right_monitor_among_same_named() {
         work_area_at(200, 0),
         1.0,
     ));
-    hub.focus_monitor(&MonitorTarget::Name("DELL #1".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("DELL #1".to_string()));
     hub.focus_workspace("7", None);
     assert_snapshot!(snapshot(&hub), @r#"
     Hub(focused=WindowId(1))
@@ -764,7 +765,7 @@ fn simultaneous_same_name_removal_single_replug_reattaches_last_removed() {
         work_area_at(200, 0),
         1.0,
     ));
-    hub.focus_monitor(&MonitorTarget::Name("DELL".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("DELL".to_string()));
     hub.focus_workspace("a", None);
     hub.insert_window(titled("d1win"), default_rect(), WindowRestrictions::None);
     let d2 = hub.add_monitor(reported_monitor(
@@ -772,7 +773,7 @@ fn simultaneous_same_name_removal_single_replug_reattaches_last_removed() {
         work_area_at(400, 0),
         1.0,
     ));
-    hub.focus_monitor(&MonitorTarget::Right);
+    hub.focus_monitor(&MonitorSelector::Right);
     hub.focus_workspace("b", None);
     hub.insert_window(titled("d2win"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("d2win"), default_rect(), WindowRestrictions::None);
@@ -797,7 +798,7 @@ fn simultaneous_same_name_removal_single_replug_reattaches_last_removed() {
         work_area_at(200, 0),
         1.0,
     ));
-    hub.focus_monitor(&MonitorTarget::Name("DELL".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("DELL".to_string()));
     hub.focus_workspace("b", None);
     assert_snapshot!(snapshot(&hub), @r#"
     Hub(focused=WindowId(2))
@@ -857,7 +858,7 @@ fn focus_monitor_by_direction() {
         1.0,
     ));
 
-    hub.focus_monitor(&MonitorTarget::Right);
+    hub.focus_monitor(&MonitorSelector::Right);
     assert_snapshot!(snapshot_text(&hub), @r#"
     Hub(focused=None)
       Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -867,7 +868,7 @@ fn focus_monitor_by_direction() {
       Monitor(id=MonitorId(2), name="bottom-monitor", screen=(x=0.00 y=30.00 w=150.00 h=30.00))
     "#);
 
-    hub.focus_monitor(&MonitorTarget::Left);
+    hub.focus_monitor(&MonitorSelector::Left);
     assert_snapshot!(snapshot_text(&hub), @r#"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -877,7 +878,7 @@ fn focus_monitor_by_direction() {
       Monitor(id=MonitorId(2), name="bottom-monitor", screen=(x=0.00 y=30.00 w=150.00 h=30.00))
     "#);
 
-    hub.focus_monitor(&MonitorTarget::Down);
+    hub.focus_monitor(&MonitorSelector::Down);
     assert_snapshot!(snapshot_text(&hub), @r#"
     Hub(focused=None)
       Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -887,7 +888,7 @@ fn focus_monitor_by_direction() {
       Monitor(id=MonitorId(2), name="bottom-monitor", screen=(x=0.00 y=30.00 w=150.00 h=30.00))
     "#);
 
-    hub.focus_monitor(&MonitorTarget::Up);
+    hub.focus_monitor(&MonitorSelector::Up);
     assert_snapshot!(snapshot_text(&hub), @r#"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -897,9 +898,9 @@ fn focus_monitor_by_direction() {
       Monitor(id=MonitorId(2), name="bottom-monitor", screen=(x=0.00 y=30.00 w=150.00 h=30.00))
     "#);
 
-    hub.focus_monitor(&MonitorTarget::Name("right-monitor".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("right-monitor".to_string()));
     let after_name = snapshot_text(&hub);
-    hub.focus_monitor(&MonitorTarget::Name("right-monitor".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("right-monitor".to_string()));
     assert_eq!(snapshot_text(&hub), after_name);
 }
 
@@ -914,7 +915,7 @@ fn focus_monitor_by_name() {
         1.0,
     ));
 
-    hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
 
     assert_snapshot!(snapshot_text(&hub), @r#"
     Hub(focused=None)
@@ -937,7 +938,7 @@ fn move_to_monitor_moves_focused_window() {
         1.0,
     ));
 
-    hub.move_focused_to_monitor(&MonitorTarget::Right);
+    hub.move_focused_to_monitor(&MonitorSelector::Right);
 
     assert_snapshot!(snapshot_text(&hub), @r#"
     Hub(focused=WindowId(0))
@@ -961,7 +962,7 @@ fn move_to_monitor_by_name() {
         1.0,
     ));
 
-    hub.move_focused_to_monitor(&MonitorTarget::Name("external".to_string()));
+    hub.move_focused_to_monitor(&MonitorSelector::Name("external".to_string()));
 
     assert_snapshot!(snapshot_text(&hub), @r#"
     Hub(focused=None)
@@ -974,7 +975,7 @@ fn move_to_monitor_by_name() {
 
 #[test]
 fn move_float_to_monitor() {
-    let mut hub = setup_with_layout(layout_floating(&["w12"]));
+    let mut hub = setup_with_tiling(tiling_floating(&["w12"]));
     hub.insert_window(
         titled("w12"),
         PixelRect::new(10, 10, 50, 20),
@@ -988,7 +989,7 @@ fn move_float_to_monitor() {
         1.0,
     ));
 
-    hub.move_focused_to_monitor(&MonitorTarget::Name("external".to_string()));
+    hub.move_focused_to_monitor(&MonitorSelector::Name("external".to_string()));
 
     assert_snapshot!(snapshot_text(&hub), @r#"
     Hub(focused=None)
@@ -1003,7 +1004,7 @@ fn monitor_noop_cases() {
         let mut hub = setup();
         hub.insert_window(titled("w13"), default_rect(), WindowRestrictions::None);
         let before = snapshot_text(&hub);
-        hub.focus_monitor(&MonitorTarget::Right);
+        hub.focus_monitor(&MonitorSelector::Right);
         assert_eq!(snapshot_text(&hub), before);
     }
 
@@ -1011,7 +1012,7 @@ fn monitor_noop_cases() {
         let mut hub = setup();
         hub.insert_window(titled("w14"), default_rect(), WindowRestrictions::None);
         let before = snapshot_text(&hub);
-        hub.move_focused_to_monitor(&MonitorTarget::Right);
+        hub.move_focused_to_monitor(&MonitorSelector::Right);
         assert_eq!(snapshot_text(&hub), before);
     }
 
@@ -1025,7 +1026,7 @@ fn monitor_noop_cases() {
             1.0,
         ));
         let before = snapshot_text(&hub);
-        hub.move_focused_to_monitor(&MonitorTarget::Name("primary".to_string()));
+        hub.move_focused_to_monitor(&MonitorSelector::Name("primary".to_string()));
         assert_eq!(snapshot_text(&hub), before);
     }
 
@@ -1037,7 +1038,7 @@ fn monitor_noop_cases() {
             1.0,
         ));
         let before = snapshot_text(&hub);
-        hub.move_focused_to_monitor(&MonitorTarget::Right);
+        hub.move_focused_to_monitor(&MonitorSelector::Right);
         assert_eq!(snapshot_text(&hub), before);
     }
 }
@@ -1164,7 +1165,7 @@ fn unique_name_recomputes_on_position_change() {
 #[cfg(target_os = "windows")]
 #[test]
 fn monitor_scale_multiplies_tab_bar_height() {
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_partition_tree_config(
             PartitionTreeConfigBuilder::new()
                 .with_tab_bar_height(Pixels::new(5))
@@ -1172,7 +1173,7 @@ fn monitor_scale_multiplies_tab_bar_height() {
                 .build(),
         )
         .build();
-    let mut hub = TestHubBuilder::new().with_scale(2.0).with_layout(l).build();
+    let mut hub = TestHubBuilder::new().with_scale(2.0).with_tiling(l).build();
     hub.insert_window(titled("w16"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w17"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
@@ -1206,8 +1207,8 @@ fn monitor_scale_multiplies_size_constraints() {
 
     let mut hub = TestHubBuilder::new()
         .with_scale(2.0)
-        .with_layout(
-            LayoutConfigBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
                 .with_partition_tree_config(
                     PartitionTreeConfigBuilder::new()
                         .with_tab_bar_height(Pixels::new(10))
@@ -1261,8 +1262,8 @@ fn monitor_scale_multiplies_size_constraints() {
 #[cfg(target_os = "windows")]
 #[test]
 fn tabbed_band_bottom_lands_on_the_content_top() {
-    let mut hub = setup_with_layout(
-        LayoutConfigBuilder::new()
+    let mut hub = setup_with_tiling(
+        TilingConfigBuilder::new()
             .with_partition_tree_config(
                 PartitionTreeConfigBuilder::new()
                     .with_tab_bar_height(Pixels::new(25))
@@ -1424,7 +1425,7 @@ fn move_to_workspace_on_same_monitor() {
         work_area_at(150, 0),
         1.0,
     ));
-    hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
     hub.focus_workspace("1", None);
     hub.insert_window(titled("bwin"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("bwin"), default_rect(), WindowRestrictions::None);
@@ -1433,7 +1434,7 @@ fn move_to_workspace_on_same_monitor() {
     // A move to "1" from the primary builds (or reuses) the primary's own
     // attached "1", never the hidden parked one, so the snapshot shows mover on
     // the primary while bwin stays out of view in the parked workspace.
-    hub.focus_monitor(&MonitorTarget::Name("primary".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("primary".to_string()));
     hub.insert_window(titled("mover"), default_rect(), WindowRestrictions::None);
     hub.move_focused_to_workspace("1", None);
     hub.focus_workspace("1", None);
@@ -1487,7 +1488,7 @@ fn focus_detached_monitor_no_parked_match_is_noop() {
         work_area_at(150, 0),
         1.0,
     ));
-    hub.focus_monitor(&MonitorTarget::Name("DELL".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("DELL".to_string()));
     hub.remove_monitor(dell);
 
     let before_current = hub.current_workspace();
@@ -1503,7 +1504,7 @@ fn focus_detached_monitor_no_parked_match_is_noop() {
         work_area_at(150, 0),
         1.0,
     ));
-    hub.focus_monitor(&MonitorTarget::Name("DELL".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("DELL".to_string()));
     hub.focus_workspace("5", None);
     hub.insert_window(titled("dwin"), default_rect(), WindowRestrictions::None);
     hub.remove_monitor(dell);
@@ -1562,7 +1563,7 @@ fn primary_change_onto_an_occupied_display_parks_the_displaced_under_its_bare_na
 
     hub.focus_workspace("p", None);
     hub.insert_window(titled("pwin"), default_rect(), WindowRestrictions::None);
-    hub.focus_monitor(&MonitorTarget::Name("DELL".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("DELL".to_string()));
     hub.focus_workspace("d", None);
     hub.insert_window(titled("dwin"), default_rect(), WindowRestrictions::None);
 
@@ -1617,7 +1618,7 @@ fn primary_change_onto_an_untracked_display_carries_the_workspaces() {
         .map(|m| m.unique_name)
         .collect();
     assert_eq!(names, ["DELL"]);
-    hub.focus_monitor(&MonitorTarget::Name("DELL".to_string()));
+    hub.focus_monitor(&MonitorSelector::Name("DELL".to_string()));
     assert_eq!(focused_monitor_name(&hub), "DELL");
 
     assert!(

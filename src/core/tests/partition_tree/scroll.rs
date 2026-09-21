@@ -1,11 +1,8 @@
 use insta::assert_snapshot;
 
-use crate::{
-    config::SizeConstraint,
-    core::{
-        Length, LimitObservation, LimitUpdate, Pixels, WindowRestrictions,
-        tests::{LayoutConfigBuilder, default_rect, setup, snapshot, titled},
-    },
+use crate::core::{
+    Length, LimitObservation, LimitUpdate, Pixels, SizeConstraint, WindowRestrictions,
+    tests::{TilingConfigBuilder, default_rect, setup, snapshot, titled},
 };
 
 #[test]
@@ -369,7 +366,7 @@ fn scroll_window_into_view_in_vertical_child_container() {
 fn scroll_view_port_also_scroll_max_constrained_window() {
     let mut hub = setup();
 
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_max_height(SizeConstraint::Pixels(Pixels::new(10)))
         .with_min_height(SizeConstraint::Pixels(Pixels::new(7)))
         .build();
@@ -442,7 +439,7 @@ fn scroll_view_port_also_scroll_max_constrained_window() {
 fn laying_out_max_constrained_windows_leaves_no_hole() {
     let mut hub = setup();
 
-    let l = LayoutConfigBuilder::new()
+    let l = TilingConfigBuilder::new()
         .with_max_height(SizeConstraint::Pixels(Pixels::new(30)))
         .with_min_height(SizeConstraint::Pixels(Pixels::new(7)))
         .with_min_width(SizeConstraint::Pixels(Pixels::new(30)))

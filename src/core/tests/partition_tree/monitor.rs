@@ -1,4 +1,4 @@
-use crate::action::MonitorTarget;
+use crate::core::MonitorSelector;
 use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{default_rect, reported_monitor, setup, snapshot, titled};
 use insta::assert_snapshot;
@@ -14,7 +14,7 @@ fn move_container_to_monitor() {
         1.0,
     ));
     hub.focus_parent();
-    hub.move_focused_to_monitor(&MonitorTarget::Right);
+    hub.move_focused_to_monitor(&MonitorSelector::Right);
 
     assert_snapshot!(snapshot(&hub), @r#"
     Hub(focused=None)
@@ -39,7 +39,7 @@ fn move_container_to_monitor_no_target() {
     ));
     hub.focus_parent();
     // No monitor to the left, should be a no-op
-    hub.move_focused_to_monitor(&MonitorTarget::Left);
+    hub.move_focused_to_monitor(&MonitorSelector::Left);
 
     assert_snapshot!(snapshot(&hub), @r#"
     Hub(focused=None)
@@ -98,7 +98,7 @@ fn move_container_to_monitor_with_floats_on_workspace() {
         1.0,
     ));
     // Should move the tiling container (W0+W2), not the float W1
-    hub.move_focused_to_monitor(&MonitorTarget::Right);
+    hub.move_focused_to_monitor(&MonitorSelector::Right);
 
     assert_snapshot!(snapshot(&hub), @r#"
     Hub(focused=WindowId(1))

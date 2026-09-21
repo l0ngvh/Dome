@@ -1,4 +1,6 @@
+use crate::platform::keymap::{KeymapPublisher, KeymapView};
 mod lifecycle;
+mod matcher;
 mod placement;
 mod transitions;
 mod uncooperative;
@@ -13,8 +15,8 @@ use anyhow::Result;
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::Action;
-use crate::config::Config;
-use crate::core::{Dimension, Length, Logical, MonitorId, PixelRect, WindowId};
+use crate::config::{Config, KeymapRuntime, LuaRuntime, PreferredLayouts};
+use crate::core::{Dimension, Length, Logical, MonitorId, PixelRect, TilingConfig, WindowId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::dispatcher::DispatcherMarker;
@@ -54,6 +56,10 @@ fn assert_inside_work_area(frame: (i32, i32, i32, i32), reported: Dimension) {
         (reported.x + reported.width).value(),
         (reported.y + reported.height).value()
     );
+}
+
+fn baseline_config() -> Config {
+    crate::config::tests::config()
 }
 
 fn default_monitor() -> MonitorInfo {
@@ -252,6 +258,38 @@ struct MacOS {
     moves: MoveLog,
     next_cg_id: u32,
     scene_state: Arc<Mutex<SceneState>>,
+    config: Config,
+}
+
+struct DomeBuilder<'env> {
+    env: &'env mut MacOS,
+    config: Config,
+}
+
+impl DomeBuilder<'_> {
+    fn tiling(mut self, adjust: impl FnOnce(&mut TilingConfig)) -> Self {
+        adjust(&mut self.config.tiling);
+        self
+    }
+
+    fn build(self) -> Dome {
+        let Self { env, config } = self;
+        let sender = TestSender {
+            scene_state: env.scene_state.clone(),
+        };
+        let (keymap_tx, _keymap_rx) = std::sync::mpsc::channel();
+        let keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
+        let runtime = LuaRuntime::new(String::new()).expect("build test Lua VM");
+        let dome = Dome::new(
+            &[default_monitor()],
+            config.tiling.clone(),
+            PreferredLayouts::default(),
+            Box::new(sender),
+            KeymapRuntime::new(runtime, Box::new(keymap)),
+        );
+        env.config = config;
+        dome
+    }
 }
 
 impl MacOS {
@@ -265,6 +303,7 @@ impl MacOS {
                 focused_monitor_id: None,
                 floats: HashMap::new(),
             })),
+            config: baseline_config(),
         }
     }
 
@@ -371,6 +410,23 @@ impl MacOS {
         self.window(cg_id).is_minimized.get()
     }
 
+    /// Replay the deminiaturize notification, which macOS routes as a move at
+    /// the window's current frame.
+    fn deminiaturize(&self, dome: &mut Dome, cg_id: CGWindowID) {
+        let (x, y, w, h) = self.window_frame(cg_id);
+        self.simulate_external_move(dome, cg_id, x, y, w, h);
+    }
+
+    /// Simulate the OS reporting a window focused. Dome answers a minimized one
+    /// with a restore, which macOS follows with a deminiaturize, so replay that.
+    fn focus_window(&self, dome: &mut Dome, cg_id: CGWindowID) {
+        let was_minimized = self.is_minimized(cg_id);
+        dome.focus_window_by_cg(cg_id);
+        if was_minimized {
+            self.deminiaturize(dome, cg_id);
+        }
+    }
+
     // Why Instant::now() works for these helpers:
     // observed_at.last must be >= placed_at for the stale check, and
     // observed_at.first must be <= placed_at + 1s for the constraint/drift check.
@@ -460,20 +516,23 @@ impl MacOS {
             }
         }
     }
-    fn setup_dome(&self) -> Dome {
-        self.setup_dome_with_config(Config::default())
+
+    fn setup_dome(&mut self) -> Dome {
+        self.dome_builder().build()
     }
 
-    fn setup_dome_with_config(&self, config: Config) -> Dome {
-        let sender = TestSender {
-            scene_state: self.scene_state.clone(),
-        };
-        Dome::new(
-            &[default_monitor()],
-            config.clone(),
-            Vec::new(),
-            Box::new(sender),
-        )
+    fn dome_builder(&mut self) -> DomeBuilder<'_> {
+        let config = self.config.clone();
+        DomeBuilder { env: self, config }
+    }
+
+    fn border(&self) -> f32 {
+        Length::from_pixels(self.config.tiling.border_size).logical()
+    }
+
+    fn change_config(&mut self, dome: &mut Dome, adjust: impl FnOnce(&mut Config)) {
+        adjust(&mut self.config);
+        dome.config_changed(self.config.tiling.clone(), self.config.appearance.clone());
     }
 
     fn last_scene_state(&self) -> SceneState {
@@ -575,25 +634,28 @@ fn end_drag(
     }]);
 }
 
+/// Mirrors the runner's action dispatch, so keep the two in step.
+fn send_action(dome: &mut Dome, action: &Action) {
+    match action {
+        Action::Focus { target } => dispatch_tiling(dome, target.into()),
+        Action::Move { target } => dispatch_tiling(dome, target.into()),
+        Action::Toggle { target } => dispatch_tiling(dome, target.into()),
+        Action::Master { target } => dispatch_tiling(dome, target.into()),
+        Action::Close => dome.close_focused_window(),
+        Action::Mode { name } => dome.switch_mode(name),
+        Action::UnminimizeWindow { id } => dome.unminimize_window(*id),
+        Action::Execute { .. } | Action::Exit => {
+            panic!("{action:?} needs the runner, which the harness does not build")
+        }
+    }
+}
+
+fn dispatch_tiling(dome: &mut Dome, tiling: crate::core::TilingAction) {
+    dome.handle_tiling_action(tiling);
+    dome.flush_layout();
+}
+
 fn send(dome: &mut Dome, s: &str) {
     let action: Action = s.parse().unwrap();
-    match &action {
-        Action::Focus { target: t } => {
-            dome.apply_focus(t);
-            dome.flush_layout();
-        }
-        Action::Move { target: t } => {
-            dome.apply_move(t);
-            dome.flush_layout();
-        }
-        Action::Toggle { target: t } => {
-            dome.apply_toggle(t);
-            dome.flush_layout();
-        }
-        Action::Master { target: t } => {
-            dome.apply_master(t);
-            dome.flush_layout();
-        }
-        _ => panic!("send() only handles tiling actions, got: {action}"),
-    }
+    send_action(dome, &action);
 }
