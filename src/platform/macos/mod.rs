@@ -8,6 +8,7 @@ mod keyboard;
 mod listeners;
 mod login_item;
 mod objc2_wrapper;
+mod permissions;
 mod running_application;
 mod spawn;
 mod throttle;
@@ -22,9 +23,6 @@ use std::sync::mpsc;
 use std::thread;
 
 use objc2::MainThreadMarker;
-use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
-use objc2_core_foundation::{CFDictionary, kCFBooleanTrue};
-use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess};
 
 use crate::config::watch::{load_or_else, start_config_watcher, start_file_watcher};
 use crate::config::{
@@ -67,28 +65,17 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
         );
     }));
 
-    let trusted = unsafe {
-        AXIsProcessTrustedWithOptions(Some(
-            CFDictionary::from_slices(&[kAXTrustedCheckOptionPrompt], &[kCFBooleanTrue.unwrap()])
-                .as_opaque(),
-        ))
-    };
-    if !trusted {
-        return Err(anyhow::anyhow!(
-            "Accessibility permission required. Please grant permission in System Settings > Privacy & Security > Accessibility, then restart Dome."
-        ));
-    }
-
-    if !CGPreflightScreenCaptureAccess() {
-        tracing::info!("Screen recording permission not granted, requesting...");
-        if !CGRequestScreenCaptureAccess() {
-            return Err(anyhow::anyhow!(
-                "Screen recording permission required. Please grant permission in System Settings > Privacy & Security > Screen Recording, then restart Dome."
-            ));
-        }
-    }
-
     let mtm = MainThreadMarker::new().unwrap();
+
+    // Ahead of the permission prompts, so a second launch during the wait for a
+    // grant does not raise its own copy of them.
+    if dome_ipc::DomeClient.ping() {
+        anyhow::bail!("dome is already running");
+    }
+
+    if !permissions::ensure_permissions() {
+        return Ok(());
+    }
 
     let (event_tx, event_rx) = calloop::channel::channel();
 
