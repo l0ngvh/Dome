@@ -2,7 +2,6 @@ mod container;
 mod navigate;
 mod placement;
 mod preferred_layout;
-mod scroll;
 mod tree;
 mod types;
 #[cfg(test)]
@@ -17,14 +16,13 @@ pub(crate) use types::*;
 use rustc_hash::FxHashMap;
 
 use crate::core::PreferredWorkspace;
-use crate::core::SizeConstraints;
 use crate::core::TilingConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
 use crate::core::node::{
     ContainerId, Direction, Logical, PixelRect, Pixels, WindowId, WindowMetadata, WorkspaceId,
 };
-use crate::core::strategy::{TilingPlacements, TilingStrategy, WorkspaceExport, translate};
+use crate::core::strategy::{TilingPlacements, TilingStrategy, WorkspaceExport};
 
 /// i3-style manual tiling strategy. Manages a container tree where windows are
 /// leaves and containers define split direction (horizontal/vertical) or tabbed
@@ -38,7 +36,6 @@ pub(crate) struct PartitionTreeStrategy {
     container_slots: Allocator<PreferredContainerSlot>,
     tab_bar_height: Pixels<Logical>,
     automatic_tiling: bool,
-    size_constraints: SizeConstraints,
 }
 
 impl TilingStrategy for PartitionTreeStrategy {
@@ -118,24 +115,11 @@ impl TilingStrategy for PartitionTreeStrategy {
     }
 
     fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> PixelRect {
-        let child_dim = self.tiling_windows.get(&window_id).unwrap().dimension;
-        let workspace_id = hub
-            .windows
-            .get(window_id)
-            .workspace()
-            .expect("detaching tiling window has a workspace");
-        let (offset_x, offset_y) = self.workspaces.get(&workspace_id).unwrap().viewport_offset;
-        let work_area = hub
-            .monitors
-            .get(hub.workspaces.get(workspace_id).monitor)
-            .work_area;
-
-        // Capture the offset before detach because detach triggers layout, which can
-        // change viewport_offset.
+        let border_box =
+            PixelRect::from_dimension(self.tiling_windows.get(&window_id).unwrap().dimension);
         self.detach_child(hub, Child::Window(window_id));
         self.tiling_windows.remove(&window_id);
-
-        translate(child_dim, offset_x, offset_y, work_area.x(), work_area.y())
+        border_box
     }
 
     fn focus_direction(&mut self, hub: &mut HubAccess, direction: Direction, forward: bool) {
@@ -304,7 +288,6 @@ impl TilingStrategy for PartitionTreeStrategy {
     fn apply_config(&mut self, hub: &mut HubAccess, tiling: TilingConfig) {
         self.tab_bar_height = tiling.partition_tree.tab_bar_height;
         self.automatic_tiling = tiling.partition_tree.automatic_tiling;
-        self.size_constraints = tiling.size_constraints;
         for ws_id in self.workspaces.keys().copied().collect::<Vec<_>>() {
             self.compute_placement(hub, ws_id);
         }
@@ -316,11 +299,7 @@ impl TilingStrategy for PartitionTreeStrategy {
 }
 
 impl PartitionTreeStrategy {
-    pub(crate) fn new(
-        tab_bar_height: Pixels<Logical>,
-        automatic_tiling: bool,
-        size_constraints: SizeConstraints,
-    ) -> Self {
+    pub(crate) fn new(tab_bar_height: Pixels<Logical>, automatic_tiling: bool) -> Self {
         Self {
             tiling_containers: FxHashMap::default(),
             tiling_windows: FxHashMap::default(),
@@ -329,7 +308,6 @@ impl PartitionTreeStrategy {
             container_slots: Allocator::new(),
             tab_bar_height,
             automatic_tiling,
-            size_constraints,
         }
     }
 }

@@ -10,6 +10,7 @@ mod partition_tree;
 mod pixel_rect;
 mod preferred_layout;
 mod query;
+mod scrolling;
 mod set_focus;
 mod smoke;
 mod strategy_switch;
@@ -23,12 +24,12 @@ use crate::core::master::PaneConfig;
 use crate::core::node::{Direction, Logical, Pixels, WindowId};
 use crate::core::strategy::StrategyAction;
 use crate::core::{
-    ContainerPlacement, FloatWindowPlacement, PixelRect, ReportedMonitor, TilingWindowPlacement,
-    WindowMetadata,
+    ColumnConfig, MasterConfig, PartitionTreeConfig, PreferredLayouts, PreferredWorkspace,
+    ScrollingConfig, SizeConstraint, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
 };
 use crate::core::{
-    MasterConfig, PartitionTreeConfig, PreferredLayouts, PreferredWorkspace, SizeConstraint,
-    SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
+    ContainerPlacement, FloatWindowPlacement, PixelRect, ReportedMonitor, TilingWindowPlacement,
+    WindowMetadata,
 };
 
 const ASCII_WIDTH: usize = 150;
@@ -457,9 +458,8 @@ fn validate_hub(hub: &Hub) {
 }
 
 fn validate_visible_placements(hub: &Hub) {
-    // Deliberately independent of `PixelRect::clip`. Production derives every
-    // `visible_border_box` with that method, so asserting against it would compare it
-    // with itself and the invariant could never fail.
+    // Deliberately independent of `PixelRect::clip`, so a defect in that method fails
+    // this check instead of passing it.
     fn clip(rect: PixelRect, bounds: PixelRect) -> Option<PixelRect> {
         let x1 = rect.x().value().max(bounds.x().value());
         let y1 = rect.y().value().max(bounds.y().value());
@@ -718,6 +718,7 @@ struct TilingConfigBuilder {
     strategy: Strategy,
     border_size: Pixels<Logical>,
     master: MasterConfig,
+    scrolling: ScrollingConfig,
     partition_tree: PartitionTreeConfig,
     size_constraints: SizeConstraints,
     float: Vec<WindowMatcher>,
@@ -733,6 +734,7 @@ impl TilingConfigBuilder {
                 master_ratio: 0.5,
                 master_count: 1,
             },
+            scrolling: ScrollingConfig::default(),
             partition_tree: PartitionTreeConfig {
                 tab_bar_height: Pixels::new(TAB_BAR_HEIGHT),
                 automatic_tiling: false,
@@ -755,56 +757,13 @@ impl TilingConfigBuilder {
         Self { master, ..self }
     }
 
-    fn with_border_size(self, border_size: Pixels<Logical>) -> Self {
-        Self {
-            border_size,
-            ..self
-        }
-    }
-
-    fn with_min_width(self, min_width: SizeConstraint) -> Self {
-        Self {
-            size_constraints: SizeConstraints {
-                minimum_width: min_width,
-                ..self.size_constraints
-            },
-            ..self
-        }
-    }
-
-    fn with_min_height(self, min_height: SizeConstraint) -> Self {
-        Self {
-            size_constraints: SizeConstraints {
-                minimum_height: min_height,
-                ..self.size_constraints
-            },
-            ..self
-        }
+    fn with_scrolling_config(self, scrolling: ScrollingConfig) -> Self {
+        Self { scrolling, ..self }
     }
 
     fn with_partition_tree_config(self, partition_tree: PartitionTreeConfig) -> Self {
         Self {
             partition_tree,
-            ..self
-        }
-    }
-
-    fn with_max_width(self, max_width: SizeConstraint) -> Self {
-        Self {
-            size_constraints: SizeConstraints {
-                maximum_width: max_width,
-                ..self.size_constraints
-            },
-            ..self
-        }
-    }
-
-    fn with_max_height(self, max_height: SizeConstraint) -> Self {
-        Self {
-            size_constraints: SizeConstraints {
-                maximum_height: max_height,
-                ..self.size_constraints
-            },
             ..self
         }
     }
@@ -823,6 +782,7 @@ impl TilingConfigBuilder {
             border_size: self.border_size,
             partition_tree: self.partition_tree,
             master: self.master,
+            scrolling: self.scrolling,
             size_constraints: self.size_constraints,
             float: self.float,
             fullscreen: self.fullscreen,
@@ -876,6 +836,7 @@ struct LayoutWorkspaceConfigBuilder {
     master_display: PaneDisplay,
     secondary_display: PaneDisplay,
     tree: Option<TreeLayoutNode>,
+    columns: Vec<ColumnConfig>,
     float: Vec<WindowMatcher>,
     fullscreen: Vec<WindowMatcher>,
 }
@@ -892,6 +853,7 @@ impl LayoutWorkspaceConfigBuilder {
             master_display: PaneDisplay::Tiled,
             secondary_display: PaneDisplay::Tiled,
             tree: None,
+            columns: vec![],
             float: vec![],
             fullscreen: vec![],
         }
@@ -952,6 +914,10 @@ impl LayoutWorkspaceConfigBuilder {
         }
     }
 
+    fn with_columns(self, columns: Vec<ColumnConfig>) -> Self {
+        Self { columns, ..self }
+    }
+
     fn build(self) -> (String, PreferredWorkspace) {
         let entry = match self.strategy {
             Strategy::Master => PreferredWorkspace::Master {
@@ -970,6 +936,11 @@ impl LayoutWorkspaceConfigBuilder {
             },
             Strategy::PartitionTree => PreferredWorkspace::PartitionTree {
                 tree: self.tree,
+                float: self.float,
+                fullscreen: self.fullscreen,
+            },
+            Strategy::Scrolling => PreferredWorkspace::Scrolling {
+                columns: self.columns,
                 float: self.float,
                 fullscreen: self.fullscreen,
             },

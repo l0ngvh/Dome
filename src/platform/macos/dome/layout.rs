@@ -173,7 +173,7 @@ impl Dome {
                     let tab_bar_dim = cp.tab_bar_band.to_dimension();
                     let tab_bar_cocoa_frame = dimension_to_ns_rect_cocoa(
                         Length::new(self.primary_full_height),
-                        tab_bar_dim,
+                        cp.visible_tab_bar_band.to_dimension(),
                     );
                     container_data.push(ContainerShow {
                         placement: cp.clone(),

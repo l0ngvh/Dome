@@ -147,9 +147,10 @@ pub(in crate::platform::macos) struct MonitorTilingData {
 #[derive(Clone)]
 pub(in crate::platform::macos) struct ContainerShow {
     pub(in crate::platform::macos) placement: ContainerPlacement,
-    /// Top band of `placement.border_box`.
+    /// `placement.tab_bar_band` at its configured height, which can run past the bottom of
+    /// `placement.border_box`.
     pub(in crate::platform::macos) tab_bar_dim: Dimension<Logical>,
-    /// Pre-flipped Cocoa frame for `tab_bar_dim`. Always populated, even when
+    /// Pre-flipped Cocoa frame for `placement.visible_tab_bar_band`. Always populated, even when
     /// `!placement.is_tabbed`.
     pub(in crate::platform::macos) tab_bar_cocoa_frame: NSRect,
 }

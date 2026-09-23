@@ -63,18 +63,22 @@
 ---@field master_ratio? number
 ---@field master_count? number
 
+---@class dome.ScrollingConfig
+---@field default_column_width? number | string Logical pixels, or "<number>%" of the work area.
+
 ---@class Config
 ---@field border_size? number Logical pixels.
 ---@field theme? "latte" | "frappe" | "macchiato" | "mocha" Catppuccin flavor.
 ---@field log_level? "trace" | "debug" | "info" | "warn" | "error"
 ---@field start_at_login? boolean
----@field layout? "partition_tree" | "master"
+---@field layout? "partition_tree" | "master" | "scrolling"
 ---@field minimum_width? number | string Logical pixels, or "<number>%" of the work area. 0 means unconstrained.
 ---@field minimum_height? number | string Logical pixels, or "<number>%" of the work area. 0 means unconstrained.
 ---@field maximum_width? number | string Logical pixels, or "<number>%" of the work area. 0 means unconstrained.
 ---@field maximum_height? number | string Logical pixels, or "<number>%" of the work area. 0 means unconstrained.
 ---@field partition_tree? dome.PartitionTree
 ---@field master? dome.MasterConfig
+---@field scrolling? dome.ScrollingConfig
 ---@field font_size? number Widget text size, in logical pixels.
 ---@field font_family? string
 ---@field float? WindowMatcher[]
@@ -90,12 +94,13 @@
 ---@alias dome.MonitorLayout table<string, dome.LayoutWorkspace>
 
 ---@class dome.LayoutWorkspace
----@field layout "partition_tree" | "master"
+---@field layout "partition_tree" | "master" | "scrolling"
 ---@field tree? dome.TreeNode partition_tree only.
 ---@field master_ratio? number master only.
 ---@field master_count? number master only.
 ---@field master? dome.Pane master only.
 ---@field secondary? dome.Pane master only.
+---@field columns? dome.Column[] scrolling only.
 ---@field float? WindowMatcher[]
 ---@field fullscreen? WindowMatcher[]
 
@@ -109,6 +114,12 @@
 
 ---@class dome.PaneContainer
 ---@field display? "tiled" | "tabbed"
+---@field children WindowMatcher[]
+
+---@alias dome.Column WindowMatcher | dome.ColumnContainer
+
+---@class dome.ColumnContainer
+---@field width? number | string Logical pixels, or "<number>%" of the work area.
 ---@field children WindowMatcher[]
 
 -- Built by adding a key to a modifier, for example Meta + "h", or named on its own as Space, Enter, or Escape.

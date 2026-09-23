@@ -25,7 +25,7 @@ use crate::font::FontConfig;
 use crate::overlay::{self, BorderMetrics, LogicalTiledContainer, LogicalTiledWindow};
 use crate::platform::macos::objc2_wrapper::{kAXFrontmostAttribute, set_attribute_value};
 use crate::platform::render::{Renderer, WgpuContext};
-use crate::platform::tab_bar::{TabBarMessage, TabBarWidget};
+use crate::platform::tab_bar::{TabBarContent, TabBarMessage, TabBarWidget};
 use crate::theme::Flavor;
 
 fn frame_attrs(frame: NSRect) -> (Point<NativeUnit>, Size<NativeUnit>) {
@@ -344,7 +344,7 @@ impl TilingOverlay {
                 id: cs.placement.id,
                 frame: cs.placement.border_box.to_dimension(),
                 visible_frame: cs.placement.visible_border_box.to_dimension(),
-                tab_bar_height: Length::from_pixels(cs.placement.tab_bar_band.height()),
+                tab_bar_height: Length::from_pixels(cs.placement.visible_tab_bar_band.height()),
                 is_highlighted: cs.placement.is_highlighted,
                 spawn_direction: cs.placement.spawn_direction,
                 is_tabbed: cs.placement.is_tabbed,
@@ -397,16 +397,8 @@ impl AuxiliaryWindowHandler for TabBarHandler {
             .downcast::<TabBarMessage>()
             .expect("tab bar window received a non-TabBarMessage payload");
         match *msg {
-            TabBarMessage::Content {
-                scale,
-                size,
-                border,
-                titles,
-                active_index,
-                is_highlighted,
-            } => {
-                self.widget
-                    .set_content(scale, size, border, titles, active_index, is_highlighted);
+            TabBarMessage::Content(content) => {
+                self.widget.set_content(content);
                 self.widget.render();
             }
             TabBarMessage::Style { theme, font } => {
@@ -472,15 +464,18 @@ impl TabBarOverlay {
     pub(super) fn render(&self, cs: &ContainerShow, scale: f64, border_thickness: Length<Logical>) {
         let (position, size) = frame_attrs(cs.tab_bar_cocoa_frame);
         self.window.set_frame(position, size);
+        let visible_bar = cs.placement.visible_tab_bar_band.to_dimension();
         let bar = cs.tab_bar_dim;
-        self.window.deliver(Box::new(TabBarMessage::Content {
-            scale: scale as f32,
-            size: (bar.width, bar.height),
-            border: border_thickness,
-            titles: cs.placement.titles.clone(),
-            active_index: cs.placement.active_tab_index,
-            is_highlighted: cs.placement.is_highlighted,
-        }));
+        self.window
+            .deliver(Box::new(TabBarMessage::Content(TabBarContent {
+                scale: scale as f32,
+                surface_size: (visible_bar.width, visible_bar.height),
+                canvas_size: (bar.width, bar.height),
+                border: border_thickness,
+                titles: cs.placement.titles.clone(),
+                active_index: cs.placement.active_tab_index,
+                is_highlighted: cs.placement.is_highlighted,
+            })));
         self.window.set_visible(true);
     }
 

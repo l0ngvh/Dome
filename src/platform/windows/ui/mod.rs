@@ -146,14 +146,13 @@ impl WindowThread {
                     data.border_thickness,
                 );
             for placement in data.containers.iter().filter(|p| p.is_tabbed) {
-                let rect = placement.tab_bar_band;
                 let tab_bar = match self.tab_bars.entry(placement.id) {
                     std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
                     std::collections::hash_map::Entry::Vacant(e) => {
                         match self.overlay_factory.create_tab_bar(
                             self.appearance.clone(),
                             placement.id,
-                            rect,
+                            placement.visible_tab_bar_band,
                             data.scale,
                         ) {
                             Ok(o) => e.insert(o),
@@ -164,14 +163,7 @@ impl WindowThread {
                         }
                     }
                 };
-                tab_bar.update(
-                    rect,
-                    placement.titles.clone(),
-                    placement.active_tab_index,
-                    placement.is_highlighted,
-                    data.scale,
-                    data.border_thickness,
-                );
+                tab_bar.update(placement, data.scale, data.border_thickness);
             }
         }
 

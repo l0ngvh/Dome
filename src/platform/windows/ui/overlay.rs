@@ -8,7 +8,7 @@ use dome_auxiliary_window::{
 
 use crate::config::Appearance;
 use crate::platform::render::{Compositor, Renderer, WgpuContext};
-use crate::platform::tab_bar::{TabBarMessage, TabBarWidget};
+use crate::platform::tab_bar::{TabBarContent, TabBarMessage, TabBarWidget};
 use crate::platform::windows::{HubEvent, HubSender};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::DirectComposition::{
@@ -174,7 +174,8 @@ impl TilingOverlay {
                 id: cp.id,
                 frame: cp.border_box.to_logical(scale),
                 visible_frame: cp.visible_border_box.to_logical(scale),
-                tab_bar_height: Length::from_pixels(cp.tab_bar_band.height()).to_logical(scale),
+                tab_bar_height: Length::from_pixels(cp.visible_tab_bar_band.height())
+                    .to_logical(scale),
                 is_highlighted: cp.is_highlighted,
                 spawn_direction: cp.spawn_direction,
                 is_tabbed: cp.is_tabbed,
@@ -528,16 +529,8 @@ impl AuxiliaryWindowHandler for TabBarHandler {
             .downcast::<TabBarMessage>()
             .expect("tab bar window received a non-TabBarMessage payload");
         match *msg {
-            TabBarMessage::Content {
-                scale,
-                size,
-                border,
-                titles,
-                active_index,
-                is_highlighted,
-            } => {
-                self.widget
-                    .set_content(scale, size, border, titles, active_index, is_highlighted);
+            TabBarMessage::Content(content) => {
+                self.widget.set_content(content);
                 let _ = self.widget.render();
             }
             TabBarMessage::Style { theme, font } => {
@@ -592,18 +585,13 @@ impl TabBarOverlay {
 impl TabBarOverlay {
     pub(super) fn update(
         &mut self,
-        rect: PixelRect,
-        titles: Vec<String>,
-        active_index: usize,
-        is_highlighted: bool,
+        placement: &ContainerPlacement,
         scale: f32,
         border_thickness: Pixels<Physical>,
     ) {
-        let (x_phys, y_phys, w_phys, h_phys) = rect.to_surface_size();
-        let bar_size = (
-            Length::new(w_phys as f32 / scale),
-            Length::new(h_phys as f32 / scale),
-        );
+        let (x_phys, y_phys, w_phys, h_phys) = placement.visible_tab_bar_band.to_surface_size();
+        let visible_band = placement.visible_tab_bar_band.to_logical(scale);
+        let band = placement.tab_bar_band.to_logical(scale);
         let border = Length::from_pixels(border_thickness).to_logical(scale);
         // No z-order lift needed. The tab bar is created above the bottom-parked
         // border overlay, the only window it shares pixels with, and set_frame
@@ -611,14 +599,16 @@ impl TabBarOverlay {
         self.aux
             .set_frame(Point::new(x_phys, y_phys), Size::new(w_phys, h_phys));
         self.aux.set_visible(true);
-        self.aux.deliver(Box::new(TabBarMessage::Content {
-            scale,
-            size: bar_size,
-            border,
-            titles,
-            active_index,
-            is_highlighted,
-        }));
+        self.aux
+            .deliver(Box::new(TabBarMessage::Content(TabBarContent {
+                scale,
+                surface_size: (visible_band.width, visible_band.height),
+                canvas_size: (band.width, band.height),
+                border,
+                titles: placement.titles.clone(),
+                active_index: placement.active_tab_index,
+                is_highlighted: placement.is_highlighted,
+            })));
     }
 
     #[expect(

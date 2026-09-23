@@ -29,7 +29,7 @@ return function(mod1)
 		-- Extra variables for actions.execute commands.
 		---@type table<string, string>
 		env = {},
-		---@type "partition_tree" | "master"
+		---@type "partition_tree" | "master" | "scrolling"
 		layout = "partition_tree",
 		-- Logical pixels, or "<number>%" of the work area. 0 means unconstrained.
 		---@type number | string
@@ -53,6 +53,11 @@ return function(mod1)
 			master_ratio = 0.5,
 			---@type number
 			master_count = 1,
+		},
+		---@type dome.ScrollingConfig
+		scrolling = {
+			---@type number | string
+			default_column_width = "50%",
 		},
 		---@type Keymaps
 		keymaps = {

@@ -1,8 +1,7 @@
 use crate::core::hub::HubAccess;
-use crate::core::node::Constraints;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WindowId, WorkspaceId};
 use crate::core::partition_tree::{Child, Parent};
-use crate::core::strategy::{VALIDATION_TOLERANCE, ValidateStrategy, window_constraints};
+use crate::core::strategy::{VALIDATION_TOLERANCE, ValidateStrategy};
 
 use rustc_hash::FxHashSet;
 
@@ -211,73 +210,40 @@ impl PartitionTreeStrategy {
         }
     }
 
-    fn child_constraints(&self, hub: &HubAccess, child: Child) -> (Dimension, Constraints) {
-        let dim = self.child_dimension(child);
-
-        match child {
-            Child::Window(wid) => (dim, window_constraints(hub, &self.size_constraints, wid)),
-            Child::Container(id) => {
-                let (min_w, min_h) = self.tiling_containers.get(&id).unwrap().min_size();
-                (
-                    dim,
-                    Constraints {
-                        min_width: min_w,
-                        min_height: min_h,
-                        max_width: Length::ZERO,
-                        max_height: Length::ZERO,
-                    },
-                )
-            }
-        }
-    }
-
     fn validate_container_dimensions(&self, hub: &HubAccess, cid: ContainerId) {
         let data = self.tiling_containers.get(&cid).unwrap();
         let dim = data.dimension;
         let children = hub.containers.get(cid).children();
-        let constraints: Vec<_> = children
-            .iter()
-            .map(|&c| self.child_constraints(hub, c))
-            .collect();
+        let child_dims: Vec<Dimension> =
+            children.iter().map(|&c| self.child_dimension(c)).collect();
 
         match data.direction() {
             Some(dir) => {
-                let (split_label, split_limit) = match dir {
+                let (split_label, split_extent) = match dir {
                     Direction::Horizontal => ("width", dim.width.value()),
                     Direction::Vertical => ("height", dim.height.value()),
                 };
                 let split_sum: f32 = match dir {
-                    Direction::Horizontal => constraints.iter().map(|(d, _)| d.width.value()).sum(),
-                    Direction::Vertical => constraints.iter().map(|(d, _)| d.height.value()).sum(),
+                    Direction::Horizontal => child_dims.iter().map(|d| d.width.value()).sum(),
+                    Direction::Vertical => child_dims.iter().map(|d| d.height.value()).sum(),
                 };
                 assert!(
-                    split_sum <= split_limit + VALIDATION_TOLERANCE.value(),
-                    "Container {cid} children total {split_label} {split_sum:.2} > container {split_label} {split_limit:.2}",
+                    (split_sum - split_extent).abs() <= VALIDATION_TOLERANCE.value(),
+                    "Container {cid} children total {split_label} {split_sum:.2} != container {split_label} {split_extent:.2}",
                 );
 
-                for (i, (child_dim, c)) in constraints.iter().enumerate() {
-                    let (cross_child, cross_container, cross_min, cross_max, label) = match dir {
-                        Direction::Horizontal => (
-                            child_dim.height.value(),
-                            dim.height.value(),
-                            c.min_height.value(),
-                            c.max_height.value(),
-                            "height",
-                        ),
-                        Direction::Vertical => (
-                            child_dim.width.value(),
-                            dim.width.value(),
-                            c.min_width.value(),
-                            c.max_width.value(),
-                            "width",
-                        ),
+                for (i, child_dim) in child_dims.iter().enumerate() {
+                    let (cross_child, cross_container, label) = match dir {
+                        Direction::Horizontal => {
+                            (child_dim.height.value(), dim.height.value(), "height")
+                        }
+                        Direction::Vertical => {
+                            (child_dim.width.value(), dim.width.value(), "width")
+                        }
                     };
-                    let allows_smaller = cross_max > 0.0 && cross_max < cross_container;
                     assert!(
-                        cross_child >= cross_container - VALIDATION_TOLERANCE.value()
-                            || cross_child >= cross_min - VALIDATION_TOLERANCE.value()
-                            || allows_smaller,
-                        "Container {cid} child {i} {label} {cross_child:.2} < container {label} {cross_container:.2} and < min_{label} {cross_min:.2}",
+                        (cross_child - cross_container).abs() <= VALIDATION_TOLERANCE.value(),
+                        "Container {cid} child {i} {label} {cross_child:.2} != container {label} {cross_container:.2}",
                     );
                 }
             }
@@ -286,22 +252,16 @@ impl PartitionTreeStrategy {
                     .monitors
                     .get(hub.workspaces.get(data.workspace).monitor)
                     .scale;
-                let expected_height = dim.height - self.tab_bar_length(scale);
-                for (i, (child_dim, c)) in constraints.iter().enumerate() {
-                    let allows_smaller_w =
-                        c.max_width.value() > 0.0 && c.max_width.value() < dim.width.value();
-                    let allows_smaller_h = c.max_height.value() > 0.0
-                        && c.max_height.value() < expected_height.value();
+                let expected_height = (dim.height - self.tab_bar_length(scale)).max(Length::ZERO);
+                for (i, child_dim) in child_dims.iter().enumerate() {
                     assert!(
-                        (child_dim.width - dim.width).abs() < VALIDATION_TOLERANCE
-                            || allows_smaller_w,
+                        (child_dim.width - dim.width).abs() < VALIDATION_TOLERANCE,
                         "Container {cid} tabbed child {i} width {:.2} != container width {:.2}",
                         child_dim.width.value(),
                         dim.width.value()
                     );
                     assert!(
-                        (child_dim.height - expected_height).abs() < VALIDATION_TOLERANCE
-                            || allows_smaller_h,
+                        (child_dim.height - expected_height).abs() < VALIDATION_TOLERANCE,
                         "Container {cid} tabbed child {i} height {:.2} != expected {:.2}",
                         child_dim.height.value(),
                         expected_height.value()
@@ -309,20 +269,6 @@ impl PartitionTreeStrategy {
                 }
             }
         }
-
-        let (min_w, min_h) = data.min_size();
-        assert!(
-            dim.width >= min_w - VALIDATION_TOLERANCE,
-            "Container {cid} width {:.2} < min_width {:.2}",
-            dim.width.value(),
-            min_w.value()
-        );
-        assert!(
-            dim.height >= min_h - VALIDATION_TOLERANCE,
-            "Container {cid} height {:.2} < min_height {:.2}",
-            dim.height.value(),
-            min_h.value()
-        );
     }
 
     fn validate_window(
@@ -355,41 +301,36 @@ impl PartitionTreeStrategy {
         );
 
         let dim = self.tiling_windows.get(&wid).unwrap().dimension;
-        let c = window_constraints(hub, &self.size_constraints, wid);
-        let min_w = c.min_width.value();
-        let min_h = c.min_height.value();
-        let max_w = c.max_width.value();
-        let max_h = c.max_height.value();
-
+        let usable = hub
+            .monitors
+            .get(hub.workspaces.get(workspace_id).monitor)
+            .work_area
+            .to_dimension();
+        let tol = VALIDATION_TOLERANCE;
         assert!(
-            dim.width.value() >= min_w - VALIDATION_TOLERANCE.value(),
-            "Window {wid} width {:.2} < min_width {:.2}",
-            dim.width.value(),
-            min_w
+            dim.x >= usable.x - tol,
+            "Window {wid} x {:.2} left of usable area {:.2}",
+            dim.x.value(),
+            usable.x.value()
         );
         assert!(
-            dim.height.value() >= min_h - VALIDATION_TOLERANCE.value(),
-            "Window {wid} height {:.2} < min_height {:.2}",
-            dim.height.value(),
-            min_h
+            dim.y >= usable.y - tol,
+            "Window {wid} y {:.2} above usable area {:.2}",
+            dim.y.value(),
+            usable.y.value()
         );
-
-        if max_w > 0.0 {
-            assert!(
-                dim.width.value() <= max_w + VALIDATION_TOLERANCE.value(),
-                "Window {wid} width {:.2} > max_width {:.2}",
-                dim.width.value(),
-                max_w
-            );
-        }
-        if max_h > 0.0 {
-            assert!(
-                dim.height.value() <= max_h + VALIDATION_TOLERANCE.value(),
-                "Window {wid} height {:.2} > max_height {:.2}",
-                dim.height.value(),
-                max_h
-            );
-        }
+        assert!(
+            dim.x + dim.width <= usable.x + usable.width + tol,
+            "Window {wid} right {:.2} past usable area right {:.2}",
+            (dim.x + dim.width).value(),
+            (usable.x + usable.width).value()
+        );
+        assert!(
+            dim.y + dim.height <= usable.y + usable.height + tol,
+            "Window {wid} bottom {:.2} past usable area bottom {:.2}",
+            (dim.y + dim.height).value(),
+            (usable.y + usable.height).value()
+        );
 
         // window_constraints caps min by max, so an inverted stored pair is only
         // observable before that cap runs.

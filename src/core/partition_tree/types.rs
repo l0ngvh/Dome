@@ -2,7 +2,7 @@ use super::preferred_layout::{PreferredContainerSlotId, PreferredSlot, Preferred
 use crate::config::lua::deserializer::string_enum;
 use crate::core::node::Child;
 use crate::core::node::{
-    ContainerId, Dimension, Direction, Length, Logical, Pixels, WindowId, WorkspaceId,
+    ContainerId, Dimension, Direction, Logical, Pixels, WindowId, WorkspaceId,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -91,9 +91,6 @@ pub(super) struct TilingContainerData {
     spawn_direction: Direction,
     pub(super) is_tabbed: bool,
     pub(super) active_tab_index: usize,
-    pub(super) min_width: Length,
-    pub(super) min_height: Length,
-    /// Preferred container slot this live container materializes, if any.
     pub(super) occupy: Option<PreferredContainerSlotId>,
 }
 
@@ -112,8 +109,6 @@ impl TilingContainerData {
             spawn_direction: direction,
             is_tabbed,
             active_tab_index: 0,
-            min_width: Length::ZERO,
-            min_height: Length::ZERO,
             occupy: None,
         }
     }
@@ -124,10 +119,6 @@ impl TilingContainerData {
 
     pub(super) fn active_tab_index(&self) -> usize {
         self.active_tab_index
-    }
-
-    pub(super) fn min_size(&self) -> (Length, Length) {
-        (self.min_width, self.min_height)
     }
 
     pub(super) fn direction(&self) -> Option<Direction> {
@@ -179,7 +170,6 @@ pub(super) struct WorkspaceTilingState {
     /// The highest occupied node in the preferred layout tree. `None` when no
     /// matched window has been placed.
     pub(super) occupied_preferred_root: Option<PreferredSlot>,
-    pub(super) viewport_offset: (Length, Length),
 }
 
 impl WorkspaceTilingState {

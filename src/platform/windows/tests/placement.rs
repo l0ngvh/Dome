@@ -28,17 +28,18 @@ fn three_windows_split_screen() {
 }
 
 #[test]
-fn reported_min_width_binds_while_zero_min_height_is_cleared() {
+fn reported_min_width_does_not_bind_the_even_split() {
     let mut env = TestEnv::new();
     let w1 = env.window().min_size(1200.0, 0.0).open();
-    env.open();
+    let w2 = env.open();
 
-    // An even split would leave each window near 952, so the minimum binds. The
-    // shell forwards it untouched and core outsets it by the border, so the app
-    // gets back exactly the content width it asked for.
-    assert_eq!(env.dim(w1).width, Length::new(1200.0));
-    // The zero height component reads as Cleared, not a zero-height minimum.
-    assert_eq!(env.dim(w1).height, SCREEN_HEIGHT - env.border() * 2.0);
+    assert_eq!(
+        env.dim(w1).width,
+        Length::new(952.0),
+        "R2: the reported minimum does not bind; w1 keeps its even half"
+    );
+    assert_eq!(env.dim(w2).width, Length::new(952.0));
+    env.assert_horizontally_tiled(&[env.dim(w1), env.dim(w2)]);
 }
 
 #[test]
@@ -46,10 +47,8 @@ fn dropping_all_limits_restores_the_even_split() {
     let mut env = TestEnv::new();
     let w1 = env.window().min_size(1200.0, 0.0).open();
     let w2 = env.open();
-    assert_eq!(env.dim(w1).width, Length::new(1200.0));
+    assert_eq!(env.dim(w1).width, Length::new(952.0));
 
-    // Mirrors dispatch_constraint_read re-reading an app that no longer reports a
-    // minimum. Discarding an all-clear observation would strand the 1200 forever.
     env.dome.set_constraints_for(
         w1,
         LimitObservation {
@@ -61,7 +60,11 @@ fn dropping_all_limits_restores_the_even_split() {
     );
     env.layout();
 
-    assert_eq!(env.dim(w1).width, Length::new(952.0));
+    assert_eq!(
+        env.dim(w1).width,
+        Length::new(952.0),
+        "the Cleared merge runs without panicking and leaves the even split"
+    );
     assert_eq!(env.dim(w2).width, Length::new(952.0));
     env.assert_horizontally_tiled(&[env.dim(w1), env.dim(w2)]);
 }

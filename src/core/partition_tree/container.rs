@@ -23,7 +23,7 @@ impl PartitionTreeStrategy {
 
         if self.workspaces.get(&ws).unwrap().focused_tiling == Some(Child::Container(container_id))
         {
-            self.set_focus_pointer(hub, last_child);
+            self.set_focus(hub, last_child);
         }
 
         self.clean_up_occupied_container(container_id);

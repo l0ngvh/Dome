@@ -5,8 +5,9 @@ use super::defaults::DefaultValues;
 use super::lua::deserializer::{FromLuaValue, LoadContext, as_table};
 use super::{Appearance, Config, LogLevel, ModalKeymaps};
 use crate::core::{
-    Logical, MasterConfig, PartitionTreeConfig, Pixels, SizeConstraint, SizeConstraints, Strategy,
-    TilingConfig, WindowMatcher, read_master_count_override, read_master_ratio_override,
+    Logical, MasterConfig, PartitionTreeConfig, Pixels, ScrollingConfig, SizeConstraint,
+    SizeConstraints, Strategy, TilingConfig, WindowMatcher, read_master_count_override,
+    read_master_ratio_override,
 };
 use crate::font::{FontConfig, MAX_FONT_SIZE, MIN_FONT_SIZE};
 use crate::theme::Flavor;
@@ -21,6 +22,7 @@ pub(super) struct ConfigOverrides {
     border_size: Option<Pixels<Logical>>,
     partition_tree: Option<PartitionTreeOverrides>,
     master: Option<MasterOverrides>,
+    scrolling: Option<ScrollingOverrides>,
     size_constraints: SizeConstraintOverrides,
     float: Option<Vec<WindowMatcher>>,
     fullscreen: Option<Vec<WindowMatcher>>,
@@ -42,6 +44,11 @@ pub(super) struct PartitionTreeOverrides {
 pub(super) struct MasterOverrides {
     master_ratio: Option<f32>,
     master_count: Option<usize>,
+}
+
+#[derive(Default)]
+pub(super) struct ScrollingOverrides {
+    default_column_width: Option<SizeConstraint>,
 }
 
 #[derive(Default)]
@@ -81,6 +88,7 @@ impl ConfigOverrides {
             border_size,
             partition_tree,
             master,
+            scrolling,
             size_constraints,
             float,
             fullscreen,
@@ -103,6 +111,7 @@ impl ConfigOverrides {
                     .unwrap_or_default()
                     .merge_over(&tiling.partition_tree),
                 master: master.unwrap_or_default().merge_over(&tiling.master),
+                scrolling: scrolling.unwrap_or_default().merge_over(&tiling.scrolling),
                 size_constraints: size_constraints.merge_over(&tiling.size_constraints, cx),
                 float: float.unwrap_or_default(),
                 fullscreen: fullscreen.unwrap_or_default(),
@@ -124,6 +133,7 @@ impl ConfigOverrides {
     pub(super) fn into_defaults(self) -> mlua::Result<DefaultValues> {
         let partition_tree = self.partition_tree.unwrap_or_default();
         let master = self.master.unwrap_or_default();
+        let scrolling = self.scrolling.unwrap_or_default();
         Ok(DefaultValues {
             tiling: TilingConfig {
                 layout: require(self.layout, "layout")?,
@@ -141,6 +151,12 @@ impl ConfigOverrides {
                 master: MasterConfig {
                     master_ratio: require(master.master_ratio, "master.master_ratio")?,
                     master_count: require(master.master_count, "master.master_count")?,
+                },
+                scrolling: ScrollingConfig {
+                    default_column_width: require(
+                        scrolling.default_column_width,
+                        "scrolling.default_column_width",
+                    )?,
                 },
                 size_constraints: SizeConstraints {
                     minimum_width: require(self.size_constraints.minimum_width, "minimum_width")?,
@@ -200,6 +216,17 @@ impl MasterOverrides {
     }
 }
 
+impl ScrollingOverrides {
+    fn merge_over(self, defaults: &ScrollingConfig) -> ScrollingConfig {
+        let ScrollingOverrides {
+            default_column_width,
+        } = self;
+        ScrollingConfig {
+            default_column_width: default_column_width.unwrap_or(defaults.default_column_width),
+        }
+    }
+}
+
 impl SizeConstraintOverrides {
     /// The pair check runs here rather than during the read, because a minimum
     /// and its maximum can arrive from different sources.
@@ -255,6 +282,7 @@ impl FromLuaValue for ConfigOverrides {
             border_size: cx.field(table, "border_size"),
             partition_tree: cx.field(table, "partition_tree"),
             master: cx.field(table, "master"),
+            scrolling: cx.field(table, "scrolling"),
             // These groups read the root table, because their keys take no
             // group prefix.
             size_constraints: SizeConstraintOverrides::from_lua_value(value, cx)?,
@@ -286,6 +314,15 @@ impl FromLuaValue for MasterOverrides {
         Ok(MasterOverrides {
             master_ratio: read_master_ratio_override(table, cx),
             master_count: read_master_count_override(table, cx),
+        })
+    }
+}
+
+impl FromLuaValue for ScrollingOverrides {
+    fn from_lua_value(value: &mlua::Value, cx: &mut LoadContext) -> mlua::Result<Self> {
+        let table = as_table(value, "a table")?;
+        Ok(ScrollingOverrides {
+            default_column_width: cx.field(table, "default_column_width"),
         })
     }
 }

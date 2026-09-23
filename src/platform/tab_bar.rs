@@ -6,25 +6,27 @@ use crate::theme::Flavor;
 
 /// A payload delivered to a tab bar window's handler through `AuxiliaryWindow::deliver`.
 pub(crate) enum TabBarMessage {
-    Content {
-        scale: f32,
-        size: (Length<Logical>, Length<Logical>),
-        border: Length<Logical>,
-        titles: Vec<String>,
-        active_index: usize,
-        is_highlighted: bool,
-    },
-    Style {
-        theme: Flavor,
-        font: FontConfig,
-    },
+    Content(TabBarContent),
+    Style { theme: Flavor, font: FontConfig },
+}
+
+/// The bar paints at `canvas_size` onto a render surface of `surface_size`, so a bar taller
+/// than its container is cut off at the surface edge rather than squashed.
+pub(crate) struct TabBarContent {
+    pub(crate) scale: f32,
+    pub(crate) surface_size: (Length<Logical>, Length<Logical>),
+    pub(crate) canvas_size: (Length<Logical>, Length<Logical>),
+    pub(crate) border: Length<Logical>,
+    pub(crate) titles: Vec<String>,
+    pub(crate) active_index: usize,
+    pub(crate) is_highlighted: bool,
 }
 
 pub(crate) struct TabBarWidget {
     renderer: Renderer,
     events: Vec<egui::Event>,
     container_id: ContainerId,
-    bar_size: (Length<Logical>, Length<Logical>),
+    canvas_size: (Length<Logical>, Length<Logical>),
     border_thickness: Length<Logical>,
     titles: Vec<String>,
     active_index: usize,
@@ -46,7 +48,7 @@ impl TabBarWidget {
             renderer,
             events: Vec::new(),
             container_id,
-            bar_size: (Length::ZERO, Length::ZERO),
+            canvas_size: (Length::ZERO, Length::ZERO),
             border_thickness: Length::ZERO,
             titles: Vec::new(),
             active_index: 0,
@@ -58,22 +60,22 @@ impl TabBarWidget {
 
     /// Does not paint. The caller renders after placing the window so the present
     /// matches the new geometry.
-    pub(crate) fn set_content(
-        &mut self,
-        scale: f32,
-        bar_size: (Length<Logical>, Length<Logical>),
-        border_thickness: Length<Logical>,
-        titles: Vec<String>,
-        active_index: usize,
-        is_highlighted: bool,
-    ) {
+    pub(crate) fn set_content(&mut self, content: TabBarContent) {
+        let TabBarContent {
+            scale,
+            surface_size: (width, height),
+            canvas_size,
+            border,
+            titles,
+            active_index,
+            is_highlighted,
+        } = content;
         self.scale = scale;
-        self.bar_size = bar_size;
-        self.border_thickness = border_thickness;
+        self.canvas_size = canvas_size;
+        self.border_thickness = border;
         self.titles = titles;
         self.active_index = active_index;
         self.is_highlighted = is_highlighted;
-        let (width, height) = self.bar_size;
         let surface_size = (
             (width.logical() * scale).round().max(1.0) as u32,
             (height.logical() * scale).round().max(1.0) as u32,
@@ -122,7 +124,7 @@ impl TabBarWidget {
         let active_index = self.active_index;
         let is_highlighted = self.is_highlighted;
         let scale = self.scale;
-        let (width, height) = self.bar_size;
+        let (width, height) = self.canvas_size;
         let canvas = Dimension::<Logical>::new(Length::ZERO, Length::ZERO, width, height);
         self.renderer.render(scale, events, |ui| {
             overlay::paint_tab_bar(

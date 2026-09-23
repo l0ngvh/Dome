@@ -422,10 +422,9 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
                 }
                 runner.dome.remove_untracked_app(pid);
             }
-            // On startup, it seems not all windows move/resized events aren't being fired,
-            // especially when there are multiple windows and viewport keeps being scrolled as
-            // windows are inserted. So we gives these newly inserted windows extra synthetic
-            // movement notification so constraint detection can work.
+            // On startup, not all window move/resize events fire, especially with several
+            // windows open, so we hand each newly inserted window a synthetic movement
+            // notification to drive constraint detection.
             let added_pids: HashSet<i32> = result
                 .to_add
                 .iter()

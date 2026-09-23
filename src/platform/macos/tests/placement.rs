@@ -85,7 +85,7 @@ fn two_windows_split_horizontally() {
 }
 
 #[test]
-fn tile_past_work_area_is_trimmed() {
+fn drag_drop_tiles_on_screen_even_split() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
 
@@ -104,12 +104,14 @@ fn tile_past_work_area_is_trimmed() {
     end_drag(&mut dome, &macos, 100, cg1, 500, 300, 400, 400);
     macos.settle(&mut dome, 10);
 
-    // The drop leaves the tree wider than the work area, so cg1 is scrolled off the
-    // left edge and core's content_box for it starts at -92 with width 1912. macOS
-    // must place the trimmed rect rather than that.
-    let (x, _, w, _) = macos.window_frame(cg1);
-    assert_eq!(x, 0, "left edge clamped to the work area");
-    assert_eq!(w, 1820, "width trimmed down from the untrimmed 1912");
+    // R1: the tree fits the usable area, so the drop tiles both windows on-screen
+    // in equal halves rather than scrolling cg1 off the left edge.
+    let (x1, _, w1, _) = macos.window_frame(cg1);
+    let (x2, _, w2, _) = macos.window_frame(cg2);
+    assert!(!macos.is_offscreen(cg1));
+    assert!(!macos.is_offscreen(cg2));
+    assert_eq!((x1, w1), (4, 952), "cg1 fills its on-screen even half");
+    assert_eq!((x2, w2), (964, 952), "cg2 fills its on-screen even half");
 }
 
 #[test]
