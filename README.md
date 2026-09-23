@@ -24,10 +24,6 @@ cd Dome
 cargo install --path .
 ```
 
-On macOS, Dome needs Accessibility permissions to manage windows, and Screen
-Capture permissions to render float windows. macOS will prompt you for both on
-first launch. No extra permissions are required on Windows.
-
 Once installed, start Dome from your system launcher, or run `dome` from the
 command line.
 

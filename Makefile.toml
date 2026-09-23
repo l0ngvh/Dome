@@ -154,13 +154,15 @@ plutil -replace CFBundleShortVersionString -string "$VERSION" "$BUNDLE_DIR/Info.
 plutil -replace CFBundleVersion -string "$VERSION" "$BUNDLE_DIR/Info.plist"
 cp "$BIN_SRC" "$BUNDLE_DIR/MacOS/dome"
 cp resources/macos/icon/AppIcon.icns "$BUNDLE_DIR/Resources/AppIcon.icns"
-if [ -n "${DOME_SIGNING_IDENTITY:-}" ]; then
-  codesign --force --options runtime --timestamp=none \
-    --sign "$DOME_SIGNING_IDENTITY" "$BUNDLE_DIR/MacOS/dome"
-  codesign --force --options runtime --timestamp=none \
-    --sign "$DOME_SIGNING_IDENTITY" target/bundle/Dome.app
-  codesign --verify --strict --verbose=2 target/bundle/Dome.app
-fi
+# Ad-hoc when DOME_SIGNING_IDENTITY is unset. The linker-signed binary rustc
+# emits does not bind Info.plist, and TCC deletes a grant it cannot bind to the
+# bundle id.
+SIGNING_IDENTITY="${DOME_SIGNING_IDENTITY:--}"
+codesign --force --options runtime --timestamp=none \
+  --sign "$SIGNING_IDENTITY" "$BUNDLE_DIR/MacOS/dome"
+codesign --force --options runtime --timestamp=none \
+  --sign "$SIGNING_IDENTITY" target/bundle/Dome.app
+codesign --verify --strict --verbose=2 target/bundle/Dome.app
 hdiutil create -volname "Dome" -srcfolder target/bundle/Dome.app -ov -format UDZO "target/Dome-${VERSION}.dmg"
 echo "Created target/bundle/Dome.app and target/Dome-${VERSION}.dmg (v$VERSION)"
 '''

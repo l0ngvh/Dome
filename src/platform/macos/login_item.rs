@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::process::Command;
 
-const LABEL: &str = "com.dome-wm.dome";
-const PLIST_NAME: &str = "com.dome-wm.dome.plist";
+const LABEL: &str = "com.longvh.dome";
+const PLIST_NAME: &str = "com.longvh.dome.plist";
 
 /// Detects if the current binary is running inside a `Dome.app` bundle.
 /// Returns the path to the `.app` directory (e.g. `/Applications/Dome.app`) if so.
