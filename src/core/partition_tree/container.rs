@@ -26,7 +26,7 @@ impl PartitionTreeStrategy {
             self.set_focus_pointer(hub, last_child);
         }
 
-        self.clean_up_occupied_container(container_id);
+        self.release_container_slot(container_id);
         hub.free_container(container_id);
         self.tiling_containers.remove(&container_id);
         self.maintain_direction_invariance(hub, grandparent);

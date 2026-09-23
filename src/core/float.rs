@@ -1,8 +1,7 @@
 use crate::core::{
     Hub, WindowId,
     hub::RestrictedAction,
-    matcher::FloatFullscreenMatcherId,
-    node::{DisplayMode, MonitorId, PixelRect, WorkspaceId},
+    node::{Child, DisplayMode, MonitorId, PixelRect, WorkspaceId},
 };
 
 impl Hub {
@@ -26,13 +25,16 @@ impl Hub {
         workspace_id: WorkspaceId,
         id: WindowId,
         border_box: PixelRect,
-        occupy: Option<FloatFullscreenMatcherId>,
+        entry_index: Option<usize>,
     ) {
         let window = self.access.windows.get_mut(id);
-        window.mode = DisplayMode::Float { border_box, occupy };
+        window.mode = DisplayMode::Float { border_box };
         window.set_workspace(Some(workspace_id));
         let workspace = self.access.workspaces.get_mut(workspace_id);
         workspace.float_windows.push(id);
+        if let Some(idx) = entry_index {
+            workspace.float_entries[idx].window = Some(id);
+        }
         self.focus_float(workspace_id, id);
     }
 
@@ -55,6 +57,11 @@ impl Hub {
             .position(|&fid| fid == id)
             .expect("detach_float_from_workspace: window not in float_windows");
         workspace.float_windows.remove(pos);
+        for entry in workspace.float_entries.iter_mut() {
+            if entry.window == Some(id) {
+                entry.window = None;
+            }
+        }
 
         if was_focused && workspace.float_windows.is_empty() {
             workspace.is_float_focused = false;
@@ -88,12 +95,7 @@ impl Hub {
             let ws = window
                 .workspace()
                 .expect("non-minimized float window has a workspace");
-            // Same-monitor drag settle stays on the same workspace, so preserve
-            // occupy. Only a cross-workspace hop below drops it.
-            let DisplayMode::Float { occupy, .. } = window.mode else {
-                unreachable!("is_float asserted above")
-            };
-            window.mode = DisplayMode::Float { border_box, occupy };
+            window.mode = DisplayMode::Float { border_box };
             ws
         };
 
@@ -102,8 +104,6 @@ impl Hub {
         if monitor_id != old_monitor {
             let target_ws = self.access.monitors.get(monitor_id).active_workspace;
             if target_ws != old_ws {
-                // Cross-workspace hop: drop occupy. Carrying it would leak
-                // old_ws's authored matcher into target_ws's export section.
                 let stored_dim = self.detach_float_from_workspace(window_id);
                 self.attach_float_to_workspace(target_ws, window_id, stored_dim, None);
             }
@@ -123,15 +123,13 @@ impl Hub {
         };
 
         match self.access.windows.get(window_id).mode {
-            DisplayMode::Fullscreen { .. } => (),
+            DisplayMode::Fullscreen => (),
             DisplayMode::Float { .. } => {
                 self.detach_float_from_workspace(window_id);
                 self.access.windows.get_mut(window_id).mode = DisplayMode::Tiling;
-                self.strategies.for_workspace_mut(current_ws).attach_window(
-                    &mut self.access,
-                    window_id,
-                    current_ws,
-                );
+                self.strategies
+                    .for_workspace_mut(current_ws)
+                    .reattach_child(&mut self.access, Child::Window(window_id), current_ws);
                 self.set_workspace_focus(window_id);
 
                 tracing::debug!(%window_id, "Window is now tiling");

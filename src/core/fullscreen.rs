@@ -1,8 +1,7 @@
 use crate::core::{
     Hub, WindowId,
     hub::RestrictedAction,
-    matcher::FloatFullscreenMatcherId,
-    node::{DisplayMode, WindowRestrictions, WorkspaceId},
+    node::{Child, DisplayMode, WindowRestrictions, WorkspaceId},
 };
 
 impl Hub {
@@ -22,7 +21,7 @@ impl Hub {
             DisplayMode::Float { .. } => {
                 self.detach_float_from_workspace(window_id);
             }
-            DisplayMode::Fullscreen { .. } => {
+            DisplayMode::Fullscreen => {
                 tracing::debug!("Updating restrictions on already-fullscreen window");
                 self.access.windows.get_mut(window_id).restrictions = restrictions;
                 return;
@@ -39,7 +38,7 @@ impl Hub {
     #[tracing::instrument(skip(self))]
     pub(crate) fn unset_fullscreen(&mut self, window_id: WindowId) {
         let window = self.access.windows.get(window_id);
-        if !matches!(window.mode, DisplayMode::Fullscreen { .. }) {
+        if !matches!(window.mode, DisplayMode::Fullscreen) {
             return;
         }
 
@@ -50,9 +49,11 @@ impl Hub {
         self.detach_fullscreen_from_workspace(window_id);
 
         self.access.windows.get_mut(window_id).mode = DisplayMode::Tiling;
-        self.strategies
-            .for_workspace_mut(ws)
-            .attach_window(&mut self.access, window_id, ws);
+        self.strategies.for_workspace_mut(ws).reattach_child(
+            &mut self.access,
+            Child::Window(window_id),
+            ws,
+        );
         self.set_workspace_focus(window_id);
 
         tracing::info!("Fullscreen unset");
@@ -62,16 +63,16 @@ impl Hub {
         &mut self,
         ws: WorkspaceId,
         id: WindowId,
-        occupy: Option<FloatFullscreenMatcherId>,
+        entry_index: Option<usize>,
     ) {
         let window = self.access.windows.get_mut(id);
-        window.mode = DisplayMode::Fullscreen { occupy };
+        window.mode = DisplayMode::Fullscreen;
         window.set_workspace(Some(ws));
-        self.access
-            .workspaces
-            .get_mut(ws)
-            .fullscreen_windows
-            .push(id);
+        let workspace = self.access.workspaces.get_mut(ws);
+        workspace.fullscreen_windows.push(id);
+        if let Some(idx) = entry_index {
+            workspace.fullscreen_entries[idx].window = Some(id);
+        }
     }
 
     pub(super) fn detach_fullscreen_from_workspace(&mut self, id: WindowId) {
@@ -84,6 +85,11 @@ impl Hub {
         let workspace = self.access.workspaces.get_mut(ws_id);
 
         workspace.fullscreen_windows.retain(|&w| w != id);
+        for entry in workspace.fullscreen_entries.iter_mut() {
+            if entry.window == Some(id) {
+                entry.window = None;
+            }
+        }
     }
 
     #[tracing::instrument(skip(self))]
@@ -97,7 +103,7 @@ impl Hub {
         };
 
         match self.access.windows.get(window_id).mode {
-            DisplayMode::Fullscreen { .. } => self.unset_fullscreen(window_id),
+            DisplayMode::Fullscreen => self.unset_fullscreen(window_id),
             DisplayMode::Tiling | DisplayMode::Float { .. } => {
                 self.set_fullscreen(window_id, WindowRestrictions::None)
             }

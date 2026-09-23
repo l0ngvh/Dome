@@ -108,7 +108,7 @@ impl PartitionTreeStrategy {
         // surviving focus rather than the one that just left.
         self.compute_placement(hub, workspace_id);
 
-        self.detach_preferred_slot(hub, workspace_id, child);
+        self.release_slots_in(hub, child);
     }
 
     /// Drop every window of `subtree` from `ws`'s focus history. Returns whether the

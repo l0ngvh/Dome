@@ -18,8 +18,8 @@ pub(crate) enum IpcEvent {
         query: Query,
         reply: SyncSender<String>,
     },
-    // ExportLayout carries the path so start_server owns it, not each platform.
-    ExportLayout(String),
+    SaveLayout(String),
+    ApplyLayout(String),
 }
 
 const QUERY_TIMEOUT: Duration = Duration::from_secs(1);
@@ -27,7 +27,7 @@ const RPC_READ_TIMEOUT: Duration = Duration::from_secs(2);
 const RPC_POLL_INTERVAL: Duration = Duration::from_millis(5);
 const RPC_MAX_REQUEST_BYTES: usize = 64 * 1024;
 
-pub(crate) fn start_server<F>(export_layout_path: String, dispatch: F) -> anyhow::Result<()>
+pub(crate) fn start_server<F>(layout_path: String, dispatch: F) -> anyhow::Result<()>
 where
     F: Fn(IpcEvent) -> anyhow::Result<()> + Send + Clone + 'static,
 {
@@ -55,12 +55,14 @@ where
                     Err(e) => Response::error(ErrorCode::ActionFailed, e.to_string()),
                 }
             }
-            IpcMessage::ExportLayout => {
-                match dispatch(IpcEvent::ExportLayout(export_layout_path.clone())) {
-                    Ok(()) => Response::ok(serde_json::Value::Null),
-                    Err(e) => Response::error(ErrorCode::ActionFailed, e.to_string()),
-                }
-            }
+            IpcMessage::SaveLayout => match dispatch(IpcEvent::SaveLayout(layout_path.clone())) {
+                Ok(()) => Response::ok(serde_json::Value::Null),
+                Err(e) => Response::error(ErrorCode::ActionFailed, e.to_string()),
+            },
+            IpcMessage::ApplyLayout => match dispatch(IpcEvent::ApplyLayout(layout_path.clone())) {
+                Ok(()) => Response::ok(serde_json::Value::Null),
+                Err(e) => Response::error(ErrorCode::ActionFailed, e.to_string()),
+            },
         }
     };
     listen(on_message)

@@ -6,15 +6,12 @@ use crate::core::MonitorSelector;
 use crate::core::TilingConfig;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::master::MasterStrategy;
-use crate::core::master::PaneConfig;
 use crate::core::node::{
     Child, Constraints, ContainerId, Dimension, Direction, Length, PixelRect, Pixels, Unit,
     WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
-use crate::core::{
-    PreferredLayouts, PreferredWorkspace, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
-};
+use crate::core::{PreferredMaster, PreferredTiling, SizeConstraints, Strategy};
 
 #[derive(Debug)]
 pub(crate) enum StrategyAction {
@@ -153,53 +150,12 @@ pub(crate) struct TilingPlacements {
     pub(crate) containers: Vec<ContainerPlacement>,
 }
 
-#[derive(Debug, Default, PartialEq)]
-pub(crate) struct WorkspaceExport {
-    pub(crate) strategy: String,
-    pub(crate) tree: Option<TreeLayoutNode>,
-    pub(crate) master_ratio: Option<f32>,
-    pub(crate) master_count: Option<usize>,
-    pub(crate) master: PaneConfig,
-    pub(crate) secondary: PaneConfig,
-    pub(crate) float: Vec<WindowMatcher>,
-    pub(crate) fullscreen: Vec<WindowMatcher>,
-}
-
-impl WorkspaceExport {
-    pub(crate) fn to_layout_workspace_config(&self) -> PreferredWorkspace {
-        match self.strategy.as_str() {
-            "partition_tree" => PreferredWorkspace::PartitionTree {
-                tree: self.tree.clone(),
-                float: self.float.clone(),
-                fullscreen: self.fullscreen.clone(),
-            },
-            "master" => PreferredWorkspace::Master {
-                master_ratio: self.master_ratio,
-                master_count: self.master_count,
-                master: self.master.clone(),
-                secondary: self.secondary.clone(),
-                float: self.float.clone(),
-                fullscreen: self.fullscreen.clone(),
-            },
-            _ => unreachable!("unknown strategy"),
-        }
-    }
-}
-
 /// Abstraction over tiling behavior. Tiling-specific operations live here.
 /// Generic window management (monitors, workspaces, float, fullscreen, focus
 /// priority) does not.
 pub(crate) trait TilingStrategy: std::fmt::Debug {
-    /// Pre-allocate per-workspace state.
-    fn prepare_workspace(
-        &mut self,
-        hub: &mut HubAccess,
-        ws_id: WorkspaceId,
-        preferred_layout: Option<&PreferredWorkspace>,
-    );
-
-    /// Insert a window into the tiling tree for the given workspace. Does not
-    /// focus it: the hub decides focus.
+    /// The window takes a free slot that matches it, when one exists. Does not focus it: the
+    /// hub decides focus.
     fn attach_window(&mut self, hub: &mut HubAccess, window_id: WindowId, ws_id: WorkspaceId);
 
     /// Remove a window from its workspace's tiling tree. Returns the window's
@@ -242,44 +198,29 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Returns the number of tiling windows in the workspace.
     fn tiling_window_count(&self, hub: &HubAccess, ws_id: WorkspaceId) -> usize;
 
-    /// Return true if this workspace's tiling layout has a matcher that matches
+    /// Return true if this workspace's tiling layout has a free slot that matches
     /// the given window. Read-only routing query used by resolve_matcher on
     /// window insert.
     fn matches_tiling(&self, ws_id: WorkspaceId, metadata: &dyn WindowMetadata) -> bool;
 
     /// Re-attach a previously-detached `Child` into `ws_id` and set focus within the
-    /// workspace. A strategy that cannot host containers flattens `child` into its
-    /// windows, so the resulting focus need not be `child`.
+    /// workspace.
     fn reattach_child(&mut self, hub: &mut HubAccess, child: Child, ws_id: WorkspaceId);
 
-    /// Migrate windows out of a workspace being rebuilt after a strategy
-    /// change. Returns the list of tiling window IDs and the focused tiling
-    /// window (if any), then removes all per-workspace state.
-    fn migrate(
-        &mut self,
-        hub: &mut HubAccess,
-        ws_id: WorkspaceId,
-    ) -> (Vec<WindowId>, Option<WindowId>);
-
-    /// Synchronize the preferred layout for a single workspace from an incoming
-    /// workspace override.
-    /// `incoming` is `None` when the workspace no longer has an override
-    /// in the new config. The strategy clears its per-workspace state and
-    /// falls back to global defaults.
-    fn sync_preferred_layout(
-        &mut self,
-        hub: &mut HubAccess,
-        ws_id: WorkspaceId,
-        incoming: Option<&PreferredWorkspace>,
-    );
+    /// Takes every tiling window off a workspace being reset, then removes all
+    /// per-workspace state. Returns the windows in the order to re-attach them.
+    fn migrate(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Vec<WindowId>;
 
     /// Refresh config-derived internal state and relayout every workspace this
     /// strategy owns.
     fn apply_config(&mut self, hub: &mut HubAccess, tiling: TilingConfig);
+}
 
-    /// Export the current layout for a workspace, updating the strategy's
-    /// internal preferred-layout representation to match the live tree.
-    fn export_workspace(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> WorkspaceExport;
+fn preferred_tiling(hub: &HubAccess, ws_id: WorkspaceId) -> Option<&PreferredTiling> {
+    let monitor = hub.origin_monitor_name(ws_id);
+    hub.preferred_layouts
+        .workspace(&monitor, &hub.workspaces.get(ws_id).name)
+        .map(|entry| &entry.tiling)
 }
 
 #[cfg(test)]
@@ -532,22 +473,37 @@ impl StrategySet {
     }
 
     pub(super) fn register(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
-        let ws_name = hub.workspaces.get(ws_id).name.clone();
-        let monitor = hub.origin_monitor_name(ws_id);
         // Clone so the `&mut hub` below does not alias a borrow into `hub.preferred_layouts`.
-        let preferred = hub.preferred_layouts.workspace(&monitor, &ws_name).cloned();
-        let preferred_strategy = preferred
-            .as_ref()
-            .map(|w| match w {
-                PreferredWorkspace::PartitionTree { .. } => Strategy::PartitionTree,
-                PreferredWorkspace::Master { .. } => Strategy::Master,
-            })
-            .unwrap_or(hub.tiling.layout);
+        let tiling = preferred_tiling(hub, ws_id).cloned();
+        let default = hub.tiling.layout;
+        self.kinds.insert(
+            ws_id,
+            tiling.as_ref().map_or(default, PreferredTiling::strategy),
+        );
+        match &tiling {
+            Some(PreferredTiling::PartitionTree { tree }) => {
+                self.partition_tree.prepare_workspace(ws_id, tree.as_ref())
+            }
+            Some(PreferredTiling::Master(layout)) => {
+                self.master.prepare_workspace(hub, ws_id, layout)
+            }
+            None => match default {
+                Strategy::PartitionTree => self.partition_tree.prepare_workspace(ws_id, None),
+                Strategy::Master => {
+                    self.master
+                        .prepare_workspace(hub, ws_id, &PreferredMaster::default())
+                }
+            },
+        }
+    }
 
-        self.kinds.insert(ws_id, preferred_strategy);
-        let kind = self.kind_of(ws_id);
-        self.get_mut(kind)
-            .prepare_workspace(hub, ws_id, preferred.as_ref());
+    pub(super) fn export_workspace(&self, hub: &HubAccess, ws_id: WorkspaceId) -> PreferredTiling {
+        match self.kind_of(ws_id) {
+            Strategy::PartitionTree => PreferredTiling::PartitionTree {
+                tree: self.partition_tree.export_workspace(hub, ws_id),
+            },
+            Strategy::Master => PreferredTiling::Master(self.master.export_workspace(hub, ws_id)),
+        }
     }
 
     pub(super) fn kind_of(&self, ws_id: WorkspaceId) -> Strategy {
@@ -647,51 +603,18 @@ impl StrategySet {
         }
     }
 
-    /// Recompute kinds and drive the full sync. All cross-kind rebuilds and
-    /// same-kind syncs happen here.
-    pub(super) fn resync(
-        &mut self,
-        hub: &mut HubAccess,
-        preferred_layouts: &PreferredLayouts,
-        default_strategy: Strategy,
-    ) {
-        for ws_id in hub.workspaces.sorted_ids() {
-            let old = *self
-                .kinds
-                .get(&ws_id)
-                .unwrap_or_else(|| panic!("workspace {ws_id:?} not registered with StrategySet"));
-            let ws_name = hub.workspaces.get(ws_id).name.clone();
-            let monitor = hub.origin_monitor_name(ws_id);
-            let incoming = preferred_layouts.workspace(&monitor, &ws_name);
-            let new = incoming
-                .map(|w| match w {
-                    PreferredWorkspace::PartitionTree { .. } => Strategy::PartitionTree,
-                    PreferredWorkspace::Master { .. } => Strategy::Master,
-                })
-                .unwrap_or(default_strategy);
-            self.kinds.insert(ws_id, new);
-            if old != new {
-                tracing::debug!(
-                    ws_id = %ws_id,
-                    old = ?old,
-                    new = ?new,
-                    "Per-workspace strategy changed, rebuilding",
-                );
-                let (tiling_windows, focused) = self.get_mut(old).migrate(hub, ws_id);
-                self.get_mut(new).prepare_workspace(hub, ws_id, incoming);
-
-                for wid in &tiling_windows {
-                    self.for_workspace_mut(ws_id)
-                        .attach_window(hub, *wid, ws_id);
-                }
-                if let Some(f) = focused {
-                    self.for_workspace_mut(ws_id).set_focus(hub, f);
-                }
-            } else {
-                let cfg = incoming.cloned();
-                self.get_mut(new)
-                    .sync_preferred_layout(hub, ws_id, cfg.as_ref());
-            }
+    /// Rebuilds the tiling state of `ws_id` from the preferred layouts and attaches its
+    /// tiling windows again.
+    pub(super) fn reset_workspace(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
+        let old = self.kind_of(ws_id);
+        let migrated = self.get_mut(old).migrate(hub, ws_id);
+        self.register(hub, ws_id);
+        let new = self.kind_of(ws_id);
+        for &wid in &migrated {
+            self.get_mut(new).attach_window(hub, wid, ws_id);
+        }
+        if let Some(&last) = migrated.last() {
+            self.get_mut(new).set_focus(hub, last);
         }
     }
 

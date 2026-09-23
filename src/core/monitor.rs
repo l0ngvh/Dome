@@ -188,13 +188,13 @@ impl Hub {
                     .workspaces
                     .allocate(Workspace::new(workspace_name.clone(), monitor_id));
                 self.strategies.register(&mut self.access, ws_id);
+                self.load_entries(ws_id);
                 ws_id
             }
         };
         self.access.monitors.get_mut(monitor_id).active_workspace = active;
 
-        let preferred = self.access.preferred_layouts.clone();
-        self.index_matchers(&preferred);
+        self.create_named_workspaces();
 
         monitor_id
     }

@@ -1,23 +1,6 @@
-//! Minimize boundary.
-//!
-//! Mutators on `Hub` that take a `WindowId` require the window to be
-//! non-minimized at call time. Callers observe minimized state through
-//! their own registry (e.g. `ManagedWindow::is_minimized` in the macOS
-//! and Windows shells) and must call `unminimize_window` first if they
-//! intend to mutate a minimized window. Enforcement is implicit: each
-//! in-scope mutator runs `workspace().expect("non-minimized window has
-//! a workspace")`, which panics on a minimized `WindowId` because a
-//! minimized window has no workspace. No explicit `is_minimized` assert
-//! is added on each mutator.
-//!
-//! Exemptions: `minimize_window` and `unminimize_window` (the boundary
-//! primitives defined in this module); `delete_window` (lifecycle,
-//! owned by the OS); `set_window_title` and `set_window_constraint`
-//! (bookkeeping that does not affect layout).
-
 use crate::core::{
     Hub, WindowId,
-    node::{DisplayMode, MinimizedWindowEntry},
+    node::{Child, DisplayMode, MinimizedWindowEntry},
 };
 
 impl Hub {
@@ -50,7 +33,7 @@ impl Hub {
             DisplayMode::Float { .. } => {
                 self.detach_float_from_workspace(window_id);
             }
-            DisplayMode::Fullscreen { .. } => {
+            DisplayMode::Fullscreen => {
                 self.detach_fullscreen_from_workspace(window_id);
             }
         }
@@ -82,17 +65,13 @@ impl Hub {
             DisplayMode::Tiling => {
                 self.strategies
                     .for_workspace_mut(target_workspace)
-                    .attach_window(&mut self.access, window_id, target_workspace);
+                    .reattach_child(&mut self.access, Child::Window(window_id), target_workspace);
                 self.set_workspace_focus(window_id);
             }
             DisplayMode::Float { border_box, .. } => {
-                // unminimize restores to current_workspace(), and minimize
-                // clears the origin, so the restore target may differ from the
-                // origin workspace. Drop occupy unconditionally to avoid
-                // leaking the origin's matcher into a different export section.
                 self.attach_float_to_workspace(target_workspace, window_id, border_box, None);
             }
-            DisplayMode::Fullscreen { .. } => {
+            DisplayMode::Fullscreen => {
                 self.attach_fullscreen_to_workspace(target_workspace, window_id, None);
             }
         }

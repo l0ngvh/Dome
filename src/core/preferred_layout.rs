@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::config::lua::deserializer::{FromLuaValue, LoadContext, as_table};
+use crate::core::Strategy;
 use crate::core::master::{PaneConfig, read_master_count_override, read_master_ratio_override};
 use crate::core::matcher::WindowMatcher;
 use crate::core::partition_tree::TreeLayoutNode;
@@ -78,46 +79,64 @@ impl PreferredMonitor {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum PreferredWorkspace {
-    PartitionTree {
-        tree: Option<TreeLayoutNode>,
-        float: Vec<WindowMatcher>,
-        fullscreen: Vec<WindowMatcher>,
-    },
-    Master {
-        master_ratio: Option<f32>,
-        master_count: Option<usize>,
-        master: PaneConfig,
-        secondary: PaneConfig,
-        float: Vec<WindowMatcher>,
-        fullscreen: Vec<WindowMatcher>,
-    },
+pub(crate) struct PreferredWorkspace {
+    pub(crate) tiling: PreferredTiling,
+    pub(crate) float: Vec<WindowMatcher>,
+    pub(crate) fullscreen: Vec<WindowMatcher>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PreferredTiling {
+    PartitionTree { tree: Option<TreeLayoutNode> },
+    Master(PreferredMaster),
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct PreferredMaster {
+    pub(crate) master_ratio: Option<f32>,
+    pub(crate) master_count: Option<usize>,
+    pub(crate) master: PaneConfig,
+    pub(crate) secondary: PaneConfig,
+}
+
+impl PreferredTiling {
+    pub(crate) fn strategy(&self) -> Strategy {
+        match self {
+            PreferredTiling::PartitionTree { .. } => Strategy::PartitionTree,
+            PreferredTiling::Master(_) => Strategy::Master,
+        }
+    }
 }
 
 impl FromLuaValue for PreferredWorkspace {
     fn from_lua_value(value: &mlua::Value, cx: &mut LoadContext) -> mlua::Result<Self> {
         let table = as_table(value, "a workspace table")?;
         let layout: String = cx.field_or_else(table, "layout", String::new);
-        match layout.as_str() {
-            "" => Err(mlua::Error::runtime(
-                "layout is required, and must be \"partition_tree\" or \"master\"",
-            )),
-            "partition_tree" => Ok(PreferredWorkspace::PartitionTree {
+        let tiling = match layout.as_str() {
+            "" => {
+                return Err(mlua::Error::runtime(
+                    "layout is required, and must be \"partition_tree\" or \"master\"",
+                ));
+            }
+            "partition_tree" => PreferredTiling::PartitionTree {
                 tree: cx.field(table, "tree"),
-                float: cx.field(table, "float"),
-                fullscreen: cx.field(table, "fullscreen"),
-            }),
-            "master" => Ok(PreferredWorkspace::Master {
+            },
+            "master" => PreferredTiling::Master(PreferredMaster {
                 master_ratio: read_master_ratio_override(table, cx),
                 master_count: read_master_count_override(table, cx),
                 master: cx.field(table, "master"),
                 secondary: cx.field(table, "secondary"),
-                float: cx.field(table, "float"),
-                fullscreen: cx.field(table, "fullscreen"),
             }),
-            other => Err(mlua::Error::runtime(format!(
-                "layout must be \"partition_tree\" or \"master\", got \"{other}\""
-            ))),
-        }
+            other => {
+                return Err(mlua::Error::runtime(format!(
+                    "layout must be \"partition_tree\" or \"master\", got \"{other}\""
+                )));
+            }
+        };
+        Ok(PreferredWorkspace {
+            tiling,
+            float: cx.field(table, "float"),
+            fullscreen: cx.field(table, "fullscreen"),
+        })
     }
 }

@@ -5,8 +5,9 @@ use super::node::WorkspaceId;
 use super::{Hub, WindowId};
 use crate::core::PaneDisplay;
 use crate::core::master::PaneConfig;
-use crate::core::preferred_layout::{PreferredLayouts, PreferredWorkspace};
-use crate::core::{SplitMode, TreeLayoutNode, WindowMatcher};
+use crate::core::{
+    PreferredLayouts, PreferredTiling, PreferredWorkspace, SplitMode, TreeLayoutNode, WindowMatcher,
+};
 
 impl Hub {
     /// Synthesises one matcher per window from its live metadata. A window that a
@@ -22,24 +23,31 @@ impl Hub {
             .collect()
     }
 
-    pub(crate) fn export_layout(&mut self, layout_path: &Path) -> anyhow::Result<()> {
+    /// Returns the in-memory layouts with each monitor that has a live workspace
+    /// rewritten from the live state. A monitor with no live workspace keeps its
+    /// entries, so a file written on the laptop still carries the desktop's layout.
+    pub(super) fn capture_live_layouts(&self) -> PreferredLayouts {
+        let mut layouts = self.access.preferred_layouts.clone();
         let ws_ids: Vec<WorkspaceId> = self.access.workspaces.sorted_ids();
-
-        // Clearing first is what drops a workspace that no longer exists. A
-        // monitor with no live workspace keeps its entries, so a file written on
-        // the laptop still carries the desktop's layout.
+        // Clearing first is what drops a workspace that no longer exists.
         let live_monitors: BTreeSet<String> = ws_ids
             .iter()
             .map(|&ws_id| self.access.origin_monitor_name(ws_id))
             .collect();
         for monitor in &live_monitors {
-            self.access.preferred_layouts.clear_monitor(monitor);
+            layouts.clear_monitor(monitor);
         }
         for ws_id in ws_ids {
-            self.export_workspace(ws_id);
+            let monitor = self.access.origin_monitor_name(ws_id);
+            let name = &self.access.workspaces.get(ws_id).name;
+            let entry = self.export_workspace(ws_id);
+            layouts.insert(&monitor, name, entry);
         }
+        layouts
+    }
 
-        let rendered = render_layout(&self.access.preferred_layouts);
+    pub(crate) fn save_layout(&self, layout_path: &Path) -> anyhow::Result<()> {
+        let rendered = render_layout(&self.capture_live_layouts());
 
         // Regenerate destroys any comments the user added, so keep the prior
         // file recoverable.
@@ -185,45 +193,36 @@ fn emit_workspace(out: &mut String, name: &str, ws: &PreferredWorkspace, level: 
     let nested = level + 1;
     out.push_str(&element);
     out.push_str(&format!("[{}] = {{\n", lua_str(name)));
-    match ws {
-        PreferredWorkspace::PartitionTree {
-            tree,
-            float,
-            fullscreen,
-        } => {
+    match &ws.tiling {
+        PreferredTiling::PartitionTree { tree } => {
             out.push_str(&format!("{field}layout = \"partition_tree\",\n"));
             if let Some(tree) = tree {
                 out.push_str(&format!("{field}tree = {},\n", emit_tree(tree, nested)));
             }
-            emit_display_lists(out, &field, nested, float, fullscreen);
         }
-        PreferredWorkspace::Master {
-            master_ratio,
-            master_count,
-            master,
-            secondary,
-            float,
-            fullscreen,
-        } => {
+        PreferredTiling::Master(master) => {
             out.push_str(&format!("{field}layout = \"master\",\n"));
-            if let Some(ratio) = master_ratio {
+            if let Some(ratio) = master.master_ratio {
                 out.push_str(&format!("{field}master_ratio = {ratio},\n"));
             }
-            if let Some(count) = master_count {
+            if let Some(count) = master.master_count {
                 out.push_str(&format!("{field}master_count = {count},\n"));
             }
-            if !master.children.is_empty() {
-                out.push_str(&format!("{field}master = {},\n", emit_pane(master, nested)));
-            }
-            if !secondary.children.is_empty() {
+            if !master.master.children.is_empty() {
                 out.push_str(&format!(
-                    "{field}secondary = {},\n",
-                    emit_pane(secondary, nested)
+                    "{field}master = {},\n",
+                    emit_pane(&master.master, nested)
                 ));
             }
-            emit_display_lists(out, &field, nested, float, fullscreen);
+            if !master.secondary.children.is_empty() {
+                out.push_str(&format!(
+                    "{field}secondary = {},\n",
+                    emit_pane(&master.secondary, nested)
+                ));
+            }
         }
     }
+    emit_display_lists(out, &field, nested, &ws.float, &ws.fullscreen);
     out.push_str(&element);
     out.push_str("},\n");
 }

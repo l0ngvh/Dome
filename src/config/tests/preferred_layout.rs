@@ -1,5 +1,9 @@
+use super::{CleanupFile, temp_lua_path};
 use crate::config::PreferredLayouts;
-use crate::core::{PaneDisplay, PreferredWorkspace, SplitMode, TreeLayoutNode, WindowMatcher};
+use crate::core::{
+    PaneDisplay, PreferredMaster, PreferredTiling, PreferredWorkspace, SplitMode, TreeLayoutNode,
+    WindowMatcher,
+};
 
 fn layout_from(src: &str) -> PreferredLayouts {
     PreferredLayouts::from_lua("test layout", src).expect("layout should load")
@@ -42,7 +46,11 @@ return {
     let layout = PreferredLayouts::from_lua("test layout", src).expect("lua layout should load");
     assert_eq!(layout.entries().count(), 2);
     match layout.workspace("PC Monitor", "dev").expect("dev entry") {
-        PreferredWorkspace::PartitionTree { tree, float, .. } => {
+        PreferredWorkspace {
+            tiling: PreferredTiling::PartitionTree { tree },
+            float,
+            ..
+        } => {
             let Some(TreeLayoutNode::Container { split, children }) = tree else {
                 panic!("expected outer container");
             };
@@ -61,8 +69,12 @@ return {
         _ => panic!("expected PartitionTree"),
     }
     match layout.workspace("PC Monitor", "work").expect("work entry") {
-        PreferredWorkspace::Master {
-            master, secondary, ..
+        PreferredWorkspace {
+            tiling:
+                PreferredTiling::Master(PreferredMaster {
+                    master, secondary, ..
+                }),
+            ..
         } => {
             assert_eq!(master.display, PaneDisplay::Tiled);
             assert_eq!(master.children.len(), 1);
@@ -83,13 +95,21 @@ fn fullscreen_rules_load_on_either_strategy() {
     let tree =
         workspace_from(r#"{ layout = "partition_tree", fullscreen = { { app = "Steam" } } }"#);
     match tree {
-        PreferredWorkspace::PartitionTree { fullscreen, .. } => assert_eq!(fullscreen, steam),
+        PreferredWorkspace {
+            tiling: PreferredTiling::PartitionTree { .. },
+            fullscreen,
+            ..
+        } => assert_eq!(fullscreen, steam),
         _ => panic!("expected PartitionTree variant"),
     }
 
     let master = workspace_from(r#"{ layout = "master", fullscreen = { { app = "Steam" } } }"#);
     match master {
-        PreferredWorkspace::Master { fullscreen, .. } => assert_eq!(fullscreen, steam),
+        PreferredWorkspace {
+            tiling: PreferredTiling::Master(_),
+            fullscreen,
+            ..
+        } => assert_eq!(fullscreen, steam),
         _ => panic!("expected Master variant"),
     }
 }
@@ -109,9 +129,13 @@ return {
 "#;
     let layout = PreferredLayouts::from_lua("test layout", src).expect("lua layout should load");
     match layout.workspace("PC Monitor", "bad").expect("bad entry") {
-        PreferredWorkspace::Master {
-            master_ratio,
-            master_count,
+        PreferredWorkspace {
+            tiling:
+                PreferredTiling::Master(PreferredMaster {
+                    master_ratio,
+                    master_count,
+                    ..
+                }),
             ..
         } => {
             assert_eq!(*master_ratio, None);
@@ -120,9 +144,13 @@ return {
         _ => panic!("expected Master"),
     }
     match layout.workspace("PC Monitor", "good").expect("good entry") {
-        PreferredWorkspace::Master {
-            master_ratio,
-            master_count,
+        PreferredWorkspace {
+            tiling:
+                PreferredTiling::Master(PreferredMaster {
+                    master_ratio,
+                    master_count,
+                    ..
+                }),
             ..
         } => {
             assert_eq!(*master_ratio, Some(0.6));
@@ -152,11 +180,17 @@ return {
     assert_eq!(layout.entries().count(), 2);
     assert!(matches!(
         layout.workspace("Built-in Retina Display", "1"),
-        Some(PreferredWorkspace::Master { .. })
+        Some(PreferredWorkspace {
+            tiling: PreferredTiling::Master(_),
+            ..
+        })
     ));
     assert!(matches!(
         layout.workspace("PC Monitor", "1"),
-        Some(PreferredWorkspace::Master { .. })
+        Some(PreferredWorkspace {
+            tiling: PreferredTiling::Master(_),
+            ..
+        })
     ));
 }
 
@@ -176,7 +210,10 @@ return {
     assert_eq!(layout.entries().count(), 1);
     assert!(matches!(
         layout.workspace("PC Monitor", "1"),
-        Some(PreferredWorkspace::Master { .. })
+        Some(PreferredWorkspace {
+            tiling: PreferredTiling::Master(_),
+            ..
+        })
     ));
 }
 
@@ -191,7 +228,10 @@ fn preferred_layout_parse_single_entry() {
     assert_eq!(layout.entries().count(), 1);
     assert!(matches!(
         layout.workspace("desk", "1"),
-        Some(PreferredWorkspace::Master { .. })
+        Some(PreferredWorkspace {
+            tiling: PreferredTiling::Master(_),
+            ..
+        })
     ));
 }
 
@@ -206,11 +246,17 @@ fn preferred_layout_parse_multiple_distinct() {
     assert_eq!(layout.entries().count(), 2);
     assert!(matches!(
         layout.workspace("desk", "1"),
-        Some(PreferredWorkspace::Master { .. })
+        Some(PreferredWorkspace {
+            tiling: PreferredTiling::Master(_),
+            ..
+        })
     ));
     assert!(matches!(
         layout.workspace("desk", "scratch"),
-        Some(PreferredWorkspace::PartitionTree { .. })
+        Some(PreferredWorkspace {
+            tiling: PreferredTiling::PartitionTree { .. },
+            ..
+        })
     ));
 }
 
@@ -225,7 +271,10 @@ fn preferred_layout_drops_a_workspace_with_an_unknown_strategy() {
     assert!(layout.workspace("desk", "bad").is_none());
     assert!(matches!(
         layout.workspace("desk", "good"),
-        Some(PreferredWorkspace::Master { .. })
+        Some(PreferredWorkspace {
+            tiling: PreferredTiling::Master(_),
+            ..
+        })
     ));
 }
 
@@ -233,7 +282,10 @@ fn preferred_layout_drops_a_workspace_with_an_unknown_strategy() {
 fn tree_leaf_parses() {
     let ws = workspace_from(r#"{ layout = "partition_tree", tree = { process = "editor.exe" } }"#);
     match ws {
-        PreferredWorkspace::PartitionTree { tree, .. } => {
+        PreferredWorkspace {
+            tiling: PreferredTiling::PartitionTree { tree },
+            ..
+        } => {
             let Some(TreeLayoutNode::Leaf(matcher)) = tree else {
                 panic!("expected Leaf");
             };
@@ -258,7 +310,10 @@ fn tree_array_container_parses() {
 } }"#,
     );
     match ws {
-        PreferredWorkspace::PartitionTree { tree, .. } => {
+        PreferredWorkspace {
+            tiling: PreferredTiling::PartitionTree { tree },
+            ..
+        } => {
             let Some(TreeLayoutNode::Container { split, children }) = tree else {
                 panic!("expected Container");
             };
@@ -280,7 +335,10 @@ fn tree_split_container_parses() {
 } }"#,
     );
     match ws {
-        PreferredWorkspace::PartitionTree { tree, .. } => {
+        PreferredWorkspace {
+            tiling: PreferredTiling::PartitionTree { tree },
+            ..
+        } => {
             let Some(TreeLayoutNode::Container { split, children }) = tree else {
                 panic!("expected Container");
             };
@@ -300,7 +358,10 @@ fn tree_tabbed_parses() {
 } }"#,
     );
     match ws {
-        PreferredWorkspace::PartitionTree { tree, .. } => {
+        PreferredWorkspace {
+            tiling: PreferredTiling::PartitionTree { tree },
+            ..
+        } => {
             let Some(TreeLayoutNode::Container { split, children }) = tree else {
                 panic!("expected Container");
             };
@@ -326,7 +387,10 @@ fn tree_nested_parses() {
 } }"#,
     );
     match ws {
-        PreferredWorkspace::PartitionTree { tree, .. } => {
+        PreferredWorkspace {
+            tiling: PreferredTiling::PartitionTree { tree },
+            ..
+        } => {
             let Some(TreeLayoutNode::Container { split, children }) = tree else {
                 panic!("expected outer Container");
             };
@@ -349,7 +413,10 @@ fn tree_nested_parses() {
 fn tree_default_none() {
     let ws = workspace_from(r#"{ layout = "partition_tree" }"#);
     match ws {
-        PreferredWorkspace::PartitionTree { tree, .. } => {
+        PreferredWorkspace {
+            tiling: PreferredTiling::PartitionTree { tree },
+            ..
+        } => {
             assert!(tree.is_none());
         }
         _ => panic!("expected PartitionTree variant"),
@@ -365,7 +432,10 @@ fn tree_recovers_from_an_invalid_split() {
 } } }"#,
     );
     match ws {
-        PreferredWorkspace::PartitionTree { tree, .. } => {
+        PreferredWorkspace {
+            tiling: PreferredTiling::PartitionTree { tree },
+            ..
+        } => {
             let Some(TreeLayoutNode::Container { split, children }) = tree else {
                 panic!("expected Container");
             };
@@ -374,4 +444,33 @@ fn tree_recovers_from_an_invalid_split() {
         }
         _ => panic!("expected PartitionTree variant"),
     }
+}
+
+#[test]
+fn load_or_default_reads_a_valid_file() {
+    let path = temp_lua_path("layout_valid");
+    std::fs::write(
+        &path,
+        r#"return { desk = { w = { layout = "partition_tree" } } }"#,
+    )
+    .unwrap();
+    let _cleanup = CleanupFile(path.clone());
+    let layout = PreferredLayouts::load_or_default(path.to_str().unwrap());
+    assert!(layout.workspace("desk", "w").is_some());
+}
+
+#[test]
+fn load_or_default_returns_an_empty_layout_when_the_file_is_missing() {
+    let path = temp_lua_path("layout_missing");
+    let layout = PreferredLayouts::load_or_default(path.to_str().unwrap());
+    assert_eq!(layout, PreferredLayouts::default());
+}
+
+#[test]
+fn load_or_default_returns_an_empty_layout_on_malformed_lua() {
+    let path = temp_lua_path("layout_malformed");
+    std::fs::write(&path, "this is not valid lua ]]}\n").unwrap();
+    let _cleanup = CleanupFile(path.clone());
+    let layout = PreferredLayouts::load_or_default(path.to_str().unwrap());
+    assert_eq!(layout, PreferredLayouts::default());
 }

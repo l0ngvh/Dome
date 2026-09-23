@@ -7,6 +7,7 @@ use crate::core::strategy::{VALIDATION_TOLERANCE, ValidateStrategy, window_const
 use rustc_hash::FxHashSet;
 
 use super::PartitionTreeStrategy;
+use super::preferred_layout::PreferredSlot;
 
 impl ValidateStrategy for PartitionTreeStrategy {
     fn validate(&self, hub: &HubAccess) -> FxHashSet<ContainerId> {
@@ -44,6 +45,8 @@ impl ValidateStrategy for PartitionTreeStrategy {
             self.validate_workspace_focus(hub, workspace_id, &tree_windows);
         }
         self.validate_container_arena(&reachable);
+        self.validate_leaf_holders();
+        self.validate_slot_arena();
         reachable
     }
 }
@@ -153,6 +156,61 @@ impl PartitionTreeStrategy {
             Vec::new(),
             "Containers holding tiling state but reachable from no workspace root, so their \
              state leaked"
+        );
+    }
+
+    fn validate_leaf_holders(&self) {
+        for leaf in self.window_slots.sorted_ids() {
+            let Some(wid) = self.window_slots.get(leaf).window else {
+                continue;
+            };
+            assert_eq!(
+                self.tiling_windows
+                    .get(&wid)
+                    .and_then(|data| data.held_slot),
+                Some(leaf),
+                "{leaf} holds window {wid}, which does not hold it"
+            );
+        }
+    }
+
+    fn validate_slot_arena(&self) {
+        let mut leaves = FxHashSet::default();
+        let mut containers = FxHashSet::default();
+        for state in self.workspaces.values() {
+            let mut stack: Vec<PreferredSlot> = state.preferred_root.into_iter().collect();
+            for _ in crate::core::bounded_loop() {
+                let Some(slot) = stack.pop() else { break };
+                match slot {
+                    PreferredSlot::Window(id) => {
+                        leaves.insert(id);
+                    }
+                    PreferredSlot::Container(id) => {
+                        containers.insert(id);
+                        stack.extend(self.container_slots.get(id).children.iter().copied());
+                    }
+                }
+            }
+        }
+        let leaked: Vec<_> = self
+            .window_slots
+            .sorted_ids()
+            .into_iter()
+            .filter(|id| !leaves.contains(id))
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "Leaves reachable from no preferred root: {leaked:?}"
+        );
+        let leaked: Vec<_> = self
+            .container_slots
+            .sorted_ids()
+            .into_iter()
+            .filter(|id| !containers.contains(id))
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "Container slots reachable from no preferred root: {leaked:?}"
         );
     }
 
@@ -353,6 +411,13 @@ impl PartitionTreeStrategy {
             Some(workspace_id),
             "Window {wid} has wrong workspace"
         );
+        if let Some(leaf) = self.tiling_windows.get(&wid).unwrap().held_slot {
+            assert_eq!(
+                self.window_slots.get(leaf).window,
+                Some(wid),
+                "Window {wid} holds {leaf}, which holds another window"
+            );
+        }
 
         let dim = self.tiling_windows.get(&wid).unwrap().dimension;
         let c = window_constraints(hub, &self.size_constraints, wid);

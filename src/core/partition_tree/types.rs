@@ -49,7 +49,7 @@ pub(super) struct TilingWindowData {
     pub(super) parent: Parent,
     pub(super) dimension: Dimension,
     pub(super) spawn_direction: Direction,
-    pub(super) occupy: Option<PreferredWindowSlotId>,
+    pub(super) held_slot: Option<PreferredWindowSlotId>,
 }
 
 impl TilingWindowData {
@@ -66,7 +66,7 @@ impl TilingWindowData {
             parent,
             dimension: Dimension::default(),
             spawn_direction: Direction::default(),
-            occupy: None,
+            held_slot: None,
         }
     }
 }
@@ -94,7 +94,7 @@ pub(super) struct TilingContainerData {
     pub(super) min_width: Length,
     pub(super) min_height: Length,
     /// Preferred container slot this live container materializes, if any.
-    pub(super) occupy: Option<PreferredContainerSlotId>,
+    pub(super) held_slot: Option<PreferredContainerSlotId>,
 }
 
 impl TilingContainerData {
@@ -114,7 +114,7 @@ impl TilingContainerData {
             active_tab_index: 0,
             min_width: Length::ZERO,
             min_height: Length::ZERO,
-            occupy: None,
+            held_slot: None,
         }
     }
 
@@ -176,9 +176,6 @@ pub(super) struct WorkspaceTilingState {
     pub(super) focus_history: Vec<WindowId>,
     /// Root of the static preferred layout tree. `None` when no layout is configured.
     pub(super) preferred_root: Option<PreferredSlot>,
-    /// The highest occupied node in the preferred layout tree. `None` when no
-    /// matched window has been placed.
-    pub(super) occupied_preferred_root: Option<PreferredSlot>,
     pub(super) viewport_offset: (Length, Length),
 }
 

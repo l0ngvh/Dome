@@ -1,12 +1,11 @@
 use crate::core::PaneDisplay;
 use crate::core::WindowRestrictions;
 use crate::core::master::PaneConfig;
-use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
-    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect, titled,
-    titled_process,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect, master_entry,
+    titled, titled_process,
 };
-use crate::core::{Strategy, WindowMatcher};
+use crate::core::{PreferredMaster, PreferredTiling, Strategy, WindowMatcher};
 
 #[test]
 fn export_master_empty_workspace() {
@@ -21,13 +20,7 @@ fn export_master_empty_workspace() {
     let ws_id = hub.current_workspace();
 
     let result = hub.export_workspace(ws_id);
-    assert_eq!(
-        result,
-        WorkspaceExport {
-            strategy: "master".into(),
-            ..WorkspaceExport::default()
-        }
-    );
+    assert_eq!(result, master_entry(PreferredMaster::default()));
 }
 
 #[test]
@@ -46,49 +39,13 @@ fn export_master_single_window() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        WorkspaceExport {
-            strategy: "master".into(),
+        master_entry(PreferredMaster {
             master: PaneConfig::tiled(vec![WindowMatcher {
                 title: Some("w0".into()),
                 ..Default::default()
             }]),
-            ..WorkspaceExport::default()
-        }
-    );
-}
-
-#[test]
-fn export_master_matched_preserves_slot_matcher() {
-    let slot_matcher = WindowMatcher {
-        title: Some("AAA".into()),
-        ..Default::default()
-    };
-    let mut hub = TestHubBuilder::new()
-        .with_tiling(
-            TilingConfigBuilder::new()
-                .with_strategy(Strategy::Master)
-                .build(),
-        )
-        .with_preferred_layout(vec![
-            LayoutWorkspaceConfigBuilder::new("1")
-                .with_strategy(Strategy::Master)
-                .with_master(vec![slot_matcher.clone()])
-                .build(),
-        ])
-        .build();
-    hub.focus_workspace("1", None);
-    let ws_id = hub.current_workspace();
-    hub.insert_window(titled("AAA"), default_rect(), WindowRestrictions::None);
-
-    let result = hub.export_workspace(ws_id);
-    assert_eq!(
-        result,
-        WorkspaceExport {
-            strategy: "master".into(),
-            master: PaneConfig::tiled(vec![slot_matcher]),
-            secondary: PaneConfig::tiled(vec![]),
-            ..WorkspaceExport::default()
-        }
+            ..PreferredMaster::default()
+        })
     );
 }
 
@@ -120,20 +77,19 @@ fn export_master_mixed_matched_and_unmatched() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        WorkspaceExport {
-            strategy: "master".into(),
+        master_entry(PreferredMaster {
             master: PaneConfig::tiled(vec![slot_matcher]),
             secondary: PaneConfig::tiled(vec![WindowMatcher {
                 title: Some("foreign".into()),
                 ..Default::default()
             }]),
-            ..WorkspaceExport::default()
-        }
+            ..PreferredMaster::default()
+        })
     );
 }
 
 #[test]
-fn export_two_windows_one_slot_emits_single_matcher() {
+fn export_writes_own_matcher_for_window_that_holds_a_slot() {
     let mut hub = TestHubBuilder::new()
         .with_tiling(
             TilingConfigBuilder::new()
@@ -164,15 +120,23 @@ fn export_two_windows_one_slot_emits_single_matcher() {
         WindowRestrictions::None,
     );
 
-    let result = hub.export_workspace(ws_id);
-    // Two windows share one slot, so the slot's matcher must be emitted once.
-    assert_eq!(result.master.children.len(), 1);
+    let PreferredTiling::Master(result) = hub.export_workspace(ws_id).tiling else {
+        panic!("workspace 1 should be master");
+    };
     assert_eq!(
         result.master.children,
-        vec![WindowMatcher {
-            process: Some("browser.exe".into()),
-            ..Default::default()
-        }]
+        vec![
+            WindowMatcher {
+                title: Some("Browser A".into()),
+                process: Some("browser.exe".into()),
+                ..Default::default()
+            },
+            WindowMatcher {
+                title: Some("Browser B".into()),
+                process: Some("browser.exe".into()),
+                ..Default::default()
+            },
+        ]
     );
 }
 
@@ -198,24 +162,26 @@ fn export_reload_restores_tabbed_pane() {
     // Both windows land in the master pane.
     hub.toggle_container_layout();
     let export = hub.export_workspace(ws);
-    assert_eq!(export.master.display, PaneDisplay::Tabbed);
+    let PreferredTiling::Master(master) = &export.tiling else {
+        panic!("workspace 1 should be master");
+    };
+    assert_eq!(master.master.display, PaneDisplay::Tabbed);
 
-    let config = export.to_layout_workspace_config();
     let mut reloaded = TestHubBuilder::new()
         .with_tiling(
             TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_preferred_layout([("1".to_string(), config)])
+        .with_preferred_layout([("1".to_string(), export)])
         .build();
     reloaded.focus_workspace("1", None);
     let rws = reloaded.current_workspace();
     reloaded.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     reloaded.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
 
-    assert_eq!(
-        reloaded.export_workspace(rws).master.display,
-        PaneDisplay::Tabbed
-    );
+    let PreferredTiling::Master(reloaded_master) = reloaded.export_workspace(rws).tiling else {
+        panic!("workspace 1 should be master");
+    };
+    assert_eq!(reloaded_master.master.display, PaneDisplay::Tabbed);
 }

@@ -1,7 +1,9 @@
+use insta::assert_snapshot;
+
 use crate::core::node::WindowRestrictions;
-use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
-    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect, titled,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect,
+    partition_tree_entry, snapshot, titled, titled_matcher,
 };
 use crate::core::{SplitMode, TreeLayoutNode, WindowMatcher};
 
@@ -14,13 +16,7 @@ fn export_empty_workspace_returns_empty_export() {
     let ws_id = hub.current_workspace();
 
     let result = hub.export_workspace(ws_id);
-    assert_eq!(
-        result,
-        WorkspaceExport {
-            strategy: "partition_tree".into(),
-            ..WorkspaceExport::default()
-        }
-    );
+    assert_eq!(result, partition_tree_entry(None));
 }
 
 #[test]
@@ -35,28 +31,20 @@ fn export_single_foreign_window() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        WorkspaceExport {
-            strategy: "partition_tree".into(),
-            tree: Some(TreeLayoutNode::Leaf(WindowMatcher {
-                title: Some("w0".into()),
-                ..Default::default()
-            })),
-            ..WorkspaceExport::default()
-        }
+        partition_tree_entry(Some(TreeLayoutNode::Leaf(WindowMatcher {
+            title: Some("w0".into()),
+            ..Default::default()
+        })))
     );
 }
 
 #[test]
-fn export_occupied_window_slot_uses_slot_matcher() {
-    let slot_matcher = WindowMatcher {
-        title: Some("preferred-title".into()),
-        ..Default::default()
-    };
+fn export_held_window_slot_writes_own_matcher() {
     let mut hub = TestHubBuilder::new()
         .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
-                .with_tree(TreeLayoutNode::Leaf(slot_matcher.clone()))
+                .with_tree(TreeLayoutNode::Leaf(titled_matcher("/preferred.*/")))
                 .build(),
         ])
         .build();
@@ -72,11 +60,9 @@ fn export_occupied_window_slot_uses_slot_matcher() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        WorkspaceExport {
-            strategy: "partition_tree".into(),
-            tree: Some(TreeLayoutNode::Leaf(slot_matcher)),
-            ..WorkspaceExport::default()
-        }
+        partition_tree_entry(Some(TreeLayoutNode::Leaf(titled_matcher(
+            "preferred-title"
+        ))))
     );
 }
 
@@ -94,23 +80,19 @@ fn export_foreign_container_with_two_windows() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        WorkspaceExport {
-            strategy: "partition_tree".into(),
-            tree: Some(TreeLayoutNode::Container {
-                split: Some(SplitMode::Vertical),
-                children: vec![
-                    TreeLayoutNode::Leaf(WindowMatcher {
-                        title: Some("w0".into()),
-                        ..Default::default()
-                    }),
-                    TreeLayoutNode::Leaf(WindowMatcher {
-                        title: Some("w1".into()),
-                        ..Default::default()
-                    }),
-                ],
-            }),
-            ..WorkspaceExport::default()
-        }
+        partition_tree_entry(Some(TreeLayoutNode::Container {
+            split: Some(SplitMode::Vertical),
+            children: vec![
+                TreeLayoutNode::Leaf(WindowMatcher {
+                    title: Some("w0".into()),
+                    ..Default::default()
+                }),
+                TreeLayoutNode::Leaf(WindowMatcher {
+                    title: Some("w1".into()),
+                    ..Default::default()
+                }),
+            ],
+        }))
     );
 }
 
@@ -128,23 +110,19 @@ fn export_tabbed_container() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        WorkspaceExport {
-            strategy: "partition_tree".into(),
-            tree: Some(TreeLayoutNode::Container {
-                split: Some(SplitMode::Tabbed),
-                children: vec![
-                    TreeLayoutNode::Leaf(WindowMatcher {
-                        title: Some("w0".into()),
-                        ..Default::default()
-                    }),
-                    TreeLayoutNode::Leaf(WindowMatcher {
-                        title: Some("w1".into()),
-                        ..Default::default()
-                    }),
-                ],
-            }),
-            ..WorkspaceExport::default()
-        }
+        partition_tree_entry(Some(TreeLayoutNode::Container {
+            split: Some(SplitMode::Tabbed),
+            children: vec![
+                TreeLayoutNode::Leaf(WindowMatcher {
+                    title: Some("w0".into()),
+                    ..Default::default()
+                }),
+                TreeLayoutNode::Leaf(WindowMatcher {
+                    title: Some("w1".into()),
+                    ..Default::default()
+                }),
+            ],
+        }))
     );
 }
 
@@ -164,52 +142,42 @@ fn export_nested_containers() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        WorkspaceExport {
-            strategy: "partition_tree".into(),
-            tree: Some(TreeLayoutNode::Container {
-                split: Some(SplitMode::Tabbed),
-                children: vec![
-                    TreeLayoutNode::Leaf(WindowMatcher {
-                        title: Some("w0".into()),
-                        ..Default::default()
-                    }),
-                    TreeLayoutNode::Container {
-                        split: Some(SplitMode::Horizontal),
-                        children: vec![
-                            TreeLayoutNode::Leaf(WindowMatcher {
-                                title: Some("w1".into()),
-                                ..Default::default()
-                            }),
-                            TreeLayoutNode::Leaf(WindowMatcher {
-                                title: Some("w2".into()),
-                                ..Default::default()
-                            }),
-                        ],
-                    },
-                ],
-            }),
-            ..WorkspaceExport::default()
-        }
+        partition_tree_entry(Some(TreeLayoutNode::Container {
+            split: Some(SplitMode::Tabbed),
+            children: vec![
+                TreeLayoutNode::Leaf(WindowMatcher {
+                    title: Some("w0".into()),
+                    ..Default::default()
+                }),
+                TreeLayoutNode::Container {
+                    split: Some(SplitMode::Horizontal),
+                    children: vec![
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("w1".into()),
+                            ..Default::default()
+                        }),
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("w2".into()),
+                            ..Default::default()
+                        }),
+                    ],
+                },
+            ],
+        }))
     );
 }
 
 #[test]
-fn export_mixed_occupied_and_foreign() {
+fn export_then_reopen_window_does_not_panic() {
     let mut hub = TestHubBuilder::new()
         .with_tiling(TilingConfigBuilder::new().build())
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
-                    split: Some(SplitMode::Tabbed),
+                    split: Some(SplitMode::Horizontal),
                     children: vec![
-                        TreeLayoutNode::Leaf(WindowMatcher {
-                            title: Some("AAA".into()),
-                            ..Default::default()
-                        }),
-                        TreeLayoutNode::Leaf(WindowMatcher {
-                            title: Some("/B.*/".into()),
-                            ..Default::default()
-                        }),
+                        TreeLayoutNode::Leaf(titled_matcher("editor")),
+                        TreeLayoutNode::Leaf(titled_matcher("term")),
                     ],
                 })
                 .build(),
@@ -217,38 +185,49 @@ fn export_mixed_occupied_and_foreign() {
         .build();
     hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
-    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
-    hub.insert_window(titled("BBB"), default_rect(), WindowRestrictions::None);
-    hub.insert_window(titled("AAA"), default_rect(), WindowRestrictions::None);
+    let editor = hub
+        .insert_window(titled("editor"), default_rect(), WindowRestrictions::None)
+        .unwrap();
+    hub.export_workspace(ws_id);
 
-    let result = hub.export_workspace(ws_id);
-    assert_eq!(
-        result,
-        WorkspaceExport {
-            strategy: "partition_tree".into(),
-            tree: Some(TreeLayoutNode::Container {
-                split: Some(SplitMode::Horizontal),
-                children: vec![
-                    TreeLayoutNode::Leaf(WindowMatcher {
-                        title: Some("w0".into()),
-                        ..Default::default()
-                    }),
-                    TreeLayoutNode::Container {
-                        split: Some(SplitMode::Tabbed),
-                        children: vec![
-                            TreeLayoutNode::Leaf(WindowMatcher {
-                                title: Some("AAA".into()),
-                                ..Default::default()
-                            }),
-                            TreeLayoutNode::Leaf(WindowMatcher {
-                                title: Some("/B.*/".into()),
-                                ..Default::default()
-                            }),
-                        ],
-                    },
-                ],
-            }),
-            ..WorkspaceExport::default()
-        }
-    );
+    hub.delete_window(editor);
+    hub.insert_window(titled("editor"), default_rect(), WindowRestrictions::None)
+        .unwrap();
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
+      )
+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W1                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    ");
 }

@@ -78,7 +78,8 @@ enum CliCommand {
     Mode {
         name: String,
     },
-    Export,
+    SaveLayout,
+    ApplyLayout,
     Query {
         #[command(subcommand)]
         query: CliQuery,
@@ -117,7 +118,8 @@ enum Dispatch {
     },
     Action(Action),
     Query(CliQuery),
-    Export,
+    SaveLayout,
+    ApplyLayout,
     Generate(CliGenerate),
 }
 
@@ -169,7 +171,8 @@ impl From<CliCommand> for Dispatch {
             CliCommand::Exit => Dispatch::Action(Action::Exit),
             CliCommand::Close => Dispatch::Action(Action::Close),
             CliCommand::Mode { name } => Dispatch::Action(Action::Mode { name }),
-            CliCommand::Export => Dispatch::Export,
+            CliCommand::SaveLayout => Dispatch::SaveLayout,
+            CliCommand::ApplyLayout => Dispatch::ApplyLayout,
             CliCommand::Query { query } => Dispatch::Query(query),
             CliCommand::Generate { bar } => Dispatch::Generate(bar),
             CliCommand::UnminimizeWindow { id } => {
@@ -188,7 +191,8 @@ impl From<CliCommand> for Dispatch {
 trait Client {
     fn ping(&self) -> bool;
     fn action(&self, action: &Action) -> anyhow::Result<()>;
-    fn export_layout(&self) -> anyhow::Result<()>;
+    fn save_layout(&self) -> anyhow::Result<()>;
+    fn apply_layout(&self) -> anyhow::Result<()>;
     fn query<T: DeserializeOwned>(&self, query: &Query) -> anyhow::Result<T>;
 }
 
@@ -201,8 +205,12 @@ impl Client for crate::DomeClient {
         crate::DomeClient::action(self, action)
     }
 
-    fn export_layout(&self) -> anyhow::Result<()> {
-        crate::DomeClient::export_layout(self)
+    fn save_layout(&self) -> anyhow::Result<()> {
+        crate::DomeClient::save_layout(self)
+    }
+
+    fn apply_layout(&self) -> anyhow::Result<()> {
+        crate::DomeClient::apply_layout(self)
     }
 
     fn query<T: DeserializeOwned>(&self, query: &Query) -> anyhow::Result<T> {
@@ -272,8 +280,11 @@ fn execute(dispatch: Dispatch, client: &impl Client, out: &mut impl Write) -> an
             };
             writeln!(out, "{json}")?;
         }
-        Dispatch::Export => {
-            client.export_layout()?;
+        Dispatch::SaveLayout => {
+            client.save_layout()?;
+        }
+        Dispatch::ApplyLayout => {
+            client.apply_layout()?;
         }
         Dispatch::Generate(CliGenerate::Sketchybar) => {
             crate::integrations::sketchybar::generate()?;
@@ -392,8 +403,12 @@ mod tests {
             unreachable!("no test sends an action")
         }
 
-        fn export_layout(&self) -> anyhow::Result<()> {
-            unreachable!("no test exports a layout")
+        fn save_layout(&self) -> anyhow::Result<()> {
+            unreachable!("no test saves a layout")
+        }
+
+        fn apply_layout(&self) -> anyhow::Result<()> {
+            unreachable!("no test applies a layout")
         }
 
         fn query<T: DeserializeOwned>(&self, query: &Query) -> anyhow::Result<T> {
@@ -490,6 +505,27 @@ mod tests {
             }
             other => panic!("expected Workspace, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cli_save_layout() {
+        match dispatch_from_argv(&["dome", "save-layout"]) {
+            Dispatch::SaveLayout => {}
+            other => panic!("expected SaveLayout, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_apply_layout() {
+        match dispatch_from_argv(&["dome", "apply-layout"]) {
+            Dispatch::ApplyLayout => {}
+            other => panic!("expected ApplyLayout, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_export_is_not_a_command() {
+        assert!(Cli::try_parse_from(["dome", "export"]).is_err());
     }
 
     #[test]

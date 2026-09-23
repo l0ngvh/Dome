@@ -1,9 +1,7 @@
 use crate::config::lua::deserializer::{FromLuaValue, LoadContext, as_table, string_enum};
 
-use super::allocator::{Node, NodeId};
 use super::hub::Hub;
-use super::node::{DisplayMode, WindowId, WindowMetadata, WorkspaceId};
-use super::preferred_layout::{PreferredLayouts, PreferredWorkspace};
+use super::node::{MonitorId, WindowId, WindowMetadata, WorkspaceId};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub(crate) struct WindowMatcher {
@@ -68,22 +66,13 @@ fn read_pattern(table: &mlua::Table, key: &str, cx: &mut LoadContext) -> Option<
     Some(pattern)
 }
 
-/// Handle to a matcher in the pool. A window's `DisplayMode` keeps it so the
-/// export path can re-find the matcher after the tree has mutated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct FloatFullscreenMatcherId(usize);
-
-impl NodeId for FloatFullscreenMatcherId {
-    fn new(id: usize) -> Self {
-        Self(id)
-    }
-    fn get(self) -> usize {
-        self.0
-    }
-}
-
-impl Node for WindowMatcher {
-    type Id = FloatFullscreenMatcherId;
+/// A per-workspace float or fullscreen entry. The list it lives in decides its
+/// mode. `window` is the window currently holding the entry, or `None` when the
+/// entry is free.
+#[derive(Debug, Clone)]
+pub(super) struct FloatFullscreenEntry {
+    pub(super) matcher: WindowMatcher,
+    pub(super) window: Option<WindowId>,
 }
 
 /// Result of routing a new window through the matcher lists.
@@ -91,8 +80,12 @@ pub(super) struct MatcherHit {
     /// Workspace to place the window on. `None` means the current workspace, used by global matchers.
     pub(super) ws_id: Option<WorkspaceId>,
     pub(super) mode: WindowMode,
-    /// Links the window back to the matcher that routed it. `None` for tiling hits (tiling has no occupy field) and global hits (export only writes per-workspace matchers, so a global id has no destination).
-    pub(super) matcher_id: Option<FloatFullscreenMatcherId>,
+    /// Index of the free entry the window will hold, within the target workspace's list for
+    /// `mode`.
+    ///
+    /// - `None` for a tiling hit, because a tiling window holds a slot of its strategy.
+    /// - `None` for a global hit, because a global matcher may route any number of windows.
+    pub(super) entry_index: Option<usize>,
 }
 
 impl Hub {
@@ -109,26 +102,13 @@ impl Hub {
             )
             .collect();
 
-        for &ws_id in &search_order {
-            let ws = self.access.workspaces.get(ws_id);
-            for id in &ws.fullscreen_matchers {
-                if metadata.matches_window_matcher(self.float_fullscreen_matchers.get(*id)) {
+        for mode in [WindowMode::Fullscreen, WindowMode::Float] {
+            for &ws_id in &search_order {
+                if let Some(entry_index) = self.find_free_entry(ws_id, mode, metadata) {
                     return Some(MatcherHit {
                         ws_id: Some(ws_id),
-                        mode: WindowMode::Fullscreen,
-                        matcher_id: Some(*id),
-                    });
-                }
-            }
-        }
-        for &ws_id in &search_order {
-            let ws = self.access.workspaces.get(ws_id);
-            for id in &ws.float_matchers {
-                if metadata.matches_window_matcher(self.float_fullscreen_matchers.get(*id)) {
-                    return Some(MatcherHit {
-                        ws_id: Some(ws_id),
-                        mode: WindowMode::Float,
-                        matcher_id: Some(*id),
+                        mode,
+                        entry_index: Some(entry_index),
                     });
                 }
             }
@@ -142,149 +122,80 @@ impl Hub {
                 return Some(MatcherHit {
                     ws_id: Some(ws_id),
                     mode: WindowMode::Tiling,
-                    matcher_id: None,
+                    entry_index: None,
                 });
             }
         }
-        for id in &self.global_fullscreen_matchers {
-            if metadata.matches_window_matcher(self.float_fullscreen_matchers.get(*id)) {
+        let tiling = &self.access.tiling;
+        for (matchers, mode) in [
+            (&tiling.fullscreen, WindowMode::Fullscreen),
+            (&tiling.float, WindowMode::Float),
+        ] {
+            if matchers.iter().any(|m| metadata.matches_window_matcher(m)) {
                 return Some(MatcherHit {
                     ws_id: None,
-                    mode: WindowMode::Fullscreen,
-                    matcher_id: None,
-                });
-            }
-        }
-        for id in &self.global_float_matchers {
-            if metadata.matches_window_matcher(self.float_fullscreen_matchers.get(*id)) {
-                return Some(MatcherHit {
-                    ws_id: None,
-                    mode: WindowMode::Float,
-                    matcher_id: None,
+                    mode,
+                    entry_index: None,
                 });
             }
         }
         None
     }
 
-    /// Rebuilds the matcher pool and every routing vec, per-workspace and
-    /// global, from the current config. Skips a preferred-layout entry whose
-    /// monitor is absent.
-    pub(super) fn index_matchers(&mut self, preferred_layouts: &PreferredLayouts) {
-        for id in self.float_fullscreen_matchers.sorted_ids() {
-            self.float_fullscreen_matchers.delete(id);
-        }
+    /// Returns the index of the first free entry in `ws_id`'s list for `mode`
+    /// whose matcher accepts `metadata`.
+    fn find_free_entry(
+        &self,
+        ws_id: WorkspaceId,
+        mode: WindowMode,
+        metadata: &dyn WindowMetadata,
+    ) -> Option<usize> {
+        let ws = self.access.workspaces.get(ws_id);
+        let entries = match mode {
+            WindowMode::Fullscreen => &ws.fullscreen_entries,
+            WindowMode::Float => &ws.float_entries,
+            WindowMode::Tiling => return None,
+        };
+        entries
+            .iter()
+            .position(|e| e.window.is_none() && metadata.matches_window_matcher(&e.matcher))
+    }
 
-        self.global_float_matchers.clear();
-        self.global_fullscreen_matchers.clear();
-        for ws_id in self.access.workspaces.sorted_ids() {
-            let w = self.access.workspaces.get_mut(ws_id);
-            w.float_matchers.clear();
-            w.fullscreen_matchers.clear();
-        }
-
-        // Clone globals up front: the allocation loop needs `&mut
-        // self.float_fullscreen_matchers` while these borrow `&self.access.tiling`.
-        let global_fullscreen = self.access.tiling.fullscreen.clone();
-        let global_float = self.access.tiling.float.clone();
-
-        // The `entries()` order fixes the workspace ids allocated below, and a
-        // lower workspace id wins a matcher tie in `resolve_matcher`.
-        for (monitor, name, entry) in preferred_layouts.entries() {
-            let Some(monitor_id) = self.monitor_id_by_disambiguated_name(monitor) else {
-                continue;
-            };
-            let ws_id = self.get_or_create_workspace_on(name, Some(monitor_id));
-            let matchers = workspace_matchers(entry);
-            for m in matchers.fullscreen {
-                let id = self.float_fullscreen_matchers.allocate(m);
-                self.access
-                    .workspaces
-                    .get_mut(ws_id)
-                    .fullscreen_matchers
-                    .push(id);
-            }
-            for m in matchers.float {
-                let id = self.float_fullscreen_matchers.allocate(m);
-                self.access
-                    .workspaces
-                    .get_mut(ws_id)
-                    .float_matchers
-                    .push(id);
-            }
-        }
-
-        for m in global_fullscreen {
-            let id = self.float_fullscreen_matchers.allocate(m);
-            self.global_fullscreen_matchers.push(id);
-        }
-        for m in global_float {
-            let id = self.float_fullscreen_matchers.allocate(m);
-            self.global_float_matchers.push(id);
-        }
-
-        // Re-match each float/fullscreen window against only its own workspace's
-        // same-mode matchers. A global-only hit or a no-match leaves occupy None,
-        // so the export path synthesises a matcher from live metadata.
-        let new_occupies: Vec<(WindowId, Option<FloatFullscreenMatcherId>)> = self
+    /// Rebuilds the float and fullscreen entry lists of `ws_id` from its entry in the
+    /// layout file, with every entry free.
+    pub(super) fn load_entries(&mut self, ws_id: WorkspaceId) {
+        let monitor = self.access.origin_monitor_name(ws_id);
+        let workspace = self.access.workspaces.get_mut(ws_id);
+        let layout = self
             .access
-            .windows
-            .sorted_ids()
-            .into_iter()
-            .filter_map(|win_id| {
-                let window = self.access.windows.get(win_id);
-                let is_float = match window.mode {
-                    DisplayMode::Float { .. } => true,
-                    DisplayMode::Fullscreen { .. } => false,
-                    DisplayMode::Tiling => return None,
-                };
-                let occupy = window.workspace().and_then(|ws_id| {
-                    let ws = self.access.workspaces.get(ws_id);
-                    let ids = if is_float {
-                        &ws.float_matchers
-                    } else {
-                        &ws.fullscreen_matchers
-                    };
-                    ids.iter()
-                        .find(|id| {
-                            window
-                                .metadata
-                                .matches_window_matcher(self.float_fullscreen_matchers.get(**id))
-                        })
-                        .copied()
-                });
-                Some((win_id, occupy))
+            .preferred_layouts
+            .workspace(&monitor, &workspace.name);
+        let free = |matchers: &[WindowMatcher]| {
+            matchers
+                .iter()
+                .map(|m| FloatFullscreenEntry {
+                    matcher: m.clone(),
+                    window: None,
+                })
+                .collect()
+        };
+        workspace.float_entries = layout.map_or_else(Vec::new, |l| free(&l.float));
+        workspace.fullscreen_entries = layout.map_or_else(Vec::new, |l| free(&l.fullscreen));
+    }
+
+    /// Creates each workspace that the layout file names under a connected monitor.
+    pub(super) fn create_named_workspaces(&mut self) {
+        let named: Vec<(MonitorId, String)> = self
+            .access
+            .preferred_layouts
+            .entries()
+            .filter_map(|(monitor, name, _)| {
+                let monitor_id = self.monitor_id_by_disambiguated_name(monitor)?;
+                Some((monitor_id, name.to_string()))
             })
             .collect();
-
-        for (win_id, new_occupy) in new_occupies {
-            match &mut self.access.windows.get_mut(win_id).mode {
-                DisplayMode::Float { occupy, .. } => *occupy = new_occupy,
-                DisplayMode::Fullscreen { occupy } => *occupy = new_occupy,
-                DisplayMode::Tiling => {}
-            }
+        for (monitor_id, name) in named {
+            self.get_or_create_workspace_on(&name, Some(monitor_id));
         }
-    }
-}
-
-struct Matchers {
-    fullscreen: Vec<WindowMatcher>,
-    float: Vec<WindowMatcher>,
-}
-
-fn workspace_matchers(entry: &PreferredWorkspace) -> Matchers {
-    match entry {
-        PreferredWorkspace::PartitionTree {
-            fullscreen, float, ..
-        } => Matchers {
-            fullscreen: fullscreen.clone(),
-            float: float.clone(),
-        },
-        PreferredWorkspace::Master {
-            fullscreen, float, ..
-        } => Matchers {
-            fullscreen: fullscreen.clone(),
-            float: float.clone(),
-        },
     }
 }

@@ -11,7 +11,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::{
     LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect,
-    reported_monitor, setup_logger_with_level, titled, titled_matcher, validate_hub,
+    reported_monitor, save_then_apply, setup_logger_with_level, titled, titled_matcher,
+    validate_hub,
 };
 use crate::action::MonitorTarget;
 use crate::core::hub::Hub;
@@ -229,7 +230,8 @@ enum OpKind {
     MinimizeWindow,
     UnminimizeWindow,
     ConfigReload,
-    SyncPreferredLayout,
+    ApplyPreferredLayouts,
+    ExportLayout,
 }
 
 const ALL_OP_KINDS: &[OpKind] = &[
@@ -271,7 +273,8 @@ const ALL_OP_KINDS: &[OpKind] = &[
     OpKind::MinimizeWindow,
     OpKind::UnminimizeWindow,
     OpKind::ConfigReload,
-    OpKind::SyncPreferredLayout,
+    OpKind::ApplyPreferredLayouts,
+    OpKind::ExportLayout,
 ];
 
 #[derive(Debug, Clone)]
@@ -359,7 +362,7 @@ enum RecordedOp {
     ConfigReload {
         tiling: TilingConfig,
     },
-    SyncPreferredLayout {
+    ApplyPreferredLayouts {
         workspace_name: String,
         strategy: Strategy,
         tree_ops: Vec<PrefTreeBuildOp>,
@@ -368,6 +371,7 @@ enum RecordedOp {
         float: Vec<String>,
         fullscreen: Vec<String>,
     },
+    ExportLayout,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -751,7 +755,7 @@ fn build_op(
             }
             Some(RecordedOp::ConfigReload { tiling })
         }
-        OpKind::SyncPreferredLayout => {
+        OpKind::ApplyPreferredLayouts => {
             if workspace_names.is_empty() {
                 return None;
             }
@@ -782,7 +786,7 @@ fn build_op(
                     }
                 }
             }
-            Some(RecordedOp::SyncPreferredLayout {
+            Some(RecordedOp::ApplyPreferredLayouts {
                 workspace_name,
                 strategy,
                 tree_ops,
@@ -792,6 +796,7 @@ fn build_op(
                 fullscreen,
             })
         }
+        OpKind::ExportLayout => Some(RecordedOp::ExportLayout),
     }
 }
 
@@ -972,7 +977,7 @@ fn apply_op(
         RecordedOp::ConfigReload { tiling } => {
             hub.sync_configuration(tiling.clone());
         }
-        RecordedOp::SyncPreferredLayout {
+        RecordedOp::ApplyPreferredLayouts {
             workspace_name,
             strategy,
             tree_ops,
@@ -993,7 +998,10 @@ fn apply_op(
                     fullscreen,
                 ),
             );
-            hub.sync_preferred_layout(layouts);
+            hub.apply_preferred_layouts(layouts);
+        }
+        RecordedOp::ExportLayout => {
+            save_then_apply(hub);
         }
     }
 }
@@ -1345,7 +1353,7 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
             RecordedOp::ConfigReload { tiling } => {
                 hub.sync_configuration(tiling.clone());
             }
-            RecordedOp::SyncPreferredLayout {
+            RecordedOp::ApplyPreferredLayouts {
                 workspace_name,
                 strategy,
                 tree_ops,
@@ -1366,7 +1374,10 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                         fullscreen,
                     ),
                 );
-                hub.sync_preferred_layout(layouts);
+                hub.apply_preferred_layouts(layouts);
+            }
+            RecordedOp::ExportLayout => {
+                save_then_apply(&mut hub);
             }
         }
         validate_hub(&hub);
@@ -1634,9 +1645,8 @@ fn preferred_workspace_config(
     builder.build()
 }
 
-/// Small trees stay common so a `SyncPreferredLayout` does not crowd out the rest of
-/// the op mix, while the range still reaches `PREF_TREE_MAX_LEAVES` so that moving
-/// tree generation off the construction path does not cut depth.
+/// Most trees stay small so that `ApplyPreferredLayouts` ops do not take most of the
+/// run time of a smoke run.
 fn sync_tree_max_leaves(rng: &mut ChaCha8Rng) -> usize {
     if rng.random_bool(0.8) {
         rng.random_range(2..=5)
@@ -1647,13 +1657,13 @@ fn sync_tree_max_leaves(rng: &mut ChaCha8Rng) -> usize {
 
 fn sync_tree_ops(op: &RecordedOp) -> Option<Vec<PrefTreeBuildOp>> {
     match op {
-        RecordedOp::SyncPreferredLayout { tree_ops, .. } => Some(tree_ops.clone()),
+        RecordedOp::ApplyPreferredLayouts { tree_ops, .. } => Some(tree_ops.clone()),
         _ => None,
     }
 }
 
 fn set_sync_tree_ops(op: &mut RecordedOp, ops: Vec<PrefTreeBuildOp>) {
-    if let RecordedOp::SyncPreferredLayout { tree_ops, .. } = op {
+    if let RecordedOp::ApplyPreferredLayouts { tree_ops, .. } = op {
         *tree_ops = ops;
     }
 }
@@ -1815,8 +1825,8 @@ mod tests {
     }
 
     #[test]
-    fn shrink_reduces_a_sync_preferred_layout_payload() {
-        let window = vec![RecordedOp::SyncPreferredLayout {
+    fn shrink_reduces_an_apply_preferred_layouts_payload() {
+        let window = vec![RecordedOp::ApplyPreferredLayouts {
             workspace_name: "1".into(),
             strategy: Strategy::PartitionTree,
             tree_ops: vec![
@@ -1848,7 +1858,7 @@ mod tests {
         let reduced = shrink_op_payloads(&window, |candidate| {
             candidate
                 .iter()
-                .any(|op| matches!(op, RecordedOp::SyncPreferredLayout { .. }))
+                .any(|op| matches!(op, RecordedOp::ApplyPreferredLayouts { .. }))
         })
         .expect("a three-leaf payload must shrink");
 

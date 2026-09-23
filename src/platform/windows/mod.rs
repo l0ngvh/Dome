@@ -44,7 +44,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::BOOL;
 
 use crate::action::{Actions, WorkspaceInfo};
-use crate::config::watch::{load_or_else, start_config_watcher, start_file_watcher};
+use crate::config::watch::start_file_watcher;
 use crate::config::{
     Appearance, LuaRuntime, PreferredLayouts, bootstrap::resolve_config_path, paths,
 };
@@ -173,11 +173,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
             .to_string_lossy()
             .into_owned()
     });
-    let layout = load_or_else(
-        &layout_path,
-        PreferredLayouts::load,
-        PreferredLayouts::default,
-    );
+    let layout = PreferredLayouts::load_or_default(&layout_path);
     tracing::info!(path = %layout_path, "Loaded layout");
 
     std::panic::set_hook(Box::new(|panic_info| {
@@ -266,7 +262,8 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
                     query,
                     sender: reply,
                 }),
-                ipc::IpcEvent::ExportLayout(path) => sender.send(HubEvent::ExportLayout(path)),
+                ipc::IpcEvent::SaveLayout(path) => sender.send(HubEvent::SaveLayout(path)),
+                ipc::IpcEvent::ApplyLayout(path) => sender.send(HubEvent::ApplyLayout(path)),
             }
             Ok(())
         }
@@ -279,15 +276,6 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
         }
     })
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))
-    .ok();
-
-    let _layout_watcher = start_config_watcher(&layout_path, PreferredLayouts::load, {
-        let sender = hub_sender.clone();
-        move |new_layout| {
-            sender.send(HubEvent::LayoutConfigChanged(Box::new(new_layout)));
-        }
-    })
-    .inspect_err(|e| tracing::warn!("Failed to setup layout watcher: {e:#}"))
     .ok();
 
     // Main thread: bare message pump for hooks only

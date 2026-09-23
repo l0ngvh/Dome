@@ -8,7 +8,7 @@ mod types;
 #[cfg(test)]
 mod validate;
 
-use self::preferred_layout::{PreferredContainerSlot, PreferredSlot, PreferredWindowSlot};
+use self::preferred_layout::{PreferredContainerSlot, PreferredWindowSlot};
 pub(crate) use crate::core::node::Child;
 pub(crate) use crate::core::node::Container;
 pub(crate) use preferred_layout::TreeLayoutNode;
@@ -16,7 +16,6 @@ pub(crate) use types::*;
 
 use rustc_hash::FxHashMap;
 
-use crate::core::PreferredWorkspace;
 use crate::core::SizeConstraints;
 use crate::core::TilingConfig;
 use crate::core::allocator::Allocator;
@@ -24,7 +23,7 @@ use crate::core::hub::HubAccess;
 use crate::core::node::{
     ContainerId, Direction, Logical, PixelRect, Pixels, WindowId, WindowMetadata, WorkspaceId,
 };
-use crate::core::strategy::{TilingPlacements, TilingStrategy, WorkspaceExport, translate};
+use crate::core::strategy::{TilingPlacements, TilingStrategy, translate};
 
 /// i3-style manual tiling strategy. Manages a container tree where windows are
 /// leaves and containers define split direction (horizontal/vertical) or tabbed
@@ -42,28 +41,6 @@ pub(crate) struct PartitionTreeStrategy {
 }
 
 impl TilingStrategy for PartitionTreeStrategy {
-    fn prepare_workspace(
-        &mut self,
-        _hub: &mut HubAccess,
-        ws_id: WorkspaceId,
-        preferred_layout: Option<&PreferredWorkspace>,
-    ) {
-        let preferred_root = match preferred_layout {
-            Some(PreferredWorkspace::PartitionTree { tree, .. }) => {
-                tree.as_ref().map(|t| self.build_preferred_layout(t))
-            }
-            Some(_) => panic!("Preparing master workspace in partition tree strategy"),
-            None => None,
-        };
-        self.workspaces.insert(
-            ws_id,
-            WorkspaceTilingState {
-                preferred_root,
-                ..Default::default()
-            },
-        );
-    }
-
     fn attach_window(&mut self, hub: &mut HubAccess, window_id: WindowId, ws_id: WorkspaceId) {
         let metadata = hub.windows.get(window_id).metadata.as_ref();
         self.tiling_windows
@@ -74,47 +51,13 @@ impl TilingStrategy for PartitionTreeStrategy {
             self.attach_child_according_to_spawn_direction(hub, Child::Window(window_id), ws_id);
             return;
         };
-        let Some(slot_id) = self.find_window_slot(root, metadata) else {
+        let Some(slot_id) = self.find_free_slot(root, metadata) else {
             tracing::debug!(%window_id, "No preferred layout slot matched, falling back to spawn direction");
             self.attach_child_according_to_spawn_direction(hub, Child::Window(window_id), ws_id);
             return;
         };
         tracing::debug!(%window_id, ?slot_id, "Window matched preferred layout slot");
-        hub.windows.get_mut(window_id).set_workspace(Some(ws_id));
-
-        self.workspaces
-            .get_mut(&ws_id)
-            .unwrap()
-            .add_to_history(window_id);
-        if let Some(ancestor_slot) = self.first_occupied_ancestor(slot_id) {
-            self.attach_window_into_occupied_ancestor(
-                hub,
-                window_id,
-                ws_id,
-                slot_id,
-                ancestor_slot,
-            );
-            return;
-        }
-
-        if !self.window_slots.get(slot_id).windows.is_empty() {
-            self.attach_window_into_same_slot(hub, window_id, ws_id, slot_id);
-            return;
-        }
-
-        if let Some(root_slot) = self.workspaces.get(&ws_id).unwrap().occupied_preferred_root {
-            self.attach_window_to_unoccupied_container(hub, window_id, ws_id, slot_id, root_slot);
-            return;
-        }
-
-        self.attach_child_according_to_spawn_direction(hub, Child::Window(window_id), ws_id);
-
-        self.occupy_window_slot(slot_id, window_id);
-        self.workspaces
-            .get_mut(&ws_id)
-            .unwrap()
-            .occupied_preferred_root = Some(PreferredSlot::Window(slot_id));
-        tracing::debug!(%window_id, ?slot_id, "First preferred window, established as root");
+        self.attach_window_to_slot(hub, window_id, ws_id, slot_id);
     }
 
     fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> PixelRect {
@@ -265,17 +208,12 @@ impl TilingStrategy for PartitionTreeStrategy {
         let Some(root) = self.workspaces.get(&ws_id).and_then(|w| w.preferred_root) else {
             return false;
         };
-        self.find_window_slot(root, metadata).is_some()
+        self.find_free_slot(root, metadata).is_some()
     }
 
-    fn migrate(
-        &mut self,
-        hub: &mut HubAccess,
-        ws_id: WorkspaceId,
-    ) -> (Vec<WindowId>, Option<WindowId>) {
-        let focused = self.focused_tiling_window(ws_id);
+    fn migrate(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Vec<WindowId> {
         let Some(state) = self.workspaces.remove(&ws_id) else {
-            return (Vec::new(), focused);
+            return Vec::new();
         };
         let mut tiling = match state.root {
             Some(root) => self.free_container_subtree(hub, root),
@@ -287,18 +225,8 @@ impl TilingStrategy for PartitionTreeStrategy {
         for wid in &tiling {
             self.tiling_windows.remove(wid);
         }
-        // To return the windows in inserted order
         tiling.reverse();
-        (tiling, focused)
-    }
-
-    fn sync_preferred_layout(
-        &mut self,
-        hub: &mut HubAccess,
-        ws_id: WorkspaceId,
-        incoming: Option<&PreferredWorkspace>,
-    ) {
-        self.sync_preferred_layout(hub, ws_id, incoming)
+        tiling
     }
 
     fn apply_config(&mut self, hub: &mut HubAccess, tiling: TilingConfig) {
@@ -308,10 +236,6 @@ impl TilingStrategy for PartitionTreeStrategy {
         for ws_id in self.workspaces.keys().copied().collect::<Vec<_>>() {
             self.compute_placement(hub, ws_id);
         }
-    }
-
-    fn export_workspace(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> WorkspaceExport {
-        PartitionTreeStrategy::export_workspace(self, hub, ws_id)
     }
 }
 
@@ -331,5 +255,16 @@ impl PartitionTreeStrategy {
             automatic_tiling,
             size_constraints,
         }
+    }
+
+    pub(super) fn prepare_workspace(&mut self, ws_id: WorkspaceId, tree: Option<&TreeLayoutNode>) {
+        let preferred_root = tree.map(|t| self.build_preferred_layout(t));
+        self.workspaces.insert(
+            ws_id,
+            WorkspaceTilingState {
+                preferred_root,
+                ..Default::default()
+            },
+        );
     }
 }

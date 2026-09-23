@@ -2,7 +2,7 @@ use crate::core::{
     Hub,
     allocator::Node,
     hub::RestrictedAction,
-    matcher::FloatFullscreenMatcherId,
+    matcher::FloatFullscreenEntry,
     node::{DisplayMode, MonitorId, WindowId, WorkspaceId},
     partition_tree::Child,
 };
@@ -38,8 +38,8 @@ pub(super) struct Workspace {
     /// All fullscreen windows in this workspace, ordered by z-index. The last is
     /// the topmost. Only the topmost fullscreen window is displayed.
     pub(super) fullscreen_windows: Vec<WindowId>,
-    pub(super) float_matchers: Vec<FloatFullscreenMatcherId>,
-    pub(super) fullscreen_matchers: Vec<FloatFullscreenMatcherId>,
+    pub(super) float_entries: Vec<FloatFullscreenEntry>,
+    pub(super) fullscreen_entries: Vec<FloatFullscreenEntry>,
 }
 
 impl Node for Workspace {
@@ -55,8 +55,8 @@ impl Workspace {
             attachment: Attachment::Attached,
             float_windows: Vec::new(),
             fullscreen_windows: Vec::new(),
-            float_matchers: Vec::new(),
-            fullscreen_matchers: Vec::new(),
+            float_entries: Vec::new(),
+            fullscreen_entries: Vec::new(),
         }
     }
 
@@ -167,14 +167,12 @@ impl Hub {
             panic!("Minimized window can't be moved");
         }
         match window.mode {
-            DisplayMode::Fullscreen { .. } => {
+            DisplayMode::Fullscreen => {
                 self.detach_fullscreen_from_workspace(window_id);
                 self.attach_fullscreen_to_workspace(target_ws, window_id, None);
                 self.access.workspaces.get_mut(target_ws).is_float_focused = false;
             }
             DisplayMode::Float { .. } => {
-                // Cross-workspace hop: drop occupy so the destination does not
-                // export the origin workspace's authored matcher.
                 let dim = self.detach_float_from_workspace(window_id);
                 self.attach_float_to_workspace(target_ws, window_id, dim, None);
             }
@@ -210,6 +208,7 @@ impl Hub {
             .workspaces
             .allocate(Workspace::new(name.to_string(), target));
         self.strategies.register(&mut self.access, ws_id);
+        self.load_entries(ws_id);
         ws_id
     }
 

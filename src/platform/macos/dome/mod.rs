@@ -405,9 +405,16 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn layout_changed(&mut self, new_layout: PreferredLayouts) {
-        self.hub.sync_preferred_layout(new_layout);
-        tracing::info!("Layout reloaded");
+    pub(in crate::platform::macos) fn apply_layout_file(&mut self, path: &str) {
+        let layouts = match PreferredLayouts::load(path) {
+            Ok(layouts) => layouts,
+            Err(e) => {
+                tracing::error!("Apply layout failed: {e:#}");
+                return;
+            }
+        };
+        self.hub.apply_preferred_layouts(layouts);
+        tracing::info!(%path, "Layout applied");
         self.flush_layout();
     }
 
@@ -490,9 +497,9 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn export_layout(&mut self, path: &std::path::Path) {
-        if let Err(e) = self.hub.export_layout(path) {
-            tracing::error!("Export layout failed: {e:#}");
+    pub(in crate::platform::macos) fn save_layout_file(&mut self, path: &std::path::Path) {
+        if let Err(e) = self.hub.save_layout(path) {
+            tracing::error!("Save layout failed: {e:#}");
         }
     }
 

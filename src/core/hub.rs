@@ -1,5 +1,5 @@
 use super::allocator::{Allocator, NodeId};
-use super::matcher::{FloatFullscreenMatcherId, MatcherHit, WindowMatcher, WindowMode};
+use super::matcher::{MatcherHit, WindowMode};
 use super::monitor::{Monitor, ReportedMonitor};
 use super::node::{
     Container, ContainerId, Direction, DisplayMode, Length, LimitObservation, LimitUpdate,
@@ -7,8 +7,8 @@ use super::node::{
     WorkspaceId,
 };
 use super::partition_tree::Child;
-use super::preferred_layout::PreferredLayouts;
-use super::strategy::{StrategyAction, StrategySet, TilingAction, WorkspaceExport};
+use super::preferred_layout::{PreferredLayouts, PreferredWorkspace};
+use super::strategy::{StrategyAction, StrategySet, TilingAction};
 use super::tiling::TilingConfig;
 use super::workspace::{Attachment, Workspace};
 use crate::action::{Action, Actions};
@@ -196,9 +196,6 @@ pub(crate) struct Hub {
     pub(super) access: HubAccess,
     pub(super) strategies: StrategySet,
     pub(super) minimized_windows: Vec<WindowId>,
-    pub(super) float_fullscreen_matchers: Allocator<WindowMatcher>,
-    pub(super) global_float_matchers: Vec<FloatFullscreenMatcherId>,
-    pub(super) global_fullscreen_matchers: Vec<FloatFullscreenMatcherId>,
     runtime: LuaRuntime,
 }
 
@@ -225,9 +222,6 @@ impl Hub {
             },
             strategies,
             minimized_windows: Vec::new(),
-            float_fullscreen_matchers: Allocator::new(),
-            global_float_matchers: Vec::new(),
-            global_fullscreen_matchers: Vec::new(),
             runtime,
         };
 
@@ -402,7 +396,7 @@ impl Hub {
             .workspace()
             .expect("non-minimized window has a workspace");
         match window.mode {
-            DisplayMode::Fullscreen { .. } => {
+            DisplayMode::Fullscreen => {
                 let fs = &mut self.access.workspaces.get_mut(ws).fullscreen_windows;
                 if let Some(pos) = fs.iter().position(|&w| w == window_id) {
                     fs.remove(pos);
@@ -505,54 +499,63 @@ impl Hub {
         tiling_count + ws.float_windows.len() + ws.fullscreen_windows.len()
     }
 
-    pub(crate) fn export_workspace(&mut self, ws_id: WorkspaceId) -> WorkspaceExport {
-        let ws_name = self.access.workspaces.get(ws_id).name.clone();
-        let mut export = self
-            .strategies
-            .for_workspace_mut(ws_id)
-            .export_workspace(&self.access, ws_id);
-
+    pub(crate) fn export_workspace(&self, ws_id: WorkspaceId) -> PreferredWorkspace {
         let ws = self.access.workspaces.get(ws_id);
-        let float_windows: Vec<WindowId> = ws.float_windows.clone();
-        let fullscreen_windows: Vec<WindowId> = ws.fullscreen_windows.clone();
-
-        let float = self.synthesize_display_matchers(&float_windows);
-        let fullscreen = self.synthesize_display_matchers(&fullscreen_windows);
-
-        export.float = float;
-        export.fullscreen = fullscreen;
-
-        let config = export.to_layout_workspace_config();
-        let monitor = self.access.origin_monitor_name(ws_id);
-        self.access
-            .preferred_layouts
-            .insert(&monitor, &ws_name, config);
-
-        export
+        PreferredWorkspace {
+            tiling: self.strategies.export_workspace(&self.access, ws_id),
+            float: self.synthesize_display_matchers(&ws.float_windows),
+            fullscreen: self.synthesize_display_matchers(&ws.fullscreen_windows),
+        }
     }
 
     pub(crate) fn sync_configuration(&mut self, tiling: TilingConfig) {
         self.access.tiling = tiling.clone();
         self.strategies.apply_config(&mut self.access, &tiling);
-        let preferred_layouts = self.access.preferred_layouts.clone();
-
-        self.strategies
-            .resync(&mut self.access, &preferred_layouts, tiling.layout);
-
-        self.index_matchers(&preferred_layouts);
     }
 
-    pub(crate) fn sync_preferred_layout(&mut self, preferred_layouts: PreferredLayouts) {
-        self.index_matchers(&preferred_layouts);
-        let default_strategy = self.access.tiling.layout;
-        self.strategies
-            .resync(&mut self.access, &preferred_layouts, default_strategy);
+    /// Resets every workspace from `preferred_layouts`, including a workspace that no
+    /// entry names. A workspace that an entry names but that does not exist yet is
+    /// created from that entry.
+    #[tracing::instrument(skip(self))]
+    pub(crate) fn apply_preferred_layouts(&mut self, preferred_layouts: PreferredLayouts) {
         self.access.preferred_layouts = preferred_layouts;
+        self.create_named_workspaces();
+        for ws_id in self.access.workspaces.sorted_ids() {
+            self.load_entries(ws_id);
+            self.strategies.reset_workspace(&mut self.access, ws_id);
+        }
     }
 
     #[cfg(test)]
     pub(crate) fn validate(&self) {
         self.strategies.validate(&self.access);
+        self.validate_entry_holders();
+    }
+
+    #[cfg(test)]
+    fn validate_entry_holders(&self) {
+        for ws_id in self.access.workspaces.sorted_ids() {
+            let ws = self.access.workspaces.get(ws_id);
+            let mut held = rustc_hash::FxHashSet::default();
+            for (windows, entries) in [
+                (&ws.float_windows, &ws.float_entries),
+                (&ws.fullscreen_windows, &ws.fullscreen_entries),
+            ] {
+                for entry in entries {
+                    let Some(window_id) = entry.window else {
+                        continue;
+                    };
+                    assert!(
+                        windows.contains(&window_id),
+                        "workspace {ws_id}: entry holder {window_id} is not in its own workspace and mode"
+                    );
+                    assert!(
+                        held.insert(window_id),
+                        "workspace {ws_id}: window {window_id} holds more than one entry"
+                    );
+                }
+            }
+        }
     }
 
     #[tracing::instrument(skip(self))]
@@ -578,16 +581,16 @@ impl Hub {
             .and_then(|hit| hit.ws_id)
             .unwrap_or_else(|| self.current_workspace());
 
-        let (mode, restrictions, occupy_id) = if restrictions == WindowRestrictions::None {
+        let (mode, restrictions, entry_index) = if restrictions == WindowRestrictions::None {
             match matcher {
                 Some(MatcherHit {
-                    mode, matcher_id, ..
-                }) => (mode, restrictions, matcher_id),
+                    mode, entry_index, ..
+                }) => (mode, restrictions, entry_index),
                 None => (WindowMode::Tiling, restrictions, None),
             }
         } else {
             // Restrictions force fullscreen, so the matcher only routes the
-            // workspace here, and a restricted window never picks up an occupy.
+            // workspace here, and a restricted window never holds an entry.
             (WindowMode::Fullscreen, restrictions, None)
         };
 
@@ -611,7 +614,7 @@ impl Hub {
                     .windows
                     .allocate(Window::float(target_ws, rect, metadata));
                 tracing::debug!(%window_id, ?rect, "Inserting float window");
-                self.attach_float_to_workspace(target_ws, window_id, rect, occupy_id);
+                self.attach_float_to_workspace(target_ws, window_id, rect, entry_index);
                 self.set_focus(window_id);
                 window_id
             }
@@ -621,7 +624,7 @@ impl Hub {
                     restrictions,
                     metadata,
                 ));
-                self.attach_fullscreen_to_workspace(target_ws, window_id, occupy_id);
+                self.attach_fullscreen_to_workspace(target_ws, window_id, entry_index);
                 self.set_focus(window_id);
                 window_id
             }
@@ -726,7 +729,7 @@ impl Hub {
                 DisplayMode::Float { .. } => {
                     self.detach_float_from_workspace(id);
                 }
-                DisplayMode::Fullscreen { .. } => self.detach_fullscreen_from_workspace(id),
+                DisplayMode::Fullscreen => self.detach_fullscreen_from_workspace(id),
                 DisplayMode::Tiling => {
                     let strategy = self.strategies.for_workspace_mut(ws_id);
                     strategy.detach_window(&mut self.access, id);
