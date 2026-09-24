@@ -273,7 +273,8 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
         incoming: Option<&PreferredWorkspace>,
     );
 
-    /// Refresh config-derived internal state and relayout the given workspace.
+    /// Refresh config-derived internal state and relayout every workspace this
+    /// strategy owns.
     fn apply_config(&mut self, hub: &mut HubAccess, tiling: TilingConfig);
 
     /// Export the current layout for a workspace, updating the strategy's
@@ -283,10 +284,8 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
 
 #[cfg(test)]
 pub(super) trait ValidateStrategy {
-    fn validate(&self, hub: &HubAccess);
-
-    /// Container ids this strategy reaches from its workspace roots.
-    fn reachable_containers(&self, hub: &HubAccess) -> FxHashSet<ContainerId>;
+    /// Returns the container ids this strategy reaches from its workspace roots.
+    fn validate(&self, hub: &HubAccess) -> FxHashSet<ContainerId>;
 }
 
 /// Absorbs the f32 error a constraint accumulates while being distributed.
@@ -581,6 +580,13 @@ impl StrategySet {
         self.get_mut(kind)
     }
 
+    /// A strategy that owns no workspace still takes the config, so a workspace
+    /// that later moves to it starts from the current values.
+    pub(super) fn apply_config(&mut self, hub: &mut HubAccess, tiling: &TilingConfig) {
+        self.partition_tree.apply_config(hub, tiling.clone());
+        self.master.apply_config(hub, tiling.clone());
+    }
+
     pub(super) fn handle_action(
         &mut self,
         hub: &mut HubAccess,
@@ -693,8 +699,8 @@ impl StrategySet {
     pub(super) fn validate(&self, hub: &HubAccess) {
         // The container arena is shared across strategies, so union every strategy's reachable
         // set before the leak sweep, or one strategy's containers look leaked to another.
-        let mut reachable = self.partition_tree.reachable_containers(hub);
-        reachable.extend(self.master.reachable_containers(hub));
+        let mut reachable = self.partition_tree.validate(hub);
+        reachable.extend(self.master.validate(hub));
         let allocated: FxHashSet<ContainerId> = hub.containers.sorted_ids().into_iter().collect();
 
         let mut leaked: Vec<ContainerId> = allocated.difference(&reachable).copied().collect();
@@ -709,9 +715,6 @@ impl StrategySet {
             dangling.is_empty(),
             "Containers reachable from a workspace root but not allocated: {dangling:?}"
         );
-
-        self.partition_tree.validate(hub);
-        self.master.validate(hub);
     }
 
     fn master_for(&mut self, kind: Strategy) -> Option<&mut MasterStrategy> {

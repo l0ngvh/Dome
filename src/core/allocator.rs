@@ -48,17 +48,6 @@ impl<T: std::fmt::Debug + Node> Allocator<T> {
         ids
     }
 
-    #[cfg(test)]
-    pub(super) fn all_active(&self) -> Vec<(T::Id, T)> {
-        let mut entries: Vec<_> = self
-            .storage
-            .iter()
-            .map(|(id, node)| (*id, node.clone()))
-            .collect();
-        entries.sort_by_key(|(id, _)| id.get());
-        entries
-    }
-
     pub(super) fn find(&self, f: impl Fn(&T) -> bool) -> Option<T::Id> {
         self.storage
             .iter()
@@ -128,18 +117,18 @@ mod test {
     }
 
     #[test]
-    fn all_active_returns_only_allocated_nodes() {
+    fn sorted_ids_skips_deleted_nodes() {
         let mut allocator = Allocator::new();
         let id0 = allocator.allocate(TestNode { value: 1 });
         allocator.allocate(TestNode { value: 2 });
         allocator.delete(id0);
         allocator.allocate(TestNode { value: 3 });
 
-        let mut active = allocator.all_active();
-        active.sort_by_key(|(id, _)| id.get());
-        assert_eq!(active.len(), 2);
-        assert_eq!(active[0], (TestId::new(1), TestNode { value: 2 }));
-        assert_eq!(active[1], (TestId::new(2), TestNode { value: 3 }));
+        let ids = allocator.sorted_ids();
+
+        assert_eq!(ids, vec![TestId::new(1), TestId::new(2)]);
+        assert_eq!(allocator.get(ids[0]).value, 2);
+        assert_eq!(allocator.get(ids[1]).value, 3);
     }
 
     #[test]
@@ -151,11 +140,11 @@ mod test {
         allocator.delete(id0);
         allocator.delete(id0);
 
-        assert_eq!(allocator.all_active().len(), 1);
+        assert_eq!(allocator.sorted_ids().len(), 1);
     }
 
     #[test]
-    fn all_active_returns_deterministic_order() {
+    fn sorted_ids_returns_ascending_ids() {
         let mut allocator = Allocator::new();
         let id0 = allocator.allocate(TestNode { value: 10 });
         let id1 = allocator.allocate(TestNode { value: 20 });
@@ -164,14 +153,6 @@ mod test {
         allocator.delete(id1);
         allocator.delete(id3);
 
-        let active = allocator.all_active();
-        assert_eq!(active.len(), 2);
-        assert_eq!(active[0].0, id0);
-        assert_eq!(active[1].0, id2);
-
-        for _ in 0..10 {
-            let again = allocator.all_active();
-            assert_eq!(again, active);
-        }
+        assert_eq!(allocator.sorted_ids(), vec![id0, id2]);
     }
 }

@@ -460,11 +460,7 @@ impl Hub {
 
     pub(crate) fn sync_configuration(&mut self, tiling: TilingConfig) {
         self.access.tiling = tiling.clone();
-        for ws_id in self.access.workspaces.sorted_ids() {
-            self.strategies
-                .for_workspace_mut(ws_id)
-                .apply_config(&mut self.access, tiling.clone());
-        }
+        self.strategies.apply_config(&mut self.access, &tiling);
         let preferred_layouts = self.access.preferred_layouts.clone();
 
         self.strategies

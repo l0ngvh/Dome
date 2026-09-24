@@ -166,6 +166,54 @@ fn sync_config_switches_partition_tree_to_master() {
 }
 
 #[test]
+fn sync_config_switch_to_master_applies_the_new_master_ratio() {
+    let mut hub = setup_hub();
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
+
+    hub.sync_configuration(tiling(Strategy::Master, 0.3, 1, &[], &[]));
+
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=45.00, h=30.00)
+        Window(id=WindowId(1), x=45.00, y=0.00, w=105.00, h=30.00, highlighted)
+      )
+
+    +-------------------------------------------+*********************************************************************************************************
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                     W0                    |*                                                   W1                                                  *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    +-------------------------------------------+*********************************************************************************************************
+    ");
+}
+
+#[test]
 fn sync_config_switches_master_to_partition_tree() {
     let mut hub = setup_hub_with_tiling(tiling(Strategy::Master, 0.5, 1, &[], &[]), Vec::new());
     hub.insert_window(titled("w8"), default_rect(), WindowRestrictions::None);
@@ -606,7 +654,7 @@ fn switching_a_workspace_to_master_frees_its_containers() {
 
     // Without a container the switch below would have nothing to free and would pass
     // whether or not it frees anything.
-    assert_eq!(hub.access.containers.all_active().len(), 1);
+    assert_eq!(hub.access.containers.sorted_ids().len(), 1);
 
     hub.sync_configuration(tiling(Strategy::Master, 0.5, 1, &[], &[]));
 

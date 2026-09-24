@@ -1,5 +1,7 @@
 //! Smoke tests and delta-debugging reducer for the Hub.
 
+mod workload;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -22,11 +24,14 @@ use crate::core::{
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
+use workload::Workload;
 
 const RUNS: usize = 200;
 const OPS_PER_RUN: usize = 10000;
 const SEED: u64 = 42u64;
 const PREF_TREE_MAX_LEAVES: usize = 30;
+/// Above what a real desk has, so the cap removes no realistic setup.
+const MAX_MONITORS: usize = 8;
 
 /// The two titles the harness inserts under a fixed name. A generated matcher is
 /// inert unless it is written against one of these or a `pref-N` preferred title,
@@ -372,6 +377,7 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, strategy: SmokeStrategy, a
         return;
     }
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let workload = Workload::for_seed(seed, ops_per_run);
     let mut hub = strategy.build_hub();
     let mut current_tiling = initial_tiling(strategy);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -380,7 +386,7 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, strategy: SmokeStrategy, a
             abort,
             |_| {},
             &mut rng,
-            ops_per_run,
+            &workload,
             &mut current_tiling,
         );
     }));
@@ -388,6 +394,7 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, strategy: SmokeStrategy, a
     if let Err(e) = result {
         abort.store(true, Ordering::Relaxed);
         let name = strategy.test_name();
+        tracing::error!("Workload: {workload}");
         tracing::error!(
             "To reproduce: DOME_SMOKE_STRATEGY={name} DOME_SMOKE_SEED={seed} cargo test --lib \
              reproduce_smoke_failure -- --ignored --nocapture",
@@ -413,7 +420,7 @@ fn run_iteration<F>(
     abort: &AtomicBool,
     mut observer: F,
     rng: &mut ChaCha8Rng,
-    ops_per_run: usize,
+    workload: &Workload,
     current_tiling: &mut TilingConfig,
 ) where
     F: FnMut(&RecordedOp),
@@ -426,11 +433,11 @@ fn run_iteration<F>(
     let mut next_op_index: usize = 0;
     let mut workspace_names: Vec<String> = vec!["0".to_string()];
 
-    for _ in 0..ops_per_run {
+    for pattern in workload.op_patterns() {
         if abort.load(Ordering::Relaxed) {
             return;
         }
-        let kind = ALL_OP_KINDS[rng.random_range(0..ALL_OP_KINDS.len())];
+        let kind = workload.draw_kind(pattern, rng);
         let Some(op) = build_op(
             kind,
             rng,
@@ -585,6 +592,9 @@ fn build_op(
             })
         }
         OpKind::AddMonitor => {
+            if monitors.len() >= MAX_MONITORS {
+                return None;
+            }
             let x = monitors.len() as i32 * 150;
             let name = format!("monitor-{}", monitors.len());
             let rect = PixelRect::new(x, 0, 150, 30);
@@ -1131,6 +1141,7 @@ fn record(
 ) -> (Vec<RecordedOp>, FailureSignature) {
     let abort = AtomicBool::new(false);
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let workload = Workload::for_seed(seed, ops_per_run);
     let mut hub = strategy.build_hub();
     let mut ops: Vec<RecordedOp> = Vec::new();
     let mut current_tiling = initial_tiling(strategy);
@@ -1140,7 +1151,7 @@ fn record(
             &abort,
             |op| ops.push(op.clone()),
             &mut rng,
-            ops_per_run,
+            &workload,
             &mut current_tiling,
         );
     });

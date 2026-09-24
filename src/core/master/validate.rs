@@ -9,17 +9,11 @@ use crate::core::{
 };
 
 impl ValidateStrategy for MasterStrategy {
-    fn reachable_containers(&self, _hub: &HubAccess) -> FxHashSet<ContainerId> {
+    fn validate(&self, hub: &HubAccess) -> FxHashSet<ContainerId> {
         let mut reachable = FxHashSet::default();
-        for state in self.workspaces.values() {
+        for (&ws_id, state) in &self.workspaces {
             reachable.insert(state.master.container);
             reachable.insert(state.secondary.container);
-        }
-        reachable
-    }
-
-    fn validate(&self, hub: &HubAccess) {
-        for (&ws_id, state) in &self.workspaces {
             let master = Self::pane_windows(hub, state.master.container);
             let secondary = Self::pane_windows(hub, state.secondary.container);
             let mut seen = FxHashSet::default();
@@ -214,5 +208,6 @@ impl ValidateStrategy for MasterStrategy {
                 }
             }
         }
+        reachable
     }
 }

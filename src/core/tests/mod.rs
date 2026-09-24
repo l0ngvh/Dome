@@ -543,7 +543,8 @@ fn validate_minimized(hub: &Hub) {
             "{id} is minimized but has a workspace",
         );
     }
-    for (wid, window) in hub.access.windows.all_active() {
+    for wid in hub.access.windows.sorted_ids() {
+        let window = hub.access.windows.get(wid);
         if window.workspace().is_none() {
             assert!(
                 window.is_minimized(),

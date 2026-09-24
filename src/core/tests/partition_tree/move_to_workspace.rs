@@ -627,7 +627,7 @@ fn move_nested_container_to_empty_workspace_maintains_direction_invariance() {
 
     // Depth two is the precondition. A shallower subtree holds no container pair, so it
     // stays valid whether or not the rebuild re-derives direction.
-    assert_eq!(hub.access.containers.all_active().len(), 2);
+    assert_eq!(hub.access.containers.sorted_ids().len(), 2);
 
     hub.move_focused_to_workspace("1", None);
     hub.focus_workspace("1", None);

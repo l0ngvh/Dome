@@ -1,6 +1,6 @@
 use crate::core::hub::HubAccess;
 use crate::core::node::Constraints;
-use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
+use crate::core::node::{ContainerId, Dimension, Direction, Length, WindowId, WorkspaceId};
 use crate::core::partition_tree::{Child, Parent};
 use crate::core::strategy::{VALIDATION_TOLERANCE, ValidateStrategy, window_constraints};
 
@@ -9,53 +9,41 @@ use rustc_hash::FxHashSet;
 use super::PartitionTreeStrategy;
 
 impl ValidateStrategy for PartitionTreeStrategy {
-    fn validate(&self, hub: &HubAccess) {
+    fn validate(&self, hub: &HubAccess) -> FxHashSet<ContainerId> {
         let mut reachable: FxHashSet<ContainerId> = FxHashSet::default();
         for workspace_id in hub.workspaces.sorted_ids() {
-            self.validate_workspace_focus(hub, workspace_id, hub.workspaces.get(workspace_id));
-
-            let Some(root) = self.workspaces.get(&workspace_id).and_then(|s| s.root) else {
-                continue;
-            };
-            // Hand-rolled DFS kept because the walk threads expected_parent
-            // derived from the traversal structure. Using children_dfs plus
-            // parent would check the parent field against itself.
-            let mut stack = vec![(root, Parent::Workspace(workspace_id))];
-            for _ in crate::core::bounded_loop() {
-                let Some((child, expected_parent)) = stack.pop() else {
-                    break;
-                };
-                match child {
-                    Child::Window(wid) => {
-                        self.validate_window(hub, wid, expected_parent, workspace_id)
-                    }
-                    Child::Container(cid) => {
-                        reachable.insert(cid);
-                        self.validate_container(
-                            hub,
-                            cid,
-                            expected_parent,
-                            workspace_id,
-                            &mut stack,
-                        );
+            let root = self.workspaces.get(&workspace_id).and_then(|s| s.root);
+            let mut tree_windows: FxHashSet<WindowId> = FxHashSet::default();
+            if let Some(root) = root {
+                // Hand-rolled DFS kept because the walk threads expected_parent
+                // derived from the traversal structure. Using children_dfs plus
+                // parent would check the parent field against itself.
+                let mut stack = vec![(root, Parent::Workspace(workspace_id))];
+                for _ in crate::core::bounded_loop() {
+                    let Some((child, expected_parent)) = stack.pop() else {
+                        break;
+                    };
+                    match child {
+                        Child::Window(wid) => {
+                            tree_windows.insert(wid);
+                            self.validate_window(hub, wid, expected_parent, workspace_id)
+                        }
+                        Child::Container(cid) => {
+                            reachable.insert(cid);
+                            self.validate_container(
+                                hub,
+                                cid,
+                                expected_parent,
+                                workspace_id,
+                                &mut stack,
+                            );
+                        }
                     }
                 }
             }
+            self.validate_workspace_focus(hub, workspace_id, &tree_windows);
         }
         self.validate_container_arena(&reachable);
-    }
-
-    fn reachable_containers(&self, hub: &HubAccess) -> FxHashSet<ContainerId> {
-        let mut reachable = FxHashSet::default();
-        for workspace_id in hub.workspaces.sorted_ids() {
-            if let Some(root) = self.workspaces.get(&workspace_id).and_then(|s| s.root) {
-                for child in hub.children_dfs(root) {
-                    if let Child::Container(cid) = child {
-                        reachable.insert(cid);
-                    }
-                }
-            }
-        }
         reachable
     }
 }
@@ -72,7 +60,7 @@ impl PartitionTreeStrategy {
         &self,
         hub: &HubAccess,
         workspace_id: WorkspaceId,
-        _workspace: &crate::core::workspace::Workspace,
+        tree_windows: &FxHashSet<WindowId>,
     ) {
         use crate::core::node::DisplayMode;
 
@@ -104,7 +92,7 @@ impl PartitionTreeStrategy {
             );
         }
 
-        self.validate_focus_history(hub, workspace_id, root);
+        self.validate_focus_history(workspace_id, tree_windows);
 
         if let Some(Child::Window(wid)) = focused_tiling {
             assert_eq!(
@@ -134,24 +122,12 @@ impl PartitionTreeStrategy {
 
     fn validate_focus_history(
         &self,
-        hub: &HubAccess,
         workspace_id: WorkspaceId,
-        root: Option<Child>,
+        tree_windows: &FxHashSet<WindowId>,
     ) {
         let Some(state) = self.workspaces.get(&workspace_id) else {
             return;
         };
-        let tree_windows: FxHashSet<crate::core::node::WindowId> = root
-            .map(|r| {
-                hub.children_dfs(r)
-                    .into_iter()
-                    .filter_map(|c| match c {
-                        Child::Window(wid) => Some(wid),
-                        Child::Container(_) => None,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
 
         assert_eq!(
             state.focus_history.len(),
@@ -161,10 +137,9 @@ impl PartitionTreeStrategy {
             state.focus_history.len(),
             tree_windows.len()
         );
-        let history_seen: FxHashSet<crate::core::node::WindowId> =
-            state.focus_history.iter().copied().collect();
+        let history_seen: FxHashSet<WindowId> = state.focus_history.iter().copied().collect();
         assert_eq!(
-            history_seen, tree_windows,
+            &history_seen, tree_windows,
             "Workspace {workspace_id}: focus_history does not match the tiling windows in the tree"
         );
     }
