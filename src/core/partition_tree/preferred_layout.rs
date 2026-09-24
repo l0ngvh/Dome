@@ -14,7 +14,7 @@ use crate::core::WindowMatcher;
 use crate::core::WindowMetadata;
 use crate::core::allocator::{Node, NodeId};
 use crate::core::hub::HubAccess;
-use crate::core::node::{Child, ContainerId, WindowId, WorkspaceId};
+use crate::core::node::{Child, ContainerId, WindowHost, WindowId, WorkspaceId};
 use crate::core::partition_tree::PartitionTreeStrategy;
 use crate::core::partition_tree::SplitMode;
 
@@ -165,7 +165,9 @@ impl PartitionTreeStrategy {
         ws_id: WorkspaceId,
         slot_id: PreferredWindowSlotId,
     ) {
-        hub.windows.get_mut(window_id).set_workspace(Some(ws_id));
+        hub.windows
+            .get_mut(window_id)
+            .set_host(WindowHost::Workspace(ws_id));
         self.workspaces
             .get_mut(&ws_id)
             .unwrap()

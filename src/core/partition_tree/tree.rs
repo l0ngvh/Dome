@@ -1,6 +1,6 @@
 use crate::core::SplitMode;
 use crate::core::hub::HubAccess;
-use crate::core::node::{ContainerId, Dimension, Direction, WindowId, WorkspaceId};
+use crate::core::node::{ContainerId, Dimension, Direction, WindowHost, WindowId, WorkspaceId};
 use crate::core::partition_tree::{Child, Container, Parent, TilingContainerData};
 
 use super::PartitionTreeStrategy;
@@ -221,11 +221,12 @@ impl PartitionTreeStrategy {
 
     pub(super) fn child_workspace(&self, hub: &HubAccess, child: Child) -> WorkspaceId {
         match child {
-            Child::Window(id) => hub
-                .windows
-                .get(id)
-                .workspace()
-                .expect("tiling window must have a workspace"),
+            Child::Window(id) => {
+                let WindowHost::Workspace(ws) = hub.windows.get(id).host else {
+                    panic!("tiling window must have a workspace");
+                };
+                ws
+            }
             Child::Container(id) => self.tiling_containers.get(&id).unwrap().workspace,
         }
     }
@@ -269,7 +270,9 @@ impl PartitionTreeStrategy {
         for node in nodes {
             match node {
                 Child::Window(wid) => {
-                    hub.windows.get_mut(wid).set_workspace(Some(workspace_id));
+                    hub.windows
+                        .get_mut(wid)
+                        .set_host(WindowHost::Workspace(workspace_id));
                     self.workspaces
                         .get_mut(&workspace_id)
                         .unwrap()

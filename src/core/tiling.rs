@@ -17,6 +17,7 @@ pub(crate) struct TilingConfig {
     pub(crate) size_constraints: SizeConstraints,
     pub(crate) float: Vec<WindowMatcher>,
     pub(crate) fullscreen: Vec<WindowMatcher>,
+    pub(crate) sticky: Vec<WindowMatcher>,
     pub(crate) ignore: Vec<WindowMatcher>,
 }
 

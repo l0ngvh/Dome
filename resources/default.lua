@@ -26,6 +26,9 @@ return function(mod1)
 		float = {},
 		---@type WindowMatcher[]
 		fullscreen = {},
+		-- Windows kept on top on every workspace of their monitor.
+		---@type WindowMatcher[]
+		sticky = {},
 		-- Extra variables for actions.execute commands.
 		---@type table<string, string>
 		env = {},

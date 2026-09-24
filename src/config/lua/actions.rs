@@ -12,7 +12,7 @@ type Make = fn() -> TilingAction;
 
 /// Each name must be its CLI command name with every hyphen replaced by an
 /// underscore.
-const NO_ARG: [(&str, Make); 28] = [
+const NO_ARG: [(&str, Make); 29] = [
     ("focus_left", || {
         focus_direction(Direction::Horizontal, false)
     }),
@@ -60,6 +60,7 @@ const NO_ARG: [(&str, Make); 28] = [
         StrategyAction::ToggleContainerLayout.into()
     }),
     ("toggle_float", || TilingAction::ToggleFloat),
+    ("toggle_sticky", || TilingAction::ToggleSticky),
     ("toggle_fullscreen", || TilingAction::ToggleFullscreen),
     ("increase_master_ratio", || {
         StrategyAction::GrowMaster.into()

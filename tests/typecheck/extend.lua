@@ -20,6 +20,7 @@ config.font_size = 14.0
 config.font_family = dome.env.DOME_FONT or "PingFang SC"
 config.float = { { process = "calculator.exe" } }
 config.fullscreen = { { process = "slides.exe" } }
+config.sticky = { { process = "timer.exe" } }
 config.env = { EDITOR = "nvim" }
 config.reserved_area = function(monitor)
   if monitor.name == "Built-in Retina Display" then

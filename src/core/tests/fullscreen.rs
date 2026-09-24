@@ -225,6 +225,217 @@ fn set_fullscreen_already_fullscreen() {
 }
 
 #[test]
+fn toggle_fullscreen_twice_restores_float() {
+    let mut hub = setup_with_tiling(tiling_floating(&["w5"]));
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(
+        titled("w5"),
+        PixelRect::new(10, 5, 40, 10),
+        WindowRestrictions::None,
+    )
+    .unwrap();
+
+    hub.toggle_fullscreen();
+    hub.toggle_fullscreen();
+
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(1), x=10.00, y=5.00, w=40.00, h=10.00, float, highlighted)
+      )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |         ****************************************                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                  F1                  *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         ****************************************                                                                                                   |
+    |                                                                         W0                                                                         |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    ");
+}
+
+#[test]
+fn fullscreen_float_moved_to_another_workspace_restores_float() {
+    let mut hub = setup_with_tiling(tiling_floating(&["w5"]));
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
+    let w5 = hub
+        .insert_window(
+            titled("w5"),
+            PixelRect::new(10, 5, 40, 10),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+
+    hub.set_fullscreen(w5, WindowRestrictions::None);
+    hub.move_focused_to_workspace("1", None);
+    hub.focus_workspace("1", None);
+    hub.unset_fullscreen(w5);
+
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=10.00, y=5.00, w=40.00, h=10.00, float, highlighted)
+      )
+
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+              ****************************************                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              *                  F1                  *                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              ****************************************
+    ");
+}
+
+#[test]
+fn minimized_fullscreen_float_restores_float() {
+    let mut hub = setup_with_tiling(tiling_floating(&["w5"]));
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
+    let w5 = hub
+        .insert_window(
+            titled("w5"),
+            PixelRect::new(10, 5, 40, 10),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+
+    hub.set_fullscreen(w5, WindowRestrictions::None);
+    hub.minimize_window(w5);
+    hub.unminimize_window(w5);
+    hub.unset_fullscreen(w5);
+
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(1), x=10.00, y=5.00, w=40.00, h=10.00, float, highlighted)
+      )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |         ****************************************                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                  F1                  *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         ****************************************                                                                                                   |
+    |                                                                         W0                                                                         |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    ");
+}
+
+#[test]
+fn window_inserted_as_fullscreen_exits_to_tiling() {
+    let mut hub = setup_with_tiling(
+        TilingConfigBuilder::new()
+            .with_fullscreen(vec![titled_matcher("w5")])
+            .build(),
+    );
+    hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
+    let w5 = hub
+        .insert_window(
+            titled("w5"),
+            PixelRect::new(10, 5, 40, 10),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+
+    hub.unset_fullscreen(w5);
+
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w4, w5])
+      )
+
+    +-------------------------------------------------------------------------+***************************************************************************
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                    W0                                   |*                                    W1                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    +-------------------------------------------------------------------------+***************************************************************************
+    ");
+}
+
+#[test]
 fn unset_fullscreen_to_tiling() {
     let mut hub = setup();
     let w1 = hub

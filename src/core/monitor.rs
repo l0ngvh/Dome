@@ -1,6 +1,9 @@
 use super::allocator::{Node, NodeId};
 use super::hub::{Hub, RestrictedAction};
-use super::node::{Dimension, Length, Logical, MonitorId, PixelRect, Pixels, WorkspaceId};
+use super::node::{
+    Dimension, DisplayMode, Length, Logical, MonitorId, PixelRect, Pixels, WindowHost, WindowId,
+    WorkspaceId,
+};
 use super::workspace::{Attachment, Workspace};
 use crate::config::lua::deserializer::{FromLuaValue, LoadContext, as_table};
 
@@ -36,6 +39,11 @@ pub(super) struct Monitor {
     ///   multiplies them into the frame unit.
     pub(super) scale: f32,
     pub(super) active_workspace: WorkspaceId,
+    /// Sticky window ids on this monitor, ordered by z-index (last is topmost).
+    pub(super) sticky_windows: Vec<WindowId>,
+    /// When true, the focused window is `sticky_windows.last()`. A fullscreen window
+    /// on the active workspace outranks it.
+    pub(super) is_sticky_focused: bool,
 }
 
 impl Node for Monitor {
@@ -151,7 +159,16 @@ impl Hub {
         tracing::debug!("Moving to monitor");
         let current_ws = self.current_workspace();
         if let Some(window_id) = self.focused_window(current_ws) {
-            self.move_child_to_workspace_with_id(window_id, target_ws);
+            match self.access.windows.get(window_id).host {
+                WindowHost::Monitor(_) => {
+                    let border_box = self.detach_sticky_from_monitor(window_id);
+                    let border_box = self.border_box_on_monitor(border_box, target_id);
+                    self.attach_sticky_to_monitor(target_id, window_id, border_box);
+                }
+                WindowHost::Minimized { .. } | WindowHost::Workspace(_) => {
+                    self.move_child_to_workspace_with_id(window_id, target_ws);
+                }
+            }
         } else {
             self.move_focused_across_workspaces(current_ws, target_ws);
         }
@@ -170,6 +187,8 @@ impl Hub {
             // Placeholder. A workspace needs this monitor's id, so the real
             // active one is chosen at the end.
             active_workspace: WorkspaceId::new(0),
+            sticky_windows: Vec::new(),
+            is_sticky_focused: false,
         });
         self.rederive_monitors();
 
@@ -336,7 +355,8 @@ impl Hub {
         // If focus sits on the departing monitor, it moves to the primary, a
         // guaranteed survivor. The primary's active workspace becomes current,
         // because current tracks focus.
-        if self.access.focused_monitor == monitor_id {
+        let focus_was_here = self.access.focused_monitor == monitor_id;
+        if focus_was_here {
             self.access.focused_monitor = primary;
         }
 
@@ -369,6 +389,8 @@ impl Hub {
                 .compute_placement(&self.access, ws_id);
         }
 
+        self.move_sticky_windows_to_primary(monitor_id, focus_was_here);
+
         // Safe to delete now, because no workspace's `monitor` field points at it.
         self.access.monitors.delete(monitor_id);
 
@@ -376,6 +398,46 @@ impl Hub {
         // frozen origin reflects the pre-removal set. After the delete, so the
         // recompute sees only survivors.
         self.rederive_monitors();
+    }
+
+    /// Call it before `monitor_id` is deleted, because `border_box_on_monitor` reads its
+    /// work area. The primary keeps its own focused sticky window on top unless focus
+    /// moves over from `monitor_id`.
+    fn move_sticky_windows_to_primary(&mut self, monitor_id: MonitorId, focus_was_here: bool) {
+        let primary = self.access.primary_monitor;
+        let removed = self.access.monitors.get_mut(monitor_id);
+        let sticky_ids = std::mem::take(&mut removed.sticky_windows);
+        let removed_sticky_focused = std::mem::take(&mut removed.is_sticky_focused);
+        let primary_top = self
+            .access
+            .monitors
+            .get(primary)
+            .sticky_windows
+            .last()
+            .copied();
+
+        for id in sticky_ids {
+            let DisplayMode::Float { border_box, .. } = self.access.windows.get(id).mode else {
+                panic!("sticky window {id} is not Float");
+            };
+            let border_box = self.border_box_on_monitor(border_box, primary);
+            let window = self.access.windows.get_mut(id);
+            window.mode = DisplayMode::Float { border_box };
+            window.set_host(WindowHost::Monitor(primary));
+            self.access
+                .monitors
+                .get_mut(primary)
+                .sticky_windows
+                .push(id);
+        }
+
+        if focus_was_here {
+            self.access.monitors.get_mut(primary).is_sticky_focused = removed_sticky_focused;
+        } else if let Some(top) = primary_top
+            && self.access.monitors.get(primary).is_sticky_focused
+        {
+            self.focus_sticky(primary, top);
+        }
     }
 
     /// Apply the latest reported description to an existing monitor.
@@ -388,6 +450,19 @@ impl Hub {
         reported: ReportedMonitor,
         displaced: Option<MonitorId>,
     ) {
+        // Take the new geometry before removing `displaced`. Its sticky windows move to
+        // the primary, and when this monitor is the primary they must map onto the new
+        // work area.
+        let monitor = self.access.monitors.get_mut(monitor_id);
+        let scale_changed = monitor.scale != reported.scale;
+        let system_work_area_changed = monitor.system_work_area != reported.work_area;
+        let work_area_before = monitor.work_area;
+        monitor.system_work_area = reported.work_area;
+        monitor.scale = reported.scale;
+        monitor.work_area = monitor
+            .reserved_area
+            .subtract_from(reported.work_area, reported.scale);
+
         // Remove displaced before the rename below, while it still owns its name.
         // Its workspaces park and freeze that name so they return on replug. If
         // the rename ran first, both monitors would share the name, each would
@@ -397,19 +472,15 @@ impl Hub {
         }
 
         let monitor = self.access.monitors.get_mut(monitor_id);
-        let scale_changed = monitor.scale != reported.scale;
         if !scale_changed
-            && monitor.system_work_area == reported.work_area
+            && !system_work_area_changed
             && monitor.device_name == reported.device_name
             && monitor.cg_display_id == reported.cg_display_id
             && monitor.gdi_device == reported.gdi_device
         {
             return;
         }
-        let work_area_before = monitor.work_area;
         monitor.device_name = reported.device_name;
-        monitor.system_work_area = reported.work_area;
-        monitor.scale = reported.scale;
         monitor.cg_display_id = reported.cg_display_id;
         monitor.gdi_device = reported.gdi_device;
 
@@ -417,7 +488,7 @@ impl Hub {
 
         // A new scale changes every scaled length in the layout, even when the
         // work area stays put.
-        if scale_changed && self.access.monitors.get(monitor_id).work_area == work_area_before {
+        if scale_changed || self.access.monitors.get(monitor_id).work_area != work_area_before {
             self.compute_monitor_placements(monitor_id);
         }
     }

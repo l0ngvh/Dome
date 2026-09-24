@@ -167,6 +167,32 @@ fn float_restored_from_offscreen_is_topmost() {
 }
 
 #[test]
+fn sticky_window_is_topmost() {
+    let mut env = TestEnv::new();
+    let _w1 = env.open();
+    let w2 = env.open();
+
+    env.run_actions("toggle sticky");
+
+    assert!(env.is_topmost(w2));
+}
+
+#[test]
+fn sticky_window_stays_topmost_across_workspace_change() {
+    let mut env = TestEnv::new();
+    let _w1 = env.open();
+    let w2 = env.open();
+    env.run_actions("toggle sticky");
+    env.clear_moves();
+
+    env.run_actions("focus workspace 1");
+
+    assert!(!env.is_offscreen(w2));
+    assert!(env.is_topmost(w2));
+    assert!(!env.moved(w2));
+}
+
+#[test]
 fn float_to_tiling_loses_topmost() {
     let mut env = TestEnv::new();
     let w1 = env.open();
@@ -317,6 +343,26 @@ fn borderless_fullscreen_exit_reflows_siblings() {
     );
     let tile = env.dim(w1);
     assert!(tile.width.value() > 0.0 && tile.height.value() > 0.0);
+}
+
+#[test]
+fn float_returns_to_its_rect_after_borderless_fullscreen_exit() {
+    let mut env = TestEnv::new();
+    let w1 = env.open();
+    let w2 = env.open();
+    env.run_actions("toggle float");
+    env.move_window_to(w2, dim(200, 150, 640, 480));
+    env.flush_moves();
+    let float_rect = env.dim(w2);
+
+    env.move_window_to(w2, fullscreen_dim());
+    env.flush_moves();
+    assert!(env.is_offscreen(w1));
+
+    env.move_window_to(w2, dim(100, 100, 800, 600));
+    env.flush_moves();
+
+    assert_eq!(env.dim(w2), float_rect);
 }
 
 #[test]

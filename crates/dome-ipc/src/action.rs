@@ -311,6 +311,7 @@ pub enum ToggleTarget {
     Direction,
     Layout,
     Float,
+    Sticky,
     Fullscreen,
 }
 
@@ -321,6 +322,7 @@ impl fmt::Display for ToggleTarget {
             ToggleTarget::Direction => write!(f, "direction"),
             ToggleTarget::Layout => write!(f, "layout"),
             ToggleTarget::Float => write!(f, "float"),
+            ToggleTarget::Sticky => write!(f, "sticky"),
             ToggleTarget::Fullscreen => write!(f, "fullscreen"),
         }
     }
@@ -443,6 +445,9 @@ impl FromStr for Action {
             ["toggle", "float"] => Ok(Action::Toggle {
                 target: ToggleTarget::Float,
             }),
+            ["toggle", "sticky"] => Ok(Action::Toggle {
+                target: ToggleTarget::Sticky,
+            }),
             ["toggle", "fullscreen"] => Ok(Action::Toggle {
                 target: ToggleTarget::Fullscreen,
             }),
@@ -513,6 +518,12 @@ mod tests {
                     target: ToggleTarget::Float,
                 },
                 r#"{"type":"toggle","target":"float"}"#,
+            ),
+            (
+                Action::Toggle {
+                    target: ToggleTarget::Sticky,
+                },
+                r#"{"type":"toggle","target":"sticky"}"#,
             ),
             (
                 Action::Master {
@@ -636,6 +647,7 @@ mod tests {
             "toggle direction",
             "toggle layout",
             "toggle float",
+            "toggle sticky",
             "toggle fullscreen",
             "master grow",
             "master shrink",

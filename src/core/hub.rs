@@ -3,8 +3,8 @@ use super::matcher::{MatcherHit, WindowMode};
 use super::monitor::{Monitor, ReportedMonitor};
 use super::node::{
     Container, ContainerId, Direction, DisplayMode, Length, LimitObservation, LimitUpdate,
-    MonitorId, PixelRect, Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions,
-    WorkspaceId,
+    MonitorId, PixelRect, Pixels, PriorMode, Unit, Window, WindowHost, WindowId, WindowMetadata,
+    WindowRestrictions, WorkspaceId,
 };
 use super::partition_tree::Child;
 use super::preferred_layout::{PreferredLayouts, PreferredWorkspace};
@@ -48,6 +48,12 @@ pub(crate) struct FloatWindowPlacement {
     pub(crate) visible_border_box: PixelRect,
     pub(crate) content_box: PixelRect,
     pub(crate) is_highlighted: bool,
+    /// True for a window shown on every workspace of its monitor.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "no platform reads the sticky flag yet")
+    )]
+    pub(crate) sticky: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -312,13 +318,17 @@ impl Hub {
             .active_workspace
     }
 
-    /// The top most fullscreen window will get the focus, if any, as fullscreen windows take over
-    /// the whole workspaces they are in.
-    /// If none is present, focus between float and tiling windows will be decided by is_float_focused
+    /// The window that holds keyboard focus while `ws_id` is the current workspace.
     pub(crate) fn focused_window(&self, ws_id: WorkspaceId) -> Option<WindowId> {
         let workspace = self.access.workspaces.get(ws_id);
 
         if let Some(&id) = workspace.fullscreen_windows.last() {
+            return Some(id);
+        }
+        let monitor = self.access.monitors.get(workspace.monitor);
+        if monitor.is_sticky_focused
+            && let Some(&id) = monitor.sticky_windows.last()
+        {
             return Some(id);
         }
         if workspace.is_float_focused
@@ -370,6 +380,7 @@ impl Hub {
             TilingAction::FocusMonitor { selector } => self.focus_monitor(&selector),
             TilingAction::MoveToMonitor { selector } => self.move_focused_to_monitor(&selector),
             TilingAction::ToggleFloat => self.toggle_float(),
+            TilingAction::ToggleSticky => self.toggle_sticky(),
             TilingAction::ToggleFullscreen => self.toggle_fullscreen(),
         }
     }
@@ -384,36 +395,48 @@ impl Hub {
     #[tracing::instrument(skip(self))]
     pub(crate) fn set_focus(&mut self, window_id: WindowId) {
         tracing::debug!("Setting focus to window");
-        let ws = self
-            .access
-            .windows
-            .get(window_id)
-            .workspace()
-            .expect("non-minimized window has a workspace");
-        self.set_workspace_focus(window_id);
+        let ws = match self.access.windows.get(window_id).host {
+            WindowHost::Minimized { .. } => panic!("non-minimized window has a workspace"),
+            WindowHost::Workspace(ws) => {
+                self.set_workspace_focus(window_id);
+                ws
+            }
+            WindowHost::Monitor(monitor_id) => {
+                self.focus_sticky(monitor_id, window_id);
+                self.access.monitors.get(monitor_id).active_workspace
+            }
+        };
         self.focus_workspace_with_id(ws);
     }
 
     /// Focus `window_id` within its own workspace, without switching workspace.
     pub(super) fn set_workspace_focus(&mut self, window_id: WindowId) {
         let window = self.access.windows.get(window_id);
-        let ws = window
-            .workspace()
-            .expect("non-minimized window has a workspace");
+        let ws = match window.host {
+            WindowHost::Minimized { .. } => panic!("non-minimized window has a workspace"),
+            WindowHost::Workspace(ws) => ws,
+            WindowHost::Monitor(monitor_id) => {
+                self.focus_sticky(monitor_id, window_id);
+                return;
+            }
+        };
+        let monitor_id = self.access.workspaces.get(ws).monitor;
         match window.mode {
-            DisplayMode::Fullscreen => {
+            DisplayMode::Fullscreen { .. } => {
                 let fs = &mut self.access.workspaces.get_mut(ws).fullscreen_windows;
                 if let Some(pos) = fs.iter().position(|&w| w == window_id) {
                     fs.remove(pos);
                     fs.push(window_id);
                 }
                 self.access.workspaces.get_mut(ws).is_float_focused = false;
+                self.access.monitors.get_mut(monitor_id).is_sticky_focused = false;
             }
             DisplayMode::Float { .. } => {
                 self.focus_float(ws, window_id);
             }
             DisplayMode::Tiling => {
                 self.access.workspaces.get_mut(ws).is_float_focused = false;
+                self.access.monitors.get_mut(monitor_id).is_sticky_focused = false;
                 self.strategies
                     .for_workspace_mut(ws)
                     .set_focus(&mut self.access, window_id);
@@ -623,13 +646,29 @@ impl Hub {
                 self.set_focus(window_id);
                 window_id
             }
+            WindowMode::Sticky => {
+                let window_id = self
+                    .access
+                    .windows
+                    .allocate(Window::float(target_ws, rect, metadata));
+                tracing::debug!(%window_id, ?rect, "Inserting sticky window");
+                let monitor_id = self.access.workspaces.get(target_ws).monitor;
+                self.attach_sticky_to_monitor(monitor_id, window_id, rect);
+                self.set_focus(window_id);
+                window_id
+            }
             WindowMode::Fullscreen => {
                 let window_id = self.access.windows.allocate(Window::fullscreen(
                     target_ws,
                     restrictions,
                     metadata,
                 ));
-                self.attach_fullscreen_to_workspace(target_ws, window_id, entry_index);
+                self.attach_fullscreen_to_workspace(
+                    target_ws,
+                    window_id,
+                    entry_index,
+                    PriorMode::Tiling,
+                );
                 self.set_focus(window_id);
                 window_id
             }
@@ -694,11 +733,16 @@ impl Hub {
                 };
 
                 let border = self.access.border(ws.monitor);
+                let sticky_windows = &self.access.monitors.get(ws.monitor).sticky_windows;
                 let mut float_windows = Vec::new();
-                for &id in &ws.float_windows {
+                let float_ids = ws.float_windows.iter().map(|&id| (id, false));
+                let sticky_ids = sticky_windows.iter().map(|&id| (id, true));
+                for (id, sticky) in float_ids.chain(sticky_ids) {
                     let window = self.access.windows.get(id);
                     let DisplayMode::Float { border_box, .. } = window.mode else {
-                        panic!("window {id} in float_windows but mode is not Float");
+                        panic!(
+                            "window {id} in float_windows or sticky_windows but mode is not Float"
+                        );
                     };
                     if let Some(visible_border_box) = border_box.clip(screen) {
                         let is_highlighted = focused == Some(id);
@@ -708,6 +752,7 @@ impl Hub {
                             visible_border_box,
                             content_box: border_box.inset_by(border),
                             is_highlighted,
+                            sticky,
                         });
                     }
                 }
@@ -749,20 +794,18 @@ impl Hub {
     #[tracing::instrument(skip(self))]
     pub(crate) fn delete_window(&mut self, id: WindowId) {
         let window = self.access.windows.get(id);
-        let is_minimized = window.is_minimized();
         let mode = window.mode;
 
-        if is_minimized {
-            self.minimized_windows.retain(|&w| w != id);
-        } else {
-            let ws_id = window
-                .workspace()
-                .expect("non-minimized window has a workspace");
-            match mode {
+        match window.host {
+            WindowHost::Minimized { .. } => self.minimized_windows.retain(|&w| w != id),
+            WindowHost::Monitor(_) => {
+                self.detach_sticky_from_monitor(id);
+            }
+            WindowHost::Workspace(ws_id) => match mode {
                 DisplayMode::Float { .. } => {
                     self.detach_float_from_workspace(id);
                 }
-                DisplayMode::Fullscreen => self.detach_fullscreen_from_workspace(id),
+                DisplayMode::Fullscreen { .. } => self.detach_fullscreen_from_workspace(id),
                 DisplayMode::Tiling => {
                     let strategy = self.strategies.for_workspace_mut(ws_id);
                     strategy.detach_window(&mut self.access, id);
@@ -773,7 +816,7 @@ impl Hub {
                         }
                     }
                 }
-            }
+            },
         }
 
         self.access.windows.delete(id);
@@ -842,10 +885,12 @@ impl Hub {
 
         tracing::debug!("Window constraint set");
 
-        if let Some(ws) = window.workspace() {
-            self.strategies
+        match window.host {
+            WindowHost::Minimized { .. } | WindowHost::Monitor(_) => {}
+            WindowHost::Workspace(ws) => self
+                .strategies
                 .for_workspace_mut(ws)
-                .compute_placement(&self.access, ws);
+                .compute_placement(&self.access, ws),
         }
     }
 }

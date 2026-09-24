@@ -163,17 +163,22 @@ impl Hub {
         }
 
         let window = self.access.windows.get(window_id);
+        if window.is_sticky() {
+            return;
+        }
         if window.is_minimized() {
             panic!("Minimized window can't be moved");
         }
         match window.mode {
-            DisplayMode::Fullscreen => {
+            DisplayMode::Fullscreen { prior_mode } => {
                 self.detach_fullscreen_from_workspace(window_id);
-                self.attach_fullscreen_to_workspace(target_ws, window_id, None);
+                self.attach_fullscreen_to_workspace(target_ws, window_id, None, prior_mode);
                 self.access.workspaces.get_mut(target_ws).is_float_focused = false;
             }
             DisplayMode::Float { .. } => {
                 let dim = self.detach_float_from_workspace(window_id);
+                let target_monitor = self.access.workspaces.get(target_ws).monitor;
+                let dim = self.border_box_on_monitor(dim, target_monitor);
                 self.attach_float_to_workspace(target_ws, window_id, dim, None);
             }
             DisplayMode::Tiling => {

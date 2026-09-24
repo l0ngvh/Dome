@@ -21,7 +21,8 @@ use crate::core::TilingConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
 use crate::core::node::{
-    ContainerId, Direction, Logical, PixelRect, Pixels, WindowId, WindowMetadata, WorkspaceId,
+    ContainerId, Direction, Logical, PixelRect, Pixels, WindowHost, WindowId, WindowMetadata,
+    WorkspaceId,
 };
 use crate::core::strategy::{TilingPlacements, TilingStrategy, translate};
 
@@ -62,11 +63,9 @@ impl TilingStrategy for PartitionTreeStrategy {
 
     fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> PixelRect {
         let child_dim = self.tiling_windows.get(&window_id).unwrap().dimension;
-        let workspace_id = hub
-            .windows
-            .get(window_id)
-            .workspace()
-            .expect("detaching tiling window has a workspace");
+        let WindowHost::Workspace(workspace_id) = hub.windows.get(window_id).host else {
+            panic!("detaching tiling window has a workspace");
+        };
         let (offset_x, offset_y) = self.workspaces.get(&workspace_id).unwrap().viewport_offset;
         let work_area = hub
             .monitors

@@ -72,6 +72,11 @@ not join a tabbed container.
 
 Float or re-tile the focused window.
 
+## `dome toggle-sticky`
+
+Make the focused window sticky, or make a sticky window a float. A sticky
+window floats above other windows on every workspace of its monitor.
+
 ## `dome toggle-fullscreen`
 
 Fullscreen the focused window, or restore it.

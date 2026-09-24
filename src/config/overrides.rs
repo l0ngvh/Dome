@@ -32,6 +32,7 @@ pub(super) fn read_config(
             size_constraints: read_size_constraints(cx, user, defaults)?,
             float: user_or_default(cx, user, defaults, "float")?,
             fullscreen: user_or_default(cx, user, defaults, "fullscreen")?,
+            sticky: user_or_default(cx, user, defaults, "sticky")?,
             ignore: user_or_default(cx, user, defaults, "ignore")?,
         },
         appearance: Appearance {

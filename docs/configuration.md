@@ -201,6 +201,11 @@ not join a tabbed container.
 
 Toggle the focused window between tiling and floating.
 
+### `actions.toggle_sticky()`
+
+Toggle the focused window between sticky and floating. A sticky window floats
+above other windows on every workspace of its monitor.
+
 ### `actions.toggle_fullscreen()`
 
 Toggle the focused window between normal and fullscreen.

@@ -13,9 +13,10 @@ mod preferred_layout;
 mod query;
 mod set_focus;
 mod smoke;
+mod sticky;
 mod strategy_switch;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::config::LuaRuntime;
 use crate::config::lua::test_support::RecordingKeymap;
@@ -23,7 +24,9 @@ use crate::core::PaneDisplay;
 use crate::core::TilingConfig;
 use crate::core::hub::{Hub, MonitorLayout};
 use crate::core::master::PaneConfig;
-use crate::core::node::{Direction, Logical, Pixels, WindowId};
+use crate::core::node::{
+    Direction, DisplayMode, Logical, Pixels, WindowHost, WindowId, WorkspaceId,
+};
 use crate::core::strategy::StrategyAction;
 use crate::core::{
     ContainerPlacement, FloatWindowPlacement, PixelRect, ReportedMonitor, TilingWindowPlacement,
@@ -240,6 +243,9 @@ fn fmt_float_placement(wp: &FloatWindowPlacement) -> String {
         wp.id, d.x, d.y, d.width, d.height
     );
     parts.push_str(", float");
+    if wp.sticky {
+        parts.push_str(", sticky");
+    }
     if wp.is_highlighted {
         parts.push_str(", highlighted");
     }
@@ -456,7 +462,7 @@ fn draw_focused_border(grid: &mut [Vec<char>], rect: PixelRect, clip: [bool; 4])
 fn validate_hub(hub: &Hub) {
     hub.validate();
     validate_visible_placements(hub);
-    validate_minimized(hub);
+    validate_window_hosts(hub);
 }
 
 fn validate_visible_placements(hub: &Hub) {
@@ -543,36 +549,94 @@ fn validate_visible_placements(hub: &Hub) {
     }
 }
 
-fn validate_minimized(hub: &Hub) {
-    let minimized_ids: Vec<WindowId> = hub
-        .minimized_window_entries()
-        .into_iter()
-        .map(|e| e.id)
-        .collect();
-
-    for &id in &minimized_ids {
-        let w = hub.access.windows.get(id);
+/// No type ties a window's host to the collection that holds its id, so this checks both
+/// directions for every collection.
+fn validate_window_hosts(hub: &Hub) {
+    for &id in &hub.minimized_windows {
         assert!(
-            w.is_minimized(),
-            "Window {id} in minimized_windows but is_minimized is false"
-        );
-        assert!(
-            w.workspace().is_none(),
-            "{id} is minimized but has a workspace",
+            hub.access.windows.get(id).is_minimized(),
+            "Window {id} in minimized_windows but its host differs"
         );
     }
-    for wid in hub.access.windows.sorted_ids() {
-        let window = hub.access.windows.get(wid);
-        if window.workspace().is_none() {
-            assert!(
-                window.is_minimized(),
-                "{wid} has no workspace but is_minimized is false"
-            );
-            assert!(
-                minimized_ids.contains(&wid),
-                "{wid} has no workspace but is not in minimized_windows"
+
+    for ws_id in hub.access.workspaces.sorted_ids() {
+        let ws = hub.access.workspaces.get(ws_id);
+        for &id in ws.float_windows.iter().chain(&ws.fullscreen_windows) {
+            assert_eq!(
+                hub.access.windows.get(id).host,
+                WindowHost::Workspace(ws_id),
+                "{id} is listed on {ws_id} but its host differs"
             );
         }
+    }
+
+    for monitor_id in hub.access.monitors.sorted_ids() {
+        let monitor = hub.access.monitors.get(monitor_id);
+        assert!(
+            !monitor.is_sticky_focused || !monitor.sticky_windows.is_empty(),
+            "{monitor_id} has sticky focus but no sticky window"
+        );
+        for &id in &monitor.sticky_windows {
+            let window = hub.access.windows.get(id);
+            assert_eq!(
+                window.host,
+                WindowHost::Monitor(monitor_id),
+                "{id} is listed on {monitor_id} but its host differs"
+            );
+            assert!(window.is_float(), "sticky window {id} is not Float");
+        }
+    }
+
+    let mut tiling_counts: HashMap<WorkspaceId, usize> = HashMap::new();
+    for wid in hub.access.windows.sorted_ids() {
+        let window = hub.access.windows.get(wid);
+        let ws_id = match window.host {
+            WindowHost::Minimized { sticky } => {
+                assert!(
+                    hub.minimized_windows.contains(&wid),
+                    "{wid} is minimized but is not in minimized_windows"
+                );
+                assert!(
+                    !sticky || window.is_float(),
+                    "minimized sticky window {wid} is not Float"
+                );
+                continue;
+            }
+            WindowHost::Monitor(monitor_id) => {
+                assert!(
+                    hub.access
+                        .monitors
+                        .get(monitor_id)
+                        .sticky_windows
+                        .contains(&wid),
+                    "{wid} is sticky on {monitor_id} but not in its sticky_windows"
+                );
+                continue;
+            }
+            WindowHost::Workspace(ws_id) => ws_id,
+        };
+        let ws = hub.access.workspaces.get(ws_id);
+        match window.mode {
+            DisplayMode::Tiling => *tiling_counts.entry(ws_id).or_default() += 1,
+            DisplayMode::Float { .. } => assert!(
+                ws.float_windows.contains(&wid),
+                "{wid} is a float on {ws_id} but not in its float_windows"
+            ),
+            DisplayMode::Fullscreen { .. } => assert!(
+                ws.fullscreen_windows.contains(&wid),
+                "{wid} is fullscreen on {ws_id} but not in its fullscreen_windows"
+            ),
+        }
+    }
+
+    for ws_id in hub.access.workspaces.sorted_ids() {
+        assert_eq!(
+            tiling_counts.get(&ws_id).copied().unwrap_or(0),
+            hub.strategies
+                .for_workspace(ws_id)
+                .tiling_window_count(&hub.access, ws_id),
+            "tiling windows hosted by {ws_id} disagree with its strategy count"
+        );
     }
 }
 
@@ -743,6 +807,7 @@ struct TilingConfigBuilder {
     size_constraints: SizeConstraints,
     float: Vec<WindowMatcher>,
     fullscreen: Vec<WindowMatcher>,
+    sticky: Vec<WindowMatcher>,
 }
 
 impl TilingConfigBuilder {
@@ -766,6 +831,7 @@ impl TilingConfigBuilder {
             },
             float: vec![],
             fullscreen: vec![],
+            sticky: vec![],
         }
     }
     fn with_strategy(self, strategy: Strategy) -> Self {
@@ -838,6 +904,10 @@ impl TilingConfigBuilder {
         Self { fullscreen, ..self }
     }
 
+    fn with_sticky(self, sticky: Vec<WindowMatcher>) -> Self {
+        Self { sticky, ..self }
+    }
+
     fn build(self) -> TilingConfig {
         TilingConfig {
             layout: self.strategy,
@@ -847,6 +917,7 @@ impl TilingConfigBuilder {
             size_constraints: self.size_constraints,
             float: self.float,
             fullscreen: self.fullscreen,
+            sticky: self.sticky,
             ignore: Vec::new(),
         }
     }

@@ -993,7 +993,102 @@ fn move_float_to_monitor() {
     assert_snapshot!(snapshot_text(&hub), @r#"
     Hub(focused=None)
       Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-      Monitor(id=MonitorId(1), name="external", screen=(x=150.00 y=0.00 w=100.00 h=30.00))
+      Monitor(id=MonitorId(1), name="external", screen=(x=150.00 y=0.00 w=100.00 h=30.00),
+        Window(id=WindowId(0), x=150.00, y=10.00, w=48.00, h=20.00, float)
+      )
+    "#);
+}
+
+#[test]
+fn border_box_on_monitor_scales_the_centre() {
+    let mut hub = setup();
+    let external = hub.add_monitor(reported_monitor(
+        "external".to_string(),
+        PixelRect::new(150, 0, 300, 60),
+        1.0,
+    ));
+
+    let mapped = hub.border_box_on_monitor(PixelRect::new(10, 5, 40, 10), external);
+
+    assert_eq!(mapped, PixelRect::new(190, 15, 40, 10));
+}
+
+#[test]
+fn border_box_on_monitor_keeps_a_rect_on_the_target() {
+    let mut hub = setup();
+    let external = hub.add_monitor(reported_monitor(
+        "external".to_string(),
+        PixelRect::new(150, 0, 300, 60),
+        1.0,
+    ));
+
+    let mapped = hub.border_box_on_monitor(PixelRect::new(160, 5, 40, 10), external);
+
+    assert_eq!(mapped, PixelRect::new(160, 5, 40, 10));
+}
+
+#[test]
+fn border_box_on_monitor_keeps_a_rect_with_its_centre_off_every_work_area() {
+    let mut hub = setup();
+    hub.add_monitor(reported_monitor(
+        "external".to_string(),
+        PixelRect::new(150, 0, 300, 60),
+        1.0,
+    ));
+    let primary = hub.primary_monitor();
+    let rect = PixelRect::new(10, 20, 40, 30);
+    let work_area = hub.access.monitors.get(primary).work_area;
+    assert!(
+        rect.y().value() + rect.height().value() / 2 > work_area.bottom().value(),
+        "the centre must sit below the target work area"
+    );
+
+    let mapped = hub.border_box_on_monitor(rect, primary);
+
+    assert_eq!(mapped, rect);
+}
+
+#[test]
+fn border_box_on_monitor_centres_a_rect_on_no_monitor() {
+    let mut hub = setup();
+    hub.add_monitor(reported_monitor(
+        "external".to_string(),
+        PixelRect::new(150, 0, 300, 60),
+        1.0,
+    ));
+    let primary = hub.primary_monitor();
+
+    let mapped = hub.border_box_on_monitor(PixelRect::new(1000, 1000, 40, 10), primary);
+
+    assert_eq!(mapped, PixelRect::new(55, 10, 40, 10));
+}
+
+#[test]
+fn unminimized_float_lands_on_the_current_monitor() {
+    let mut hub = setup_with_tiling(tiling_floating(&["w12"]));
+    let float = hub
+        .insert_window(
+            titled("w12"),
+            PixelRect::new(10, 10, 50, 20),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    hub.add_monitor(reported_monitor(
+        "external".to_string(),
+        PixelRect::new(150, 0, 100, 30),
+        1.0,
+    ));
+
+    hub.minimize_window(float);
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
+    hub.unminimize_window(float);
+
+    assert_snapshot!(snapshot_text(&hub), @r#"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00))
+      Monitor(id=MonitorId(1), name="external", screen=(x=150.00 y=0.00 w=100.00 h=30.00),
+        Window(id=WindowId(0), x=150.00, y=10.00, w=48.00, h=20.00, float, highlighted)
+      )
     "#);
 }
 

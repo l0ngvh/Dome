@@ -41,6 +41,13 @@ impl std::fmt::Display for Direction {
     }
 }
 
+/// The mode a fullscreen window returns to when fullscreen ends.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum PriorMode {
+    Tiling,
+    Float { border_box: PixelRect, sticky: bool },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(super) enum DisplayMode {
     #[default]
@@ -48,7 +55,9 @@ pub(super) enum DisplayMode {
     Float {
         border_box: PixelRect,
     },
-    Fullscreen,
+    Fullscreen {
+        prior_mode: PriorMode,
+    },
 }
 
 impl std::fmt::Display for DisplayMode {
@@ -56,7 +65,7 @@ impl std::fmt::Display for DisplayMode {
         match self {
             Self::Tiling => write!(f, "tiling"),
             Self::Float { .. } => write!(f, "float"),
-            Self::Fullscreen => write!(f, "fullscreen"),
+            Self::Fullscreen { .. } => write!(f, "fullscreen"),
         }
     }
 }
@@ -93,12 +102,23 @@ pub(crate) trait WindowMetadata:
     }
 }
 
+/// Names the one collection that holds a window's id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WindowHost {
+    /// `sticky` records whether the window returns as a sticky window.
+    Minimized {
+        sticky: bool,
+    },
+    Workspace(WorkspaceId),
+    /// A sticky window, shown on every workspace of the monitor.
+    Monitor(MonitorId),
+}
+
 #[derive(Debug)]
 pub(crate) struct Window {
-    pub(super) workspace: Option<WorkspaceId>,
+    pub(super) host: WindowHost,
     pub(super) mode: DisplayMode,
     pub(super) restrictions: WindowRestrictions,
-    is_minimized: bool,
     pub(super) metadata: Box<dyn WindowMetadata>,
     pub(super) limits: SizeLimits,
 }
@@ -111,39 +131,32 @@ impl Clone for Window {
     fn clone(&self) -> Self {
         Self {
             metadata: self.metadata.clone_box(),
-            workspace: self.workspace,
+            host: self.host,
             mode: self.mode,
             restrictions: self.restrictions,
-            is_minimized: self.is_minimized,
             limits: self.limits,
         }
     }
 }
 
 impl Window {
-    /// None if the window is minimized (is_minimized <=> workspace().is_none()).
-    pub(crate) fn workspace(&self) -> Option<WorkspaceId> {
-        self.workspace
-    }
-
     pub(crate) fn is_minimized(&self) -> bool {
-        self.is_minimized
+        matches!(self.host, WindowHost::Minimized { .. })
     }
 
-    pub(super) fn set_minimized(&mut self, v: bool) {
-        self.is_minimized = v;
+    pub(crate) fn is_sticky(&self) -> bool {
+        matches!(self.host, WindowHost::Monitor(_))
     }
 
-    pub(super) fn set_workspace(&mut self, ws: Option<WorkspaceId>) {
-        self.workspace = ws;
+    pub(super) fn set_host(&mut self, host: WindowHost) {
+        self.host = host;
     }
 
     pub(super) fn tiling(workspace: WorkspaceId, metadata: Box<dyn WindowMetadata>) -> Self {
         Self {
-            workspace: Some(workspace),
+            host: WindowHost::Workspace(workspace),
             mode: DisplayMode::Tiling,
             restrictions: WindowRestrictions::None,
-            is_minimized: false,
             metadata,
             limits: SizeLimits::default(),
         }
@@ -155,10 +168,9 @@ impl Window {
         metadata: Box<dyn WindowMetadata>,
     ) -> Self {
         Self {
-            workspace: Some(workspace),
+            host: WindowHost::Workspace(workspace),
             mode: DisplayMode::Float { border_box },
             restrictions: WindowRestrictions::None,
-            is_minimized: false,
             metadata,
             limits: SizeLimits::default(),
         }
@@ -170,10 +182,11 @@ impl Window {
         metadata: Box<dyn WindowMetadata>,
     ) -> Self {
         Self {
-            workspace: Some(workspace),
-            mode: DisplayMode::Fullscreen,
+            host: WindowHost::Workspace(workspace),
+            mode: DisplayMode::Fullscreen {
+                prior_mode: PriorMode::Tiling,
+            },
             restrictions,
-            is_minimized: false,
             metadata,
             limits: SizeLimits::default(),
         }
@@ -192,7 +205,7 @@ impl Window {
     }
 
     pub(crate) fn is_fullscreen(&self) -> bool {
-        matches!(self.mode, DisplayMode::Fullscreen)
+        matches!(self.mode, DisplayMode::Fullscreen { .. })
     }
 }
 

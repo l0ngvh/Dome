@@ -77,11 +77,12 @@ impl MasterStrategy {
         let ((master_x, master_w), (stack_x, stack_w)) =
             Self::split_widths(&master_ids, &stack_ids, screen_width, master_ratio);
 
-        let focused_id = if focused && !ws.is_float_focused {
-            state.focused_window()
-        } else {
-            None
-        };
+        let focused_id =
+            if focused && !ws.is_float_focused && !hub.monitors.get(ws.monitor).is_sticky_focused {
+                state.focused_window()
+            } else {
+                None
+            };
 
         let mut windows = Vec::new();
         let mut containers = Vec::new();

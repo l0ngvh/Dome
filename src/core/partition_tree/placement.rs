@@ -93,11 +93,12 @@ impl PartitionTreeStrategy {
         let border = hub.border(ws.monitor);
         // Fullscreen workspaces never reach here (hub returns early with
         // MonitorLayout::Fullscreen).
-        let focused = if focused && !ws.is_float_focused {
-            ws_state.focused_tiling
-        } else {
-            None
-        };
+        let focused =
+            if focused && !ws.is_float_focused && !hub.monitors.get(ws.monitor).is_sticky_focused {
+                ws_state.focused_tiling
+            } else {
+                None
+            };
         let mut windows = Vec::new();
         let mut containers = Vec::new();
 

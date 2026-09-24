@@ -206,6 +206,48 @@ fn float_focus_unfocus_cycle() {
     assert!(!macos.is_offscreen(cg2));
 }
 
+fn sticky_window_behind_a_focused_tiling_window(macos: &mut MacOS) -> (Dome, CGWindowID) {
+    let mut dome = macos.setup_dome();
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(macos, cg1), new_window(macos, cg2)],
+        &[],
+        &[],
+    );
+    macos.settle(&mut dome, 10);
+
+    send(&mut dome, "toggle sticky");
+    macos.settle(&mut dome, 10);
+    macos.focus_window(&mut dome, cg1);
+    macos.settle(&mut dome, 10);
+    (dome, cg2)
+}
+
+#[test]
+fn unfocused_sticky_window_is_mirrored() {
+    let mut macos = MacOS::new();
+
+    let (_dome, cg) = sticky_window_behind_a_focused_tiling_window(&mut macos);
+
+    assert!(macos.is_offscreen(cg));
+    assert!(macos.last_float_snapshot(cg).is_some());
+}
+
+#[test]
+fn sticky_window_keeps_its_mirror_across_workspace_change() {
+    let mut macos = MacOS::new();
+    let (mut dome, cg) = sticky_window_behind_a_focused_tiling_window(&mut macos);
+
+    send(&mut dome, "focus workspace 1");
+    macos.settle(&mut dome, 10);
+
+    assert!(macos.last_float_snapshot(cg).is_some());
+}
+
 #[test]
 fn hide_noop_for_native_fullscreen() {
     let mut macos = MacOS::new();

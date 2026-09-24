@@ -1,6 +1,8 @@
 use crate::core::hub::HubAccess;
 use crate::core::node::Constraints;
-use crate::core::node::{ContainerId, Dimension, Direction, Length, WindowId, WorkspaceId};
+use crate::core::node::{
+    ContainerId, Dimension, Direction, Length, WindowHost, WindowId, WorkspaceId,
+};
 use crate::core::partition_tree::{Child, Parent};
 use crate::core::strategy::{VALIDATION_TOLERANCE, ValidateStrategy, window_constraints};
 
@@ -407,8 +409,8 @@ impl PartitionTreeStrategy {
             "Window {wid} has wrong parent"
         );
         assert_eq!(
-            window.workspace(),
-            Some(workspace_id),
+            window.host,
+            WindowHost::Workspace(workspace_id),
             "Window {wid} has wrong workspace"
         );
         if let Some(leaf) = self.tiling_windows.get(&wid).unwrap().held_slot {

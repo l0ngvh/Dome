@@ -19,7 +19,7 @@ use crate::core::master::options::{MIN_MASTER_COUNT, clamp_master_ratio};
 use crate::core::master::preferred_layout::{Slot, SlotId};
 use crate::core::node::{
     Child, Container, ContainerId, Dimension, Direction, Length, Logical, PixelRect, Pixels,
-    WindowId, WindowMetadata, WorkspaceId,
+    WindowHost, WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::strategy::{
     TilingPlacements, TilingStrategy, distribute_space, translate, window_constraints,
@@ -50,11 +50,9 @@ impl TilingStrategy for MasterStrategy {
     }
 
     fn detach_window(&mut self, hub: &mut HubAccess, id: WindowId) -> PixelRect {
-        let ws_id = hub
-            .windows
-            .get(id)
-            .workspace()
-            .expect("detaching tiling window has a workspace");
+        let WindowHost::Workspace(ws_id) = hub.windows.get(id).host else {
+            panic!("detaching tiling window has a workspace");
+        };
         let work_area = hub
             .monitors
             .get(hub.workspaces.get(ws_id).monitor)
@@ -75,11 +73,9 @@ impl TilingStrategy for MasterStrategy {
     }
 
     fn set_focus(&mut self, hub: &mut HubAccess, window_id: WindowId) {
-        let ws_id = hub
-            .windows
-            .get(window_id)
-            .workspace()
-            .expect("setting focus on tiling window requires a workspace");
+        let WindowHost::Workspace(ws_id) = hub.windows.get(window_id).host else {
+            panic!("setting focus on tiling window requires a workspace");
+        };
         self.workspaces
             .get_mut(&ws_id)
             .unwrap()
@@ -642,7 +638,9 @@ impl MasterStrategy {
     }
 
     fn track_window(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId, id: WindowId) {
-        hub.windows.get_mut(id).set_workspace(Some(ws_id));
+        hub.windows
+            .get_mut(id)
+            .set_host(WindowHost::Workspace(ws_id));
         self.window_states.insert(
             id,
             WindowState {

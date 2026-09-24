@@ -8,7 +8,7 @@ use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::master::MasterStrategy;
 use crate::core::node::{
     Child, Constraints, ContainerId, Dimension, Direction, Length, PixelRect, Pixels, Unit,
-    WindowId, WindowMetadata, WorkspaceId,
+    WindowHost, WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
 use crate::core::{PreferredMaster, PreferredTiling, SizeConstraints, Strategy};
@@ -58,6 +58,7 @@ pub(crate) enum TilingAction {
         selector: MonitorSelector,
     },
     ToggleFloat,
+    ToggleSticky,
     ToggleFullscreen,
 }
 
@@ -125,6 +126,7 @@ impl From<&crate::action::ToggleTarget> for TilingAction {
             ToggleTarget::Direction => StrategyAction::ToggleDirection.into(),
             ToggleTarget::Layout => StrategyAction::ToggleContainerLayout.into(),
             ToggleTarget::Float => Self::ToggleFloat,
+            ToggleTarget::Sticky => Self::ToggleSticky,
             ToggleTarget::Fullscreen => Self::ToggleFullscreen,
         }
     }
@@ -248,7 +250,9 @@ pub(crate) fn window_constraints(
     wid: WindowId,
 ) -> Constraints {
     let window = hub.windows.get(wid);
-    let ws_id = window.workspace().expect("tiling window has a workspace");
+    let WindowHost::Workspace(ws_id) = window.host else {
+        panic!("tiling window has a workspace");
+    };
     let monitor_id = hub.workspaces.get(ws_id).monitor;
     let monitor = hub.monitors.get(monitor_id);
     let scale = monitor.scale;

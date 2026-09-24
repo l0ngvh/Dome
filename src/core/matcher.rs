@@ -32,14 +32,16 @@ pub(crate) enum WindowMode {
     Tiling,
     Float,
     Fullscreen,
+    Sticky,
 }
 
 string_enum!(
     WindowMode,
-    "\"tiling\", \"float\" or \"fullscreen\"",
+    "\"tiling\", \"float\", \"fullscreen\" or \"sticky\"",
     "tiling" => WindowMode::Tiling,
     "float" => WindowMode::Float,
     "fullscreen" => WindowMode::Fullscreen,
+    "sticky" => WindowMode::Sticky,
 );
 
 pub(crate) fn pattern_matches(pattern: &str, text: &str) -> bool {
@@ -129,6 +131,7 @@ impl Hub {
         let tiling = &self.access.tiling;
         for (matchers, mode) in [
             (&tiling.fullscreen, WindowMode::Fullscreen),
+            (&tiling.sticky, WindowMode::Sticky),
             (&tiling.float, WindowMode::Float),
         ] {
             if matchers.iter().any(|m| metadata.matches_window_matcher(m)) {
@@ -154,7 +157,7 @@ impl Hub {
         let entries = match mode {
             WindowMode::Fullscreen => &ws.fullscreen_entries,
             WindowMode::Float => &ws.float_entries,
-            WindowMode::Tiling => return None,
+            WindowMode::Tiling | WindowMode::Sticky => return None,
         };
         entries
             .iter()

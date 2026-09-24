@@ -31,6 +31,7 @@
 ---@field rotate fun() Flip the parent container's split between horizontal and vertical.
 ---@field toggle_tabbed fun() Switch the parent container between tiled and tabbed.
 ---@field toggle_float fun()
+---@field toggle_sticky fun() Keep the focused window on top on every workspace of its monitor. On a sticky window, make it a float.
 ---@field toggle_fullscreen fun()
 ---@field increase_master_ratio fun() Widen the master area by 5 percentage points, clamped to 0.1 through 0.9.
 ---@field decrease_master_ratio fun() Narrow the master area by 5 percentage points, clamped to 0.1 through 0.9.
@@ -90,6 +91,7 @@
 ---@field font_family? string
 ---@field float? WindowMatcher[]
 ---@field fullscreen? WindowMatcher[]
+---@field sticky? WindowMatcher[] Windows kept on top on every workspace of their monitor.
 ---@field ignore? WindowMatcher[]
 ---@field env? table<string, string> Extra variables for actions.execute commands.
 ---@field keymaps? Keymaps
