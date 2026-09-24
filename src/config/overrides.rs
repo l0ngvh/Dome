@@ -10,6 +10,7 @@ use crate::core::{
 };
 use crate::font::{FontConfig, MAX_FONT_SIZE, MIN_FONT_SIZE};
 use crate::theme::Flavor;
+use std::collections::HashMap;
 
 #[derive(Default)]
 pub(super) struct ConfigOverrides {
@@ -28,6 +29,7 @@ pub(super) struct ConfigOverrides {
     font: FontOverrides,
     log_level: Option<LogLevel>,
     start_at_login: Option<bool>,
+    env: HashMap<String, String>,
 }
 
 #[derive(Default)]
@@ -87,6 +89,7 @@ impl ConfigOverrides {
             font,
             log_level,
             start_at_login,
+            env,
         } = self;
         let tiling = &defaults.tiling;
         Config {
@@ -111,6 +114,7 @@ impl ConfigOverrides {
             },
             log_level: log_level.unwrap_or(defaults.log_level),
             start_at_login: start_at_login.unwrap_or(defaults.start_at_login),
+            env,
         }
     }
 
@@ -261,6 +265,7 @@ impl FromLuaValue for ConfigOverrides {
             font: FontOverrides::from_lua_value(value, cx)?,
             log_level: cx.field(table, "log_level"),
             start_at_login: cx.field(table, "start_at_login"),
+            env: read_env(table, cx),
         })
     }
 }
@@ -347,6 +352,54 @@ fn read_font_family(table: &mlua::Table, cx: &mut LoadContext) -> Option<String>
     cx.warn_value("must not be blank");
     cx.pop();
     None
+}
+
+/// A child process receives one entry per name, so a name that cannot become a
+/// `KEY=VALUE` entry is dropped here rather than at spawn, where no diagnostic
+/// would reach the user. The `HashMap` read has already dropped a non-string
+/// value.
+fn read_env(table: &mlua::Table, cx: &mut LoadContext) -> HashMap<String, String> {
+    let raw: HashMap<String, String> = cx.field(table, "env");
+    cx.push("env");
+    let mut valid = HashMap::new();
+    for (name, value) in raw {
+        match env_entry_error(&name, &value) {
+            Some(reason) => {
+                cx.push(&name);
+                cx.warn_dropped(reason);
+                cx.pop();
+            }
+            None => {
+                valid.insert(environment_variable_name(&name), value);
+            }
+        }
+    }
+    cx.pop();
+    valid
+}
+
+fn env_entry_error(name: &str, value: &str) -> Option<&'static str> {
+    if name.is_empty() {
+        Some("name must not be empty")
+    } else if name.contains('=') {
+        Some("name must not contain '='")
+    } else if name.contains('\0') {
+        Some("name must not contain a NUL byte")
+    } else if value.contains('\0') {
+        Some("value must not contain a NUL byte")
+    } else {
+        None
+    }
+}
+
+/// `name` in uppercase on Windows, where a name is case-insensitive, and
+/// unchanged elsewhere.
+pub(crate) fn environment_variable_name(name: &str) -> String {
+    if cfg!(target_os = "windows") {
+        name.to_uppercase()
+    } else {
+        name.to_string()
+    }
 }
 
 /// A zero maximum means unlimited, so only a positive maximum can conflict. The

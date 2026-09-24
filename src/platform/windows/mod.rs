@@ -18,6 +18,7 @@ mod ui;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -233,6 +234,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
                     DomeConfig {
                         appearance: config.appearance,
                         tiling: config.tiling,
+                        env: config.env,
                     },
                     layout,
                     main_thread_id,
@@ -370,6 +372,7 @@ unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
 struct DomeConfig {
     appearance: Appearance,
     tiling: TilingConfig,
+    env: HashMap<String, String>,
 }
 
 fn run_dome(
@@ -420,6 +423,7 @@ fn run_dome(
             waker: ready.waker,
         }),
         KeymapRuntime::new(runtime, Box::new(keymap)),
+        config.env,
     )
     .expect("Failed to initialize Dome");
 

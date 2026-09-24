@@ -110,6 +110,7 @@ impl TestEnvBuilder {
                 let runtime = LuaRuntime::new(String::new()).expect("build test Lua VM");
                 KeymapRuntime::new(runtime, Box::new(keymap))
             },
+            config.env.clone(),
         )
         .unwrap();
         let mut env = TestEnv {
@@ -546,8 +547,11 @@ impl TestEnv {
 
     pub(super) fn change_config(&mut self, adjust: impl FnOnce(&mut Config)) {
         adjust(&mut self.config);
-        self.dome
-            .config_changed(self.config.tiling.clone(), self.config.appearance.clone());
+        self.dome.config_changed(
+            self.config.tiling.clone(),
+            self.config.appearance.clone(),
+            self.config.env.clone(),
+        );
         self.layout();
     }
 

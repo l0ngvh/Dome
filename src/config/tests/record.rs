@@ -383,3 +383,75 @@ fn ignore_rules_parse_every_matcher_field() {
         }
     );
 }
+
+#[test]
+fn env_is_empty_by_default() {
+    assert!(config_from("return {}").env.is_empty());
+}
+
+#[test]
+fn env_keeps_a_valid_entry() {
+    let config = config_from(r#"return { env = { EDITOR = "nvim" } }"#);
+    assert_eq!(config.env.get("EDITOR").map(String::as_str), Some("nvim"));
+}
+
+#[test]
+fn env_drops_a_name_holding_equals_and_keeps_a_sibling() {
+    let config = config_from(r#"return { env = { ["A=B"] = "x", EDITOR = "nvim" } }"#);
+    let env = &config.env;
+    assert!(!env.contains_key("A=B"));
+    assert!(env.contains_key("EDITOR"));
+}
+
+#[test]
+fn env_drops_an_empty_name() {
+    let config = config_from(r#"return { env = { [""] = "x", EDITOR = "nvim" } }"#);
+    let env = &config.env;
+    assert!(!env.contains_key(""));
+    assert!(env.contains_key("EDITOR"));
+}
+
+#[test]
+fn env_drops_a_name_holding_a_nul_byte() {
+    let config = config_from(
+        r#"return { env = { [("A" .. string.char(0) .. "B")] = "x", EDITOR = "nvim" } }"#,
+    );
+    let env = &config.env;
+    assert_eq!(env.len(), 1);
+    assert!(env.contains_key("EDITOR"));
+}
+
+#[test]
+fn env_drops_a_value_holding_a_nul_byte() {
+    let config =
+        config_from(r#"return { env = { BAD = "a" .. string.char(0) .. "b", EDITOR = "nvim" } }"#);
+    let env = &config.env;
+    assert!(!env.contains_key("BAD"));
+    assert!(env.contains_key("EDITOR"));
+}
+
+#[test]
+fn env_drops_a_non_string_value() {
+    let config = config_from(r#"return { env = { COUNT = 42, EDITOR = "nvim" } }"#);
+    let env = &config.env;
+    assert!(!env.contains_key("COUNT"));
+    assert!(env.contains_key("EDITOR"));
+}
+
+#[test]
+fn env_keeps_an_empty_value() {
+    let config = config_from(r#"return { env = { EDITOR = "" } }"#);
+    assert_eq!(config.env.get("EDITOR").map(String::as_str), Some(""));
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn env_drops_one_of_a_case_colliding_pair() {
+    let config = config_from(r#"return { env = { Path = "a", PATH = "b" } }"#);
+    let env = &config.env;
+    assert_eq!(env.len(), 1);
+    assert!(matches!(
+        env.get("PATH").map(String::as_str),
+        Some("a" | "b")
+    ));
+}

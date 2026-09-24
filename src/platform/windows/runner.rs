@@ -81,7 +81,8 @@ impl Runner {
                 if let Some(config) = self.dome.reload() {
                     self.logger.set_level(config.log_level);
                     login_item::sync_login_item(config.start_at_login);
-                    self.dome.config_changed(config.tiling, config.appearance);
+                    self.dome
+                        .config_changed(config.tiling, config.appearance, config.env);
                 }
             }
             HubEvent::LayoutConfigChanged(c) => {
@@ -240,11 +241,7 @@ impl Runner {
                 Action::Move { target } => self.dome.handle_tiling_action(target.into()),
                 Action::Toggle { target } => self.dome.handle_tiling_action(target.into()),
                 Action::Master { target } => self.dome.handle_tiling_action(target.into()),
-                Action::Execute { command } => {
-                    if let Err(e) = crate::platform::windows::spawn::spawn(command) {
-                        tracing::warn!(%command, "Failed to execute: {e:#}");
-                    }
-                }
+                Action::Execute { command } => self.dome.execute(command),
                 Action::Exit => {
                     unsafe {
                         PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok()

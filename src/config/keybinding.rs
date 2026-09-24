@@ -32,8 +32,6 @@ impl FromStr for Keystroke {
 
     fn from_str(s: &str) -> Result<Self> {
         let parts: Vec<&str> = s.split('+').collect();
-        // Both platform layers emit a lowercase key name, so a key segment that
-        // keeps its case would parse and then never match a real press.
         let key = parts.last().unwrap().to_ascii_lowercase();
         if key.is_empty() {
             return Err(anyhow!("Empty key name"));
@@ -99,15 +97,20 @@ impl mlua::UserData for Keystroke {
 
 impl FromLuaValue for Keystroke {
     fn from_lua_value(value: &mlua::Value, cx: &mut LoadContext) -> mlua::Result<Self> {
-        if let mlua::Value::UserData(handle) = value {
-            return handle
+        let mut keystroke = if let mlua::Value::UserData(handle) = value {
+            handle
                 .borrow::<Keystroke>()
                 .map(|held| held.clone())
-                .map_err(|_| mlua::Error::runtime("expected a key built from a modifier"));
+                .map_err(|_| mlua::Error::runtime("expected a key built from a modifier"))?
+        } else {
+            let text = String::from_lua_value(value, cx)?;
+            text.parse::<Keystroke>()
+                .map_err(|e| mlua::Error::runtime(format!("invalid key {text:?}: {e}")))?
+        };
+        if keystroke.key == "enter" {
+            keystroke.key = "return".to_string();
         }
-        let text = String::from_lua_value(value, cx)?;
-        text.parse()
-            .map_err(|e| mlua::Error::runtime(format!("invalid key {text:?}: {e}")))
+        Ok(keystroke)
     }
 }
 

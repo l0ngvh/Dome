@@ -26,6 +26,9 @@ return function(mod1)
 		float = {},
 		---@type WindowMatcher[]
 		fullscreen = {},
+		-- Extra variables for actions.execute commands.
+		---@type table<string, string>
+		env = {},
 		---@type "partition_tree" | "master"
 		layout = "partition_tree",
 		-- Logical pixels, or "<number>%" of the work area. 0 means unconstrained.
