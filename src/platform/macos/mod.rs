@@ -134,6 +134,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
                     hub_layout,
                     Box::new(sender),
                     KeymapRuntime::new(runtime, Box::new(keymap)),
+                    config.env,
                 );
                 event_loop::run_dome(dome, event_rx, logger, bundle_path);
             }))

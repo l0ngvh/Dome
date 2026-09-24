@@ -81,61 +81,55 @@ config.keymaps = {
 }
 ```
 
-To change the base modifier from the default `Alt`:
-
-```lua
-local config = dome.with_default_modifier(Meta).defaults()
-return config
-```
-
 ## Built-in helpers
 
 ### `dome.os`
 
 The platform Dome runs on, `"macos"` or `"windows"`.
 
+### `dome.env`
+
+The environment variables that Dome started with.
+
 ### `dome.defaults()`
 
-Returns the default config, the table
-[`resources/default.lua`](../resources/default.lua) builds. Read that file for
-every option and its default value.
+Build the default config table. See [`resources/default.lua`](../resources/default.lua).
+
+### `dome.with_default_modifier(m)`
+
+Change the modifier in the default keymap that `defaults()` returns to `m`.
+`m` must be `Meta` or `Alt`.
+
+Example:
+```lua
+local config = dome.with_default_modifier(Meta).defaults()
+```
 
 ### `dome.executable(name)`
 
 Returns `true` when `name` resolves on `PATH`.
 
-### `dome.with_default_modifier(m)`
-
-Returns a builder whose `defaults()` builds the default keymap on `m` as the
-primary modifier. `m` must be `Meta` or `Alt`.
-
 ### `Meta`/`Alt`/`Ctrl`/`Shift`
 
-Combine a modifier with a key using `+`, for example `Meta + "h"`. Modifiers
-can be chained together, for example `Meta + Shift + "1"`. `Meta` (or `Cmd`,
-`Win`) is Command on macOS and the Windows key on Windows. `Alt` (or `Opt`,
-`Option`) is the Option key on macOS.
+Combines with a key or another modifier using `+`, for example
+`Meta + Shift + "1"`. Each modifier also has a string form:
 
-### `Space`/`Enter`/`Escape` and the other named keys
+- `Meta`, `Cmd`, or `Win`:
+  `"meta"`, `"cmd"`, or `"win"`
+- `Alt`, `Opt`, or `Option`: `"alt"`, `"opt"`, or `"option"`
+- `Ctrl` or `Control`: `"ctrl"` or `"control"`
+- `Shift`: `"shift"`
 
-A key that types no character has a global of its own. Write it without quotes.
-`Space`, `Enter`, `Return`, `Escape`, `Esc`, `Tab`, `Backspace`, `Up`, `Down`,
-`Left`, and `Right` are the whole set. Both platforms recognize every key in the
-set. `Enter` and `Return` name the same key, the main Return key. `Esc` and
-`Escape` also name one key.
+### `Space`/`Enter`/`Escape`/`Tab`/`Backspace`/`Up`/`Down`/`Left`/`Right`
 
-```lua
-config.keymaps.main[Meta + Space] = function(actions) actions.execute("open -a Raycast") end
-config.keymaps.main[Meta + Shift + Enter] = function(actions) actions.execute("wt") end
-config.keymaps.main[Ctrl + Left] = function(actions) actions.focus_monitor_left() end
--- a key global also stands on its own, with no modifier
-config.keymaps.resize = {
-  [Escape] = function(actions) actions.mode("main") end,
-}
-```
+Represents non-character keys. Each key also has a string form:
 
-On macOS the numpad Enter is a separate physical key. No key global selects it.
-Bind it as the string `"enter"`.
+- `Space`: `"space"`
+- `Enter` or `Return` (also numpad Enter): `"return"` or `"enter"`
+- `Escape` or `Esc`: `"escape"`
+- `Tab`: `"tab"`
+- `Backspace`: `"backspace"`
+- `Up`, `Down`, `Left`, `Right`: `"up"`, `"down"`, `"left"`, `"right"`
 
 ## Actions
 

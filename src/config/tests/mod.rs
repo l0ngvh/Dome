@@ -23,6 +23,7 @@ pub(crate) fn config() -> Config {
         appearance: defaults.appearance,
         log_level: defaults.log_level,
         start_at_login: defaults.start_at_login,
+        env: std::collections::HashMap::new(),
     }
 }
 

@@ -18,15 +18,18 @@ fn keystroke(key: &str, modifiers: Modifiers) -> Keystroke {
 }
 
 #[test]
-fn plus_key_binding_survives_the_load() {
-    let config = config_from(
-        r#"return { keymaps = { main = { [Meta + "+"] = function(a) a.focus_left() end } } }"#,
-    );
-    assert!(
-        config.keymaps.modes["main"].contains_key(&keystroke("+", Modifiers::META)),
-        "{:?}",
-        config.keymaps.modes["main"].keys().collect::<Vec<_>>()
-    );
+fn an_enter_key_loads_as_the_return_key() {
+    for src in [
+        r#"return { keymaps = { main = { [Meta + "enter"] = function(a) a.focus_left() end } } }"#,
+        r#"return { keymaps = { main = { ["Meta+Enter"] = function(a) a.focus_left() end } } }"#,
+    ] {
+        let config = config_from(src);
+        assert!(
+            config.keymaps.modes["main"].contains_key(&keystroke("return", Modifiers::META)),
+            "{src}: {:?}",
+            config.keymaps.modes["main"].keys().collect::<Vec<_>>()
+        );
+    }
 }
 
 fn defaults_with_one_default_key_rebound(assignment: &str) -> Config {
@@ -100,6 +103,34 @@ return { keymaps = { main = { [key] = function(a) a.focus_left() end } } }"#,
     );
     assert!(config.keymaps.modes["main"].contains_key(&present.parse::<Keystroke>().unwrap()));
     assert!(!config.keymaps.modes["main"].contains_key(&absent.parse::<Keystroke>().unwrap()));
+}
+
+#[test]
+fn dome_env_exposes_the_launch_environment() {
+    let path = std::env::var("PATH").unwrap();
+    let config = config_from(r#"return { font_family = dome.env.PATH }"#);
+    assert_eq!(
+        config.appearance.font.family.as_deref(),
+        Some(path.as_str())
+    );
+}
+
+#[test]
+fn dome_env_holds_no_name_that_the_environment_omits() {
+    let config =
+        config_from(r#"return { font_family = dome.env.DOME_NAME_THAT_NOTHING_SETS or "absent" }"#);
+    assert_eq!(config.appearance.font.family.as_deref(), Some("absent"));
+}
+
+#[test]
+fn dome_env_rejects_an_assignment() {
+    assert!(
+        try_config(
+            r#"dome.env.PATH = "/tmp"
+return {}"#
+        )
+        .is_err()
+    );
 }
 
 #[test]

@@ -36,6 +36,7 @@ use self::window::{PositionedState, WindowState};
 struct WinPlatformEffects<'a> {
     registry: &'a mut WindowRegistry,
     main_thread_id: u32,
+    env: &'a HashMap<String, String>,
 }
 
 impl PlatformEffects for WinPlatformEffects<'_> {
@@ -44,7 +45,7 @@ impl PlatformEffects for WinPlatformEffects<'_> {
     }
 
     fn execute(&mut self, command: &str) {
-        if let Err(e) = crate::platform::windows::spawn::spawn(command) {
+        if let Err(e) = crate::platform::windows::spawn::spawn(command, self.env) {
             tracing::warn!(%command, "Failed to execute: {e:#}");
         }
     }
@@ -144,6 +145,7 @@ pub(super) struct Dome {
     recovery: Recovery,
     status_bars: StatusBars,
     runtime: KeymapRuntime,
+    env: HashMap<String, String>,
 }
 
 impl Drop for Dome {
@@ -160,6 +162,7 @@ impl Dome {
         display: Box<dyn QueryDisplay>,
         mut window: Box<dyn SceneSender>,
         runtime: KeymapRuntime,
+        env: HashMap<String, String>,
     ) -> anyhow::Result<Self> {
         let monitors = display.get_all_monitors()?;
         anyhow::ensure!(!monitors.is_empty(), "No monitors detected");
@@ -238,6 +241,7 @@ impl Dome {
             recovery: Recovery::new(taskbar),
             status_bars: StatusBars::default(),
             runtime,
+            env,
         })
     }
 
@@ -259,7 +263,13 @@ impl Dome {
         self.float_overlays.insert(window, overlay);
     }
 
-    pub(super) fn config_changed(&mut self, tiling: TilingConfig, appearance: Appearance) {
+    pub(super) fn config_changed(
+        &mut self,
+        tiling: TilingConfig,
+        appearance: Appearance,
+        env: HashMap<String, String>,
+    ) {
+        self.env = env;
         self.hub.sync_configuration(tiling);
         self.dispatch(HubMessage::AppearanceChanged(appearance));
         tracing::info!("Config reloaded");
@@ -520,11 +530,18 @@ impl Dome {
         self.registry.close_window(window_id);
     }
 
+    pub(super) fn execute(&self, command: &str) {
+        if let Err(e) = crate::platform::windows::spawn::spawn(command, &self.env) {
+            tracing::warn!(%command, "Failed to execute: {e:#}");
+        }
+    }
+
     pub(super) fn run_binding(&mut self, keymap: &str, keystroke: &Keystroke, main_thread_id: u32) {
         {
             let mut effects = WinPlatformEffects {
                 registry: &mut self.registry,
                 main_thread_id,
+                env: &self.env,
             };
             self.runtime
                 .dispatch(keymap, keystroke, &mut self.hub, &mut effects);

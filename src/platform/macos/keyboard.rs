@@ -197,8 +197,8 @@ fn get_key_from_event(event: *mut CGEvent) -> String {
         0x2E => "m",
         0x2F => ".",
         0x32 => "`",
-        0x24 => "return",
-        0x4C => "enter",
+        // Return and Numpad Enter.
+        0x24 | 0x4C => "return",
         0x33 => "backspace",
         0x35 => "escape",
         0x30 => "tab",

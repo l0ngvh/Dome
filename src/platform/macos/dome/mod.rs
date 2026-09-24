@@ -42,6 +42,7 @@ pub(in crate::platform::macos) use registry::WindowRegistry;
 struct MacPlatformEffects<'a> {
     registry: &'a mut WindowRegistry,
     signal: &'a LoopSignal,
+    env: &'a HashMap<String, String>,
 }
 
 impl PlatformEffects for MacPlatformEffects<'_> {
@@ -50,7 +51,7 @@ impl PlatformEffects for MacPlatformEffects<'_> {
     }
 
     fn execute(&mut self, command: &str) {
-        if let Err(e) = crate::platform::macos::spawn::spawn_disclaimed_sh(command) {
+        if let Err(e) = crate::platform::macos::spawn::spawn_disclaimed_sh(command, self.env) {
             tracing::warn!(%command, "Failed to execute: {e}");
         }
     }
@@ -204,6 +205,7 @@ pub(in crate::platform::macos) struct Dome {
     /// Detection is suppressed while the display settles after a monitor change.
     monitor_settling: bool,
     runtime: KeymapRuntime,
+    env: HashMap<String, String>,
 }
 
 impl Dome {
@@ -213,6 +215,7 @@ impl Dome {
         workspace_overrides: PreferredLayouts,
         sender: Box<dyn SceneSender>,
         runtime: KeymapRuntime,
+        env: HashMap<String, String>,
     ) -> Self {
         let primary = monitors
             .iter()
@@ -243,6 +246,7 @@ impl Dome {
             monitors: monitors.to_vec(),
             monitor_settling: false,
             runtime,
+            env,
         }
     }
 
@@ -401,7 +405,9 @@ impl Dome {
         &mut self,
         tiling: TilingConfig,
         appearance: Appearance,
+        env: HashMap<String, String>,
     ) {
+        self.env = env;
         self.hub.sync_configuration(tiling);
         self.sender.send(HubMessage::AppearanceChanged(appearance));
         tracing::info!("Config reloaded");
@@ -651,6 +657,12 @@ impl Dome {
         self.registry.close_window(window_id);
     }
 
+    pub(in crate::platform::macos) fn execute(&self, command: &str) {
+        if let Err(e) = crate::platform::macos::spawn::spawn_disclaimed_sh(command, &self.env) {
+            tracing::warn!(%command, "Failed to execute: {e}");
+        }
+    }
+
     pub(in crate::platform::macos) fn run_binding(
         &mut self,
         keymap: &str,
@@ -660,6 +672,7 @@ impl Dome {
         let mut effects = MacPlatformEffects {
             registry: &mut self.registry,
             signal,
+            env: &self.env,
         };
         self.runtime
             .dispatch(keymap, keystroke, &mut self.hub, &mut effects);

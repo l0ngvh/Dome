@@ -9,6 +9,7 @@ local terminal = dome.os == "macos" and "open -a Terminal" or "wt"
 local config = {
   theme = "latte",
   border_size = 2,
+  env = { EDITOR = "nvim" },
   keymaps = {
     main = {
       [Meta + "h"] = function(actions) actions.focus_left() end,
@@ -25,7 +26,6 @@ local config = {
       [Meta + "b"] = function(actions) actions.toggle_tabbed() end,
       [Meta + Shift + "f"] = function(actions) actions.toggle_float() end,
       [Meta + "f"] = function(actions) actions.toggle_fullscreen() end,
-      [Meta + "+"] = function(actions) actions.increase_master_ratio() end,
       [Meta + Return] = function(actions) actions.execute(terminal) end,
       [Meta + Shift + "1"] = function(actions)
         actions.move_to_workspace("1")

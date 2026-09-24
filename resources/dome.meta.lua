@@ -80,6 +80,7 @@
 ---@field float? WindowMatcher[]
 ---@field fullscreen? WindowMatcher[]
 ---@field ignore? WindowMatcher[]
+---@field env? table<string, string> Extra variables for actions.execute commands.
 ---@field keymaps? Keymaps
 
 -- Keyed by monitor name.
@@ -140,7 +141,6 @@ Control = nil
 
 ---@type Keystroke
 Space = nil
--- Enter and Return both name the main Return key. The macOS numpad Enter is the separate string key "enter".
 ---@type Keystroke
 Enter = nil
 ---@type Keystroke
@@ -167,6 +167,7 @@ Right = nil
 
 ---@class Dome
 ---@field os "macos" | "windows"
+---@field env table<string, string> The environment that started Dome.
 ---@field executable fun(name: string): boolean True when name resolves on PATH.
 ---@field defaults fun(): Config
 ---@field with_default_modifier fun(modifier: Modifier): dome.Builder Meta or Alt only.

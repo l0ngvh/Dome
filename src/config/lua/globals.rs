@@ -1,5 +1,6 @@
 //! Builds the Luau VM and the read-only `dome` global.
 
+use crate::config::overrides::environment_variable_name;
 use crate::config::{Keystroke, Modifiers};
 
 use super::caller_error;
@@ -35,8 +36,6 @@ const MODIFIER_NAMES: [(&str, Modifiers); 9] = [
 
 const KEY_NAMES: [(&str, &str); 11] = [
     ("Space", "space"),
-    // Both names reach the main Return key. On macOS the numpad Enter is a
-    // separate key named "enter", which only the string form binds.
     ("Enter", "return"),
     ("Return", "return"),
     ("Escape", "escape"),
@@ -107,7 +106,21 @@ pub(crate) fn new_vm() -> mlua::Result<mlua::Lua> {
     lua.set_named_registry_value(KEYSTROKE_INTERN_TABLE, lua.create_table()?)?;
 
     let dome = lua.create_table()?;
+    let table_lib: mlua::Table = globals.get("table")?;
+    let freeze: mlua::Function = table_lib.get("freeze")?;
+
     dome.set("os", host_os())?;
+
+    let env = lua.create_table()?;
+    // `std::env::vars` panics on a name or value that is not valid Unicode.
+    for (name, value) in std::env::vars_os() {
+        if let (Some(name), Some(value)) = (name.to_str(), value.to_str()) {
+            env.set(environment_variable_name(name), value)?;
+        }
+    }
+    // `table.freeze` on `dome` and `lua.sandbox` leave a nested table such as
+    // `env` writable.
+    dome.set("env", freeze.call::<mlua::Table>(env)?)?;
     dome.set(
         "executable",
         lua.create_function(|_, name: String| Ok(which::which(name).is_ok()))?,
@@ -140,8 +153,6 @@ pub(crate) fn new_vm() -> mlua::Result<mlua::Lua> {
         })?,
     )?;
 
-    let table_lib: mlua::Table = globals.get("table")?;
-    let freeze: mlua::Function = table_lib.get("freeze")?;
     let dome: mlua::Table = freeze.call(dome)?;
     globals.set("dome", dome)?;
 
@@ -188,9 +199,6 @@ fn interned_modifier(lua: &mlua::Lua, modifiers: Modifiers) -> mlua::Result<mlua
 // One userdata per modifier set and key pair, because a Lua table indexes by
 // primitive equality and ignores `__eq`. Without interning, writing the same
 // keystroke twice in one keymap would make two table keys.
-//
-// `key` is a whole table key here, never spliced around a separator, so a key
-// named "+" interns like any other.
 fn interned_keystroke(
     lua: &mlua::Lua,
     modifiers: Modifiers,

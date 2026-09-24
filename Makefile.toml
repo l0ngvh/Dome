@@ -36,21 +36,6 @@ command = "cargo"
 toolchain = "nightly"
 args = ["llvm-cov", "test", "--lib", "--branch", "--html", "--open"]
 
-[tasks.e2e-coverage]
-clear = true
-env = { "RUSTUP_TOOLCHAIN" = "nightly", "RUSTFLAGS" = "-C instrument-coverage -Zcoverage-options=branch --cfg=coverage --cfg=trybuild_no_target", "CARGO_LLVM_COV" = "1", "CARGO_LLVM_COV_TARGET_DIR" = "${CARGO_MAKE_WORKING_DIRECTORY}/target", "LLVM_PROFILE_FILE" = "${CARGO_MAKE_WORKING_DIRECTORY}/target/dome-%p-%11m.profraw" }
-script_runner = "@shell"
-script = '''
-cargo llvm-cov clean --workspace
-cargo test --lib
-cargo test --test e2e -- --test-threads=1
-cargo llvm-cov report --branch --json
-'''
-
-[tasks.e2e]
-command = "cargo"
-args = ["test", "--test", "e2e", "--", "--test-threads=1", "${@}"]
-
 [tasks.leak-check]
 description = "Run leak check"
 # Run once at the workspace root, not per member. See [tasks.bundle].

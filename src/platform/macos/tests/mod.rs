@@ -286,6 +286,7 @@ impl DomeBuilder<'_> {
             PreferredLayouts::default(),
             Box::new(sender),
             KeymapRuntime::new(runtime, Box::new(keymap)),
+            config.env.clone(),
         );
         env.config = config;
         dome
@@ -532,7 +533,11 @@ impl MacOS {
 
     fn change_config(&mut self, dome: &mut Dome, adjust: impl FnOnce(&mut Config)) {
         adjust(&mut self.config);
-        dome.config_changed(self.config.tiling.clone(), self.config.appearance.clone());
+        dome.config_changed(
+            self.config.tiling.clone(),
+            self.config.appearance.clone(),
+            self.config.env.clone(),
+        );
     }
 
     fn last_scene_state(&self) -> SceneState {

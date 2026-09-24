@@ -1,5 +1,7 @@
 //! Dome's configuration surface.
 
+use std::collections::HashMap;
+
 #[cfg(test)]
 use anyhow::Result;
 use anyhow::anyhow;
@@ -42,6 +44,8 @@ pub(crate) struct Config {
     pub(crate) appearance: Appearance,
     pub(crate) log_level: LogLevel,
     pub(crate) start_at_login: bool,
+    /// Variables the `execute` action adds to its child process
+    pub(crate) env: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]

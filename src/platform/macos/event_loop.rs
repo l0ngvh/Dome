@@ -126,7 +126,9 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
             if let Some(config) = runner.dome.reload() {
                 runner.logger.set_level(config.log_level);
                 login_item::sync_login_item(config.start_at_login, runner.bundle_path.as_deref());
-                runner.dome.config_changed(config.tiling, config.appearance);
+                runner
+                    .dome
+                    .config_changed(config.tiling, config.appearance, config.env);
             }
         }
         HubEvent::LayoutConfigChanged(new_layout) => {
@@ -202,11 +204,7 @@ fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
             Action::Move { target } => dispatch_tiling(runner, target.into()),
             Action::Toggle { target } => dispatch_tiling(runner, target.into()),
             Action::Master { target } => dispatch_tiling(runner, target.into()),
-            Action::Execute { command } => {
-                if let Err(e) = crate::platform::macos::spawn::spawn_disclaimed_sh(command) {
-                    tracing::warn!(%command, "Failed to execute: {e}");
-                }
-            }
+            Action::Execute { command } => runner.dome.execute(command),
             Action::Exit => {
                 tracing::debug!("Exit action received");
                 runner.signal.stop();
