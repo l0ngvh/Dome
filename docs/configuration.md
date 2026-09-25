@@ -137,7 +137,7 @@ Dome passes an `actions` handle to each binding function.
 
 ### `actions.focus_left()`, `focus_right()`, `focus_up()`, `focus_down()`
 
-Focus the neighboring window in that direction in the tiling tree.
+Focus the neighboring window in that direction.
 
 ### `actions.focus_parent()`
 
@@ -161,7 +161,7 @@ Focus the next or previous tab in a tabbed container.
 
 ### `actions.move_left()`, `move_right()`, `move_up()`, `move_down()`
 
-Move the focused window one step in that direction in the tiling tree.
+Move the focused window one step in that direction.
 
 ### `actions.move_to_workspace(name)`
 

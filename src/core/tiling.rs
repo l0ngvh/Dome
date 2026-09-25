@@ -1,6 +1,8 @@
 use serde::Serialize;
 
-use crate::config::lua::deserializer::{FromLuaValue, LoadContext, string_enum, type_error};
+use crate::config::lua::deserializer::{
+    FromLuaValue, LoadContext, as_table, string_enum, type_error,
+};
 use crate::core::node::pixels_from_lua_number;
 use crate::core::{Length, Logical, Pixels, Unit};
 
@@ -14,6 +16,7 @@ pub(crate) struct TilingConfig {
     pub(crate) border_size: Pixels<Logical>,
     pub(crate) partition_tree: PartitionTreeConfig,
     pub(crate) master: MasterConfig,
+    pub(crate) scrolling: ScrollingConfig,
     pub(crate) size_constraints: SizeConstraints,
     pub(crate) float: Vec<WindowMatcher>,
     pub(crate) fullscreen: Vec<WindowMatcher>,
@@ -24,14 +27,41 @@ pub(crate) struct TilingConfig {
 pub(crate) enum Strategy {
     PartitionTree,
     Master,
+    Scrolling,
 }
 
 string_enum!(
     Strategy,
-    "\"partition_tree\" or \"master\"",
+    "\"partition_tree\", \"master\" or \"scrolling\"",
     "partition_tree" => Strategy::PartitionTree,
     "master" => Strategy::Master,
+    "scrolling" => Strategy::Scrolling,
 );
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ScrollingConfig {
+    /// Seeds a new column only. A reload leaves existing columns at their width.
+    pub(crate) default_column_width: SizeConstraint,
+}
+
+impl Default for ScrollingConfig {
+    fn default() -> Self {
+        Self {
+            default_column_width: SizeConstraint::Percent(50.0),
+        }
+    }
+}
+
+impl FromLuaValue for ScrollingConfig {
+    fn from_lua_value(value: &mlua::Value, cx: &mut LoadContext) -> mlua::Result<Self> {
+        let table = as_table(value, "a scrolling table")?;
+        Ok(ScrollingConfig {
+            default_column_width: cx.field_or_else(table, "default_column_width", || {
+                Self::default().default_column_width
+            }),
+        })
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct SizeConstraints {

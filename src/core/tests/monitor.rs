@@ -5,8 +5,6 @@ use super::TilingConfigBuilder;
 use super::{PartitionTreeConfigBuilder, TestHubBuilder};
 use crate::action::WorkspaceState;
 use crate::core::MonitorSelector;
-#[cfg(target_os = "windows")]
-use crate::core::SizeConstraint;
 use crate::core::TilingConfig;
 #[cfg(target_os = "windows")]
 use crate::core::hub::MonitorLayout;
@@ -1196,61 +1194,6 @@ fn monitor_scale_multiplies_tab_bar_height() {
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=1000.00 h=1000.00),
         Window(id=WindowId(1), x=0.00, y=15.00, w=1000.00, h=985.00, highlighted, spawn=right)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=1000.00, h=1000.00, tabbed, active_tab=1, titles=[w16, w17])
-      )
-    ");
-}
-
-#[cfg(target_os = "windows")]
-#[test]
-fn monitor_scale_multiplies_size_constraints() {
-    use crate::core::node::Pixels;
-
-    let mut hub = TestHubBuilder::new()
-        .with_scale(2.0)
-        .with_tiling(
-            TilingConfigBuilder::new()
-                .with_partition_tree_config(
-                    PartitionTreeConfigBuilder::new()
-                        .with_tab_bar_height(Pixels::new(10))
-                        .with_automatic_tiling(false)
-                        .build(),
-                )
-                .with_min_width(SizeConstraint::Pixels(Pixels::new(40)))
-                .build(),
-        )
-        .build();
-    for i in 0..6 {
-        hub.insert_window(
-            titled(format!("w{i}").as_str()),
-            default_rect(),
-            WindowRestrictions::None,
-        );
-    }
-    assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WindowId(5))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(5), x=70.00, y=0.00, w=80.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(4), x=0.00, y=0.00, w=70.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, w1, w2, w3, w4, w5])
-      )
-    ");
-
-    let monitor_id = hub.primary_monitor();
-    hub.update_monitor(
-        monitor_id,
-        reported_monitor("primary".to_string(), PixelRect::new(0, 0, 500, 1000), 3.0),
-        None,
-    );
-
-    assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WindowId(5))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=500.00 h=1000.00),
-        Window(id=WindowId(5), x=380.00, y=0.00, w=120.00, h=1000.00, highlighted, spawn=right)
-        Window(id=WindowId(4), x=260.00, y=0.00, w=120.00, h=1000.00)
-        Window(id=WindowId(3), x=140.00, y=0.00, w=120.00, h=1000.00)
-        Window(id=WindowId(2), x=20.00, y=0.00, w=120.00, h=1000.00)
-        Window(id=WindowId(1), x=0.00, y=0.00, w=20.00, h=1000.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=500.00, h=1000.00, titles=[w0, w1, w2, w3, w4, w5])
       )
     ");
 }

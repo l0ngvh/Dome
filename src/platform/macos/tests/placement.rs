@@ -85,7 +85,7 @@ fn two_windows_split_horizontally() {
 }
 
 #[test]
-fn tile_past_work_area_is_trimmed() {
+fn drag_drop_tiles_on_screen_even_split() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
 
@@ -104,12 +104,14 @@ fn tile_past_work_area_is_trimmed() {
     end_drag(&mut dome, &macos, 100, cg1, 500, 300, 400, 400);
     macos.settle(&mut dome, 10);
 
-    // The drop leaves the tree wider than the work area, so cg1 is scrolled off the
-    // left edge and core's content_box for it starts at -92 with width 1912. macOS
-    // must place the trimmed rect rather than that.
-    let (x, _, w, _) = macos.window_frame(cg1);
-    assert_eq!(x, 0, "left edge clamped to the work area");
-    assert_eq!(w, 1820, "width trimmed down from the untrimmed 1912");
+    // R1: the tree fits the usable area, so the drop tiles both windows on-screen
+    // in equal halves rather than scrolling cg1 off the left edge.
+    let (x1, _, w1, _) = macos.window_frame(cg1);
+    let (x2, _, w2, _) = macos.window_frame(cg2);
+    assert!(!macos.is_offscreen(cg1));
+    assert!(!macos.is_offscreen(cg2));
+    assert_eq!((x1, w1), (4, 952), "cg1 fills its on-screen even half");
+    assert_eq!((x2, w2), (964, 952), "cg2 fills its on-screen even half");
 }
 
 #[test]
@@ -425,4 +427,59 @@ fn failed_probe_keeps_previous_reservation() {
     dome.set_reserved_bar(Err(anyhow::anyhow!("probe failed")));
     macos.settle(&mut dome, 10);
     assert_eq!(macos.window_frame(win), (4, 34, 1912, 1042));
+}
+
+#[test]
+fn a_cut_unfocused_scrolling_column_parks_at_full_size_behind_a_mirror() {
+    let mut macos = MacOS::new();
+    let mut dome = macos
+        .dome_builder()
+        .tiling(|tiling| {
+            tiling.border_size = Pixels::ZERO;
+            tiling.layout = crate::core::Strategy::Scrolling;
+            tiling.scrolling = crate::core::ScrollingConfig {
+                default_column_width: crate::core::SizeConstraint::Percent(40.0),
+            };
+        })
+        .build();
+    let windows: Vec<CGWindowID> = (0..4)
+        .map(|i| {
+            let cg_id = macos.spawn_window(100 + i, "App", "w");
+            dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg_id)], &[], &[]);
+            macos.settle(&mut dome, 10);
+            cg_id
+        })
+        .collect();
+    let [_, cg2, cg3, cg4] = windows[..] else {
+        unreachable!("four windows spawned");
+    };
+    let mirror = |x: f32| {
+        Dimension::new(
+            Length::new(x),
+            Length::ZERO,
+            Length::new(384.0),
+            Length::new(1080.0),
+        )
+    };
+
+    assert_eq!(
+        macos.last_scene_state().mirrors,
+        HashMap::from([(cg2, mirror(384.0))]),
+        "the focused cg4 sits against the right edge, which leaves the right half of cg2 on screen"
+    );
+    assert!(macos.is_offscreen(cg2));
+    assert_eq!(macos.window_frame(cg2).2, 768);
+    assert_eq!(macos.window_frame(cg3), (384, 0, 768, 1080));
+    assert_eq!(macos.window_frame(cg4), (1152, 0, 768, 1080));
+
+    dome.mirror_clicked(cg2);
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(macos.window_frame(cg2), (0, 0, 768, 1080));
+    assert_eq!(
+        macos.last_scene_state().mirrors,
+        HashMap::from([(cg4, mirror(0.0))])
+    );
+    assert!(macos.is_offscreen(cg4));
+    assert_eq!(macos.window_frame(cg4).2, 768);
 }

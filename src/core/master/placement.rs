@@ -4,8 +4,8 @@ use crate::core::{
     master::{MasterStrategy, PaneDisplay, PaneKind, WindowState},
     node::WorkspaceId,
     strategy::{
-        TilingPlacements, container_titles, distribute_space, tab_bar_band, translate,
-        window_constraints,
+        TilingPlacements, apply_max_constraint, container_titles, distribute_space, tab_bar_band,
+        translate, visible_tab_bar_band, window_constraints,
     },
 };
 
@@ -108,6 +108,7 @@ impl MasterStrategy {
                         visible_content_box: content_box.clip(screen).unwrap_or(PixelRect::ZERO),
                         is_highlighted: focused_id == Some(active),
                         spawn_direction: None,
+                        is_mirrored: false,
                     });
                 }
                 let pane_dim = Dimension::new(
@@ -119,18 +120,19 @@ impl MasterStrategy {
                 let border_box =
                     translate(pane_dim, Length::ZERO, Length::ZERO, screen.x(), screen.y());
                 if let Some(visible_border_box) = border_box.clip(screen) {
+                    let band = tab_bar_band(
+                        border_box,
+                        pane_dim,
+                        screen,
+                        self.tab_bar_length(scale),
+                        true,
+                    );
                     containers.push(ContainerPlacement {
                         id: pane.container,
                         border_box,
                         visible_border_box,
-                        tab_bar_band: tab_bar_band(
-                            border_box,
-                            pane_dim,
-                            Length::ZERO,
-                            screen,
-                            self.tab_bar_length(scale),
-                            true,
-                        ),
+                        tab_bar_band: band,
+                        visible_tab_bar_band: visible_tab_bar_band(band, visible_border_box),
                         is_highlighted: false,
                         spawn_direction: None,
                         is_tabbed: true,
@@ -156,6 +158,7 @@ impl MasterStrategy {
                                 .unwrap_or(PixelRect::ZERO),
                             is_highlighted: focused_id == Some(wid),
                             spawn_direction: None,
+                            is_mirrored: false,
                         });
                     }
                 }
@@ -292,14 +295,4 @@ impl MasterStrategy {
         state.master.y_offset = state.master.y_offset.clamp(Length::ZERO, master_max);
         state.secondary.y_offset = state.secondary.y_offset.clamp(Length::ZERO, stack_max);
     }
-}
-
-fn apply_max_constraint(max: Length, slot_extent: Length) -> (Length, Length) {
-    let size = if max > Length::ZERO && max < slot_extent {
-        max
-    } else {
-        slot_extent
-    };
-    let offset = (slot_extent - size) / 2.0;
-    (size, offset.max(Length::ZERO))
 }

@@ -782,9 +782,7 @@ impl<U> PixelRect<U> {
         Pixels::new(self.y.v + self.height.v)
     }
 
-    /// Mirrors `strategy::clip`, including returning `None` on an empty intersection,
-    /// so the two cannot drift apart in meaning. Exact on integers: an intersection of
-    /// two grid-aligned rectangles is grid-aligned, so nothing needs rounding after.
+    /// The intersection with `bounds`, or `None` when the intersection has no area.
     pub(crate) fn clip(self, bounds: Self) -> Option<Self> {
         let x1 = self.x.max(bounds.x);
         let y1 = self.y.max(bounds.y);
@@ -796,8 +794,7 @@ impl<U> PixelRect<U> {
         Some(Self::from_pixels(x1, y1, x2 - x1, y2 - y1))
     }
 
-    /// `<=` rather than `==` so an inverted extent counts as empty, matching what
-    /// `strategy::clip` rejects.
+    /// An inverted extent also counts as empty.
     pub(crate) const fn is_empty(self) -> bool {
         self.width.v <= 0 || self.height.v <= 0
     }

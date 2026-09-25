@@ -2,7 +2,9 @@ pub(in crate::platform::windows) mod overlay;
 
 use std::collections::{HashMap, HashSet};
 
-use self::overlay::{FloatOverlay, TabBarOverlay, TilingOverlay, WgpuOverlayFactory};
+use self::overlay::{
+    FloatOverlay, TabBarOverlay, ThumbnailOverlay, TilingOverlay, WgpuOverlayFactory,
+};
 use crate::config::Appearance;
 use crate::core::{ContainerId, MonitorId, WindowId};
 use crate::platform::windows::HubSender;
@@ -17,6 +19,7 @@ pub(in crate::platform::windows) struct WindowThread {
     tiling_overlays: HashMap<MonitorId, Box<TilingOverlay>>,
     tab_bars: HashMap<ContainerId, Box<TabBarOverlay>>,
     float_overlays: HashMap<WindowId, Box<FloatOverlay>>,
+    thumbnails: HashMap<WindowId, Box<ThumbnailOverlay>>,
     report: HubSender,
 }
 
@@ -32,6 +35,7 @@ impl WindowThread {
             tiling_overlays: HashMap::new(),
             tab_bars: HashMap::new(),
             float_overlays: HashMap::new(),
+            thumbnails: HashMap::new(),
             report,
         }
     }
@@ -146,14 +150,13 @@ impl WindowThread {
                     data.border_thickness,
                 );
             for placement in data.containers.iter().filter(|p| p.is_tabbed) {
-                let rect = placement.tab_bar_band;
                 let tab_bar = match self.tab_bars.entry(placement.id) {
                     std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
                     std::collections::hash_map::Entry::Vacant(e) => {
                         match self.overlay_factory.create_tab_bar(
                             self.appearance.clone(),
                             placement.id,
-                            rect,
+                            placement.visible_tab_bar_band,
                             data.scale,
                         ) {
                             Ok(o) => e.insert(o),
@@ -164,14 +167,7 @@ impl WindowThread {
                         }
                     }
                 };
-                tab_bar.update(
-                    rect,
-                    placement.titles.clone(),
-                    placement.active_tab_index,
-                    placement.is_highlighted,
-                    data.scale,
-                    data.border_thickness,
-                );
+                tab_bar.update(placement, data.scale, data.border_thickness);
             }
         }
 
@@ -181,6 +177,23 @@ impl WindowThread {
             .flat_map(|d| d.containers.iter().filter(|p| p.is_tabbed).map(|p| p.id))
             .collect();
         self.tab_bars.retain(|id, _| active.contains(id));
+
+        let mut live_thumbnails: HashSet<WindowId> = HashSet::new();
+        for show in scene.monitors.iter().flat_map(|m| &m.thumbnails) {
+            live_thumbnails.insert(show.window_id);
+            match self.thumbnails.entry(show.window_id) {
+                std::collections::hash_map::Entry::Occupied(e) => e.into_mut().update(show),
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    match self.overlay_factory.create_thumbnail(show) {
+                        Ok(o) => {
+                            e.insert(o);
+                        }
+                        Err(err) => tracing::warn!(?err, "failed to create thumbnail"),
+                    }
+                }
+            }
+        }
+        self.thumbnails.retain(|id, _| live_thumbnails.contains(id));
     }
 }
 

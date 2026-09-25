@@ -43,11 +43,18 @@ pub(super) enum PositionedState {
 pub(super) struct OffscreenPlacement {
     actual: PixelRect,
     retries: u8,
+    /// The size Dome last set while it parked the window for a mirror. `None` after a plain
+    /// hide, which keeps whatever size the window had.
+    mirror_size: Option<(Pixels, Pixels)>,
 }
 
 impl OffscreenPlacement {
     pub(super) fn new(actual: PixelRect) -> Self {
-        Self { actual, retries: 0 }
+        Self {
+            actual,
+            retries: 0,
+            mirror_size: None,
+        }
     }
 
     /// Updates `actual` unconditionally. Returns true if the window is NOT at
@@ -705,6 +712,45 @@ impl Dome {
                     tracing::debug!(%window_id, "Failed to move window offscreen: {e}");
                 }
             }
+        }
+    }
+
+    /// Parks a tiling window at `content_box`'s size, so its mirror captures the window at the
+    /// size it would have on screen. A window that refuses the size gets no retry.
+    #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
+    pub(super) fn park_mirrored_window(&mut self, window_id: WindowId, content_box: PixelRect) {
+        let monitors = self.monitor_registry.all_monitors();
+        let Some(window) = self.registry.by_id_mut(window_id) else {
+            return;
+        };
+        tracing::Span::current().record("window", window.to_string());
+        if window.is_moving {
+            return;
+        }
+        let WindowState::Positioned(positioned_state) = &mut window.state else {
+            unreachable!("Only a window whose position Dome controls can be mirrored");
+        };
+        let mut offscreen = match *positioned_state {
+            PositionedState::Tiling(placement) => OffscreenPlacement::new(placement.actual),
+            PositionedState::Float(fp) => OffscreenPlacement::new(fp.target),
+            PositionedState::Offscreen(offscreen) => offscreen,
+        };
+        let size = (content_box.width(), content_box.height());
+        let result = if offscreen.mirror_size == Some(size) {
+            move_offscreen(&monitors, &offscreen.actual, &*window.ext)
+        } else {
+            offscreen.mirror_size = Some(size);
+            let (hidden_x, hidden_y) = hidden_position(&monitors);
+            window.ext.set_frame(PixelRect::new(
+                hidden_x.value(),
+                hidden_y.value(),
+                size.0.value(),
+                size.1.value(),
+            ))
+        };
+        *positioned_state = PositionedState::Offscreen(offscreen);
+        if let Err(e) = result {
+            tracing::debug!(%window_id, "Failed to park mirrored window: {e:#}");
         }
     }
 

@@ -303,6 +303,7 @@ impl MacOS {
                 focused_window: None,
                 focused_monitor_id: None,
                 floats: HashMap::new(),
+                mirrors: HashMap::new(),
             })),
             config: baseline_config(),
         }
@@ -573,6 +574,8 @@ struct SceneState {
     focused_window: Option<WindowId>,
     focused_monitor_id: Option<MonitorId>,
     floats: HashMap<CGWindowID, FloatSnapshot>,
+    /// The captured part of each mirrored window, relative to the window's top-left corner.
+    mirrors: HashMap<CGWindowID, Dimension>,
 }
 
 struct TestSender {
@@ -597,6 +600,11 @@ impl SceneSender for TestSender {
                         },
                     )
                 })
+                .collect();
+            state.mirrors = scene
+                .mirror_shows
+                .iter()
+                .map(|show| (show.cg_id, show.source))
                 .collect();
         }
     }

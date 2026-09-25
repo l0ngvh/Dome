@@ -28,6 +28,15 @@ local shared = {
     master = { { app = "Ghostty" } },
     secondary = { display = "tabbed", children = { { app = "Firefox" } } },
   },
+  ["scroll"] = {
+    layout = "scrolling",
+    columns = {
+      { app = "Ghostty" },
+      { width = "40%", children = { { app = "Firefox" } } },
+      { width = 800, children = { { app = "Slack" } } },
+    },
+    float = { { app = "mpv" } },
+  },
 }
 
 ---@type dome.Layout

@@ -201,6 +201,7 @@ pub(crate) fn paint_tab_bar(
     egui::Area::new(egui::Id::new(("tab_bar", container_id)))
         .order(egui::Order::Foreground)
         .fixed_pos(origin.to_pos2())
+        .constrain(false)
         .fade_in(false)
         .show(ctx, |ui| {
             // Without the discard, the first frame paints Shape::Noop and the tab bar shows up blank on Windows.
@@ -256,6 +257,9 @@ fn show_container(
 
         if is_tabbed {
             let body_h = h - th;
+            if body_h <= 0.0 {
+                return;
+            }
             let r_body = effective_radius(r, w, body_h);
 
             // When r_body==0, clip rects collapse to zero dimensions and egui skips them entirely.

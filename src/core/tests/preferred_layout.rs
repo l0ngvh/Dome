@@ -1,11 +1,15 @@
 use super::LayoutWorkspaceConfigBuilder;
-use crate::core::node::{PixelRect, WindowRestrictions, WorkspaceId};
+use super::scrolling::{border_boxes_by_window, process_matcher, scrolling_layout_hub};
+use crate::core::node::{PixelRect, WindowId, WindowRestrictions, WorkspaceId};
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
-    PRIMARY_MONITOR, TestHubBuilder, TilingConfigBuilder, preferred_layout, process_meta,
-    reported_monitor, snapshot, titled, work_area_at,
+    PRIMARY_MONITOR, TestHubBuilder, TilingConfigBuilder, default_rect, preferred_layout,
+    process_meta, reported_monitor, snapshot, titled, validate_hub, work_area_at,
 };
-use crate::core::{Strategy, WindowMatcher};
+use crate::core::{
+    ColumnConfig, Hub, Pixels, PreferredLayouts, ScrollingConfig, SizeConstraint, Strategy,
+    WindowMatcher,
+};
 use insta::assert_snapshot;
 
 #[test]
@@ -1147,6 +1151,26 @@ fn tiling_insert_routes_against_post_export_state() {
 }
 
 #[test]
+fn scrolling_insert_routes_against_post_export_state() {
+    let mut hub = scrolling_layout_hub(vec![ColumnConfig::bare(process_matcher("a.exe"))]);
+    hub.focus_workspace("dev", None);
+    let dev = dev_workspace(&hub);
+    insert_process(&mut hub, "u.exe");
+    assert!(
+        !hub.strategies
+            .for_workspace(dev)
+            .matches_tiling(dev, process_meta("u.exe").as_ref())
+    );
+
+    hub.export_workspace(dev);
+
+    hub.focus_workspace("0", None);
+    let routed = insert_process(&mut hub, "u.exe");
+    assert_eq!(hub.access.windows.get(routed).workspace(), Some(dev));
+    validate_hub(&hub);
+}
+
+#[test]
 fn tiling_routes_to_current_workspace_when_it_can_house() {
     let editor = || WindowMatcher {
         process: Some("editor.exe".into()),
@@ -1355,4 +1379,225 @@ fn float_routes_to_current_workspace_when_it_can_house() {
               *                            *                                                                                                              
               ******************************
     ");
+}
+
+fn insert_process(hub: &mut Hub, process: &str) -> WindowId {
+    hub.insert_window(
+        process_meta(process),
+        default_rect(),
+        WindowRestrictions::None,
+    )
+    .expect("tiling window inserted")
+}
+
+fn dev_workspace(hub: &Hub) -> WorkspaceId {
+    workspace_on(hub, PRIMARY_MONITOR, "dev")
+}
+
+fn keyed_column(width: SizeConstraint, process: &str) -> ColumnConfig {
+    ColumnConfig {
+        width: Some(width),
+        children: vec![process_matcher(process)],
+    }
+}
+
+fn scrolling_dev_layout(columns: Vec<ColumnConfig>) -> PreferredLayouts {
+    preferred_layout(vec![
+        LayoutWorkspaceConfigBuilder::new("dev")
+            .with_strategy(Strategy::Scrolling)
+            .with_columns(columns)
+            .build(),
+    ])
+}
+
+#[test]
+fn scrolling_column_routes_to_its_workspace() {
+    let mut hub = scrolling_layout_hub(vec![ColumnConfig::bare(process_matcher("a.exe"))]);
+    let dev = dev_workspace(&hub);
+
+    let w0 = insert_process(&mut hub, "a.exe");
+
+    assert_eq!(hub.access.windows.get(w0).workspace(), Some(dev));
+    validate_hub(&hub);
+}
+
+#[test]
+fn scrolling_windows_in_layout_order_take_their_widths() {
+    let mut hub = scrolling_layout_hub(vec![
+        ColumnConfig::bare(process_matcher("a.exe")),
+        keyed_column(SizeConstraint::Percent(40.0), "b.exe"),
+        keyed_column(SizeConstraint::Pixels(Pixels::new(45)), "c.exe"),
+    ]);
+    hub.focus_workspace("dev", None);
+
+    let w0 = insert_process(&mut hub, "a.exe");
+    let w1 = insert_process(&mut hub, "b.exe");
+    let w2 = insert_process(&mut hub, "c.exe");
+
+    assert_eq!(
+        border_boxes_by_window(&hub),
+        vec![
+            (w0, PixelRect::new(0, 0, 30, 30)),
+            (w1, PixelRect::new(30, 0, 60, 30)),
+            (w2, PixelRect::new(90, 0, 45, 30)),
+        ]
+    );
+    validate_hub(&hub);
+}
+
+#[test]
+fn scrolling_windows_out_of_order_fill_their_layout_places() {
+    let mut hub = scrolling_layout_hub(vec![
+        ColumnConfig::bare(process_matcher("a.exe")),
+        keyed_column(SizeConstraint::Percent(40.0), "b.exe"),
+        keyed_column(SizeConstraint::Pixels(Pixels::new(45)), "c.exe"),
+    ]);
+    hub.focus_workspace("dev", None);
+
+    let w0 = insert_process(&mut hub, "c.exe");
+    let w1 = insert_process(&mut hub, "b.exe");
+    let w2 = insert_process(&mut hub, "a.exe");
+
+    assert_eq!(
+        border_boxes_by_window(&hub),
+        vec![
+            (w0, PixelRect::new(90, 0, 45, 30)),
+            (w1, PixelRect::new(30, 0, 60, 30)),
+            (w2, PixelRect::new(0, 0, 30, 30)),
+        ]
+    );
+    validate_hub(&hub);
+}
+
+#[test]
+fn unmatched_window_opens_right_of_focus_between_layout_columns() {
+    let mut hub = scrolling_layout_hub(vec![
+        ColumnConfig::bare(process_matcher("a.exe")),
+        ColumnConfig::bare(process_matcher("b.exe")),
+    ]);
+    hub.focus_workspace("dev", None);
+    let w0 = insert_process(&mut hub, "a.exe");
+    let w1 = insert_process(&mut hub, "b.exe");
+    hub.set_focus(w0);
+
+    let w2 = insert_process(&mut hub, "u.exe");
+    let w3 = insert_process(&mut hub, "b.exe");
+
+    assert_eq!(
+        border_boxes_by_window(&hub),
+        vec![
+            (w0, PixelRect::new(0, 0, 30, 30)),
+            (w1, PixelRect::new(60, 0, 30, 30)),
+            (w2, PixelRect::new(30, 0, 30, 30)),
+            (w3, PixelRect::new(90, 0, 30, 30)),
+        ]
+    );
+    validate_hub(&hub);
+}
+
+#[test]
+fn switching_a_workspace_to_scrolling_fills_its_layout_columns() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
+                .with_scrolling_config(ScrollingConfig {
+                    default_column_width: SizeConstraint::Percent(20.0),
+                })
+                .build(),
+        )
+        .build();
+    hub.focus_workspace("dev", None);
+    let w0 = insert_process(&mut hub, "a.exe");
+    let w1 = insert_process(&mut hub, "b.exe");
+    let w2 = insert_process(&mut hub, "c.exe");
+
+    hub.sync_preferred_layout(scrolling_dev_layout(vec![
+        ColumnConfig::bare(process_matcher("c.exe")),
+        ColumnConfig::bare(process_matcher("b.exe")),
+        ColumnConfig::bare(process_matcher("a.exe")),
+    ]));
+
+    assert_eq!(
+        border_boxes_by_window(&hub),
+        vec![
+            (w0, PixelRect::new(60, 0, 30, 30)),
+            (w1, PixelRect::new(30, 0, 30, 30)),
+            (w2, PixelRect::new(0, 0, 30, 30)),
+        ]
+    );
+    validate_hub(&hub);
+}
+
+#[test]
+fn editing_the_columns_reorders_open_windows() {
+    let mut hub = scrolling_layout_hub(vec![
+        ColumnConfig::bare(process_matcher("a.exe")),
+        ColumnConfig::bare(process_matcher("b.exe")),
+    ]);
+    hub.focus_workspace("dev", None);
+    let w0 = insert_process(&mut hub, "a.exe");
+    let w1 = insert_process(&mut hub, "b.exe");
+
+    hub.sync_preferred_layout(scrolling_dev_layout(vec![
+        ColumnConfig::bare(process_matcher("b.exe")),
+        keyed_column(SizeConstraint::Percent(40.0), "a.exe"),
+    ]));
+
+    assert_eq!(
+        border_boxes_by_window(&hub),
+        vec![
+            (w0, PixelRect::new(30, 0, 60, 30)),
+            (w1, PixelRect::new(0, 0, 30, 30)),
+        ]
+    );
+    assert_eq!(hub.focused_window(dev_workspace(&hub)), Some(w1));
+    validate_hub(&hub);
+}
+
+#[test]
+fn rebuilding_the_columns_keeps_unmatched_windows_in_order() {
+    let mut hub = scrolling_layout_hub(vec![ColumnConfig::bare(process_matcher("a.exe"))]);
+    hub.focus_workspace("dev", None);
+    let w0 = insert_process(&mut hub, "x.exe");
+    let w1 = insert_process(&mut hub, "y.exe");
+    let w2 = insert_process(&mut hub, "z.exe");
+
+    hub.sync_preferred_layout(scrolling_dev_layout(vec![ColumnConfig::bare(
+        process_matcher("b.exe"),
+    )]));
+
+    assert_eq!(
+        border_boxes_by_window(&hub),
+        vec![
+            (w0, PixelRect::new(0, 0, 30, 30)),
+            (w1, PixelRect::new(30, 0, 30, 30)),
+            (w2, PixelRect::new(60, 0, 30, 30)),
+        ]
+    );
+    validate_hub(&hub);
+}
+
+#[test]
+fn dropping_the_layout_entry_keeps_every_column_width() {
+    let mut hub = scrolling_layout_hub(vec![keyed_column(SizeConstraint::Percent(40.0), "a.exe")]);
+    hub.focus_workspace("dev", None);
+    let w0 = insert_process(&mut hub, "a.exe");
+    let w1 = insert_process(&mut hub, "u.exe");
+
+    hub.sync_preferred_layout(PreferredLayouts::default());
+
+    assert_eq!(
+        border_boxes_by_window(&hub),
+        vec![
+            (w0, PixelRect::new(0, 0, 60, 30)),
+            (w1, PixelRect::new(60, 0, 30, 30)),
+        ]
+    );
+    hub.focus_workspace("0", None);
+    let w2 = insert_process(&mut hub, "a.exe");
+    assert_eq!(
+        hub.access.windows.get(w2).workspace(),
+        Some(workspace_on(&hub, PRIMARY_MONITOR, "0"))
+    );
+    validate_hub(&hub);
 }

@@ -4,7 +4,7 @@ use crate::core::{
     ContainerPlacement, FloatWindowPlacement, MonitorId, Physical, PixelRect, Pixels,
     TilingWindowPlacement, WindowId,
 };
-use crate::platform::windows::external::ZOrder;
+use crate::platform::windows::external::{HwndId, ZOrder};
 
 pub(in crate::platform::windows) enum HubMessage {
     Scene(RenderScene),
@@ -66,4 +66,12 @@ pub(in crate::platform::windows) struct MonitorScene {
     pub(in crate::platform::windows) tiling_windows: Vec<TilingWindowPlacement>,
     pub(in crate::platform::windows) float_windows: Vec<FloatWindowPlacement>,
     pub(in crate::platform::windows) containers: Vec<ContainerPlacement>,
+    pub(in crate::platform::windows) thumbnails: Vec<ThumbnailShow>,
+}
+
+/// A parked tiling window whose on-screen part shows through a DWM thumbnail.
+pub(in crate::platform::windows) struct ThumbnailShow {
+    pub(in crate::platform::windows) window_id: WindowId,
+    pub(in crate::platform::windows) source: HwndId,
+    pub(in crate::platform::windows) placement: TilingWindowPlacement,
 }

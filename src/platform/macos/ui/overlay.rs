@@ -15,7 +15,7 @@ use objc2_foundation::NSRect;
 use objc2_io_surface::IOSurface;
 use objc2_quartz_core::{CAAutoresizingMask, CALayer, CATransaction, kCAGravityResize};
 
-use super::super::dome::{ContainerShow, HubEvent};
+use super::super::dome::{ContainerShow, HubEvent, MirrorShow};
 use super::compositor::{MacOsCompositor, physical_size};
 use crate::config::Appearance;
 use crate::core::{
@@ -25,7 +25,7 @@ use crate::font::FontConfig;
 use crate::overlay::{self, BorderMetrics, LogicalTiledContainer, LogicalTiledWindow};
 use crate::platform::macos::objc2_wrapper::{kAXFrontmostAttribute, set_attribute_value};
 use crate::platform::render::{Renderer, WgpuContext};
-use crate::platform::tab_bar::{TabBarMessage, TabBarWidget};
+use crate::platform::tab_bar::{TabBarContent, TabBarMessage, TabBarWidget};
 use crate::theme::Flavor;
 
 fn frame_attrs(frame: NSRect) -> (Point<NativeUnit>, Size<NativeUnit>) {
@@ -38,12 +38,12 @@ fn frame_attrs(frame: NSRect) -> (Point<NativeUnit>, Size<NativeUnit>) {
     )
 }
 
-struct FloatHandler {
+struct MirrorHandler {
     hub_sender: CalloopSender<HubEvent>,
     cg_id: CGWindowID,
 }
 
-impl AuxiliaryWindowHandler for FloatHandler {
+impl AuxiliaryWindowHandler for MirrorHandler {
     fn on_mouse_down(&mut self, _at: Point<NativeUnit>, _button: MouseButton) {
         self.hub_sender
             .send(HubEvent::MirrorClicked(self.cg_id))
@@ -108,7 +108,7 @@ impl FloatOverlay {
                 click_through: true,
                 focusable: false,
             },
-            Box::new(FloatHandler { hub_sender, cg_id }),
+            Box::new(MirrorHandler { hub_sender, cg_id }),
         )
         .expect("auxiliary window on main thread");
         window.set_level(WindowLevel::Floating);
@@ -190,17 +190,85 @@ impl FloatOverlay {
         if self.is_focused {
             return;
         }
-        // Core Animation applies a 0.25s implicit crossfade when contents changes.
-        // Wrapping in a transaction with disabled actions swaps surfaces atomically.
-        unsafe {
-            CATransaction::begin();
-            CATransaction::setDisableActions(true);
-            // Explicit typed binding avoids deref-coercion ambiguity through the
-            // IOSurface -> NSObject -> AnyObject chain in argument position.
-            let obj: &AnyObject = surface;
-            self.mirror_layer.setContents(Some(obj));
-            CATransaction::commit();
-        }
+        set_mirror_contents(&self.mirror_layer, surface);
+    }
+}
+
+/// A parked tiling window's on-screen part, drawn from a capture of the window.
+pub(super) struct MirrorOverlay {
+    window: AuxiliaryWindow,
+    mirror_layer: Retained<CALayer>,
+    source: Dimension,
+    scale: f64,
+}
+
+impl MirrorOverlay {
+    pub(super) fn new(
+        _mtm: MainThreadMarker,
+        show: &MirrorShow,
+        hub_sender: CalloopSender<HubEvent>,
+    ) -> Self {
+        let mirror_layer = CALayer::layer();
+        unsafe { mirror_layer.setContentsGravity(kCAGravityResize) };
+        let (position, size) = frame_attrs(show.cocoa_frame);
+        let window = AuxiliaryWindow::new(
+            &WindowAttributes {
+                position,
+                size,
+                click_through: false,
+                focusable: false,
+            },
+            Box::new(MirrorHandler {
+                hub_sender,
+                cg_id: show.cg_id,
+            }),
+        )
+        .expect("auxiliary window on main thread");
+        window.set_level(WindowLevel::Bottom);
+        window.set_content_layer(&mirror_layer);
+        let mut overlay = Self {
+            window,
+            mirror_layer,
+            source: show.source,
+            scale: show.scale,
+        };
+        overlay.render(show);
+        overlay
+    }
+
+    pub(super) fn render(&mut self, show: &MirrorShow) {
+        let (position, size) = frame_attrs(show.cocoa_frame);
+        self.window.set_frame(position, size);
+        self.mirror_layer.setContentsScale(show.scale);
+        self.source = show.source;
+        self.scale = show.scale;
+        self.window.set_visible(true);
+    }
+
+    pub(super) fn source(&self) -> Dimension {
+        self.source
+    }
+
+    pub(super) fn scale(&self) -> f64 {
+        self.scale
+    }
+
+    pub(super) fn apply_frame(&self, surface: &IOSurface) {
+        set_mirror_contents(&self.mirror_layer, surface);
+    }
+}
+
+fn set_mirror_contents(layer: &CALayer, surface: &IOSurface) {
+    // Core Animation applies a 0.25s implicit crossfade when contents changes.
+    // Wrapping in a transaction with disabled actions swaps surfaces atomically.
+    unsafe {
+        CATransaction::begin();
+        CATransaction::setDisableActions(true);
+        // Explicit typed binding avoids deref-coercion ambiguity through the
+        // IOSurface -> NSObject -> AnyObject chain in argument position.
+        let obj: &AnyObject = surface;
+        layer.setContents(Some(obj));
+        CATransaction::commit();
     }
 }
 
@@ -344,7 +412,7 @@ impl TilingOverlay {
                 id: cs.placement.id,
                 frame: cs.placement.border_box.to_dimension(),
                 visible_frame: cs.placement.visible_border_box.to_dimension(),
-                tab_bar_height: Length::from_pixels(cs.placement.tab_bar_band.height()),
+                tab_bar_height: Length::from_pixels(cs.placement.visible_tab_bar_band.height()),
                 is_highlighted: cs.placement.is_highlighted,
                 spawn_direction: cs.placement.spawn_direction,
                 is_tabbed: cs.placement.is_tabbed,
@@ -397,16 +465,8 @@ impl AuxiliaryWindowHandler for TabBarHandler {
             .downcast::<TabBarMessage>()
             .expect("tab bar window received a non-TabBarMessage payload");
         match *msg {
-            TabBarMessage::Content {
-                scale,
-                size,
-                border,
-                titles,
-                active_index,
-                is_highlighted,
-            } => {
-                self.widget
-                    .set_content(scale, size, border, titles, active_index, is_highlighted);
+            TabBarMessage::Content(content) => {
+                self.widget.set_content(content);
                 self.widget.render();
             }
             TabBarMessage::Style { theme, font } => {
@@ -472,15 +532,18 @@ impl TabBarOverlay {
     pub(super) fn render(&self, cs: &ContainerShow, scale: f64, border_thickness: Length<Logical>) {
         let (position, size) = frame_attrs(cs.tab_bar_cocoa_frame);
         self.window.set_frame(position, size);
+        let visible_bar = cs.placement.visible_tab_bar_band.to_dimension();
         let bar = cs.tab_bar_dim;
-        self.window.deliver(Box::new(TabBarMessage::Content {
-            scale: scale as f32,
-            size: (bar.width, bar.height),
-            border: border_thickness,
-            titles: cs.placement.titles.clone(),
-            active_index: cs.placement.active_tab_index,
-            is_highlighted: cs.placement.is_highlighted,
-        }));
+        self.window
+            .deliver(Box::new(TabBarMessage::Content(TabBarContent {
+                scale: scale as f32,
+                surface_size: (visible_bar.width, visible_bar.height),
+                canvas_size: (bar.width, bar.height),
+                border: border_thickness,
+                titles: cs.placement.titles.clone(),
+                active_index: cs.placement.active_tab_index,
+                is_highlighted: cs.placement.is_highlighted,
+            })));
         self.window.set_visible(true);
     }
 

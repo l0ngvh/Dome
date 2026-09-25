@@ -4,6 +4,7 @@ use crate::config::lua::deserializer::{FromLuaValue, LoadContext, as_table};
 use crate::core::master::{PaneConfig, read_master_count_override, read_master_ratio_override};
 use crate::core::matcher::WindowMatcher;
 use crate::core::partition_tree::TreeLayoutNode;
+use crate::core::scrolling::ColumnConfig;
 
 /// The `layout.lua` file root. Every workspace entry sits under a monitor key,
 /// which is that monitor's `unique_name`. Both levels are sorted maps, so
@@ -92,6 +93,11 @@ pub(crate) enum PreferredWorkspace {
         float: Vec<WindowMatcher>,
         fullscreen: Vec<WindowMatcher>,
     },
+    Scrolling {
+        columns: Vec<ColumnConfig>,
+        float: Vec<WindowMatcher>,
+        fullscreen: Vec<WindowMatcher>,
+    },
 }
 
 impl FromLuaValue for PreferredWorkspace {
@@ -100,7 +106,7 @@ impl FromLuaValue for PreferredWorkspace {
         let layout: String = cx.field_or_else(table, "layout", String::new);
         match layout.as_str() {
             "" => Err(mlua::Error::runtime(
-                "layout is required, and must be \"partition_tree\" or \"master\"",
+                "layout is required, and must be \"partition_tree\", \"master\" or \"scrolling\"",
             )),
             "partition_tree" => Ok(PreferredWorkspace::PartitionTree {
                 tree: cx.field(table, "tree"),
@@ -115,8 +121,13 @@ impl FromLuaValue for PreferredWorkspace {
                 float: cx.field(table, "float"),
                 fullscreen: cx.field(table, "fullscreen"),
             }),
+            "scrolling" => Ok(PreferredWorkspace::Scrolling {
+                columns: cx.field(table, "columns"),
+                float: cx.field(table, "float"),
+                fullscreen: cx.field(table, "fullscreen"),
+            }),
             other => Err(mlua::Error::runtime(format!(
-                "layout must be \"partition_tree\" or \"master\", got \"{other}\""
+                "layout must be \"partition_tree\", \"master\" or \"scrolling\", got \"{other}\""
             ))),
         }
     }

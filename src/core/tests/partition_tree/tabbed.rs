@@ -1,9 +1,14 @@
 use crate::core::ContainerId;
+use crate::core::ContainerPlacement;
 use crate::core::TilingConfig;
 use crate::core::allocator::NodeId;
-use crate::core::node::{Length, LimitObservation, LimitUpdate, PixelRect, WindowRestrictions};
+use crate::core::hub::{Hub, MonitorLayout};
+use crate::core::node::{
+    Length, LimitObservation, LimitUpdate, PixelRect, Pixels, WindowRestrictions,
+};
 use crate::core::tests::{
-    TilingConfigBuilder, default_rect, setup, setup_with_tiling, snapshot, titled, titled_matcher,
+    ASCII_HEIGHT, PartitionTreeConfigBuilder, TAB_BAR_HEIGHT, TilingConfigBuilder, default_rect,
+    setup, setup_with_tiling, snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
@@ -1549,6 +1554,180 @@ fn tab_bar_visible_when_min_height_exceeds_screen() {
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
-    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
     ");
+}
+
+const TALL_TAB_BAR_HEIGHT: i32 = ASCII_HEIGHT as i32 + 10;
+
+fn setup_with_tall_tab_bar() -> Hub {
+    setup_with_tab_bar_height(TALL_TAB_BAR_HEIGHT)
+}
+
+fn setup_with_tab_bar_height(height: i32) -> Hub {
+    setup_with_tiling(
+        TilingConfigBuilder::new()
+            .with_partition_tree_config(
+                PartitionTreeConfigBuilder::new()
+                    .with_tab_bar_height(Pixels::new(height))
+                    .build(),
+            )
+            .build(),
+    )
+}
+
+fn container_placements(hub: &Hub) -> Vec<ContainerPlacement> {
+    let placements = hub.get_visible_placements();
+    let MonitorLayout::Normal { containers, .. } = &placements.monitors[0].layout else {
+        panic!("expected a normally tiled monitor");
+    };
+    containers.clone()
+}
+
+#[test]
+fn tab_bar_taller_than_container_covers_it_and_places_no_tab() {
+    let mut hub = setup_with_tall_tab_bar();
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
+    hub.toggle_container_layout();
+
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[W0, W1])
+      )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                   W0                                     |                                 [W1]                                    |
+    ");
+
+    let [tabbed] = container_placements(&hub)
+        .try_into()
+        .expect("only the tabbed container is placed");
+    assert_eq!(tabbed.visible_tab_bar_band, tabbed.border_box);
+    assert_eq!(
+        tabbed.tab_bar_band,
+        PixelRect::new(0, 0, 150, TALL_TAB_BAR_HEIGHT)
+    );
+}
+
+#[test]
+fn split_in_container_shorter_than_tab_bar_lays_out_inside_screen() {
+    let mut hub = setup_with_tall_tab_bar();
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
+    hub.toggle_spawn_mode();
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
+    hub.focus_left();
+    hub.toggle_container_layout();
+    hub.focus_next_tab();
+
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[W0, Container])
+      )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                   W0                                     |                              [Container]                                |
+    ");
+
+    let screen_bottom = Pixels::new(ASCII_HEIGHT as i32);
+    for container in container_placements(&hub) {
+        assert!(
+            container.border_box.bottom() <= screen_bottom,
+            "{container:?} ends past the screen bottom"
+        );
+    }
+}
+
+#[test]
+fn tab_bar_shorter_than_container_is_fully_visible() {
+    let mut hub = setup();
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
+    hub.toggle_container_layout();
+
+    let [tabbed] = container_placements(&hub)
+        .try_into()
+        .expect("only the tabbed container is placed");
+    assert_eq!(
+        tabbed.tab_bar_band,
+        PixelRect::new(0, 0, 150, TAB_BAR_HEIGHT)
+    );
+    assert_eq!(tabbed.visible_tab_bar_band, tabbed.tab_bar_band);
+}
+
+#[test]
+fn nested_tab_bars_fill_the_screen_and_the_container_below_is_not_placed() {
+    let mut hub = setup_with_tab_bar_height(20);
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
+    hub.toggle_spawn_mode();
+    hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
+    hub.toggle_spawn_mode();
+    hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
+    hub.toggle_container_layout();
+    hub.focus_parent();
+    hub.focus_parent();
+    hub.toggle_container_layout();
+    hub.focus_parent();
+    hub.toggle_container_layout();
+
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, highlighted, spawn=right, titles=[W0, Container])
+        Container(id=ContainerId(1), x=0.00, y=20.00, w=150.00, h=10.00, tabbed, active_tab=1, titles=[W1, Container])
+      )
+
+    ******************************************************************************************************************************************************
+    *                                   W0                                     |                              [Container]                                *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *----------------------------------------------------------------------------------------------------------------------------------------------------*
+    *                                   W1                                     |                              [Container]                                *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    ");
+
+    let placements = hub.get_visible_placements();
+    let MonitorLayout::Normal {
+        tiling_windows,
+        containers,
+        ..
+    } = &placements.monitors[0].layout
+    else {
+        panic!("expected a normally tiled monitor");
+    };
+    assert!(tiling_windows.is_empty(), "{tiling_windows:?}");
+    let [outer, middle] = containers
+        .clone()
+        .try_into()
+        .expect("the innermost tabbed container has zero height and is not placed");
+    assert_eq!(outer.visible_tab_bar_band, PixelRect::new(0, 0, 150, 20));
+    assert_eq!(middle.tab_bar_band, PixelRect::new(0, 20, 150, 20));
+    assert_eq!(middle.visible_tab_bar_band, PixelRect::new(0, 20, 150, 10));
 }

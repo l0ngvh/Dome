@@ -286,5 +286,11 @@ fn workspace_matchers(entry: &PreferredWorkspace) -> Matchers {
             fullscreen: fullscreen.clone(),
             float: float.clone(),
         },
+        PreferredWorkspace::Scrolling {
+            fullscreen, float, ..
+        } => Matchers {
+            fullscreen: fullscreen.clone(),
+            float: float.clone(),
+        },
     }
 }

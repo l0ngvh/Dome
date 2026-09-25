@@ -28,17 +28,18 @@ fn three_windows_split_screen() {
 }
 
 #[test]
-fn reported_min_width_binds_while_zero_min_height_is_cleared() {
+fn reported_min_width_does_not_bind_the_even_split() {
     let mut env = TestEnv::new();
     let w1 = env.window().min_size(1200.0, 0.0).open();
-    env.open();
+    let w2 = env.open();
 
-    // An even split would leave each window near 952, so the minimum binds. The
-    // shell forwards it untouched and core outsets it by the border, so the app
-    // gets back exactly the content width it asked for.
-    assert_eq!(env.dim(w1).width, Length::new(1200.0));
-    // The zero height component reads as Cleared, not a zero-height minimum.
-    assert_eq!(env.dim(w1).height, SCREEN_HEIGHT - env.border() * 2.0);
+    assert_eq!(
+        env.dim(w1).width,
+        Length::new(952.0),
+        "R2: the reported minimum does not bind; w1 keeps its even half"
+    );
+    assert_eq!(env.dim(w2).width, Length::new(952.0));
+    env.assert_horizontally_tiled(&[env.dim(w1), env.dim(w2)]);
 }
 
 #[test]
@@ -46,10 +47,8 @@ fn dropping_all_limits_restores_the_even_split() {
     let mut env = TestEnv::new();
     let w1 = env.window().min_size(1200.0, 0.0).open();
     let w2 = env.open();
-    assert_eq!(env.dim(w1).width, Length::new(1200.0));
+    assert_eq!(env.dim(w1).width, Length::new(952.0));
 
-    // Mirrors dispatch_constraint_read re-reading an app that no longer reports a
-    // minimum. Discarding an all-clear observation would strand the 1200 forever.
     env.dome.set_constraints_for(
         w1,
         LimitObservation {
@@ -61,7 +60,11 @@ fn dropping_all_limits_restores_the_even_split() {
     );
     env.layout();
 
-    assert_eq!(env.dim(w1).width, Length::new(952.0));
+    assert_eq!(
+        env.dim(w1).width,
+        Length::new(952.0),
+        "the Cleared merge runs without panicking and leaves the even split"
+    );
     assert_eq!(env.dim(w2).width, Length::new(952.0));
     env.assert_horizontally_tiled(&[env.dim(w1), env.dim(w2)]);
 }
@@ -824,4 +827,47 @@ fn open_bar_adjust_multiple_monitors() {
 
     assert_eq!(env.dim(w1), dim(4, 34, 1912, 1042));
     assert_eq!(env.dim(w2), dim(1924, 4, 2552, 1432));
+}
+
+#[test]
+fn a_cut_unfocused_scrolling_column_parks_at_full_size_behind_a_thumbnail() {
+    let mut env = TestEnv::builder()
+        .tiling(|tiling| {
+            tiling.border_size = Pixels::ZERO;
+            tiling.layout = crate::core::Strategy::Scrolling;
+            tiling.scrolling = crate::core::ScrollingConfig {
+                default_column_width: crate::core::SizeConstraint::Percent(40.0),
+            };
+        })
+        .build();
+    let windows = env.open_many(4);
+    env.settle(10);
+    let [_, w2, w3, w4] = windows[..] else {
+        unreachable!("four windows opened");
+    };
+    let parked = Dimension::new(
+        OFFSCREEN_POS,
+        OFFSCREEN_POS,
+        Length::new(768.0),
+        Length::new(1080.0),
+    );
+
+    assert_eq!(
+        env.painted_thumbnails(0),
+        vec![(w2, PixelRect::new(0, 0, 384, 1080))],
+        "the focused w4 sits against the right edge, which leaves the right half of w2 on screen"
+    );
+    assert_eq!(env.dim(w2), parked);
+    assert_eq!(env.dim(w3), dim(384, 0, 768, 1080));
+    assert_eq!(env.dim(w4), dim(1152, 0, 768, 1080));
+
+    env.click_thumbnail(w2);
+    env.settle(10);
+
+    assert_eq!(env.dim(w2), dim(0, 0, 768, 1080));
+    assert_eq!(
+        env.painted_thumbnails(0),
+        vec![(w4, PixelRect::new(1536, 0, 384, 1080))]
+    );
+    assert_eq!(env.dim(w4), parked);
 }

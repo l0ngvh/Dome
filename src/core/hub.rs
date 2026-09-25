@@ -25,16 +25,12 @@ pub(crate) struct TilingWindowPlacement {
     pub(crate) visible_border_box: PixelRect,
     pub(crate) content_box: PixelRect,
     /// `content_box` trimmed to the monitor. Zero-area when nothing remains.
-    #[cfg_attr(
-        target_os = "windows",
-        expect(
-            dead_code,
-            reason = "macOS trims tiling placements to the work area, Windows places them unclipped"
-        )
-    )]
     pub(crate) visible_content_box: PixelRect,
     /// Highlighting does not require keyboard focus.
     pub(crate) is_highlighted: bool,
+    /// The platform parks the window at its full `content_box` size and shows
+    /// `visible_content_box` from a live capture of it.
+    pub(crate) is_mirrored: bool,
     pub(crate) spawn_direction: Option<Direction>,
 }
 
@@ -52,9 +48,13 @@ pub(crate) struct ContainerPlacement {
     pub(crate) id: ContainerId,
     pub(crate) border_box: PixelRect,
     pub(crate) visible_border_box: PixelRect,
-    /// Top band of `border_box` reserved for the tab strip, zero-height when the container
-    /// is not tabbed.
+    /// The tab strip at its configured height from the top of `border_box`, zero-height when
+    /// the container is not tabbed. A container shorter than the configured height cuts the
+    /// strip off rather than squashing it, so the band can run past the bottom of `border_box`.
     pub(crate) tab_bar_band: PixelRect,
+    /// `tab_bar_band` cut to `visible_border_box`, or `PixelRect::ZERO` when no part of the
+    /// band is inside it.
+    pub(crate) visible_tab_bar_band: PixelRect,
     pub(crate) is_highlighted: bool,
     pub(crate) spawn_direction: Option<Direction>,
     pub(crate) is_tabbed: bool,

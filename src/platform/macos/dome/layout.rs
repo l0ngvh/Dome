@@ -1,10 +1,12 @@
 use std::collections::HashSet;
 
-use crate::core::{Length, MonitorLayout, MonitorPlacements, WindowId};
+use crate::core::{Length, MonitorLayout, MonitorPlacements, PixelRect, WindowId};
 use crate::platform::macos::objc2_wrapper::dimension_to_ns_rect_cocoa;
 
 use super::Dome;
-use super::events::{ContainerShow, FloatShow, HubMessage, MonitorTilingData, RenderScene};
+use super::events::{
+    ContainerShow, FloatShow, HubMessage, MirrorShow, MonitorTilingData, RenderScene,
+};
 
 impl Dome {
     /// All fullscreen -> normal and normal -> fullscreen must be resolved before this step
@@ -12,6 +14,7 @@ impl Dome {
     pub(in crate::platform::macos) fn flush_layout(&mut self) {
         let mut tiling = Vec::new();
         let mut float_shows = Vec::new();
+        let mut mirror_shows = Vec::new();
         let result = self.hub.get_visible_placements();
         let visible_windows: HashSet<WindowId> = result
             .monitors
@@ -41,9 +44,10 @@ impl Dome {
         let focused_window = result.focused_window;
         let focused_monitor = result.focused_monitor;
         for mp in result.monitors {
-            let (t, f) = self.apply_monitor_placements(&mp, focused_window);
+            let (t, f, m) = self.apply_monitor_placements(&mp, focused_window);
             tiling.push(t);
             float_shows.extend(f);
+            mirror_shows.extend(m);
         }
 
         if focused_window != self.last_focused {
@@ -77,6 +81,7 @@ impl Dome {
         self.sender.send(HubMessage::Scene(RenderScene {
             tiling,
             float_shows,
+            mirror_shows,
             focused_window,
             focused_monitor_id: focused_monitor,
             workspaces: self.hub.query_workspaces(),
@@ -87,7 +92,7 @@ impl Dome {
         &mut self,
         mp: &MonitorPlacements,
         focused_window: Option<WindowId>,
-    ) -> (MonitorTilingData, Vec<FloatShow>) {
+    ) -> (MonitorTilingData, Vec<FloatShow>, Vec<MirrorShow>) {
         match &mp.layout {
             MonitorLayout::Fullscreen(window_id) => {
                 self.place_fullscreen_window(*window_id, mp.monitor_id);
@@ -107,6 +112,7 @@ impl Dome {
                         containers: Vec::new(),
                     },
                     Vec::new(),
+                    Vec::new(),
                 )
             }
             MonitorLayout::Normal {
@@ -120,8 +126,34 @@ impl Dome {
 
                 let mut placed_tiling = Vec::new();
                 let mut float_shows = Vec::new();
+                let mut mirror_shows = Vec::new();
 
                 for wp in tiling_windows {
+                    if wp.is_mirrored {
+                        self.park_mirrored_window(wp.id, wp.content_box);
+                        if wp.visible_content_box.is_empty() {
+                            continue;
+                        }
+                        if let Some(entry) = self.registry.by_id(wp.id) {
+                            mirror_shows.push(MirrorShow {
+                                cg_id: entry.cg_id,
+                                cocoa_frame: dimension_to_ns_rect_cocoa(
+                                    Length::new(self.primary_full_height),
+                                    wp.visible_content_box.to_dimension(),
+                                ),
+                                source: PixelRect::new(
+                                    (wp.visible_content_box.x() - wp.content_box.x()).value(),
+                                    (wp.visible_content_box.y() - wp.content_box.y()).value(),
+                                    wp.visible_content_box.width().value(),
+                                    wp.visible_content_box.height().value(),
+                                )
+                                .to_dimension(),
+                                scale,
+                            });
+                        }
+                        placed_tiling.push(*wp);
+                        continue;
+                    }
                     // macOS doesn't reliably allow placing windows partially off-screen
                     // (especially above the menu bar), so place the trimmed rect.
                     // Tiling placements are always Positioned, so parking is legal here.
@@ -173,7 +205,7 @@ impl Dome {
                     let tab_bar_dim = cp.tab_bar_band.to_dimension();
                     let tab_bar_cocoa_frame = dimension_to_ns_rect_cocoa(
                         Length::new(self.primary_full_height),
-                        tab_bar_dim,
+                        cp.visible_tab_bar_band.to_dimension(),
                     );
                     container_data.push(ContainerShow {
                         placement: cp.clone(),
@@ -196,6 +228,7 @@ impl Dome {
                         containers: container_data,
                     },
                     float_shows,
+                    mirror_shows,
                 )
             }
         }

@@ -9,7 +9,6 @@ mod monitor;
 mod move_in_direction;
 mod move_to_workspace;
 mod preferred_layout;
-mod scroll;
 mod set_window_constraint;
 mod sync_config;
 mod tabbed;

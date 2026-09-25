@@ -5,8 +5,8 @@ use super::Dome;
 use super::display_from_process;
 use super::events::FloatOverlayAction;
 use crate::core::{
-    FloatWindowPlacement, LimitObservation, MonitorId, Physical, PixelRect, Pixels,
-    TilingWindowPlacement, WindowId, WindowRestrictions,
+    FloatWindowPlacement, LimitObservation, MonitorId, Physical, PixelRect, Pixels, WindowId,
+    WindowRestrictions,
 };
 use crate::core::{WindowMatcher, pattern_matches};
 use crate::platform::windows::external::{ManageExternalWindow, ShowCmd, ZOrder};
@@ -348,20 +348,19 @@ impl Dome {
 
     #[tracing::instrument(
         level = "trace",
-        skip(self, wp),
+        skip(self),
         fields(window_id = %id),
     )]
     pub(super) fn show_tiling(
         &mut self,
         id: WindowId,
-        wp: &TilingWindowPlacement,
+        new_target: PixelRect<Physical>,
         monitor: MonitorId,
         z: ZOrder,
     ) {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
-        let new_target = wp.content_box;
 
         let tiling_state = |actual: PixelRect<Physical>| {
             WindowState::Positioned(PositionedState::Tiling(DriftState::new(

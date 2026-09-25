@@ -1,5 +1,8 @@
 use crate::config::PreferredLayouts;
-use crate::core::{PaneDisplay, PreferredWorkspace, SplitMode, TreeLayoutNode, WindowMatcher};
+use crate::core::{
+    ColumnConfig, PaneDisplay, Pixels, PreferredWorkspace, SizeConstraint, SplitMode,
+    TreeLayoutNode, WindowMatcher,
+};
 
 fn layout_from(src: &str) -> PreferredLayouts {
     PreferredLayouts::from_lua("test layout", src).expect("layout should load")
@@ -193,6 +196,106 @@ fn preferred_layout_parse_single_entry() {
         layout.workspace("desk", "1"),
         Some(PreferredWorkspace::Master { .. })
     ));
+}
+
+#[test]
+fn preferred_layout_parses_scrolling_workspace() {
+    let layout = layout_from(
+        r#"return { desk = { ["1"] = { layout = "scrolling", float = { { app = "mpv" } } } } }"#,
+    );
+    match layout.workspace("desk", "1") {
+        Some(PreferredWorkspace::Scrolling { float, .. }) => assert_eq!(float.len(), 1),
+        other => panic!("expected a scrolling workspace, got {other:?}"),
+    }
+}
+
+fn scrolling_columns(src: &str) -> Vec<ColumnConfig> {
+    match workspace_from(src) {
+        PreferredWorkspace::Scrolling { columns, .. } => columns,
+        other => panic!("expected a scrolling workspace, got {other:?}"),
+    }
+}
+
+fn process(name: &str) -> WindowMatcher {
+    WindowMatcher {
+        process: Some(name.into()),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn scrolling_columns_parse_bare_and_keyed_entries() {
+    let columns = scrolling_columns(
+        r#"{ layout = "scrolling", columns = {
+  { process = "editor.exe" },
+  { width = "40%", children = { { process = "terminal.exe" } } },
+  { width = 800, children = { { process = "logs.exe" } } },
+} }"#,
+    );
+    assert_eq!(
+        columns,
+        vec![
+            ColumnConfig::bare(process("editor.exe")),
+            ColumnConfig {
+                width: Some(SizeConstraint::Percent(40.0)),
+                children: vec![process("terminal.exe")],
+            },
+            ColumnConfig {
+                width: Some(SizeConstraint::Pixels(Pixels::new(800))),
+                children: vec![process("logs.exe")],
+            },
+        ]
+    );
+}
+
+#[test]
+fn scrolling_column_keeps_only_its_first_child() {
+    let columns = scrolling_columns(
+        r#"{ layout = "scrolling", columns = {
+  { width = "40%", children = { { process = "a.exe" }, { process = "b.exe" } } },
+} }"#,
+    );
+    assert_eq!(
+        columns,
+        vec![ColumnConfig {
+            width: Some(SizeConstraint::Percent(40.0)),
+            children: vec![process("a.exe")],
+        }]
+    );
+}
+
+#[test]
+fn scrolling_columns_written_as_one_matcher_yield_no_column() {
+    let columns =
+        scrolling_columns(r#"{ layout = "scrolling", columns = { process = "editor.exe" } }"#);
+    assert!(columns.is_empty());
+}
+
+#[test]
+fn scrolling_columns_default_to_empty() {
+    let columns = scrolling_columns(r#"{ layout = "scrolling" }"#);
+    assert!(columns.is_empty());
+}
+
+#[test]
+fn scrolling_column_with_width_but_no_children_is_dropped() {
+    let columns = scrolling_columns(
+        r#"{ layout = "scrolling", columns = {
+  { width = "40%", process = "a.exe" },
+  { process = "b.exe" },
+} }"#,
+    );
+    assert_eq!(columns, vec![ColumnConfig::bare(process("b.exe"))]);
+}
+
+#[test]
+fn scrolling_column_recovers_from_an_invalid_width() {
+    let columns = scrolling_columns(
+        r#"{ layout = "scrolling", columns = {
+  { width = "wide", children = { { process = "a.exe" } } },
+} }"#,
+    );
+    assert_eq!(columns, vec![ColumnConfig::bare(process("a.exe"))]);
 }
 
 #[test]

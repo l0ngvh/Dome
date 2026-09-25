@@ -126,6 +126,8 @@ pub(in crate::platform::macos) struct RenderScene {
     /// removes overlays and captures for any window not in this list rather than
     /// tracking individual deletions or float-to-tiling transitions.
     pub(in crate::platform::macos) float_shows: Vec<FloatShow>,
+    /// Parked tiling windows whose visible part shows through a live capture.
+    pub(in crate::platform::macos) mirror_shows: Vec<MirrorShow>,
     pub(in crate::platform::macos) focused_window: Option<WindowId>,
     pub(in crate::platform::macos) focused_monitor_id: MonitorId,
     pub(in crate::platform::macos) workspaces: Vec<WorkspaceInfo>,
@@ -147,9 +149,10 @@ pub(in crate::platform::macos) struct MonitorTilingData {
 #[derive(Clone)]
 pub(in crate::platform::macos) struct ContainerShow {
     pub(in crate::platform::macos) placement: ContainerPlacement,
-    /// Top band of `placement.border_box`.
+    /// `placement.tab_bar_band` at its configured height, which can run past the bottom of
+    /// `placement.border_box`.
     pub(in crate::platform::macos) tab_bar_dim: Dimension<Logical>,
-    /// Pre-flipped Cocoa frame for `tab_bar_dim`. Always populated, even when
+    /// Pre-flipped Cocoa frame for `placement.visible_tab_bar_band`. Always populated, even when
     /// `!placement.is_tabbed`.
     pub(in crate::platform::macos) tab_bar_cocoa_frame: NSRect,
 }
@@ -161,4 +164,13 @@ pub(in crate::platform::macos) struct FloatShow {
     pub(in crate::platform::macos) scale: f64,
     pub(in crate::platform::macos) border_thickness: Length<Logical>,
     pub(in crate::platform::macos) content_dim: Dimension,
+}
+
+pub(in crate::platform::macos) struct MirrorShow {
+    pub(in crate::platform::macos) cg_id: CGWindowID,
+    /// Pre-flipped Cocoa frame of the window's on-screen part.
+    pub(in crate::platform::macos) cocoa_frame: NSRect,
+    /// The window's on-screen part, relative to the window's top-left corner.
+    pub(in crate::platform::macos) source: Dimension,
+    pub(in crate::platform::macos) scale: f64,
 }

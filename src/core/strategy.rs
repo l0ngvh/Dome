@@ -12,8 +12,10 @@ use crate::core::node::{
     WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
+use crate::core::scrolling::ScrollingStrategy;
 use crate::core::{
-    PreferredLayouts, PreferredWorkspace, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
+    ColumnConfig, PreferredLayouts, PreferredWorkspace, SizeConstraints, Strategy, TreeLayoutNode,
+    WindowMatcher,
 };
 
 #[derive(Debug)]
@@ -161,6 +163,7 @@ pub(crate) struct WorkspaceExport {
     pub(crate) master_count: Option<usize>,
     pub(crate) master: PaneConfig,
     pub(crate) secondary: PaneConfig,
+    pub(crate) columns: Vec<ColumnConfig>,
     pub(crate) float: Vec<WindowMatcher>,
     pub(crate) fullscreen: Vec<WindowMatcher>,
 }
@@ -178,6 +181,11 @@ impl WorkspaceExport {
                 master_count: self.master_count,
                 master: self.master.clone(),
                 secondary: self.secondary.clone(),
+                float: self.float.clone(),
+                fullscreen: self.fullscreen.clone(),
+            },
+            "scrolling" => PreferredWorkspace::Scrolling {
+                columns: self.columns.clone(),
                 float: self.float.clone(),
                 fullscreen: self.fullscreen.clone(),
             },
@@ -203,8 +211,9 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     fn attach_window(&mut self, hub: &mut HubAccess, window_id: WindowId, ws_id: WorkspaceId);
 
     /// Remove a window from its workspace's tiling tree. Returns the window's
-    /// dimension in screen-absolute coordinates (translated before detach
-    /// because detach triggers layout, which can change viewport_offset).
+    /// dimension in screen-absolute coordinates, captured before detach because
+    /// detach triggers a layout pass that can move a scrolling offset (Master's
+    /// per-pane `y_offset`).
     fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> PixelRect;
 
     fn focus_direction(&mut self, hub: &mut HubAccess, direction: Direction, forward: bool);
@@ -392,31 +401,18 @@ pub(crate) fn translate<U>(
     )
 }
 
-/// Clip a dimension to screen bounds. Returns None if entirely outside.
-pub(crate) fn clip<U>(dim: Dimension<U>, bounds: Dimension<U>) -> Option<Dimension<U>> {
-    let x1 = dim.x.max(bounds.x);
-    let y1 = dim.y.max(bounds.y);
-    let x2 = (dim.x + dim.width).min(bounds.x + bounds.width);
-    let y2 = (dim.y + dim.height).min(bounds.y + bounds.height);
-    if x1 >= x2 || y1 >= y2 {
-        return None;
-    }
-    Some(Dimension::new(x1, y1, x2 - x1, y2 - y1))
-}
-
-/// Zero-height when the container is not tabbed. The band top comes from the container's own
-/// dimension, not a separately rounded height, so round(y) + round(band) cannot drift a unit from
-/// the round(y + band) the content box uses.
+/// The band top comes from the container's own dimension, not a separately
+/// rounded height, so round(y) + round(band) cannot drift a unit from the
+/// round(y + band) the content box uses.
 pub(crate) fn tab_bar_band(
     border_box: PixelRect,
     dim: Dimension,
-    offset_y: Length,
     screen: PixelRect,
     tab_bar_length: Length,
     is_tabbed: bool,
 ) -> PixelRect {
     let band_height = if is_tabbed {
-        let content_top = Pixels::round(dim.y + tab_bar_length - offset_y) + screen.y();
+        let content_top = Pixels::round(dim.y + tab_bar_length) + screen.y();
         content_top - border_box.y()
     } else {
         Pixels::ZERO
@@ -429,6 +425,15 @@ pub(crate) fn tab_bar_band(
     )
 }
 
+pub(crate) fn visible_tab_bar_band(
+    tab_bar_band: PixelRect,
+    visible_border_box: PixelRect,
+) -> PixelRect {
+    tab_bar_band
+        .clip(visible_border_box)
+        .unwrap_or(PixelRect::ZERO)
+}
+
 pub(crate) fn container_titles(hub: &HubAccess, id: ContainerId) -> Vec<String> {
     hub.containers
         .get(id)
@@ -439,6 +444,16 @@ pub(crate) fn container_titles(hub: &HubAccess, id: ContainerId) -> Vec<String> 
             Child::Container(_) => "Container".to_string(),
         })
         .collect()
+}
+
+pub(crate) fn apply_max_constraint(max: Length, slot_extent: Length) -> (Length, Length) {
+    let size = if max > Length::ZERO && max < slot_extent {
+        max
+    } else {
+        slot_extent
+    };
+    let offset = (slot_extent - size) / 2.0;
+    (size, offset.max(Length::ZERO))
 }
 
 /// Distribute `container_size` across `constraints` so every child whose
@@ -508,6 +523,7 @@ pub(crate) fn distribute_space(
 pub(super) struct StrategySet {
     partition_tree: PartitionTreeStrategy,
     master: MasterStrategy,
+    scrolling: ScrollingStrategy,
     kinds: FxHashMap<WorkspaceId, Strategy>,
 }
 
@@ -516,7 +532,6 @@ impl StrategySet {
         let partition_tree = PartitionTreeStrategy::new(
             tiling.partition_tree.tab_bar_height,
             tiling.partition_tree.automatic_tiling,
-            tiling.size_constraints,
         );
         let master = MasterStrategy::new(
             tiling.master.master_count,
@@ -524,9 +539,14 @@ impl StrategySet {
             tiling.size_constraints,
             tiling.partition_tree.tab_bar_height,
         );
+        let scrolling = ScrollingStrategy::new(
+            tiling.scrolling.default_column_width,
+            tiling.size_constraints,
+        );
         Self {
             partition_tree,
             master,
+            scrolling,
             kinds: FxHashMap::default(),
         }
     }
@@ -541,6 +561,7 @@ impl StrategySet {
             .map(|w| match w {
                 PreferredWorkspace::PartitionTree { .. } => Strategy::PartitionTree,
                 PreferredWorkspace::Master { .. } => Strategy::Master,
+                PreferredWorkspace::Scrolling { .. } => Strategy::Scrolling,
             })
             .unwrap_or(hub.tiling.layout);
 
@@ -561,6 +582,7 @@ impl StrategySet {
         match kind {
             Strategy::PartitionTree => &self.partition_tree,
             Strategy::Master => &self.master,
+            Strategy::Scrolling => &self.scrolling,
         }
     }
 
@@ -568,6 +590,7 @@ impl StrategySet {
         match kind {
             Strategy::PartitionTree => &mut self.partition_tree,
             Strategy::Master => &mut self.master,
+            Strategy::Scrolling => &mut self.scrolling,
         }
     }
 
@@ -585,6 +608,7 @@ impl StrategySet {
     pub(super) fn apply_config(&mut self, hub: &mut HubAccess, tiling: &TilingConfig) {
         self.partition_tree.apply_config(hub, tiling.clone());
         self.master.apply_config(hub, tiling.clone());
+        self.scrolling.apply_config(hub, tiling.clone());
     }
 
     pub(super) fn handle_action(
@@ -667,6 +691,7 @@ impl StrategySet {
                 .map(|w| match w {
                     PreferredWorkspace::PartitionTree { .. } => Strategy::PartitionTree,
                     PreferredWorkspace::Master { .. } => Strategy::Master,
+                    PreferredWorkspace::Scrolling { .. } => Strategy::Scrolling,
                 })
                 .unwrap_or(default_strategy);
             self.kinds.insert(ws_id, new);
@@ -701,6 +726,7 @@ impl StrategySet {
         // set before the leak sweep, or one strategy's containers look leaked to another.
         let mut reachable = self.partition_tree.validate(hub);
         reachable.extend(self.master.validate(hub));
+        reachable.extend(self.scrolling.validate(hub));
         let allocated: FxHashSet<ContainerId> = hub.containers.sorted_ids().into_iter().collect();
 
         let mut leaked: Vec<ContainerId> = allocated.difference(&reachable).copied().collect();
@@ -724,6 +750,10 @@ impl StrategySet {
                 tracing::debug!("Master action on a partition-tree workspace");
                 None
             }
+            Strategy::Scrolling => {
+                tracing::debug!("Master action on a scrolling workspace");
+                None
+            }
         }
     }
 
@@ -732,6 +762,10 @@ impl StrategySet {
             Strategy::PartitionTree => Some(&mut self.partition_tree),
             Strategy::Master => {
                 tracing::debug!("Partition-tree action on a master workspace");
+                None
+            }
+            Strategy::Scrolling => {
+                tracing::debug!("Partition-tree action on a scrolling workspace");
                 None
             }
         }

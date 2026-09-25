@@ -16,6 +16,7 @@ config.maximum_width = 0
 config.maximum_height = "50%"
 config.partition_tree = { tab_bar_height = 24, automatic_tiling = true }
 config.master = { master_ratio = 0.5, master_count = 1 }
+config.scrolling = { default_column_width = "60%" }
 config.font_size = 14.0
 config.font_family = dome.env.DOME_FONT or "PingFang SC"
 config.float = { { process = "calculator.exe" } }

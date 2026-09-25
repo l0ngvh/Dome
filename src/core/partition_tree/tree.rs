@@ -93,7 +93,7 @@ impl PartitionTreeStrategy {
                 .copied();
             match successor {
                 Some(wid) => {
-                    self.set_focus_pointer(hub, Child::Window(wid));
+                    self.set_focus(hub, Child::Window(wid));
                 }
                 None => {
                     self.workspaces
@@ -104,8 +104,6 @@ impl PartitionTreeStrategy {
             }
         }
 
-        // Ordered after recovery so the trailing scroll_into_view clamps against the
-        // surviving focus rather than the one that just left.
         self.compute_placement(hub, workspace_id);
 
         self.detach_preferred_slot(hub, workspace_id, child);
@@ -143,16 +141,9 @@ impl PartitionTreeStrategy {
         hub.take_windows(subtree)
     }
 
-    /// Internal set_focus that works with `Child` (window or container).
-    pub(super) fn set_focus(&mut self, hub: &mut HubAccess, child: Child) {
-        let ws = self.set_focus_pointer(hub, child);
-        self.scroll_into_view(hub, ws);
-    }
-
-    /// The state half of `set_focus`, without the placement pass. Returns the workspace
-    /// so callers do not re-derive it through `hub`, which can disagree with the tree
-    /// mid-surgery.
-    pub(super) fn set_focus_pointer(&mut self, hub: &HubAccess, child: Child) -> WorkspaceId {
+    /// Points the tiling focus of `child`'s workspace at `child`, and switches every tabbed
+    /// ancestor to the tab that holds it.
+    pub(super) fn set_focus(&mut self, hub: &HubAccess, child: Child) {
         let path: Vec<_> = self.ancestors_of(child).collect();
         for (walk_pos, parent_id) in &path {
             if self.tiling_containers.get(parent_id).unwrap().is_tabbed {
@@ -173,7 +164,6 @@ impl PartitionTreeStrategy {
         if let Child::Window(wid) = child {
             state.record_focus(wid);
         }
-        ws
     }
 
     pub(super) fn ancestors_of(
