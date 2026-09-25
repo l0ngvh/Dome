@@ -520,8 +520,6 @@ impl MasterStrategy {
         }
     }
 
-    /// Raises this workspace's master ratio by one step, up to the ratio cap. Does nothing on a
-    /// workspace with no focused tiling window.
     pub(super) fn grow(&mut self, hub: &mut HubAccess) {
         let Some(FocusedPanes { ws_id, .. }) = self.focused_panes(hub) else {
             return;
@@ -533,8 +531,6 @@ impl MasterStrategy {
         self.compute_placement(hub, ws_id);
     }
 
-    /// Lowers this workspace's master ratio by one step, down to the ratio floor. Does nothing on
-    /// a workspace with no focused tiling window.
     pub(super) fn shrink(&mut self, hub: &mut HubAccess) {
         let Some(FocusedPanes { ws_id, .. }) = self.focused_panes(hub) else {
             return;
@@ -546,8 +542,6 @@ impl MasterStrategy {
         self.compute_placement(hub, ws_id);
     }
 
-    /// Raises this workspace's master count by one and refills the master pane from the stack.
-    /// Does nothing on a workspace with no focused tiling window.
     pub(super) fn more(&mut self, hub: &mut HubAccess) {
         let Some(FocusedPanes { ws_id, .. }) = self.focused_panes(hub) else {
             return;
@@ -562,8 +556,6 @@ impl MasterStrategy {
         self.compute_placement(hub, ws_id);
     }
 
-    /// Lowers this workspace's master count by one and spills the surplus onto the stack. Does
-    /// nothing at `MIN_MASTER_COUNT`, or on a workspace with no focused tiling window.
     pub(super) fn fewer(&mut self, hub: &mut HubAccess) {
         let Some(FocusedPanes { ws_id, .. }) = self.focused_panes(hub) else {
             return;

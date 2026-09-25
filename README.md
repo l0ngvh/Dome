@@ -39,8 +39,10 @@ command line.
 | <kbd>Alt</kbd> + <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> / <kbd>J</kbd> / <kbd>K</kbd> / <kbd>L</kbd> | Move window to monitor left/down/up/right |
 | <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> | Toggle floating |
 | <kbd>Alt</kbd> + <kbd>F</kbd> | Toggle fullscreen |
-| <kbd>Alt</kbd> + <kbd>B</kbd> | Toggle split/tabbed layout |
+| <kbd>Alt</kbd> + <kbd>W</kbd> | Toggle split/tabbed layout |
+| <kbd>Alt</kbd> + <kbd>Return</kbd> | Open a terminal |
 | <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>Q</kbd> | Close focused window |
+| <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd> | Exit Dome |
 
 ## Configuring Dome
 

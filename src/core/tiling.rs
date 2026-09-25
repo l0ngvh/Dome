@@ -48,8 +48,6 @@ pub(crate) enum SizeConstraint {
 }
 
 impl SizeConstraint {
-    /// `Pixels` holds config-logical values and needs `scale` to reach frame
-    /// units. `Percent` is relative to `screen_size`, already in frame units.
     pub(crate) fn resolve(&self, screen_size: Length<Unit>, scale: f32) -> Length<Unit> {
         match self {
             SizeConstraint::Pixels(px) => Length::from_pixels(*px).to_unit(scale),

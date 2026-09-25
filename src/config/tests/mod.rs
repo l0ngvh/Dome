@@ -1,7 +1,5 @@
 mod bootstrap;
 mod lua;
-#[cfg(target_os = "macos")]
-mod paths;
 mod preferred_layout;
 mod record;
 mod watch;

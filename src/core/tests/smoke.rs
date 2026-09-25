@@ -1557,9 +1557,7 @@ fn reconstruct_tree(ops: &[PrefTreeBuildOp]) -> Option<TreeLayoutNode> {
     build_node_recursive(root_id, &leaves, &containers)
 }
 
-/// Spreads one entry across every connected monitor. A recorded op names a
-/// workspace and no monitor. An entry under the primary alone would apply to
-/// nothing once the run adds a monitor.
+/// Spreads one entry across every connected monitor.
 fn preferred_layout_everywhere(hub: &Hub, entry: (String, PreferredWorkspace)) -> PreferredLayouts {
     let names: Vec<String> = hub
         .access

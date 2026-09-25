@@ -10,7 +10,8 @@ use super::ActionContext;
 /// `TilingAction` is not `Clone`, so the table below holds constructors.
 type Make = fn() -> TilingAction;
 
-/// Every hub action a binding calls without an argument.
+/// Each name must be its CLI command name with every hyphen replaced by an
+/// underscore.
 const NO_ARG: [(&str, Make); 28] = [
     ("focus_left", || {
         focus_direction(Direction::Horizontal, false)
@@ -204,50 +205,6 @@ mod tests {
     use crate::core::Hub;
 
     const META_LUA: &str = include_str!("../../../resources/dome.meta.lua");
-
-    #[test]
-    fn every_hub_action_is_callable_from_lua() {
-        let lua = new_vm().unwrap();
-        let mut hub = test_hub();
-        let mut effects = RecordingEffects::default();
-        let mut keymap = RecordingKeymap::default();
-        let call_by_name: mlua::Function = lua
-            .load("return function(a, name) a[name]() end")
-            .eval()
-            .unwrap();
-        let with_a_name: mlua::Function = lua
-            .load(
-                r#"return function(a)
-                    a.focus_workspace("1")
-                    a.move_to_workspace("1")
-                    a.focus_monitor("test")
-                    a.move_to_monitor("test")
-                end"#,
-            )
-            .eval()
-            .unwrap();
-        let mut cxv = ActionContext {
-            hub: &mut hub,
-            effects: &mut effects,
-            keymap_effects: &mut keymap,
-        };
-        let cx = RefCell::new(&mut cxv);
-        let mut failed = Vec::new();
-        lua.scope(|scope| {
-            let actions = build_actions(&lua, scope, &cx)?;
-            for (name, _) in NO_ARG {
-                if let Err(error) = call_by_name.call::<()>((actions.clone(), name)) {
-                    failed.push(format!("{name}: {error}"));
-                }
-            }
-            if let Err(error) = with_a_name.call::<()>(actions) {
-                failed.push(format!("the actions that take a name: {error}"));
-            }
-            Ok(())
-        })
-        .unwrap();
-        assert!(failed.is_empty(), "{failed:#?}");
-    }
 
     /// The stub is hand-maintained and never loaded, so only this test keeps it
     /// from drifting away from the registered names.

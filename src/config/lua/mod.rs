@@ -269,22 +269,23 @@ pub(crate) mod test_support {
     #[derive(Default)]
     pub(crate) struct RecordingKeymap {
         pub switched: Vec<String>,
-        pub updates: usize,
     }
 
     impl KeymapEffects for RecordingKeymap {
         fn switch_mode(&mut self, name: &str) {
             self.switched.push(name.to_string());
         }
-        fn update_keymaps(&mut self, _keymaps: &ModalKeymaps) {
-            self.updates += 1;
-        }
+        fn update_keymaps(&mut self, _keymaps: &ModalKeymaps) {}
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    use crate::config::BASE_MODE;
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    use crate::platform::keymap::{KeymapPublisher, KeymapView};
 
     struct TempFile(std::path::PathBuf);
     impl Drop for TempFile {
@@ -368,6 +369,34 @@ mod tests {
         let mut effects = test_support::RecordingEffects::default();
         keymaps.dispatch("main", &meta_c(), &mut hub, &mut effects);
         assert_eq!(effects.executed, vec!["new".to_string()]);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn a_reload_publishes_the_new_bound_keys_to_the_keyboard() {
+        let cfg = write_temp(
+            "publish",
+            "return { keymaps = { main = { ['meta+c'] = function(a) a.execute('old') end } } }",
+        );
+        let mut runtime = LuaRuntime::new(path_str(&cfg)).unwrap();
+        runtime.load();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let publisher = KeymapPublisher::new(KeymapView::new(), tx);
+        let mut keymaps = KeymapRuntime::new(runtime, Box::new(publisher));
+
+        std::fs::write(
+            &cfg.0,
+            "return { keymaps = { main = { ['meta+x'] = function(a) a.execute('new') end } } }",
+        )
+        .unwrap();
+        assert!(keymaps.reload().is_some());
+
+        let view = rx
+            .try_iter()
+            .last()
+            .expect("the reload publishes a keymap view");
+        assert_eq!(view.resolve(&"meta+x".parse().unwrap()), Some(BASE_MODE));
+        assert_eq!(view.resolve(&meta_c()), None);
     }
 
     #[test]

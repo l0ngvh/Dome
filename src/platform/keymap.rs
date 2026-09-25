@@ -4,8 +4,7 @@ use std::sync::mpsc::Sender;
 use crate::config::{BASE_MODE, KeymapEffects, Keystroke, ModalKeymaps};
 
 /// Holds bound keystrokes without their functions, because this view has to
-/// stay `Send` and an `mlua::Function` is not. The keymaps it projects live in
-/// `LuaRuntime`.
+/// stay `Send` and an `mlua::Function` is not.
 #[derive(Debug, Clone)]
 pub(crate) struct KeymapView {
     bound: HashMap<String, HashSet<Keystroke>>,

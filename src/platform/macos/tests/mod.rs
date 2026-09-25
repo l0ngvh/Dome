@@ -428,6 +428,19 @@ impl MacOS {
         }
     }
 
+    fn run_unminimize(&self, dome: &mut Dome, cg_id: CGWindowID) {
+        let id = dome
+            .tracked_window(cg_id)
+            .expect("window is tracked by the dome")
+            .window_id;
+        send_action(dome, &Action::UnminimizeWindow { id });
+        // macOS posts the deminiaturize notification only for a window that
+        // actually left the Dock.
+        if !self.is_minimized(cg_id) {
+            self.deminiaturize(dome, cg_id);
+        }
+    }
+
     // Why Instant::now() works for these helpers:
     // observed_at.last must be >= placed_at for the stale check, and
     // observed_at.first must be <= placed_at + 1s for the constraint/drift check.

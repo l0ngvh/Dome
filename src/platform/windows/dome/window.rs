@@ -541,10 +541,6 @@ impl Dome {
             (WindowState::BorderlessMinimized { retries }, true) => {
                 *retries = retries.saturating_add(1);
                 if *retries > MAX_DRIFT_RETRIES {
-                    // Uses `>` (5 retries before give-up) to match the macOS
-                    // `Placement::just_gave_up` pattern, keeping cross-platform
-                    // symmetry. The neighbouring Offscreen arm uses `>=` (4 retries)
-                    // because it inherited the older convention.
                     if *retries == MAX_DRIFT_RETRIES + 1 {
                         tracing::debug!(%id, "BorderlessMinimized resurface retries exhausted, giving up");
                     }

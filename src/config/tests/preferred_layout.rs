@@ -5,8 +5,6 @@ fn layout_from(src: &str) -> PreferredLayouts {
     PreferredLayouts::from_lua("test layout", src).expect("layout should load")
 }
 
-/// Wraps a bare workspace table in the surrounding monitor keys, so the read
-/// still goes through the loader rather than a shortcut into the type.
 fn workspace_from(src: &str) -> PreferredWorkspace {
     let wrapped = format!("return {{ desk = {{ w = {src} }} }}");
     layout_from(&wrapped)

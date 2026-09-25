@@ -46,7 +46,6 @@ pub(super) struct TestEnv {
 pub(super) struct TestEnvBuilder {
     config: Config,
     monitors: Vec<MonitorInfo>,
-    deliver_overlay_reports: bool,
 }
 
 pub(super) struct WindowBuilder<'env> {
@@ -71,21 +70,10 @@ impl TestEnvBuilder {
         self
     }
 
-    /// Leaves the domain without any overlay handle, the state between the window thread
-    /// creating an overlay and its report arriving.
-    pub(super) fn defer_overlay_reports(mut self) -> Self {
-        self.deliver_overlay_reports = false;
-        self
-    }
-
     pub(super) fn build(self) -> TestEnv {
         setup_logger();
 
-        let Self {
-            config,
-            monitors,
-            deliver_overlay_reports,
-        } = self;
+        let Self { config, monitors } = self;
         let exclusive_fullscreen_hwnd = Arc::new(Mutex::new(None));
         let shared_monitors = Arc::new(Mutex::new(monitors));
         let display = MockDisplay {
@@ -125,9 +113,7 @@ impl TestEnvBuilder {
             scene,
             next_window_id: 1,
         };
-        if deliver_overlay_reports {
-            env.deliver_overlay_reports();
-        }
+        env.deliver_overlay_reports();
         env
     }
 }
@@ -196,7 +182,6 @@ impl TestEnv {
         TestEnvBuilder {
             config: crate::config::tests::config(),
             monitors: vec![default_monitor()],
-            deliver_overlay_reports: true,
         }
     }
 
@@ -597,8 +582,9 @@ impl TestEnv {
         self.z_stack.normal_stack()
     }
 
-    /// Mirrors the runner's create-side fork instead of driving the real
-    /// `dispatch_window_created` closure, so keep the two in sync.
+    /// Stands in for the runner's `dispatch_window_created`, except that the
+    /// monitor is fixed at 1 and the mock's `manageable` flag decides
+    /// manageability. Keep everything else in step with the runner.
     fn open_with(&mut self, ext: Arc<MockExternalHwnd>) -> HwndId {
         let hwnd_id = ext.hwnd_id;
         self.mocks.insert(hwnd_id, ext.clone());

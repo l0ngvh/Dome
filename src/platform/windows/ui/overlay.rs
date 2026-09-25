@@ -132,8 +132,7 @@ impl TilingOverlay {
         )?;
         aux.set_content_visual(dcomp_device, &dcomp_visual)?;
         aux.set_visible(true);
-        // Park below managed windows after showing. A managed window created later lands
-        // above it.
+        // A managed window created after this call starts above the overlay.
         aux.set_level(WindowLevel::Bottom);
         let boxed = Box::new(Self {
             renderer,

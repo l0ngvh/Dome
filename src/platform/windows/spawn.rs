@@ -9,8 +9,8 @@ use windows::Win32::System::Threading::{
 use windows::core::PWSTR;
 
 /// Runs `command` through `cmd.exe /C`, so a full command line works: pipes,
-/// `&&`, redirects, and any program on PATH. There is no shell "open" verb, so
-/// open a URL, document, or folder with `start <target>` inside the command.
+/// `&&`, redirects, and any program on PATH. A URL, document, or folder opens
+/// through `start <target>` inside the command.
 pub(super) fn spawn(command: &str, env: &HashMap<String, String>) -> Result<(), anyhow::Error> {
     let command = command.trim();
     if command.is_empty() {

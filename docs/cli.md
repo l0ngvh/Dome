@@ -56,8 +56,8 @@ Move the focused window to the named monitor.
 
 ## `dome toggle-split`
 
-Set the horizontal or vertical direction of the next new window relative to the
-focused window.
+Toggle the direction, horizontal or vertical, in which the next new window
+opens relative to the focused window.
 
 ## `dome rotate`
 
@@ -184,7 +184,7 @@ Prints one JSON entry per connected monitor, ordered left to right:
   {
     // monitor name, can repeat when multiple monitors of the same model exist
     "device_name": "DELL P2419H",
-    // device_name plus a #N suffix when several monitors share a model
+    // device_name when it is unique, otherwise device_name plus a #N suffix
     "unique_name": "DELL P2419H",
     // populated on macOS, the display's CGDirectDisplayID
     "cg_display_id": 1,

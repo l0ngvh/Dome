@@ -5,8 +5,6 @@ use crate::config::lua::deserializer::LoadContext;
 const MASTER_RATIO_RANGE: RangeInclusive<f32> = 0.1..=0.9;
 pub(crate) const MIN_MASTER_COUNT: usize = 1;
 
-/// Seed new workspaces only. A reload does not push these into existing
-/// workspaces, and runtime tuning persists.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MasterConfig {
     pub(crate) master_ratio: f32,

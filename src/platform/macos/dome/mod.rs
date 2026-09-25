@@ -478,8 +478,6 @@ impl Dome {
         };
         let window_id = entry.window_id;
         let ext = entry.ext.clone();
-        // A minimized window holds no workspace, so the hub cannot focus it
-        // until the deminiaturize notification reattaches it.
         if entry.is_minimized {
             self.unminimize_window(window_id);
             return;
@@ -634,8 +632,6 @@ impl Dome {
         serde_json::to_string(&entries).expect("MinimizedWindow is infallibly serializable")
     }
 
-    /// Ask the OS to take a window out of the Dock. The hub keeps the window
-    /// minimized until the deminiaturize notification reports the restore.
     #[tracing::instrument(skip(self), fields(window_id = %window_id))]
     pub(in crate::platform::macos) fn unminimize_window(&mut self, window_id: WindowId) {
         let Some(window) = self.registry.by_id(window_id) else {
