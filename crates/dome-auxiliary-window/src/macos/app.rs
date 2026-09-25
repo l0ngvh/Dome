@@ -1,6 +1,7 @@
 use std::cell::{OnceCell, RefCell};
 use std::ffi::c_void;
 
+use dispatch2::DispatchQueue;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{
@@ -8,9 +9,9 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
-    NSApplicationDidChangeScreenParametersNotification, NSControlStateValueOff,
-    NSControlStateValueOn, NSImage, NSMenu, NSMenuDelegate, NSMenuItem, NSSquareStatusItemLength,
-    NSStatusBar, NSStatusBarButton, NSStatusItem,
+    NSApplicationDidChangeScreenParametersNotification, NSApplicationTerminateReply,
+    NSControlStateValueOff, NSControlStateValueOn, NSImage, NSMenu, NSMenuDelegate, NSMenuItem,
+    NSSquareStatusItemLength, NSStatusBar, NSStatusBarButton, NSStatusItem,
 };
 use objc2_core_foundation::{CFRetained, CFRunLoop, CFRunLoopSource, kCFRunLoopDefaultMode};
 use objc2_foundation::{
@@ -199,6 +200,23 @@ define_class!(
                 button: state.button.clone(),
             });
             self.ivars().handler.borrow_mut().on_started(&shell);
+        }
+
+        // A terminate from inside a handler callback would reach will_terminate while the
+        // callback still borrows the handler. Cancel it and retry on the next main
+        // run-loop turn, after the borrow is released. TerminateLater is not safe here,
+        // because it waits in a nested run loop that can still be inside the callback.
+        #[unsafe(method(applicationShouldTerminate:))]
+        fn should_terminate(&self, _sender: &NSApplication) -> NSApplicationTerminateReply {
+            if self.ivars().handler.try_borrow_mut().is_ok() {
+                return NSApplicationTerminateReply::TerminateNow;
+            }
+            DispatchQueue::main().exec_async(|| {
+                let mtm = MainThreadMarker::new()
+                    .expect("main dispatch queue runs on the main thread");
+                NSApplication::sharedApplication(mtm).terminate(None);
+            });
+            NSApplicationTerminateReply::TerminateCancel
         }
 
         #[unsafe(method(applicationWillTerminate:))]
