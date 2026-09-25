@@ -1,6 +1,4 @@
 pub(crate) mod sketchybar;
-pub(crate) mod yasb;
-pub(crate) mod zebar;
 
 /// Lowercase, collapse each run of non-alphanumeric characters to a single `-`,
 /// and trim leading and trailing `-`.

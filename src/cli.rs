@@ -1,7 +1,11 @@
+use std::io::Write;
+
 use clap::{Parser, Subcommand};
+use serde::de::DeserializeOwned;
 
 use crate::action::{
-    Action, FocusTarget, MasterTarget, MonitorTarget, MoveTarget, Query, TabDirection, ToggleTarget,
+    Action, FocusTarget, MasterTarget, MinimizedWindow, MonitorDetails, MonitorTarget, MoveTarget,
+    Query, TabDirection, ToggleTarget, WorkspaceInfo, WorkspaceState,
 };
 use crate::core::WindowId;
 
@@ -89,9 +93,12 @@ enum CliCommand {
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 enum CliQuery {
-    Workspaces,
+    Workspaces {
+        #[arg(long)]
+        monitor: Option<String>,
+    },
     #[command(name = "minimized")]
     MinimizedWindows,
     Monitors,
@@ -99,9 +106,7 @@ enum CliQuery {
 
 #[derive(Subcommand, Debug)]
 enum CliGenerate {
-    Yasb,
     Sketchybar,
-    Zebar,
 }
 
 #[derive(Debug)]
@@ -111,19 +116,9 @@ enum Dispatch {
         layout: Option<String>,
     },
     Action(Action),
-    Query(Query),
+    Query(CliQuery),
     Export,
     Generate(CliGenerate),
-}
-
-impl From<CliQuery> for Query {
-    fn from(cq: CliQuery) -> Self {
-        match cq {
-            CliQuery::Workspaces => Query::Workspaces,
-            CliQuery::MinimizedWindows => Query::MinimizedWindows,
-            CliQuery::Monitors => Query::Monitors,
-        }
-    }
 }
 
 impl From<CliCommand> for Dispatch {
@@ -175,7 +170,7 @@ impl From<CliCommand> for Dispatch {
             CliCommand::Close => Dispatch::Action(Action::Close),
             CliCommand::Mode { name } => Dispatch::Action(Action::Mode { name }),
             CliCommand::Export => Dispatch::Export,
-            CliCommand::Query { query } => Dispatch::Query(query.into()),
+            CliCommand::Query { query } => Dispatch::Query(query),
             CliCommand::Generate { bar } => Dispatch::Generate(bar),
             CliCommand::UnminimizeWindow { id } => {
                 // WindowId's tuple-struct constructor is pub(crate) in core, so round-trip
@@ -189,41 +184,99 @@ impl From<CliCommand> for Dispatch {
     }
 }
 
+/// The running dome that a command talks to.
+trait Client {
+    fn ping(&self) -> bool;
+    fn action(&self, action: &Action) -> anyhow::Result<()>;
+    fn export_layout(&self) -> anyhow::Result<()>;
+    fn query<T: DeserializeOwned>(&self, query: &Query) -> anyhow::Result<T>;
+}
+
+impl Client for crate::DomeClient {
+    fn ping(&self) -> bool {
+        crate::DomeClient::ping(self)
+    }
+
+    fn action(&self, action: &Action) -> anyhow::Result<()> {
+        crate::DomeClient::action(self, action)
+    }
+
+    fn export_layout(&self) -> anyhow::Result<()> {
+        crate::DomeClient::export_layout(self)
+    }
+
+    fn query<T: DeserializeOwned>(&self, query: &Query) -> anyhow::Result<T> {
+        crate::DomeClient::query(self, query)
+    }
+}
+
 pub fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let dispatch = dispatch_from(cli.command);
+    execute(
+        dispatch_from(cli.command),
+        &crate::DomeClient,
+        &mut std::io::stdout(),
+    )
+}
 
+fn execute(dispatch: Dispatch, client: &impl Client, out: &mut impl Write) -> anyhow::Result<()> {
     match dispatch {
         Dispatch::Launch { config, layout } => {
-            if crate::DomeClient.ping() {
+            if client.ping() {
                 anyhow::bail!("dome is already running");
             }
             crate::run_app(config, layout)?
         }
         Dispatch::Action(action) => {
-            crate::DomeClient.action(&action)?;
+            client.action(&action)?;
         }
         Dispatch::Query(query) => {
             let json = match query {
-                Query::Workspaces => serde_json::to_string(&crate::DomeClient.workspaces()?)?,
-                Query::MinimizedWindows => {
-                    serde_json::to_string(&crate::DomeClient.minimized_windows()?)?
+                CliQuery::Workspaces { monitor } => {
+                    let mut rows: Vec<WorkspaceInfo> = client.query(&Query::Workspaces)?;
+                    let monitors: Vec<MonitorDetails> = client.query(&Query::Monitors)?;
+                    match monitor {
+                        Some(wanted) => {
+                            let Some(found) = monitors.iter().find(|m| {
+                                m.unique_name == wanted
+                                    || m.gdi_device.as_deref() == Some(wanted.as_str())
+                            }) else {
+                                anyhow::bail!(
+                                    "no connected monitor matches {wanted:?}. Run `dome query \
+                                     monitors` to list each unique_name and gdi_device."
+                                );
+                            };
+                            rows.retain(|ws| {
+                                ws.state == WorkspaceState::Attached
+                                    && ws.monitor == found.unique_name
+                            });
+                            rows.sort_by(|a, b| name_key(&a.name).cmp(&name_key(&b.name)));
+                        }
+                        None => {
+                            rows.sort_by(|a, b| {
+                                (group_key(a, &monitors), name_key(&a.name))
+                                    .cmp(&(group_key(b, &monitors), name_key(&b.name)))
+                            });
+                        }
+                    }
+                    serde_json::to_string(&rows)?
                 }
-                Query::Monitors => serde_json::to_string(&crate::DomeClient.monitors()?)?,
+                CliQuery::MinimizedWindows => {
+                    serde_json::to_string(
+                        &client.query::<Vec<MinimizedWindow>>(&Query::MinimizedWindows)?,
+                    )?
+                }
+                CliQuery::Monitors => {
+                    serde_json::to_string(&client.query::<Vec<MonitorDetails>>(&Query::Monitors)?)?
+                }
             };
-            println!("{json}");
+            writeln!(out, "{json}")?;
         }
         Dispatch::Export => {
-            crate::DomeClient.export_layout()?;
-        }
-        Dispatch::Generate(CliGenerate::Yasb) => {
-            crate::integrations::yasb::generate()?;
+            client.export_layout()?;
         }
         Dispatch::Generate(CliGenerate::Sketchybar) => {
             crate::integrations::sketchybar::generate()?;
-        }
-        Dispatch::Generate(CliGenerate::Zebar) => {
-            crate::integrations::zebar::generate()?;
         }
     }
     Ok(())
@@ -263,6 +316,44 @@ fn master(target: MasterTarget) -> Dispatch {
     Dispatch::Action(Action::Master { target })
 }
 
+// Reordering these variants changes the sort order.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum GroupKey<'a> {
+    /// Position of the row's monitor in the monitor list.
+    Known(usize),
+    /// Monitor name of an attached row whose monitor the monitor list lacks.
+    Unknown(&'a str),
+    /// Origin monitor name of a parked row.
+    Parked(&'a str),
+}
+
+fn group_key<'a>(ws: &'a WorkspaceInfo, monitors: &[MonitorDetails]) -> GroupKey<'a> {
+    if ws.state == WorkspaceState::Parked {
+        return GroupKey::Parked(&ws.monitor);
+    }
+    match monitors.iter().position(|m| m.unique_name == ws.monitor) {
+        Some(index) => GroupKey::Known(index),
+        None => GroupKey::Unknown(&ws.monitor),
+    }
+}
+
+// Numeric names sort before text names. Swapping these variants reverses that.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum NameKey<'a> {
+    /// The text breaks a tie between equal values such as `1` and `01`.
+    Numeric(i128, &'a str),
+    Text(&'a str),
+}
+
+// `i128::from_str` accepts exactly `[+-]?[0-9]+`. A name past the `i128` range fails to
+// parse and sorts as text.
+fn name_key(name: &str) -> NameKey<'_> {
+    match name.parse::<i128>() {
+        Ok(value) => NameKey::Numeric(value, name),
+        Err(_) => NameKey::Text(name),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,6 +375,34 @@ mod tests {
         match dispatch_from_argv(argv) {
             Dispatch::Action(Action::Move { target: t }) => t,
             other => panic!("{argv:?} produced {other:?}, expected Move"),
+        }
+    }
+
+    struct MockClient {
+        workspaces: Vec<WorkspaceInfo>,
+        monitors: Vec<MonitorDetails>,
+    }
+
+    impl Client for MockClient {
+        fn ping(&self) -> bool {
+            unreachable!("no test launches dome")
+        }
+
+        fn action(&self, _: &Action) -> anyhow::Result<()> {
+            unreachable!("no test sends an action")
+        }
+
+        fn export_layout(&self) -> anyhow::Result<()> {
+            unreachable!("no test exports a layout")
+        }
+
+        fn query<T: DeserializeOwned>(&self, query: &Query) -> anyhow::Result<T> {
+            let data = match query {
+                Query::Workspaces => serde_json::to_value(&self.workspaces)?,
+                Query::Monitors => serde_json::to_value(&self.monitors)?,
+                Query::MinimizedWindows => unreachable!("no test queries minimized windows"),
+            };
+            Ok(serde_json::from_value(data)?)
         }
     }
 
@@ -374,19 +493,10 @@ mod tests {
     }
 
     #[test]
-    fn cli_query_workspaces() {
-        let d = dispatch_from_argv(&["dome", "query", "workspaces"]);
-        match d {
-            Dispatch::Query(Query::Workspaces) => {}
-            other => panic!("expected Query(Workspaces), got {other:?}"),
-        }
-    }
-
-    #[test]
     fn cli_query_monitors() {
         let d = dispatch_from_argv(&["dome", "query", "monitors"]);
         match d {
-            Dispatch::Query(Query::Monitors) => {}
+            Dispatch::Query(CliQuery::Monitors) => {}
             other => panic!("expected Query(Monitors), got {other:?}"),
         }
     }
@@ -395,7 +505,7 @@ mod tests {
     fn cli_query_minimized() {
         let d = dispatch_from_argv(&["dome", "query", "minimized"]);
         match d {
-            Dispatch::Query(Query::MinimizedWindows) => {}
+            Dispatch::Query(CliQuery::MinimizedWindows) => {}
             other => panic!("expected Query(MinimizedWindows), got {other:?}"),
         }
     }
@@ -411,29 +521,11 @@ mod tests {
     }
 
     #[test]
-    fn cli_generate_yasb() {
-        let d = dispatch_from_argv(&["dome", "generate", "yasb"]);
-        match d {
-            Dispatch::Generate(CliGenerate::Yasb) => {}
-            other => panic!("expected Generate(Yasb), got {other:?}"),
-        }
-    }
-
-    #[test]
     fn cli_generate_sketchybar() {
         let d = dispatch_from_argv(&["dome", "generate", "sketchybar"]);
         match d {
             Dispatch::Generate(CliGenerate::Sketchybar) => {}
             other => panic!("expected Generate(Sketchybar), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn cli_generate_zebar() {
-        let d = dispatch_from_argv(&["dome", "generate", "zebar"]);
-        match d {
-            Dispatch::Generate(CliGenerate::Zebar) => {}
-            other => panic!("expected Generate(Zebar), got {other:?}"),
         }
     }
 
@@ -473,5 +565,191 @@ mod tests {
                 panic!("expected Launch {{ Some(\"/tmp/c\"), Some(\"/tmp/l\") }}, got {other:?}")
             }
         }
+    }
+
+    fn monitor(unique_name: &str) -> MonitorDetails {
+        MonitorDetails {
+            device_name: unique_name.to_string(),
+            unique_name: unique_name.to_string(),
+            cg_display_id: None,
+            gdi_device: None,
+            work_area: crate::action::MonitorFrame {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+        }
+    }
+
+    fn workspace(name: &str, monitor: &str, state: WorkspaceState) -> WorkspaceInfo {
+        WorkspaceInfo {
+            name: name.to_string(),
+            monitor: monitor.to_string(),
+            state,
+            is_focused: false,
+            is_visible: false,
+        }
+    }
+
+    fn query_workspaces(client: &MockClient, flags: &[&str]) -> anyhow::Result<Vec<WorkspaceInfo>> {
+        let argv = [&["dome", "query", "workspaces"], flags].concat();
+        let mut out = Vec::new();
+        execute(dispatch_from_argv(&argv), client, &mut out)?;
+        Ok(serde_json::from_slice(&out)?)
+    }
+
+    fn rows(printed: &[WorkspaceInfo]) -> Vec<(&str, &str, WorkspaceState)> {
+        printed
+            .iter()
+            .map(|ws| (ws.monitor.as_str(), ws.name.as_str(), ws.state.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn cli_query_workspaces_order() {
+        use WorkspaceState::{Attached, Parked};
+
+        let past_i128 = "9".repeat(40);
+        let workspaces = vec![
+            workspace("1", "Old", Parked),
+            workspace("web", "Left", Attached),
+            workspace("10", "Left", Attached),
+            workspace("2", "Gone", Parked),
+            workspace("Mail", "Left", Attached),
+            workspace("2", "Left", Attached),
+            workspace("+3", "Left", Attached),
+            workspace("-1", "Left", Attached),
+            workspace(&past_i128, "Left", Attached),
+            workspace("1", "Left", Attached),
+            workspace("01", "Left", Attached),
+            workspace("1", "Unlisted", Attached),
+            workspace("5", "Right", Attached),
+            workspace("4", "Right", Attached),
+            workspace("1", "Gone", Parked),
+        ];
+        let client = MockClient {
+            workspaces,
+            monitors: vec![monitor("Right"), monitor("Left")],
+        };
+
+        let printed = query_workspaces(&client, &[]).unwrap();
+        assert_eq!(
+            rows(&printed),
+            [
+                ("Right", "4", Attached),
+                ("Right", "5", Attached),
+                ("Left", "-1", Attached),
+                ("Left", "01", Attached),
+                ("Left", "1", Attached),
+                ("Left", "2", Attached),
+                ("Left", "+3", Attached),
+                ("Left", "10", Attached),
+                ("Left", past_i128.as_str(), Attached),
+                ("Left", "Mail", Attached),
+                ("Left", "web", Attached),
+                ("Unlisted", "1", Attached),
+                ("Gone", "1", Parked),
+                ("Gone", "2", Parked),
+                ("Old", "1", Parked),
+            ]
+        );
+    }
+
+    #[test]
+    fn cli_query_workspaces_on_one_monitor_lists_its_attached_workspaces_in_name_order() {
+        use WorkspaceState::{Attached, Parked};
+
+        let client = MockClient {
+            workspaces: vec![
+                workspace("b", "Left", Attached),
+                workspace("2", "Right", Attached),
+                workspace("1", "Left", Parked),
+                workspace("a", "Left", Attached),
+                workspace("10", "Left", Attached),
+                workspace("9", "Left", Attached),
+            ],
+            monitors: vec![monitor("Right"), monitor("Left")],
+        };
+
+        let printed = query_workspaces(&client, &["--monitor", "Left"]).unwrap();
+        assert_eq!(
+            rows(&printed),
+            [
+                ("Left", "9", Attached),
+                ("Left", "10", Attached),
+                ("Left", "a", Attached),
+                ("Left", "b", Attached),
+            ]
+        );
+    }
+
+    #[test]
+    fn cli_query_workspaces_on_one_monitor_matches_its_gdi_device() {
+        use WorkspaceState::Attached;
+
+        let client = MockClient {
+            workspaces: vec![
+                workspace("1", "Left", Attached),
+                workspace("2", "Right", Attached),
+            ],
+            monitors: vec![
+                monitor("Right"),
+                MonitorDetails {
+                    gdi_device: Some(r"\\.\DISPLAY2".to_string()),
+                    ..monitor("Left")
+                },
+            ],
+        };
+
+        let printed = query_workspaces(&client, &["--monitor", r"\\.\DISPLAY2"]).unwrap();
+        assert_eq!(rows(&printed), [("Left", "1", Attached)]);
+    }
+
+    #[test]
+    fn cli_query_workspaces_prints_focus_and_visibility() {
+        use WorkspaceState::Attached;
+
+        let client = MockClient {
+            workspaces: vec![
+                WorkspaceInfo {
+                    is_focused: true,
+                    is_visible: true,
+                    ..workspace("1", "Left", Attached)
+                },
+                WorkspaceInfo {
+                    is_visible: true,
+                    ..workspace("2", "Right", Attached)
+                },
+                workspace("3", "Left", Attached),
+            ],
+            monitors: vec![monitor("Left"), monitor("Right")],
+        };
+
+        let printed = query_workspaces(&client, &[]).unwrap();
+        let flags: Vec<(&str, bool, bool)> = printed
+            .iter()
+            .map(|ws| (ws.name.as_str(), ws.is_focused, ws.is_visible))
+            .collect();
+        assert_eq!(
+            flags,
+            [("1", true, true), ("3", false, false), ("2", false, true)]
+        );
+    }
+
+    #[test]
+    fn cli_query_workspaces_on_an_unknown_monitor_fails() {
+        let client = MockClient {
+            workspaces: vec![workspace("1", "Left", WorkspaceState::Attached)],
+            monitors: vec![monitor("Left")],
+        };
+
+        let error = query_workspaces(&client, &["--monitor", "Nope"]).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .starts_with(r#"no connected monitor matches "Nope"."#),
+            "{error}"
+        );
     }
 }

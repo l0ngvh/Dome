@@ -680,7 +680,7 @@ fn delete_float_keeps_workspace_alive() {
         hub.delete_window(f0);
         assert_eq!(snapshot(&hub), canonical);
         assert_eq!(
-            hub.query_workspaces().len(),
+            hub.access.workspaces.sorted_ids().len(),
             2,
             "ws1 should still exist (pruning disabled)"
         );

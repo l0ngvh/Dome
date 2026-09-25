@@ -122,7 +122,9 @@ Export the current window layout to the layout file. See
 
 ## `dome query workspaces`
 
-Prints one JSON entry per active workspace, ordered by creation:
+Returns the list of workspaces that are visible or contain at least one window.
+
+- `--monitor <unique_name|gdi_device>`: returns only the attached workspaces on that monitor.
 
 ```jsonc
 [
@@ -130,28 +132,26 @@ Prints one JSON entry per active workspace, ordered by creation:
     "name": "0",
     // owning monitor, matches unique_name in query monitors
     "monitor": "DELL P2419H",
-    // or "Parked" when the origin monitor is gone
-    "state": "Attached",
+    // or "parked" when the origin monitor is gone
+    "state": "attached",
     // the focused monitor's workspace
     "is_focused": true,
     // the visible workspace, one per monitor
-    "is_visible": true,
-    "window_count": 3
+    "is_visible": true
   },
   {
     "name": "web",
     "monitor": "DELL P2419H",
-    "state": "Attached",
+    "state": "attached",
     "is_focused": false,
-    "is_visible": false,
-    "window_count": 1
+    "is_visible": false
   }
 ]
 ```
 
 ## `dome query minimized`
 
-Prints one JSON entry per minimized window, in the order they were minimized:
+Returns the list of minimized windows, in the order they were minimized.
 
 ```jsonc
 [
@@ -177,14 +177,14 @@ Prints one JSON entry per minimized window, in the order they were minimized:
 
 ## `dome query monitors`
 
-Prints one JSON entry per connected monitor, ordered left to right:
+Returns the list of connected monitors, ordered left to right.
 
 ```jsonc
 [
   {
     // monitor name, can repeat when multiple monitors of the same model exist
     "device_name": "DELL P2419H",
-    // device_name when it is unique, otherwise device_name plus a #N suffix
+    // device_name when the model is unique, otherwise device_name plus #1, #2, and so on, left to right then top to bottom
     "unique_name": "DELL P2419H",
     // populated on macOS, the display's CGDirectDisplayID
     "cg_display_id": 1,
@@ -207,17 +207,7 @@ Prints one JSON entry per connected monitor, ordered left to right:
 
 Restore a minimized window by id.
 
-## `dome generate yasb`
-
-Generate the YASB status-bar integration. Windows. See
-[integration.md](integration.md).
-
 ## `dome generate sketchybar`
 
 Generate the SketchyBar status-bar integration. macOS. See
-[integration.md](integration.md).
-
-## `dome generate zebar`
-
-Generate the Zebar status-bar integration. Windows. See
 [integration.md](integration.md).

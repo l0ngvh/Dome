@@ -135,7 +135,6 @@ mod tests {
             state,
             is_focused: focused,
             is_visible: visible,
-            window_count: 0,
         }
     }
 
