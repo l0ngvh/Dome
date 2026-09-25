@@ -388,17 +388,7 @@ impl AppHandler for WindowLoopHandler {
                     }
                 }
                 HubMessage::Shutdown => {
-                    // This runs inside the wake-source callback, which holds a
-                    // mutable borrow of the loop handler across on_wake. terminate
-                    // fires applicationWillTerminate: synchronously, and that
-                    // delegate method borrows the same handler again, so calling it
-                    // here double-borrows and panics. Defer it to the next main
-                    // run-loop turn, once the borrow is released.
-                    DispatchQueue::main().exec_async(|| {
-                        let mtm = MainThreadMarker::new()
-                            .expect("main dispatch queue runs on the main thread");
-                        NSApplication::sharedApplication(mtm).terminate(None);
-                    });
+                    NSApplication::sharedApplication(mtm).terminate(None);
                     return;
                 }
             }
