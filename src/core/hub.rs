@@ -25,16 +25,12 @@ pub(crate) struct TilingWindowPlacement {
     pub(crate) visible_border_box: PixelRect,
     pub(crate) content_box: PixelRect,
     /// `content_box` trimmed to the monitor. Zero-area when nothing remains.
-    #[cfg_attr(
-        target_os = "windows",
-        expect(
-            dead_code,
-            reason = "macOS trims tiling placements to the work area, Windows places them unclipped"
-        )
-    )]
     pub(crate) visible_content_box: PixelRect,
     /// Highlighting does not require keyboard focus.
     pub(crate) is_highlighted: bool,
+    /// The platform parks the window at its full `content_box` size and shows
+    /// `visible_content_box` from a live capture of it.
+    pub(crate) is_mirrored: bool,
     pub(crate) spawn_direction: Option<Direction>,
 }
 

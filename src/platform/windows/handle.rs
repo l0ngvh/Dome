@@ -666,7 +666,7 @@ impl InspectExternalWindow for ExternalHwnd {
 }
 
 /// Returns the invisible border widths (left, top, right, bottom) as raw i32 in physical pixels.
-fn get_invisible_border(hwnd: HWND) -> (i32, i32, i32, i32) {
+pub(crate) fn get_invisible_border(hwnd: HWND) -> (i32, i32, i32, i32) {
     let mut window_rect = RECT::default();
     let mut frame_rect = RECT::default();
     unsafe {

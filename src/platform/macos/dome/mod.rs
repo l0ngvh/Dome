@@ -7,7 +7,7 @@ mod recovery;
 mod registry;
 mod window;
 
-pub(super) use events::{ContainerShow, HubEvent, HubMessage};
+pub(super) use events::{ContainerShow, HubEvent, HubMessage, MirrorShow};
 pub(in crate::platform::macos) use external_bar::{BarGeometry, ExternalBarProbe};
 pub(super) use inspect::{
     ExitNativeFullscreen, ExtRefresh, compute_reconcile_all, compute_reconciliation,

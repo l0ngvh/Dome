@@ -428,3 +428,58 @@ fn failed_probe_keeps_previous_reservation() {
     macos.settle(&mut dome, 10);
     assert_eq!(macos.window_frame(win), (4, 34, 1912, 1042));
 }
+
+#[test]
+fn a_cut_unfocused_scrolling_column_parks_at_full_size_behind_a_mirror() {
+    let mut macos = MacOS::new();
+    let mut dome = macos
+        .dome_builder()
+        .tiling(|tiling| {
+            tiling.border_size = Pixels::ZERO;
+            tiling.layout = crate::core::Strategy::Scrolling;
+            tiling.scrolling = crate::core::ScrollingConfig {
+                default_column_width: crate::core::SizeConstraint::Percent(40.0),
+            };
+        })
+        .build();
+    let windows: Vec<CGWindowID> = (0..4)
+        .map(|i| {
+            let cg_id = macos.spawn_window(100 + i, "App", "w");
+            dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg_id)], &[], &[]);
+            macos.settle(&mut dome, 10);
+            cg_id
+        })
+        .collect();
+    let [_, cg2, cg3, cg4] = windows[..] else {
+        unreachable!("four windows spawned");
+    };
+    let mirror = |x: f32| {
+        Dimension::new(
+            Length::new(x),
+            Length::ZERO,
+            Length::new(384.0),
+            Length::new(1080.0),
+        )
+    };
+
+    assert_eq!(
+        macos.last_scene_state().mirrors,
+        HashMap::from([(cg2, mirror(384.0))]),
+        "the focused cg4 sits against the right edge, which leaves the right half of cg2 on screen"
+    );
+    assert!(macos.is_offscreen(cg2));
+    assert_eq!(macos.window_frame(cg2).2, 768);
+    assert_eq!(macos.window_frame(cg3), (384, 0, 768, 1080));
+    assert_eq!(macos.window_frame(cg4), (1152, 0, 768, 1080));
+
+    dome.mirror_clicked(cg2);
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(macos.window_frame(cg2), (0, 0, 768, 1080));
+    assert_eq!(
+        macos.last_scene_state().mirrors,
+        HashMap::from([(cg4, mirror(0.0))])
+    );
+    assert!(macos.is_offscreen(cg4));
+    assert_eq!(macos.window_frame(cg4).2, 768);
+}

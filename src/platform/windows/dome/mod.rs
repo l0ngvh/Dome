@@ -26,6 +26,7 @@ use crate::core::{
     ContainerId, Hub, LimitObservation, MonitorId, MonitorLayout, Physical, PixelRect,
     TilingAction, TilingWindowPlacement, WindowId, WindowRestrictions,
 };
+use crate::platform::windows::handle::OFFSCREEN_POS;
 
 use self::placement_tracker::PlacementTracker;
 use self::recovery::Recovery;
@@ -61,7 +62,7 @@ pub(super) use self::window::WindowsMetadata;
 
 use self::events::{
     FloatOverlayAction, HubMessage, MonitorScene, MonitorSetChange, NewTilingOverlay, RenderScene,
-    SceneSender,
+    SceneSender, ThumbnailShow,
 };
 use self::external_bar::StatusBars;
 use crate::platform::reserve_for_bar;
@@ -102,6 +103,7 @@ pub(super) enum HubEvent {
     LayoutConfigChanged(Box<PreferredLayouts>),
     ExportLayout(String),
     TabClicked(ContainerId, usize),
+    ThumbnailClicked(WindowId),
     /// A monitor's effective DPI changed (WM_DPICHANGED).
     DpiChanged,
     /// The desktop work area changed (SPI_SETWORKAREA).
@@ -339,6 +341,14 @@ impl Dome {
 
     pub(super) fn tab_clicked(&mut self, container_id: ContainerId, tab_idx: usize) {
         self.hub.focus_tab_index(container_id, tab_idx);
+        self.apply_layout();
+    }
+
+    pub(super) fn thumbnail_clicked(&mut self, id: WindowId) {
+        if self.registry.get(id).is_none() {
+            return;
+        }
+        self.hub.set_focus(id);
         self.apply_layout();
     }
 
@@ -588,14 +598,15 @@ impl Dome {
                     let mut placed_tiling = Vec::new();
                     let mut placed_floats = Vec::new();
                     let mut container_data = Vec::new();
+                    let mut thumbnails = Vec::new();
 
-                    // Windows places tiles unclipped, so a tile extending past the work area stays where core put it.
-                    // That is a current choice, not an invariant. macOS trims instead.
+                    // A tile that is not mirrored goes on screen unclipped, so its part past the
+                    // work area shows on a neighbouring monitor.
                     for wp in tiling_windows {
                         window_ids.insert(wp.id);
-                        if self.registry.get(wp.id).is_none() {
+                        let Some(entry) = self.registry.get(wp.id) else {
                             continue;
-                        }
+                        };
                         if wp.content_box.is_empty() {
                             tracing::debug!(
                                 window_id = %wp.id,
@@ -604,6 +615,13 @@ impl Dome {
                             );
                             float_actions.extend(self.hide_window(wp.id));
                             continue;
+                        }
+                        if wp.is_mirrored && !wp.visible_content_box.is_empty() {
+                            thumbnails.push(ThumbnailShow {
+                                window_id: wp.id,
+                                source: entry.ext.id(),
+                                placement: *wp,
+                            });
                         }
                         placed_tiling.push(*wp);
                     }
@@ -638,6 +656,7 @@ impl Dome {
                         tiling_windows: placed_tiling,
                         float_windows: placed_floats,
                         containers: container_data,
+                        thumbnails,
                     });
                 }
             }
@@ -919,7 +938,19 @@ impl Dome {
         if self.placement_tracker.is_moving(entry.ext.id()) {
             return;
         }
-        self.show_tiling(wp.id, wp, monitor, z);
+        if wp.is_mirrored {
+            // A thumbnail shows the window at the window's own size, so the window parks at
+            // the size it would have on screen.
+            let parked = PixelRect::new(
+                OFFSCREEN_POS.value(),
+                OFFSCREEN_POS.value(),
+                wp.content_box.width().value(),
+                wp.content_box.height().value(),
+            );
+            self.show_tiling(wp.id, parked, monitor, ZOrder::Unchanged);
+        } else {
+            self.show_tiling(wp.id, wp.content_box, monitor, z);
+        }
     }
 
     fn update_monitors(&mut self, mut monitors: Vec<MonitorInfo>) -> Vec<HwndId> {

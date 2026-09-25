@@ -7,6 +7,7 @@ use crate::core::{
 use super::{LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder};
 
 mod focus;
+mod mirror;
 mod placement;
 mod scroll;
 

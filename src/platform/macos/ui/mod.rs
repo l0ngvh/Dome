@@ -18,11 +18,11 @@ use super::dome::{HubEvent, HubMessage, SceneSender, get_all_monitors};
 use super::listeners::EventListener;
 use crate::action::{Actions, WorkspaceInfo};
 use crate::config::Appearance;
-use crate::core::{ContainerId, MonitorId, WindowId};
+use crate::core::{ContainerId, Dimension, Length, MonitorId, WindowId};
 use crate::platform::render::WgpuContext;
 use crate::platform::shell_menu::{build_menu, focused_tooltip, id_to_action};
 use mirror::{WindowCapture, create_captures_async};
-use overlay::{FloatOverlay, TabBarOverlay, TilingOverlay};
+use overlay::{FloatOverlay, MirrorOverlay, TabBarOverlay, TilingOverlay};
 
 #[derive(Clone)]
 pub(super) struct MessageSender {
@@ -94,6 +94,7 @@ impl Ui {
             tiling_overlays: HashMap::new(),
             tab_bar_overlays: HashMap::new(),
             float_overlays: HashMap::new(),
+            tiling_mirrors: HashMap::new(),
             captures: HashMap::new(),
             event_listener,
             gpu,
@@ -162,6 +163,7 @@ struct UiState {
     tiling_overlays: HashMap<MonitorId, TilingOverlay>,
     tab_bar_overlays: HashMap<ContainerId, TabBarOverlay>,
     float_overlays: HashMap<CGWindowID, FloatOverlay>,
+    tiling_mirrors: HashMap<CGWindowID, MirrorOverlay>,
     // Owns each live WindowCapture to keep its SCStream running.
     captures: HashMap<CGWindowID, WindowCapture>,
     event_listener: EventListener,
@@ -323,9 +325,36 @@ impl AppHandler for WindowLoopHandler {
 
                         if let Some(capture) = state.captures.get_mut(&show.cg_id) {
                             if scene.focused_window != Some(show.placement.id) {
-                                capture.start(show.cg_id, show.content_dim, show.scale);
+                                let source = Dimension::new(
+                                    Length::ZERO,
+                                    Length::ZERO,
+                                    show.content_dim.width,
+                                    show.content_dim.height,
+                                );
+                                capture.start(show.cg_id, source, show.scale);
                             } else {
                                 capture.stop();
+                            }
+                        }
+                    }
+
+                    for show in &scene.mirror_shows {
+                        match state.tiling_mirrors.get_mut(&show.cg_id) {
+                            Some(overlay) => {
+                                let moved = overlay.source() != show.source
+                                    || overlay.scale() != show.scale;
+                                overlay.render(show);
+                                if moved && let Some(capture) = state.captures.get_mut(&show.cg_id)
+                                {
+                                    capture.start(show.cg_id, show.source, show.scale);
+                                }
+                            }
+                            None => {
+                                state.tiling_mirrors.insert(
+                                    show.cg_id,
+                                    MirrorOverlay::new(mtm, show, hub_sender.clone()),
+                                );
+                                capture_pairs.push(show.cg_id);
                             }
                         }
                     }
@@ -343,17 +372,19 @@ impl AppHandler for WindowLoopHandler {
                         );
                     }
 
-                    // Float windows are rare, so we can afford recreating overlays
-                    // and captures each time the workspace changes rather than
-                    // tracking which windows transitioned from float to tiling.
                     let active_floats: HashSet<CGWindowID> =
                         scene.float_shows.iter().map(|s| s.cg_id).collect();
+                    let active_mirrors: HashSet<CGWindowID> =
+                        scene.mirror_shows.iter().map(|s| s.cg_id).collect();
                     state
                         .float_overlays
                         .retain(|cg_id, _| active_floats.contains(cg_id));
                     state
-                        .captures
-                        .retain(|cg_id, _| active_floats.contains(cg_id));
+                        .tiling_mirrors
+                        .retain(|cg_id, _| active_mirrors.contains(cg_id));
+                    state.captures.retain(|cg_id, _| {
+                        active_floats.contains(cg_id) || active_mirrors.contains(cg_id)
+                    });
 
                     {
                         let last = state.last_focused;
@@ -406,13 +437,18 @@ impl AppHandler for WindowLoopHandler {
 
         while let Ok(msg) = state.capture_rx.try_recv() {
             match msg {
-                CaptureMessage::Ready { cg_id, capture } => {
+                CaptureMessage::Ready { cg_id, mut capture } => {
                     if state.float_overlays.contains_key(&cg_id) {
+                        state.captures.insert(cg_id, capture);
+                    } else if let Some(overlay) = state.tiling_mirrors.get(&cg_id) {
+                        capture.start(cg_id, overlay.source(), overlay.scale());
                         state.captures.insert(cg_id, capture);
                     }
                 }
                 CaptureMessage::Frame { cg_id, surface } => {
                     if let Some(overlay) = state.float_overlays.get_mut(&cg_id) {
+                        overlay.apply_frame(&surface);
+                    } else if let Some(overlay) = state.tiling_mirrors.get(&cg_id) {
                         overlay.apply_frame(&surface);
                     }
                 }

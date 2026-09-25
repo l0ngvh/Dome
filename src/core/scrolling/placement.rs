@@ -98,14 +98,17 @@ impl ScrollingStrategy {
                 continue;
             };
             let content_box = border_box.inset_by(border);
+            let visible_content_box = content_box.clip(screen).unwrap_or(PixelRect::ZERO);
+            let is_highlighted = focused_id == Some(wid);
             windows.push(TilingWindowPlacement {
                 id: wid,
                 border_box,
                 visible_border_box,
                 content_box,
-                visible_content_box: content_box.clip(screen).unwrap_or(PixelRect::ZERO),
-                is_highlighted: focused_id == Some(wid),
+                visible_content_box,
+                is_highlighted,
                 spawn_direction: None,
+                is_mirrored: !is_highlighted && visible_content_box != content_box,
             });
             // One window fills its column, so the column border-box equals it.
             containers.push(ContainerPlacement {

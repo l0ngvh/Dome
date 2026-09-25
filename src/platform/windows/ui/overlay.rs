@@ -21,11 +21,17 @@ use windows::core::Interface;
 
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, Physical,
-    PixelRect, Pixels, TilingWindowPlacement,
+    PixelRect, Pixels, TilingWindowPlacement, WindowId,
 };
 use crate::overlay;
+use crate::platform::windows::dome::events::ThumbnailShow;
 use crate::platform::windows::external::{ManageOverlay, ZOrder};
-use crate::platform::windows::handle::OverlayHwnd;
+use crate::platform::windows::handle::{OverlayHwnd, get_invisible_border};
+use windows::Win32::Foundation::RECT;
+use windows::Win32::Graphics::Dwm::{
+    DWM_THUMBNAIL_PROPERTIES, DWM_TNP_RECTDESTINATION, DWM_TNP_RECTSOURCE, DWM_TNP_VISIBLE,
+    DwmRegisterThumbnail, DwmUnregisterThumbnail, DwmUpdateThumbnailProperties,
+};
 
 /// The DirectComposition device and visual that wgpu renders into. Neither needs an HWND,
 /// so the renderer and its overlay state are built before the window exists.
@@ -363,6 +369,96 @@ impl FloatOverlay {
     }
 }
 
+struct ThumbnailHandler {
+    hub_sender: HubSender,
+    window_id: WindowId,
+}
+
+impl AuxiliaryWindowHandler for ThumbnailHandler {
+    fn on_mouse_down(&mut self, _at: Point<NativeUnit>, _button: MouseButton) {
+        self.hub_sender
+            .send(HubEvent::ThumbnailClicked(self.window_id));
+    }
+}
+
+/// A parked tiling window's on-screen part, drawn by DWM from the window itself. DWM keeps
+/// the thumbnail live, so a frame never passes through Dome.
+pub(in crate::platform::windows) struct ThumbnailOverlay {
+    thumbnail: isize,
+    source: HWND,
+    aux: AuxiliaryWindow,
+}
+
+impl ThumbnailOverlay {
+    fn new(show: &ThumbnailShow, hub_sender: HubSender) -> anyhow::Result<Box<Self>> {
+        let (x, y, w, h) = show.placement.visible_content_box.to_surface_size();
+        let attributes = WindowAttributes {
+            position: Point::new(x, y),
+            size: Size::new(w, h),
+            click_through: false,
+            focusable: false,
+        };
+        let aux = AuxiliaryWindow::new(
+            &attributes,
+            Box::new(ThumbnailHandler {
+                hub_sender,
+                window_id: show.window_id,
+            }),
+        )?;
+        let source = HWND::from(show.source);
+        let thumbnail = unsafe { DwmRegisterThumbnail(aux.hwnd(), source)? };
+        let mut overlay = Box::new(Self {
+            thumbnail,
+            source,
+            aux,
+        });
+        overlay.update(show);
+        Ok(overlay)
+    }
+
+    pub(super) fn update(&mut self, show: &ThumbnailShow) {
+        let visible = show.placement.visible_content_box;
+        let content = show.placement.content_box;
+        let (x, y, w, h) = visible.to_surface_size();
+        self.aux.set_frame(Point::new(x, y), Size::new(w, h));
+        self.aux.set_visible(true);
+
+        // The source rectangle is in `GetWindowRect` space, which starts at the invisible
+        // resize border rather than at the visible frame.
+        let (border_left, border_top, _, _) = get_invisible_border(self.source);
+        let left = (visible.x() - content.x()).value() + border_left;
+        let top = (visible.y() - content.y()).value() + border_top;
+        let properties = DWM_THUMBNAIL_PROPERTIES {
+            dwFlags: DWM_TNP_RECTDESTINATION | DWM_TNP_RECTSOURCE | DWM_TNP_VISIBLE,
+            rcDestination: RECT {
+                left: 0,
+                top: 0,
+                right: w as i32,
+                bottom: h as i32,
+            },
+            rcSource: RECT {
+                left,
+                top,
+                right: left + w as i32,
+                bottom: top + h as i32,
+            },
+            fVisible: true.into(),
+            ..Default::default()
+        };
+        if let Err(e) = unsafe { DwmUpdateThumbnailProperties(self.thumbnail, &properties) } {
+            tracing::debug!(source = ?self.source, "DwmUpdateThumbnailProperties failed: {e}");
+        }
+    }
+}
+
+impl Drop for ThumbnailOverlay {
+    fn drop(&mut self) {
+        if let Err(e) = unsafe { DwmUnregisterThumbnail(self.thumbnail) } {
+            tracing::debug!(source = ?self.source, "DwmUnregisterThumbnail failed: {e}");
+        }
+    }
+}
+
 pub(in crate::platform::windows) struct WgpuOverlayFactory {
     gpu: WgpuContext,
     hub_sender: HubSender,
@@ -420,6 +516,12 @@ impl WgpuOverlayFactory {
         )?;
         let handle = Arc::new(OverlayHwnd::new(overlay.hwnd()));
         Ok((overlay, handle))
+    }
+    pub(super) fn create_thumbnail(
+        &self,
+        show: &ThumbnailShow,
+    ) -> anyhow::Result<Box<ThumbnailOverlay>> {
+        ThumbnailOverlay::new(show, self.hub_sender.clone())
     }
     pub(super) fn create_tab_bar(
         &self,

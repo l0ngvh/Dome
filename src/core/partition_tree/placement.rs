@@ -84,6 +84,7 @@ impl PartitionTreeStrategy {
                         visible_content_box: content_box,
                         is_highlighted,
                         spawn_direction,
+                        is_mirrored: false,
                     });
                 }
                 Child::Container(id) => {

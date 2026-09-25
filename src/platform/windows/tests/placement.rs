@@ -828,3 +828,46 @@ fn open_bar_adjust_multiple_monitors() {
     assert_eq!(env.dim(w1), dim(4, 34, 1912, 1042));
     assert_eq!(env.dim(w2), dim(1924, 4, 2552, 1432));
 }
+
+#[test]
+fn a_cut_unfocused_scrolling_column_parks_at_full_size_behind_a_thumbnail() {
+    let mut env = TestEnv::builder()
+        .tiling(|tiling| {
+            tiling.border_size = Pixels::ZERO;
+            tiling.layout = crate::core::Strategy::Scrolling;
+            tiling.scrolling = crate::core::ScrollingConfig {
+                default_column_width: crate::core::SizeConstraint::Percent(40.0),
+            };
+        })
+        .build();
+    let windows = env.open_many(4);
+    env.settle(10);
+    let [_, w2, w3, w4] = windows[..] else {
+        unreachable!("four windows opened");
+    };
+    let parked = Dimension::new(
+        OFFSCREEN_POS,
+        OFFSCREEN_POS,
+        Length::new(768.0),
+        Length::new(1080.0),
+    );
+
+    assert_eq!(
+        env.painted_thumbnails(0),
+        vec![(w2, PixelRect::new(0, 0, 384, 1080))],
+        "the focused w4 sits against the right edge, which leaves the right half of w2 on screen"
+    );
+    assert_eq!(env.dim(w2), parked);
+    assert_eq!(env.dim(w3), dim(384, 0, 768, 1080));
+    assert_eq!(env.dim(w4), dim(1152, 0, 768, 1080));
+
+    env.click_thumbnail(w2);
+    env.settle(10);
+
+    assert_eq!(env.dim(w2), dim(0, 0, 768, 1080));
+    assert_eq!(
+        env.painted_thumbnails(0),
+        vec![(w4, PixelRect::new(1536, 0, 384, 1080))]
+    );
+    assert_eq!(env.dim(w4), parked);
+}

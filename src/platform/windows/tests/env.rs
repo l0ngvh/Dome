@@ -337,6 +337,15 @@ impl TestEnv {
         self.layout();
     }
 
+    pub(super) fn click_thumbnail(&mut self, hwnd: HwndId) {
+        let id = self
+            .dome
+            .window_id_for(hwnd)
+            .expect("a thumbnail shows a managed window");
+        self.dome.thumbnail_clicked(id);
+        self.deliver_overlay_reports();
+    }
+
     pub(super) fn dim(&self, hwnd: HwndId) -> Dimension {
         self.mock(hwnd).get_dim()
     }
@@ -448,6 +457,16 @@ impl TestEnv {
 
     pub(super) fn painted_containers(&self, index: usize) -> Vec<ContainerPlacement> {
         self.painted_scene().monitors[index].containers.clone()
+    }
+
+    /// The source window and its captured rect for each thumbnail the newest scene paints on
+    /// monitor `index`.
+    pub(super) fn painted_thumbnails(&self, index: usize) -> Vec<(HwndId, PixelRect)> {
+        self.painted_scene().monitors[index]
+            .thumbnails
+            .iter()
+            .map(|show| (show.source, show.placement.visible_content_box))
+            .collect()
     }
 
     pub(super) fn painted_border_thickness(&self, index: usize) -> Pixels<Physical> {
