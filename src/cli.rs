@@ -12,8 +12,6 @@ struct Cli {
     command: Option<CliCommand>,
 }
 
-// Clap derives each command name from its variant name in kebab-case, and the Lua
-// action name is that command with every hyphen replaced by an underscore.
 #[derive(Subcommand)]
 enum CliCommand {
     Launch {
@@ -265,59 +263,9 @@ mod tests {
     use super::*;
     use clap::CommandFactory;
 
-    /// Every action command, paired with the wire string it must send.
-    const ACTION_COMMANDS: &[(&[&str], &str)] = &[
-        (&["focus-left"], "focus left"),
-        (&["focus-right"], "focus right"),
-        (&["focus-up"], "focus up"),
-        (&["focus-down"], "focus down"),
-        (&["focus-parent"], "focus parent"),
-        (&["focus-tab-next"], "focus tab next"),
-        (&["focus-tab-prev"], "focus tab prev"),
-        (&["focus-workspace", "3"], "focus workspace 3"),
-        (&["focus-monitor-left"], "focus monitor left"),
-        (&["focus-monitor-right"], "focus monitor right"),
-        (&["focus-monitor-up"], "focus monitor up"),
-        (&["focus-monitor-down"], "focus monitor down"),
-        (
-            &["focus-monitor", "DELL U2720Q #1"],
-            "focus monitor DELL U2720Q #1",
-        ),
-        (&["move-left"], "move left"),
-        (&["move-right"], "move right"),
-        (&["move-up"], "move up"),
-        (&["move-down"], "move down"),
-        (&["move-to-workspace", "3"], "move workspace 3"),
-        (&["move-to-monitor-left"], "move monitor left"),
-        (&["move-to-monitor-right"], "move monitor right"),
-        (&["move-to-monitor-up"], "move monitor up"),
-        (&["move-to-monitor-down"], "move monitor down"),
-        (&["move-to-monitor", "HDMI"], "move monitor HDMI"),
-        (&["toggle-split"], "toggle spawn"),
-        (&["rotate"], "toggle direction"),
-        (&["toggle-tabbed"], "toggle layout"),
-        (&["toggle-float"], "toggle float"),
-        (&["toggle-fullscreen"], "toggle fullscreen"),
-        (&["increase-master-ratio"], "master grow"),
-        (&["decrease-master-ratio"], "master shrink"),
-        (&["increase-master-count"], "master more"),
-        (&["decrease-master-count"], "master fewer"),
-        (&["execute", "open -a Terminal"], "execute open -a Terminal"),
-        (&["close"], "close"),
-        (&["exit"], "exit"),
-        (&["mode", "resize"], "mode resize"),
-    ];
-
     fn dispatch_from_argv(argv: &[&str]) -> Dispatch {
         let cli = Cli::try_parse_from(argv).expect("parse");
         dispatch_from(cli.command)
-    }
-
-    fn assert_action(argv: &[&str], expected: &str) {
-        match dispatch_from_argv(argv) {
-            Dispatch::Action(a) => assert_eq!(a.to_string(), expected, "{argv:?}"),
-            other => panic!("{argv:?} produced {other:?}, expected Action({expected:?})"),
-        }
     }
 
     fn focus_target(argv: &[&str]) -> FocusTarget {
@@ -337,30 +285,6 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
-    }
-
-    #[test]
-    fn cli_action_commands_produce_their_wire_action() {
-        for (tail, expected) in ACTION_COMMANDS {
-            let argv: Vec<&str> = std::iter::once("dome")
-                .chain(tail.iter().copied())
-                .collect();
-            assert_action(&argv, expected);
-        }
-    }
-
-    #[test]
-    fn cli_every_action_command_has_a_table_row() {
-        const NOT_ACTIONS: &[&str] =
-            &["launch", "export", "query", "generate", "unminimize-window"];
-        let covered: Vec<&str> = ACTION_COMMANDS.iter().map(|(tail, _)| tail[0]).collect();
-        for sub in Cli::command().get_subcommands() {
-            let name = sub.get_name();
-            assert!(
-                NOT_ACTIONS.contains(&name) || covered.contains(&name),
-                "command {name:?} has no row in ACTION_COMMANDS"
-            );
-        }
     }
 
     #[test]

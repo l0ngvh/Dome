@@ -118,10 +118,10 @@ return function(mod1)
 					a.move_to_workspace("9")
 				end,
 				[mod1 + "e"] = function(a)
-					a.toggle_split()
-				end,
-				[mod1 + "d"] = function(a)
 					a.rotate()
+				end,
+				[mod1 + "v"] = function(a)
+					a.toggle_split()
 				end,
 				[mod1 + "w"] = function(a)
 					a.toggle_tabbed()
@@ -164,6 +164,17 @@ return function(mod1)
 				end,
 				[mod1 + "f"] = function(a)
 					a.toggle_fullscreen()
+				end,
+				[mod1 + Enter] = function(a)
+					if dome.os == "macos" then
+						a.execute("open -a Terminal")
+					else
+						-- start detaches the new window from the cmd.exe running this.
+						a.execute("start powershell")
+					end
+				end,
+				[mod1 + Shift + "e"] = function(a)
+					a.exit()
 				end,
 				[mod1 + Shift + "q"] = function(a)
 					a.close()

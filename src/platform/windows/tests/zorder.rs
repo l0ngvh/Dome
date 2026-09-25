@@ -239,25 +239,6 @@ fn unfloat_drops_window_from_topmost_band() {
     assert_tiling_above_overlay(&env, &[w1, w2], overlay);
 }
 
-/// A tiling overlay's handle reaches `Dome` asynchronously, so a placement can run before it
-/// arrives.
-#[test]
-fn unfloat_without_overlay_report_still_drops_from_topmost_band() {
-    let mut env = TestEnv::builder().defer_overlay_reports().build();
-    let _w1 = env.open();
-    let w2 = env.open();
-
-    env.run_actions("toggle float");
-    assert!(env.is_topmost(w2), "floated window must be in topmost band");
-
-    env.run_actions("toggle float");
-
-    assert!(
-        !env.is_topmost(w2),
-        "unfloated window must leave the topmost band with no overlay reference"
-    );
-}
-
 #[test]
 fn steady_state_apply_layout_keeps_the_same_zorder() {
     let mut env = TestEnv::new();

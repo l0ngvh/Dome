@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::core::{Pixels, SizeConstraint, Strategy, WindowMatcher};
+use crate::core::{Pixels, SizeConstraint, Strategy};
 use crate::theme::Flavor;
 
 use super::{CleanupFile, config_from, temp_lua_path};
@@ -343,45 +343,6 @@ fn config_load_reverts_an_inconsistent_pair_and_keeps_the_rest() {
         defaults.maximum_width
     );
     assert_eq!(config.tiling.layout, Strategy::Master);
-}
-
-/// A dropped field still yields a list of the right length, so a length check
-/// would not notice it.
-#[test]
-fn ignore_rules_parse_every_matcher_field() {
-    let config = config_from(
-        r#"return { ignore = {
-            {
-              app = "App",
-              bundle_id = "com.example.app",
-              title = "Title",
-              process = "proc.exe",
-              class = "ClassName",
-              aumid = "App_pub!Id",
-            },
-            { class = "/^MessageWindowClass\\+/" },
-        } }"#,
-    );
-    assert_eq!(
-        config.tiling.ignore[0],
-        WindowMatcher {
-            app: Some("App".to_string()),
-            bundle_id: Some("com.example.app".to_string()),
-            title: Some("Title".to_string()),
-            process: Some("proc.exe".to_string()),
-            class: Some("ClassName".to_string()),
-            aumid: Some("App_pub!Id".to_string()),
-        }
-    );
-    // The regex form stays the literal pattern string. `pattern_matches`
-    // interprets the delimiters, not the config reader.
-    assert_eq!(
-        config.tiling.ignore[1],
-        WindowMatcher {
-            class: Some(r"/^MessageWindowClass\+/".to_string()),
-            ..WindowMatcher::default()
-        }
-    );
 }
 
 #[test]

@@ -21,7 +21,6 @@ string_enum!(
     "mocha" => Flavor::Mocha,
 );
 
-// DTO: a resolved palette with no invariants. pub(crate) fields are intentional.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Theme {
     pub(crate) focused_border: Color32,

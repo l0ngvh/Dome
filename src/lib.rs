@@ -11,7 +11,7 @@ mod theme;
 
 #[expect(
     unused_imports,
-    reason = "debug_once and warn_once reserved for future callers"
+    reason = "debug_once has no callers, and warn_once callers name crate::logging directly"
 )]
 pub(crate) use logging::{debug_once, trace_once, warn_once};
 

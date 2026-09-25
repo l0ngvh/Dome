@@ -509,8 +509,6 @@ impl Dome {
         self.hub.handle_tiling_action(action);
     }
 
-    /// Ask the OS to take a window out of the taskbar. The hub keeps the window
-    /// minimized until the restore event reports it back.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn unminimize_window(&mut self, id: WindowId) {
         let Some(entry) = self.registry.get(id) else {

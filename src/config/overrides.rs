@@ -118,7 +118,6 @@ impl ConfigOverrides {
         }
     }
 
-    /// Turns the bundled table into the defaults every other load merges over.
     /// A key `default.lua` never set has nowhere left to fall back to, so it is
     /// an error here rather than a silent zero.
     pub(super) fn into_defaults(self) -> mlua::Result<DefaultValues> {

@@ -1080,7 +1080,6 @@ fn sync_preferred_layout_adopts_manual_float_when_matcher_added() {
         .with_float(vec![float_matcher.clone()])
         .build()]));
 
-    // Export synthesises from live metadata rather than re-emitting the rule.
     assert_eq!(
         hub.export_workspace(ws_id),
         WorkspaceExport {

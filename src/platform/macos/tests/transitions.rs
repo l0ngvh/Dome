@@ -865,14 +865,11 @@ fn tiling_state_restored_by_the_unminimize_action() {
     macos.settle(&mut dome, 10);
 
     let placed = macos.window_frame(cg2);
-    // Read the id while cg2 still holds focus, which the minimize below clears.
-    let window_id = macos.last_scene_state().focused_window.unwrap();
 
     macos.user_minimize(&mut dome, cg2);
     macos.settle(&mut dome, 10);
 
-    send_action(&mut dome, &Action::UnminimizeWindow { id: window_id });
-    macos.deminiaturize(&mut dome, cg2);
+    macos.run_unminimize(&mut dome, cg2);
     macos.settle(&mut dome, 10);
 
     assert_eq!(macos.window_frame(cg2), placed);
@@ -892,15 +889,11 @@ fn native_fullscreen_state_preserved_through_user_minimize_round_trip() {
     macos.settle(&mut dome, 10);
 
     let placed = macos.window_frame(cg1);
-    // Grab WindowId from frame state while the window is focused (before minimize
-    // clears focus).
-    let window_id = macos.last_scene_state().focused_window.unwrap();
 
     macos.user_minimize(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
-    send_action(&mut dome, &Action::UnminimizeWindow { id: window_id });
-    macos.deminiaturize(&mut dome, cg1);
+    macos.run_unminimize(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     // Geometry unchanged (NativeFullscreen windows are positioned by macOS)

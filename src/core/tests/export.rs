@@ -328,7 +328,6 @@ fn export_layout_writes_workspace_keys_in_name_order() {
         .filter_map(|line| line.trim().strip_prefix("["))
         .filter_map(|line| line.split('"').nth(1))
         .collect();
-    // The monitor key opens the nesting, so it leads the scraped list.
     assert_eq!(keys, vec![PRIMARY_MONITOR, "0", "a", "b", "c"]);
 }
 

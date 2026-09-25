@@ -66,7 +66,7 @@ fn home_dir() -> String {
 /// launchd can start Dome with no `HOME` at all, and the passwd record is
 /// populated there.
 #[cfg(target_os = "macos")]
-pub(super) fn passwd_home() -> Option<String> {
+fn passwd_home() -> Option<String> {
     // libc owns the passwd record, so freeing it here would be a double free.
     let passwd = unsafe { libc::getpwuid(libc::getuid()) };
     if passwd.is_null() {
