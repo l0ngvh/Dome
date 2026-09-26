@@ -67,12 +67,6 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
 
     let mtm = MainThreadMarker::new().unwrap();
 
-    // Ahead of the permission prompts, so a second launch during the wait for a
-    // grant does not raise its own copy of them.
-    if dome_ipc::DomeClient.ping() {
-        anyhow::bail!("dome is already running");
-    }
-
     if !permissions::ensure_permissions() {
         return Ok(());
     }
