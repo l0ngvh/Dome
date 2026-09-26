@@ -1,8 +1,12 @@
 //! Smoke tests and delta-debugging reducer for the Hub.
 
+// Nothing a generated op is built from may read the iteration order of a
+// `HashMap` or `HashSet`, because that order changes between processes.
+#![deny(clippy::iter_over_hash_type)]
+
 mod workload;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::{
@@ -1161,6 +1165,27 @@ fn record(
     )
 }
 
+/// Records the op sequence a seed generates, ignoring whether it panics.
+fn record_ops(seed: u64, ops_per_run: usize, strategy: SmokeStrategy) -> Vec<RecordedOp> {
+    let abort = AtomicBool::new(false);
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let workload = Workload::for_seed(seed, ops_per_run);
+    let mut hub = strategy.build_hub();
+    let mut ops: Vec<RecordedOp> = Vec::new();
+    let mut current_tiling = initial_tiling(strategy);
+    let _ = capture_panic(|| {
+        run_iteration(
+            &mut hub,
+            &abort,
+            |op| ops.push(op.clone()),
+            &mut rng,
+            &workload,
+            &mut current_tiling,
+        );
+    });
+    ops
+}
+
 fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
     let mut hub = make_hub();
     let table_size = max_producer_id(ops).map(|m| m + 1).unwrap_or(0);
@@ -1414,7 +1439,12 @@ fn generate_tree_ops(
     });
 
     let mut next_leaf_id = 1usize;
-    let mut container_ids: HashSet<usize> = HashSet::new();
+    // A `Vec` rather than a `HashSet`, because `HashSet` iteration order is
+    // randomized per process, and picking the anchor by `iter().nth(ci)` on it
+    // made the generated tree differ across runs of the same seed, so a smoke
+    // failure could not be reproduced or reduced. Container ids are unique and
+    // pushed in increasing order, so `Vec` needs no dedup.
+    let mut container_ids: Vec<usize> = Vec::new();
     let mut container_counter: usize = 0;
     let mut leaves_created = 1usize;
 
@@ -1430,7 +1460,7 @@ fn generate_tree_ops(
             pick
         } else {
             let ci = pick - leaf_count;
-            *container_ids.iter().nth(ci).unwrap()
+            container_ids[ci]
         };
 
         let leaf_id = next_leaf_id;
@@ -1452,7 +1482,7 @@ fn generate_tree_ops(
             // Anchor is a leaf: wrapping creates a new container.
             let container_id = CONTAINER_BASE + container_counter;
             container_counter += 1;
-            container_ids.insert(container_id);
+            container_ids.push(container_id);
         }
 
         leaves_created += 1;
@@ -1682,6 +1712,24 @@ fn shrink_op_payloads(
 mod tests {
     use super::*;
 
+    /// The reducer only works when a seed replays to the same op sequence every
+    /// time. A process-randomized order in generation, such as iterating a
+    /// `HashMap` or `HashSet`, breaks that silently.
+    #[test]
+    fn same_seed_records_the_same_ops() {
+        const DETERMINISM_OPS: usize = 4000;
+        for seed in [42u64, 149, 167, 777, 1234] {
+            let strategy = strategy_for_seed(seed);
+            let first = record_ops(seed, DETERMINISM_OPS, strategy);
+            let second = record_ops(seed, DETERMINISM_OPS, strategy);
+            assert_eq!(
+                format!("{first:?}"),
+                format!("{second:?}"),
+                "seed {seed} ({strategy:?}) recorded a different op sequence on a second run"
+            );
+        }
+    }
+
     #[test]
     fn normalize_digits_replaces_runs() {
         assert_eq!(normalize_digits(""), "");
@@ -1735,10 +1783,8 @@ mod tests {
             .build()
     }
 
-    /// `resolve_monitor` maps `usize::MAX` to the primary, and
-    /// `Hub::remove_monitor` asserts the removed monitor is not the primary, so
-    /// this fires on every replay. That gives the reducer tests a panic that does
-    /// not depend on a real bug.
+    /// A `RecordedOp` that always panics on replay, giving the reducer tests a
+    /// failure that does not depend on a real bug.
     fn panicking_op() -> RecordedOp {
         RecordedOp::RemoveMonitor {
             monitor: RecordedMonitor(usize::MAX),
