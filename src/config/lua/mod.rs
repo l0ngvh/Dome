@@ -67,46 +67,6 @@ pub(crate) struct ActionContext<'a> {
     pub(crate) keymap_effects: &'a mut dyn KeymapEffects,
 }
 
-/// Owns the VM and the keymaps together, so a reload swaps both or neither.
-pub(crate) struct KeymapRuntime {
-    runtime: LuaRuntime,
-    keymap_effects: Box<dyn KeymapEffects>,
-}
-
-impl KeymapRuntime {
-    pub(crate) fn new(runtime: LuaRuntime, keymap_effects: Box<dyn KeymapEffects>) -> Self {
-        Self {
-            runtime,
-            keymap_effects,
-        }
-    }
-
-    pub(crate) fn dispatch(
-        &mut self,
-        keymap: &str,
-        keystroke: &Keystroke,
-        hub: &mut Hub,
-        effects: &mut dyn PlatformEffects,
-    ) {
-        let mut cx = ActionContext {
-            hub,
-            effects,
-            keymap_effects: self.keymap_effects.as_mut(),
-        };
-        self.runtime.run_binding(keymap, keystroke, &mut cx);
-    }
-
-    pub(crate) fn reload(&mut self) -> Option<Box<Config>> {
-        let config = self.runtime.reload()?;
-        self.keymap_effects.update_keymaps(&config.keymaps);
-        Some(config)
-    }
-
-    pub(crate) fn switch_mode(&mut self, name: &str) {
-        self.keymap_effects.switch_mode(name);
-    }
-}
-
 pub(crate) struct LuaRuntime {
     lua: mlua::Lua,
     keymaps: ModalKeymaps,
@@ -122,7 +82,7 @@ impl LuaRuntime {
         })
     }
 
-    pub(crate) fn load(&mut self) -> Config {
+    pub(crate) fn load(&mut self, keymap_effects: &mut dyn KeymapEffects) -> Config {
         let config = match Config::load(&self.lua, &self.config_path) {
             Ok(config) => config,
             Err(e) => {
@@ -132,11 +92,18 @@ impl LuaRuntime {
                 Config::load_default(&self.lua).expect("the bundled default config must load")
             }
         };
-        self.keymaps = config.keymaps.clone();
+        self.install(&config, keymap_effects);
         config
     }
 
-    fn run_binding(&self, keymap: &str, keystroke: &Keystroke, cx: &mut ActionContext) {
+    pub(crate) fn dispatch(
+        &mut self,
+        keymap: &str,
+        keystroke: &Keystroke,
+        hub: &mut Hub,
+        effects: &mut dyn PlatformEffects,
+        keymap_effects: &mut dyn KeymapEffects,
+    ) {
         // A reload between the keypress and here can drop the binding, so a miss
         // is expected rather than a bug.
         let Some(func) = self
@@ -148,7 +115,12 @@ impl LuaRuntime {
             tracing::warn!(%keymap, %keystroke, "Binding is gone, dropping");
             return;
         };
-        let cx = RefCell::new(cx);
+        let mut context = ActionContext {
+            hub,
+            effects,
+            keymap_effects,
+        };
+        let cx = RefCell::new(&mut context);
         let result = self.lua.scope(|scope| {
             let actions = build_actions(&self.lua, scope, &cx)?;
             func.call::<()>(actions)
@@ -158,10 +130,10 @@ impl LuaRuntime {
         }
     }
 
-    fn reload(&mut self) -> Option<Box<Config>> {
+    pub(crate) fn reload(&mut self, keymap_effects: &mut dyn KeymapEffects) -> Option<Box<Config>> {
         match Config::load(&self.lua, &self.config_path) {
             Ok(config) => {
-                self.keymaps = config.keymaps.clone();
+                self.install(&config, keymap_effects);
                 Some(Box::new(config))
             }
             Err(e) => {
@@ -169,6 +141,11 @@ impl LuaRuntime {
                 None
             }
         }
+    }
+
+    fn install(&mut self, config: &Config, keymap_effects: &mut dyn KeymapEffects) {
+        self.keymaps = config.keymaps.clone();
+        keymap_effects.update_keymaps(&config.keymaps);
     }
 }
 
@@ -306,12 +283,28 @@ mod tests {
         f.0.to_str().unwrap().to_string()
     }
 
-    fn keymap_runtime(runtime: LuaRuntime) -> KeymapRuntime {
-        KeymapRuntime::new(runtime, Box::new(test_support::RecordingKeymap::default()))
-    }
-
     fn meta_c() -> Keystroke {
         "meta+c".parse().unwrap()
+    }
+
+    fn recording_runtime(path: String) -> (LuaRuntime, test_support::RecordingKeymap) {
+        (
+            LuaRuntime::new(path).unwrap(),
+            test_support::RecordingKeymap::default(),
+        )
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn load_publishes_the_keymaps() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut publisher = KeymapPublisher::new(KeymapView::new(), tx);
+        let mut runtime = LuaRuntime::new(String::new()).unwrap();
+        runtime.load(&mut publisher);
+
+        let view = rx.try_recv().expect("load should publish the keymaps");
+        let alt_0: Keystroke = "alt+0".parse().unwrap();
+        assert_eq!(view.resolve(&alt_0), Some("main"));
     }
 
     #[test]
@@ -320,16 +313,15 @@ mod tests {
             "good",
             "return { keymaps = { main = { ['meta+c'] = function(a) a.execute('ok') end } } }",
         );
-        let mut runtime = LuaRuntime::new(path_str(&good)).unwrap();
-        runtime.load();
-        let mut keymaps = keymap_runtime(runtime);
+        let (mut runtime, mut keymap) = recording_runtime(path_str(&good));
+        runtime.load(&mut keymap);
 
         std::fs::write(&good.0, "this is not lua {{{").unwrap();
-        assert!(keymaps.reload().is_none());
+        assert!(runtime.reload(&mut keymap).is_none());
 
         let mut hub = test_support::test_hub();
         let mut effects = test_support::RecordingEffects::default();
-        keymaps.dispatch("main", &meta_c(), &mut hub, &mut effects);
+        runtime.dispatch("main", &meta_c(), &mut hub, &mut effects, &mut keymap);
         assert_eq!(effects.executed, vec!["ok".to_string()]);
     }
 
@@ -339,12 +331,11 @@ mod tests {
             "cb",
             "return { keymaps = { main = { ['meta+c'] = function(a) a.execute('wt') end } } }",
         );
-        let mut runtime = LuaRuntime::new(path_str(&cfg)).unwrap();
-        runtime.load();
-        let mut keymaps = keymap_runtime(runtime);
+        let (mut runtime, mut keymap) = recording_runtime(path_str(&cfg));
+        runtime.load(&mut keymap);
         let mut hub = test_support::test_hub();
         let mut effects = test_support::RecordingEffects::default();
-        keymaps.dispatch("main", &meta_c(), &mut hub, &mut effects);
+        runtime.dispatch("main", &meta_c(), &mut hub, &mut effects, &mut keymap);
         assert_eq!(effects.executed, vec!["wt".to_string()]);
     }
 
@@ -354,20 +345,19 @@ mod tests {
             "inflight",
             "return { keymaps = { main = { ['meta+c'] = function(a) a.execute('old') end } } }",
         );
-        let mut runtime = LuaRuntime::new(path_str(&cfg)).unwrap();
-        runtime.load();
-        let mut keymaps = keymap_runtime(runtime);
+        let (mut runtime, mut keymap) = recording_runtime(path_str(&cfg));
+        runtime.load(&mut keymap);
 
         std::fs::write(
             &cfg.0,
             "return { keymaps = { main = { ['meta+c'] = function(a) a.execute('new') end } } }",
         )
         .unwrap();
-        assert!(keymaps.reload().is_some());
+        assert!(runtime.reload(&mut keymap).is_some());
 
         let mut hub = test_support::test_hub();
         let mut effects = test_support::RecordingEffects::default();
-        keymaps.dispatch("main", &meta_c(), &mut hub, &mut effects);
+        runtime.dispatch("main", &meta_c(), &mut hub, &mut effects, &mut keymap);
         assert_eq!(effects.executed, vec!["new".to_string()]);
     }
 
@@ -379,17 +369,16 @@ mod tests {
             "return { keymaps = { main = { ['meta+c'] = function(a) a.execute('old') end } } }",
         );
         let mut runtime = LuaRuntime::new(path_str(&cfg)).unwrap();
-        runtime.load();
         let (tx, rx) = std::sync::mpsc::channel();
-        let publisher = KeymapPublisher::new(KeymapView::new(), tx);
-        let mut keymaps = KeymapRuntime::new(runtime, Box::new(publisher));
+        let mut publisher = KeymapPublisher::new(KeymapView::new(), tx);
+        runtime.load(&mut publisher);
 
         std::fs::write(
             &cfg.0,
             "return { keymaps = { main = { ['meta+x'] = function(a) a.execute('new') end } } }",
         )
         .unwrap();
-        assert!(keymaps.reload().is_some());
+        assert!(runtime.reload(&mut publisher).is_some());
 
         let view = rx
             .try_iter()
@@ -405,20 +394,19 @@ mod tests {
             "dropped",
             "return { keymaps = { main = { ['meta+c'] = function(a) a.execute('old') end } } }",
         );
-        let mut runtime = LuaRuntime::new(path_str(&cfg)).unwrap();
-        runtime.load();
-        let mut keymaps = keymap_runtime(runtime);
+        let (mut runtime, mut keymap) = recording_runtime(path_str(&cfg));
+        runtime.load(&mut keymap);
 
         std::fs::write(
             &cfg.0,
             "return { keymaps = { main = { ['meta+x'] = function(a) a.execute('other') end } } }",
         )
         .unwrap();
-        assert!(keymaps.reload().is_some());
+        assert!(runtime.reload(&mut keymap).is_some());
 
         let mut hub = test_support::test_hub();
         let mut effects = test_support::RecordingEffects::default();
-        keymaps.dispatch("main", &meta_c(), &mut hub, &mut effects);
+        runtime.dispatch("main", &meta_c(), &mut hub, &mut effects, &mut keymap);
         assert!(effects.executed.is_empty());
     }
 }

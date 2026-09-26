@@ -26,8 +26,7 @@ use objc2::MainThreadMarker;
 
 use crate::config::watch::{load_or_else, start_config_watcher, start_file_watcher};
 use crate::config::{
-    Appearance, KeymapEffects, KeymapRuntime, LuaRuntime, PreferredLayouts,
-    bootstrap::resolve_config_path, paths,
+    Appearance, LuaRuntime, PreferredLayouts, bootstrap::resolve_config_path, paths,
 };
 use crate::ipc;
 use crate::logging::Logger;
@@ -92,6 +91,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
         let config_path = config_path.clone();
         move || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
                 let mut runtime = match LuaRuntime::new(config_path.clone()) {
                     Ok(runtime) => runtime,
                     Err(e) => {
@@ -99,14 +99,12 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
                         return;
                     }
                 };
-                let config = runtime.load();
+                // Load before init_tx.send, so no keypress resolves against an
+                // empty keymap.
+                let config = runtime.load(&mut keymap);
                 tracing::info!(%config_path, "Loaded config");
                 logger.set_level(config.log_level);
                 login_item::sync_login_item(config.start_at_login, bundle_path.as_deref());
-                // Populate keymaps before init_tx.send, so no keypress resolves
-                // against an empty keymap.
-                let mut keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
-                keymap.update_keymaps(&config.keymaps);
                 init_tx.send(config.appearance).ok();
                 let sender = sender_rx.recv().expect("main dropped the UI sender");
                 let dome = Dome::new(
@@ -114,7 +112,8 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
                     config.tiling,
                     hub_layout,
                     Box::new(sender),
-                    KeymapRuntime::new(runtime, Box::new(keymap)),
+                    runtime,
+                    keymap,
                     config.env,
                 );
                 event_loop::run_dome(dome, event_rx, logger, bundle_path);

@@ -11,7 +11,7 @@ use super::mock::{
     OverlayReport, ZOrderStack,
 };
 use crate::action::Action;
-use crate::config::{Appearance, Config, KeymapRuntime, LuaRuntime, PreferredLayouts};
+use crate::config::{Appearance, Config, LuaRuntime, PreferredLayouts};
 use crate::core::{
     ContainerPlacement, Dimension, FloatWindowPlacement, Length, MonitorId, Physical, PixelRect,
     Pixels, TilingConfig, TilingWindowPlacement, WindowId,
@@ -86,18 +86,17 @@ impl TestEnvBuilder {
             focus_target: Arc::new(Mutex::new(FocusTarget::Initial)),
         };
         let scene = Rc::new(RefCell::new(MockSceneSender::new(wiring.clone())));
+        let (keymap_tx, _keymap_rx) = std::sync::mpsc::channel();
+        let keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
+        let runtime = LuaRuntime::new(String::new()).expect("build test Lua VM");
         let dome = Dome::new(
             config.tiling.clone(),
             PreferredLayouts::default(),
             Rc::new(NoopTaskbar),
             Box::new(display),
             Box::new(scene.clone()),
-            {
-                let (keymap_tx, _keymap_rx) = std::sync::mpsc::channel();
-                let keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
-                let runtime = LuaRuntime::new(String::new()).expect("build test Lua VM");
-                KeymapRuntime::new(runtime, Box::new(keymap))
-            },
+            runtime,
+            keymap,
             config.env.clone(),
         )
         .unwrap();

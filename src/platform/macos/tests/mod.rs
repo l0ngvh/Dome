@@ -15,7 +15,7 @@ use anyhow::Result;
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::Action;
-use crate::config::{Config, KeymapRuntime, LuaRuntime, PreferredLayouts};
+use crate::config::{Config, LuaRuntime, PreferredLayouts};
 use crate::core::{Dimension, Length, Logical, MonitorId, PixelRect, TilingConfig, WindowId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
@@ -285,7 +285,8 @@ impl DomeBuilder<'_> {
             config.tiling.clone(),
             PreferredLayouts::default(),
             Box::new(sender),
-            KeymapRuntime::new(runtime, Box::new(keymap)),
+            runtime,
+            keymap,
             config.env.clone(),
         );
         env.config = config;

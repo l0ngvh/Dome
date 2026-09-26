@@ -46,8 +46,7 @@ use windows::core::BOOL;
 use crate::action::{Actions, WorkspaceInfo};
 use crate::config::watch::{load_or_else, start_config_watcher, start_file_watcher};
 use crate::config::{
-    Appearance, KeymapEffects, KeymapRuntime, LuaRuntime, PreferredLayouts,
-    bootstrap::resolve_config_path, paths,
+    Appearance, LuaRuntime, PreferredLayouts, bootstrap::resolve_config_path, paths,
 };
 use crate::core::MonitorId;
 use crate::core::TilingConfig;
@@ -211,6 +210,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
                 unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
                     .ok()
                     .expect("CoInitializeEx failed");
+                let mut keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
                 let mut runtime = match LuaRuntime::new(config_path.clone()) {
                     Ok(runtime) => runtime,
                     Err(e) => {
@@ -218,16 +218,12 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
                         return;
                     }
                 };
-                let config = runtime.load();
+                let config = runtime.load(&mut keymap);
                 // Log before set_level so the line survives a configured level
                 // above info.
                 tracing::info!(%config_path, "Loaded config");
                 logger.set_level(config.log_level);
                 login_item::sync_login_item(config.start_at_login);
-                // Populate keymaps before init_tx.send, so no keypress resolves
-                // against an empty keymap.
-                let mut keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
-                keymap.update_keymaps(&config.keymaps);
                 let tid = unsafe { GetCurrentThreadId() };
                 init_tx.send(tid).ok();
                 run_dome(
@@ -238,8 +234,8 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
                     },
                     layout,
                     main_thread_id,
-                    keymap,
                     runtime,
+                    keymap,
                     logger,
                 );
             }));
@@ -379,8 +375,8 @@ fn run_dome(
     config: DomeConfig,
     workspace_overrides: PreferredLayouts,
     main_thread_id: u32,
-    keymap: KeymapPublisher,
     runtime: LuaRuntime,
+    keymap_publisher: KeymapPublisher,
     logger: Logger,
 ) {
     let domain_thread_id = unsafe { GetCurrentThreadId() };
@@ -422,7 +418,8 @@ fn run_dome(
             scenes: ready.scenes,
             waker: ready.waker,
         }),
-        KeymapRuntime::new(runtime, Box::new(keymap)),
+        runtime,
+        keymap_publisher,
         config.env,
     )
     .expect("Failed to initialize Dome");
