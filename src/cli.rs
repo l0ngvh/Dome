@@ -194,7 +194,12 @@ pub fn run() -> anyhow::Result<()> {
     let dispatch = dispatch_from(cli.command);
 
     match dispatch {
-        Dispatch::Launch { config, layout } => crate::run_app(config, layout)?,
+        Dispatch::Launch { config, layout } => {
+            if crate::DomeClient.ping() {
+                anyhow::bail!("dome is already running");
+            }
+            crate::run_app(config, layout)?
+        }
         Dispatch::Action(action) => {
             crate::DomeClient.action(&action)?;
         }
