@@ -28,6 +28,16 @@ pub(crate) fn bundled_keymaps(
     overrides.into_keymaps()
 }
 
+/// Reads on the caller's VM, because the returned `mlua::Function` dies with the
+/// VM that built it.
+pub(crate) fn bundled_reserved_area(
+    lua: &mlua::Lua,
+    cx: &mut lua::deserializer::LoadContext,
+) -> mlua::Result<mlua::Function> {
+    let overrides: ConfigOverrides = lua::evaluate_with(lua, "default.lua", BUNDLED_SOURCE, cx)?;
+    overrides.into_reserved_area()
+}
+
 fn read(src: &str) -> mlua::Result<DefaultValues> {
     let lua = lua::new_vm()?;
     let overrides: ConfigOverrides = lua::evaluate(&lua, "default.lua", src)?;

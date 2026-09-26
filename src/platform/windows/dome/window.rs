@@ -269,7 +269,7 @@ impl Dome {
         monitor: MonitorId,
         border_thickness: Pixels<Physical>,
     ) -> Option<FloatOverlayAction> {
-        let scale = self.monitors.monitor(monitor).scale();
+        let scale = self.monitors.monitor(monitor).scale;
         let entry = self.registry.get_mut(id)?;
         let new_target = wp.content_box;
         debug_assert!(

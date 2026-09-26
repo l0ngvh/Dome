@@ -5,14 +5,14 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use super::fixtures::{SPAWN_DIM, default_monitor, dim};
+use super::fixtures::{SPAWN_DIM, baseline_tiling, default_monitor, dim};
 use super::mock::{
     MockDisplay, MockExternalHwnd, MockSceneSender, MockWiring, MoveLog, NoopTaskbar,
     OverlayReport, ZOrderStack,
 };
 use crate::action::{Action, Actions};
-use crate::config::tests::{CleanupFile, temp_lua_path};
-use crate::config::{Appearance, Config, LuaRuntime, PreferredLayouts};
+use crate::config::lua::test_support::{TempFile, loaded_runtime};
+use crate::config::{Appearance, PreferredLayouts};
 use crate::core::{
     ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, MonitorId, Physical,
     PixelRect, Pixels, TilingConfig, TilingWindowPlacement, WindowId,
@@ -35,8 +35,8 @@ pub(super) struct TestEnv {
     pub(super) dome: Dome,
     moves: MoveLog,
     monitors: Arc<Mutex<Vec<MonitorInfo>>>,
-    config: Config,
-    config_file: CleanupFile,
+    tiling: TilingConfig,
+    config_file: TempFile,
     z_stack: ZOrderStack,
     pub(super) focus_target: Arc<Mutex<FocusTarget>>,
     mocks: HashMap<HwndId, Arc<MockExternalHwnd>>,
@@ -46,7 +46,8 @@ pub(super) struct TestEnv {
 }
 
 pub(super) struct TestEnvBuilder {
-    config: Config,
+    tiling: TilingConfig,
+    config_source: String,
     monitors: Vec<MonitorInfo>,
 }
 
@@ -68,14 +69,25 @@ impl TestEnvBuilder {
     }
 
     pub(super) fn tiling(mut self, adjust: impl FnOnce(&mut TilingConfig)) -> Self {
-        adjust(&mut self.config.tiling);
+        adjust(&mut self.tiling);
+        self
+    }
+
+    /// The Lua config the runtime loads before `Dome::new`. The tiling config
+    /// still comes from `tiling`.
+    pub(super) fn config_source(mut self, source: &str) -> Self {
+        self.config_source = source.to_string();
         self
     }
 
     pub(super) fn build(self) -> TestEnv {
         setup_logger();
 
-        let Self { config, monitors } = self;
+        let Self {
+            tiling,
+            config_source,
+            monitors,
+        } = self;
         let exclusive_fullscreen_hwnd = Arc::new(Mutex::new(None));
         let shared_monitors = Arc::new(Mutex::new(monitors));
         let display = MockDisplay {
@@ -90,25 +102,23 @@ impl TestEnvBuilder {
         let scene = Rc::new(RefCell::new(MockSceneSender::new(wiring.clone())));
         let (keymap_tx, _keymap_rx) = std::sync::mpsc::channel();
         let keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
-        let config_file = CleanupFile(temp_lua_path("windows_env"));
-        let runtime = LuaRuntime::new(config_file.0.to_string_lossy().into_owned())
-            .expect("build test Lua VM");
+        let (runtime, config_file) = loaded_runtime("windows_env", &config_source);
         let dome = Dome::new(
-            config.tiling.clone(),
+            tiling.clone(),
             PreferredLayouts::default(),
             Rc::new(NoopTaskbar),
             Box::new(display),
             Box::new(scene.clone()),
             runtime,
             keymap,
-            config.env.clone(),
+            HashMap::new(),
         )
         .unwrap();
         let mut env = TestEnv {
             dome,
             moves: wiring.moves,
             monitors: shared_monitors,
-            config,
+            tiling,
             config_file,
             z_stack: wiring.z_stack,
             focus_target: wiring.focus_target,
@@ -184,7 +194,8 @@ impl TestEnv {
 
     pub(super) fn builder() -> TestEnvBuilder {
         TestEnvBuilder {
-            config: crate::config::tests::config(),
+            tiling: baseline_tiling(),
+            config_source: "return {}".to_string(),
             monitors: vec![default_monitor()],
         }
     }
@@ -299,9 +310,7 @@ impl TestEnv {
 
     pub(super) fn destroy_window(&mut self, hwnd: HwndId) {
         self.mocks.remove(&hwnd);
-        if !self.dome.remove_bar(hwnd) {
-            self.dome.window_destroyed(hwnd);
-        }
+        self.dome.window_destroyed(hwnd);
         self.z_stack.remove(hwnd);
         self.layout();
     }
@@ -455,6 +464,10 @@ impl TestEnv {
         self.painted_scene().monitors[index].border_thickness
     }
 
+    pub(super) fn painted_work_area(&self, index: usize) -> PixelRect {
+        self.painted_scene().monitors[index].work_area
+    }
+
     /// The float placement the newest scene paints, for the one float these tests keep.
     pub(super) fn painted_float(&self) -> Option<FloatWindowPlacement> {
         self.painted_scene()
@@ -493,7 +506,7 @@ impl TestEnv {
     }
 
     pub(super) fn border_at(&self, scale: f32) -> Pixels<Physical> {
-        Pixels::round(Length::from_pixels(self.config.tiling.border_size).to_unit(scale))
+        Pixels::round(Length::from_pixels(self.tiling.border_size).to_unit(scale))
     }
 
     pub(super) fn outset(&self, content_box: Dimension) -> Dimension {
@@ -517,11 +530,6 @@ impl TestEnv {
         PixelRect::from_dimension(border_box)
             .inset_by(self.border_at(scale))
             .to_dimension()
-    }
-
-    pub(super) fn full_work_area(&self) -> Dimension {
-        let primary = self.primary_monitor();
-        self.inset_at(primary.work_area.to_dimension(), primary.scale)
     }
 
     pub(super) fn assert_horizontally_tiled(&self, windows: &[Dimension]) {
@@ -562,8 +570,12 @@ impl TestEnv {
     }
 
     pub(super) fn change_config(&mut self, source: &str) {
-        std::fs::write(&self.config_file.0, source).expect("write the test config");
-        self.config = *self.dome.reload().expect("the test config should load");
+        self.config_file.rewrite(source);
+        self.tiling = self
+            .dome
+            .reload()
+            .expect("the test config should load")
+            .tiling;
         self.layout();
     }
 
@@ -623,11 +635,6 @@ impl TestEnv {
             aumid: None,
             app_name: ext.app_name.clone(),
         };
-        if Dome::is_known_bar(&metadata) {
-            self.dome
-                .capture_bar(hwnd_id, 1, PixelRect::from_dimension(ext.get_dim()));
-            return hwnd_id;
-        }
         if !ext.manageable {
             return hwnd_id;
         }

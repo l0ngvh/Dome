@@ -83,12 +83,6 @@ fn monitors_changed_updates_layout() {
         name: "Test".to_string(),
         gdi_device: "\\\\.\\DISPLAY1".to_string(),
         work_area: PixelRect::new(0, 0, 1280, 720),
-        bounds: Dimension::new(
-            Length::ZERO,
-            Length::ZERO,
-            Length::new(1280.0),
-            Length::new(720.0),
-        ),
         is_primary: true,
         scale: 1.0,
     };
@@ -174,6 +168,14 @@ fn ignored_window_rule_prevents_insertion() {
     let w1 = env.window().process("bloat.exe").open();
 
     assert_eq!(env.dim(w1), SPAWN_DIM);
+}
+
+#[test]
+fn zebar_stays_unmanaged() {
+    let mut env = TestEnv::new();
+    let bar = env.open_bar();
+
+    assert!(!env.dome.is_managed(bar));
 }
 
 #[test]
@@ -555,7 +557,7 @@ fn border_size_changed_resize_managed_windows() {
     let prev_d1 = env.dim(w1);
     let prev_d2 = env.dim(w2);
     let prev_d3 = env.dim(w3);
-    let border_size = baseline_config().tiling.border_size.value() + 2;
+    let border_size = baseline_tiling().border_size.value() + 2;
     env.change_config(&format!("return {{ border_size = {border_size} }}"));
 
     let d1 = env.dim(w1);
@@ -577,7 +579,11 @@ fn config_reload_dispatches_apply_theme_on_flavor_change() {
     env.run_actions("toggle float");
     let _w3 = env.open();
 
-    let configured = baseline_config().appearance.theme;
+    let lua = crate::config::lua::new_vm().expect("the test Lua VM should build");
+    let configured = crate::config::Config::load_default(&lua)
+        .expect("the bundled config should load")
+        .appearance
+        .theme;
     assert!(
         env.window_appearance().is_none(),
         "no appearance message before the reload"

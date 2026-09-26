@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::core::{Dimension, Length, Physical, PixelRect, TilingWindowPlacement};
+use crate::core::{Dimension, Length, Physical, PixelRect, TilingConfig, TilingWindowPlacement};
 use crate::platform::windows::dome::MonitorInfo;
 
 pub(super) const SCREEN_WIDTH: Length = Length::new(1920.0);
@@ -14,8 +14,11 @@ pub(super) const SPAWN_DIM: Dimension<Physical> = Dimension::new(
     Length::new(600.0),
 );
 
-pub(super) fn baseline_config() -> Config {
-    crate::config::tests::config()
+pub(super) fn baseline_tiling() -> TilingConfig {
+    TilingConfig {
+        ignore: Config::default_ignore(),
+        ..crate::config::tests::tiling_config()
+    }
 }
 
 pub(super) fn dim(x: i32, y: i32, w: i32, h: i32) -> Dimension<Physical> {
@@ -42,7 +45,6 @@ pub(super) fn default_monitor() -> MonitorInfo {
             SCREEN_WIDTH,
             SCREEN_HEIGHT,
         )),
-        bounds: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
         is_primary: true,
         scale: 1.0,
     }
@@ -59,12 +61,6 @@ pub(super) fn second_monitor() -> MonitorInfo {
             Length::new(2560.0),
             Length::new(1440.0),
         )),
-        bounds: Dimension::new(
-            SCREEN_WIDTH,
-            Length::ZERO,
-            Length::new(2560.0),
-            Length::new(1440.0),
-        ),
         is_primary: false,
         scale: 1.0,
     }
@@ -81,12 +77,6 @@ pub(super) fn scaled_monitor(scale: f32) -> MonitorInfo {
             SCREEN_WIDTH * scale,
             SCREEN_HEIGHT * scale,
         )),
-        bounds: Dimension::new(
-            Length::ZERO,
-            Length::ZERO,
-            SCREEN_WIDTH * scale,
-            SCREEN_HEIGHT * scale,
-        ),
         is_primary: true,
         scale,
     }

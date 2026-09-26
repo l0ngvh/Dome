@@ -328,68 +328,60 @@ fn multi_monitor_per_display() {
     assert_eq!(macos.window_frame(win2), (1924, 4, 2552, 1432));
 }
 
-#[test]
-fn set_reserved_bar_shrinks_and_restores_work_area() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
-
-    let win = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);
-    macos.settle(&mut dome, 10);
-    assert_eq!(macos.window_frame(win), (4, 4, 1912, 1072));
-
-    dome.set_reserved_bar(Ok(BarGeometry::new(30.0, Some("top".into()), 0.0, 0.0)));
-    macos.settle(&mut dome, 10);
-    assert_eq!(macos.window_frame(win), (4, 34, 1912, 1042));
-
-    dome.set_reserved_bar(Ok(BarGeometry::new(0.0, None, 0.0, 0.0)));
-    macos.settle(&mut dome, 10);
-    assert_eq!(macos.window_frame(win), (4, 4, 1912, 1072));
+fn reserved_area_config(body: &str) -> String {
+    format!("return {{ reserved_area = function(monitor) {body} end }}")
 }
 
-/// The only production path that can be handed a fractional work area from a test.
-/// `get_all_monitors` builds its rect from `NSScreen`, so the snap it performs is
-/// unreachable here.
 #[test]
-fn a_fractional_reserved_bar_keeps_the_window_inside_the_reserved_area() {
-    const BAR_HEIGHT: f64 = 30.4;
-
+fn a_reserved_area_applies_from_startup() {
     let mut macos = MacOS::new();
-    // Zero border so the sole tile fills the work area exactly, leaving no inset to
-    // absorb a sub-point rounding error.
     let mut dome = macos
         .dome_builder()
-        .tiling(|tiling| tiling.border_size = Pixels::ZERO)
+        .config_source(&reserved_area_config("return { top = 30 }"))
         .build();
 
     let win = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);
     macos.settle(&mut dome, 10);
 
-    dome.set_reserved_bar(Ok(BarGeometry::new(
-        BAR_HEIGHT,
-        Some("top".into()),
-        0.0,
-        0.0,
-    )));
-    macos.settle(&mut dome, 10);
-
-    let bar_height = Length::new(BAR_HEIGHT as f32);
-    let reserved = Dimension::new(
-        Length::ZERO,
-        bar_height,
-        SCREEN_WIDTH,
-        SCREEN_HEIGHT - bar_height,
+    assert_eq!(macos.window_frame(win), (4, 34, 1912, 1042));
+    assert_eq!(
+        macos.painted_work_area(0),
+        PixelRect::new(0, 30, 1920, 1050).to_dimension()
     );
-    assert_inside_work_area(macos.window_frame(win), reserved);
 }
 
 #[test]
-fn display_added_after_probe_is_inset() {
+fn a_fullscreen_window_starts_below_the_reserved_area() {
     let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut dome = macos
+        .dome_builder()
+        .config_source(&reserved_area_config("return { top = 30 }"))
+        .build();
 
-    dome.set_reserved_bar(Ok(BarGeometry::new(30.0, Some("top".into()), 0.0, 0.0)));
+    let win = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);
+    macos.settle(&mut dome, 10);
+    send(&mut dome, "toggle fullscreen");
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(macos.window_frame(win), (0, 30, 1920, 1050));
+    assert_eq!(
+        macos.painted_work_area(0),
+        PixelRect::new(0, 30, 1920, 1050).to_dimension()
+    );
+}
+
+#[test]
+fn a_reserved_area_applies_to_an_added_monitor() {
+    let mut macos = MacOS::new();
+    let mut dome = macos
+        .dome_builder()
+        .config_source(&reserved_area_config(
+            "if monitor.name == 'External' then return { top = 30 } end",
+        ))
+        .build();
+
     dome.monitors_changed(vec![default_monitor(), second_monitor()]);
 
     let win1 = macos.spawn_window(100, "Safari", "Google");
@@ -401,26 +393,71 @@ fn display_added_after_probe_is_inset() {
     dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win2)], &[], &[]);
     macos.settle(&mut dome, 10);
 
-    assert_eq!(macos.window_frame(win1), (4, 34, 1912, 1042));
+    assert_eq!(macos.window_frame(win1), (4, 4, 1912, 1072));
     assert_eq!(macos.window_frame(win2), (1924, 34, 2552, 1402));
 }
 
 #[test]
-fn failed_probe_keeps_previous_reservation() {
+fn a_reserved_area_matches_the_numbered_name() {
+    let mut macos = MacOS::new();
+    let mut dome = macos
+        .dome_builder()
+        .config_source(&reserved_area_config(
+            "if monitor.name == 'DELL #2' then return { top = 30 } end",
+        ))
+        .build();
+
+    let left = MonitorInfo {
+        name: "DELL".to_string(),
+        ..default_monitor()
+    };
+    let right = MonitorInfo {
+        name: "DELL".to_string(),
+        ..second_monitor()
+    };
+    dome.monitors_changed(vec![left, right]);
+
+    let win1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win1)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    send(&mut dome, "focus monitor right");
+    let win2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win2)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(macos.window_frame(win1), (4, 4, 1912, 1072));
+    assert_eq!(macos.window_frame(win2), (1924, 34, 2552, 1402));
+}
+
+#[test]
+fn a_reload_reapplies_the_reserved_area() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
 
     let win = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);
     macos.settle(&mut dome, 10);
+    assert_eq!(macos.window_frame(win), (4, 4, 1912, 1072));
 
-    dome.set_reserved_bar(Ok(BarGeometry::new(30.0, Some("top".into()), 0.0, 0.0)));
+    macos.change_config(&mut dome, &reserved_area_config("return { top = 30 }"));
     macos.settle(&mut dome, 10);
     assert_eq!(macos.window_frame(win), (4, 34, 1912, 1042));
+    assert_eq!(
+        macos.painted_work_area(0),
+        PixelRect::new(0, 30, 1920, 1050).to_dimension()
+    );
 
-    dome.set_reserved_bar(Err(anyhow::anyhow!("probe failed")));
+    macos.change_config(
+        &mut dome,
+        &reserved_area_config("return { top = 0, bottom = 0, left = 0, right = 0 }"),
+    );
     macos.settle(&mut dome, 10);
-    assert_eq!(macos.window_frame(win), (4, 34, 1912, 1042));
+    assert_eq!(macos.window_frame(win), (4, 4, 1912, 1072));
+    assert_eq!(
+        macos.painted_work_area(0),
+        PixelRect::new(0, 0, 1920, 1080).to_dimension()
+    );
 }
 
 fn temp_layout_path(name: &str) -> std::path::PathBuf {

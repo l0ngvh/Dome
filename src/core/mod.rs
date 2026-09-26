@@ -26,6 +26,7 @@ pub(crate) use master::{MasterConfig, read_master_count_override, read_master_ra
 pub(crate) use matcher::{WindowMatcher, pattern_matches};
 pub(crate) use monitor::MonitorSelector;
 pub(crate) use monitor::ReportedMonitor;
+pub(crate) use monitor::ReservedArea;
 pub(crate) use node::Direction;
 #[cfg(target_os = "windows")]
 pub(crate) use node::Physical;

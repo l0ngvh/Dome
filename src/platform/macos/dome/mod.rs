@@ -1,5 +1,4 @@
 mod events;
-mod external_bar;
 mod inspect;
 mod layout;
 mod monitor;
@@ -8,7 +7,6 @@ mod registry;
 mod window;
 
 pub(super) use events::{ContainerShow, FloatShow, HubEvent, HubMessage, TilingWindowShow};
-pub(in crate::platform::macos) use external_bar::{BarGeometry, ExternalBarProbe};
 pub(super) use inspect::{
     ExitNativeFullscreen, ExtRefresh, compute_reconcile_all, compute_reconciliation,
     compute_window_positions,
@@ -201,8 +199,7 @@ pub(in crate::platform::macos) struct Dome {
     recovery: Recovery,
     pending_created: Vec<WindowId>,
     pending_deleted: Vec<WindowId>,
-    bar_geometry: Option<BarGeometry>,
-    // Unshrunk. `reconcile_monitors` insets from this, so a shrunk value compounds.
+    /// The last monitor enumeration, exactly as the OS reported it.
     monitors: Vec<MonitorInfo>,
     /// Detection is suppressed while the display settles after a monitor change.
     monitor_settling: bool,
@@ -245,7 +242,6 @@ impl Dome {
             pending_created: Vec::new(),
             pending_deleted: Vec::new(),
             displayed_windows: HashSet::new(),
-            bar_geometry: None,
             monitors: monitors.to_vec(),
             monitor_settling: false,
             keymap_publisher,
@@ -335,7 +331,7 @@ impl Dome {
                         ax_for_recovery,
                         rect.width(),
                         rect.height(),
-                        self.monitor_registry.primary_monitor().work_area(),
+                        self.monitor_registry.primary_monitor().work_area,
                     );
                 }
             }
@@ -364,34 +360,6 @@ impl Dome {
                 );
             }
         }
-        self.flush_layout();
-    }
-
-    pub(in crate::platform::macos) fn set_reserved_bar(
-        &mut self,
-        probed: anyhow::Result<BarGeometry>,
-    ) {
-        let geo = match probed {
-            Ok(geo) => geo,
-            Err(e) => {
-                let state = if self.bar_geometry.is_some() {
-                    "keeping the last known reservation"
-                } else {
-                    "reserving no bar space yet"
-                };
-                crate::logging::warn_once!(
-                    key: "sketchybar-probe",
-                    "Bar probe failed, {state}: {e:#}"
-                );
-                return;
-            }
-        };
-        if self.bar_geometry.as_ref() == Some(&geo) {
-            return;
-        }
-        tracing::info!(?geo, "Bar geometry changed");
-        self.bar_geometry = Some(geo);
-        self.reconcile_monitors();
         self.flush_layout();
     }
 

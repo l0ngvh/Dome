@@ -36,7 +36,7 @@ fn tabbed_pane_keeps_min_height_when_tab_bar_exceeds_screen() {
     hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1))
+    Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[W0, W1])
       )

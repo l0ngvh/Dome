@@ -197,7 +197,7 @@ Returns the list of connected monitors, ordered left to right.
     "cg_display_id": 1,
     // the GDI device name on Windows
     "gdi_device": null,
-    // usable area, excluding docks and taskbars
+    // usable area, excluding docks, taskbars, and the reserved_area insets
     "work_area": { "x": 0, "y": 0, "width": 1920, "height": 1080 }
   },
   {

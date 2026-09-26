@@ -1,7 +1,8 @@
 use super::allocator::{Node, NodeId};
 use super::hub::{Hub, RestrictedAction};
-use super::node::{MonitorId, PixelRect, Pixels, WorkspaceId};
+use super::node::{Dimension, Length, Logical, MonitorId, PixelRect, Pixels, WorkspaceId};
 use super::workspace::{Attachment, Workspace};
+use crate::config::lua::deserializer::{FromLuaValue, LoadContext, as_table};
 
 #[derive(Debug, Clone)]
 pub(super) struct Monitor {
@@ -9,15 +10,22 @@ pub(super) struct Monitor {
     pub(super) device_name: String,
     /// Stable name Dome derives for this monitor. No platform handle is stable
     /// across platforms, so Dome uses `device_name` when it is unique among
-    /// active monitors. On a collision it appends `#N` by screen position, left
-    /// to right. The same arrangement always yields the same names.
+    /// active monitors. On a collision it appends `#N` by `system_work_area`
+    /// position, left to right. The same arrangement always yields the same
+    /// names.
     pub(super) unique_name: String,
     /// `CGDirectDisplayID`. Windows has no stable counterpart, so `None` there.
     pub(super) cg_display_id: Option<u32>,
     /// Win32 szDevice (`\\.\DISPLAY1`). `None` on macOS. Restamped every
     /// reconcile because Windows can move it to another display.
     pub(super) gdi_device: Option<String>,
+    /// `system_work_area` minus `reserved_area`.
     pub(super) work_area: PixelRect,
+    /// The work area the operating system reports, before the reserved area.
+    pub(super) system_work_area: PixelRect,
+    /// The inset set the config's `reserved_area` function last returned for
+    /// this monitor.
+    pub(super) reserved_area: ReservedArea,
     /// Multiplier applied to config-denominated lengths before layout math on
     /// this monitor.
     ///
@@ -32,6 +40,49 @@ pub(super) struct Monitor {
 
 impl Node for Monitor {
     type Id = MonitorId;
+}
+
+/// Logical pixels to keep clear on each edge of one monitor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReservedArea {
+    pub(crate) top: Pixels<Logical>,
+    pub(crate) bottom: Pixels<Logical>,
+    pub(crate) left: Pixels<Logical>,
+    pub(crate) right: Pixels<Logical>,
+}
+
+impl ReservedArea {
+    pub(crate) const ZERO: Self = Self {
+        top: Pixels::ZERO,
+        bottom: Pixels::ZERO,
+        left: Pixels::ZERO,
+        right: Pixels::ZERO,
+    };
+
+    pub(crate) fn subtract_from(self, work_area: PixelRect, scale: f32) -> PixelRect {
+        let inset = |px: Pixels<Logical>| Length::from_pixels(px).to_unit(scale);
+        let area = work_area.to_dimension();
+        let far_x = area.x + area.width;
+        let far_y = area.y + area.height;
+        // A near edge stops at the far edge, so a collapsed area stays inside the work area.
+        let left = (area.x + inset(self.left)).min(far_x);
+        let top = (area.y + inset(self.top)).min(far_y);
+        let right = far_x - inset(self.right);
+        let bottom = far_y - inset(self.bottom);
+        PixelRect::from_dimension_inward(Dimension::new(left, top, right - left, bottom - top))
+    }
+}
+
+impl FromLuaValue for ReservedArea {
+    fn from_lua_value(value: &mlua::Value, cx: &mut LoadContext) -> mlua::Result<Self> {
+        let table = as_table(value, "a table of insets")?;
+        Ok(ReservedArea {
+            top: cx.field_or_else(table, "top", || Pixels::ZERO),
+            bottom: cx.field_or_else(table, "bottom", || Pixels::ZERO),
+            left: cx.field_or_else(table, "left", || Pixels::ZERO),
+            right: cx.field_or_else(table, "right", || Pixels::ZERO),
+        })
+    }
 }
 
 /// What a platform reconcile reports for one monitor.
@@ -113,15 +164,17 @@ impl Hub {
             cg_display_id: reported.cg_display_id,
             gdi_device: reported.gdi_device,
             work_area: reported.work_area,
+            system_work_area: reported.work_area,
+            reserved_area: ReservedArea::ZERO,
             scale: reported.scale,
             // Placeholder. A workspace needs this monitor's id, so the real
             // active one is chosen at the end.
             active_workspace: WorkspaceId::new(0),
         });
-        self.recompute_monitor_names();
+        self.rederive_monitors();
 
-        // Read `unique_name` after the recompute above, never before. A stale
-        // pre-recompute suffix would miss a parked workspace's frozen origin.
+        // Read `unique_name` only after `rederive_monitors`. A suffix from before
+        // it would miss a parked workspace's frozen origin.
         let origin_name = self.access.monitors.get(monitor_id).unique_name.clone();
         let mut returning: Vec<WorkspaceId> = self
             .access
@@ -199,11 +252,14 @@ impl Hub {
         monitor_id
     }
 
-    /// Re-derives every active monitor's `unique_name`.
+    /// Re-derives every active monitor's `unique_name`, `reserved_area`, and
+    /// `work_area`. Recomputes the workspace placements on each monitor whose
+    /// `work_area` moved. Calls the config's `reserved_area` function once per
+    /// monitor.
     ///
     /// A `#N` rank depends on the whole active set. Call this on every add,
-    /// remove, or move.
-    fn recompute_monitor_names(&mut self) {
+    /// remove, or update, and after every successful config reload.
+    pub(super) fn rederive_monitors(&mut self) {
         let all: Vec<(MonitorId, String, PixelRect)> = self
             .access
             .monitors
@@ -211,23 +267,61 @@ impl Hub {
             .into_iter()
             .map(|id| {
                 let m = self.access.monitors.get(id);
-                (id, m.device_name.clone(), m.work_area)
+                (id, m.device_name.clone(), m.system_work_area)
             })
             .collect();
-        for (id, device_name, _) in &all {
-            let mut colliders: Vec<&(MonitorId, String, PixelRect)> =
-                all.iter().filter(|(_, dn, _)| dn == device_name).collect();
-            let unique = if colliders.len() == 1 {
-                device_name.clone()
-            } else {
-                colliders.sort_by_key(|(_, _, r)| (r.x(), r.y()));
-                let rank = colliders
-                    .iter()
-                    .position(|(cid, _, _)| cid == id)
-                    .expect("self in colliders");
-                format!("{device_name} #{}", rank + 1)
+        let names: Vec<(MonitorId, String)> = all
+            .iter()
+            .map(|(id, device_name, _)| {
+                let mut colliders: Vec<&(MonitorId, String, PixelRect)> =
+                    all.iter().filter(|(_, dn, _)| dn == device_name).collect();
+                let unique = if colliders.len() == 1 {
+                    device_name.clone()
+                } else {
+                    colliders.sort_by_key(|(_, _, r)| (r.x(), r.y()));
+                    let rank = colliders
+                        .iter()
+                        .position(|(cid, _, _)| cid == id)
+                        .expect("self in colliders");
+                    format!("{device_name} #{}", rank + 1)
+                };
+                (*id, unique)
+            })
+            .collect();
+
+        let mut moved: Vec<MonitorId> = Vec::new();
+        for (id, name) in names {
+            let (system_work_area, scale) = {
+                let m = self.access.monitors.get(id);
+                (m.system_work_area, m.scale)
             };
-            self.access.monitors.get_mut(*id).unique_name = unique;
+            let reserved_area = self.runtime.reserved_area(&name);
+            let work_area = reserved_area.subtract_from(system_work_area, scale);
+            let m = self.access.monitors.get_mut(id);
+            if work_area != m.work_area {
+                moved.push(id);
+            }
+            m.unique_name = name;
+            m.reserved_area = reserved_area;
+            m.work_area = work_area;
+        }
+        for id in moved {
+            self.compute_monitor_placements(id);
+        }
+    }
+
+    fn compute_monitor_placements(&mut self, monitor_id: MonitorId) {
+        let ws_ids: Vec<WorkspaceId> = self
+            .access
+            .workspaces
+            .sorted_ids()
+            .into_iter()
+            .filter(|&ws_id| self.access.workspaces.get(ws_id).monitor == monitor_id)
+            .collect();
+        for ws_id in ws_ids {
+            self.strategies
+                .for_workspace_mut(ws_id)
+                .compute_placement(&self.access, ws_id);
         }
     }
 
@@ -281,7 +375,7 @@ impl Hub {
         // Restamp `unique_name` across the survivors. After the snapshot, so the
         // frozen origin reflects the pre-removal set. After the delete, so the
         // recompute sees only survivors.
-        self.recompute_monitor_names();
+        self.rederive_monitors();
     }
 
     /// Apply the latest reported description to an existing monitor.
@@ -303,39 +397,29 @@ impl Hub {
         }
 
         let monitor = self.access.monitors.get_mut(monitor_id);
-        let geometry_changed =
-            monitor.work_area != reported.work_area || monitor.scale != reported.scale;
-        if !geometry_changed
+        let scale_changed = monitor.scale != reported.scale;
+        if !scale_changed
+            && monitor.system_work_area == reported.work_area
             && monitor.device_name == reported.device_name
             && monitor.cg_display_id == reported.cg_display_id
             && monitor.gdi_device == reported.gdi_device
         {
             return;
         }
+        let work_area_before = monitor.work_area;
         monitor.device_name = reported.device_name;
-        monitor.work_area = reported.work_area;
+        monitor.system_work_area = reported.work_area;
         monitor.scale = reported.scale;
         monitor.cg_display_id = reported.cg_display_id;
         monitor.gdi_device = reported.gdi_device;
 
-        if geometry_changed {
-            // Collect IDs first, so the strategy call can take `&mut self.access`
-            // without a live borrow of `self.access.workspaces`.
-            let ws_ids: Vec<WorkspaceId> = self
-                .access
-                .workspaces
-                .sorted_ids()
-                .into_iter()
-                .filter(|&id| self.access.workspaces.get(id).monitor == monitor_id)
-                .collect();
-            for ws_id in ws_ids {
-                self.strategies
-                    .for_workspace_mut(ws_id)
-                    .compute_placement(&self.access, ws_id);
-            }
-        }
+        self.rederive_monitors();
 
-        self.recompute_monitor_names();
+        // A new scale changes every scaled length in the layout, even when the
+        // work area stays put.
+        if scale_changed && self.access.monitors.get(monitor_id).work_area == work_area_before {
+            self.compute_monitor_placements(monitor_id);
+        }
     }
 
     pub(super) fn monitor_id_by_disambiguated_name(&self, name: &str) -> Option<MonitorId> {
@@ -390,5 +474,51 @@ impl Hub {
                     .map(|(id, _)| id)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WORK_AREA: PixelRect = PixelRect::new(100, 50, 1000, 800);
+
+    fn insets(top: i32, bottom: i32, left: i32, right: i32) -> ReservedArea {
+        ReservedArea {
+            top: Pixels::new(top),
+            bottom: Pixels::new(bottom),
+            left: Pixels::new(left),
+            right: Pixels::new(right),
+        }
+    }
+
+    #[test]
+    fn zero_leaves_the_work_area_unchanged() {
+        assert_eq!(ReservedArea::ZERO.subtract_from(WORK_AREA, 1.0), WORK_AREA);
+    }
+
+    #[test]
+    fn each_inset_moves_only_its_own_edge() {
+        assert_eq!(
+            insets(30, 10, 20, 5).subtract_from(WORK_AREA, 1.0),
+            PixelRect::new(120, 80, 975, 760)
+        );
+    }
+
+    #[test]
+    fn an_inset_wider_than_the_work_area_collapses_it_inside() {
+        assert_eq!(
+            insets(900, 0, 1200, 0).subtract_from(WORK_AREA, 1.0),
+            PixelRect::new(1100, 850, 0, 0)
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_scaled_inset_rounds_inward() {
+        assert_eq!(
+            insets(25, 25, 0, 0).subtract_from(PixelRect::new(0, 0, 1920, 1080), 1.5),
+            PixelRect::new(0, 38, 1920, 1004)
+        );
     }
 }

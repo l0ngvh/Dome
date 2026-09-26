@@ -21,6 +21,12 @@ config.font_family = dome.env.DOME_FONT or "PingFang SC"
 config.float = { { process = "calculator.exe" } }
 config.fullscreen = { { process = "slides.exe" } }
 config.env = { EDITOR = "nvim" }
+config.reserved_area = function(monitor)
+  if monitor.name == "Built-in Retina Display" then
+    return { top = 0 }
+  end
+  return { top = 32 }
+end
 
 -- A typed local keeps a mixed-shape matcher list from being inferred against
 -- its first element.

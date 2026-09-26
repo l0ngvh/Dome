@@ -38,7 +38,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PCWSTR, w};
 
-use crate::core::{Dimension, Length, LimitObservation, LimitUpdate, Logical, PixelRect, Pixels};
+use crate::core::{Length, LimitObservation, LimitUpdate, Logical, PixelRect, Pixels};
 use crate::platform::windows::external::{
     HwndId, InspectExternalWindow, ManageExternalWindow, ManageOverlay, ShowCmd, ZOrder,
 };
@@ -123,10 +123,6 @@ pub(crate) fn rect_to_pixel_rect(rect: RECT) -> PixelRect {
         rect.right - rect.left,
         rect.bottom - rect.top,
     )
-}
-
-pub(crate) fn rect_to_dimension(rect: RECT) -> Dimension {
-    rect_to_pixel_rect(rect).to_dimension()
 }
 
 /// Deliberately omits `SWP_NOZORDER` so the z-drop to HWND_BOTTOM takes effect. This ensures
