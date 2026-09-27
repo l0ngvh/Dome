@@ -169,6 +169,10 @@ Right = nil
 ---@field os "macos" | "windows"
 ---@field env table<string, string> The environment that started Dome.
 ---@field executable fun(name: string): boolean True when name resolves on PATH.
+---@field log_info fun(...: any) Log a message at the info level.
+---@field log_debug fun(...: any) Same as log_info, at the debug level.
+---@field log_warn fun(...: any) Same as log_info, at the warn level.
+---@field log_error fun(...: any) Same as log_info, at the error level.
 ---@field defaults fun(): Config
 ---@field with_default_modifier fun(modifier: Modifier): dome.Builder Meta or Alt only.
 

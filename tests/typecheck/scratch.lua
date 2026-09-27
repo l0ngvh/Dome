@@ -5,6 +5,11 @@
 
 local terminal = dome.os == "macos" and "open -a Terminal" or "wt"
 
+dome.log_debug("terminal command:", terminal)
+dome.log_info("building config on", dome.os)
+dome.log_warn("no", 3, "values", true)
+dome.log_error()
+
 ---@type Config
 local config = {
   theme = "latte",

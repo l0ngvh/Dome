@@ -16,6 +16,8 @@ const KEY_NAME_ERROR: &str = "a key name must be non-empty valid UTF-8";
 
 const DEFAULT_MODIFIER_ERROR: &str = "dome.with_default_modifier accepts only Meta or Alt";
 
+const LOG_VALUE_ERROR: &str = "a logged value must convert to a string through tostring";
+
 // The intern tables live in the named registry rather than in a global, so a
 // sandboxed config can neither read them nor replace them.
 const MODIFIER_INTERN_TABLE: &str = "dome.interned_modifiers";
@@ -125,6 +127,22 @@ pub(crate) fn new_vm() -> mlua::Result<mlua::Lua> {
         "executable",
         lua.create_function(|_, name: String| Ok(which::which(name).is_ok()))?,
     )?;
+    dome.set(
+        "log_debug",
+        log_function(&lua, |message| tracing::debug!("{message}"))?,
+    )?;
+    dome.set(
+        "log_info",
+        log_function(&lua, |message| tracing::info!("{message}"))?,
+    )?;
+    dome.set(
+        "log_warn",
+        log_function(&lua, |message| tracing::warn!("{message}"))?,
+    )?;
+    dome.set(
+        "log_error",
+        log_function(&lua, |message| tracing::error!("{message}"))?,
+    )?;
 
     let build: mlua::Function = lua.load(DEFAULT_LUA).set_name("default.lua").eval()?;
     let default_build = build.clone();
@@ -179,6 +197,33 @@ fn host_os() -> &'static str {
     } else {
         std::env::consts::OS
     }
+}
+
+fn log_function(lua: &mlua::Lua, emit: fn(&str)) -> mlua::Result<mlua::Function> {
+    // Luau's `tostring` rather than `mlua::Value::to_string`, so a number reads
+    // the way `print` shows it and a string that is not valid UTF-8 is logged
+    // lossily instead of raising an error.
+    let tostring: mlua::Function = lua.globals().get("tostring")?;
+    let pcall: mlua::Function = lua.globals().get("pcall")?;
+    lua.create_function(move |lua, values: mlua::Variadic<mlua::Value>| {
+        let mut parts = Vec::with_capacity(values.len());
+        for value in values {
+            // An error from `Function::call` arrives with its traceback
+            // appended. `pcall` returns the bare reason instead.
+            let (converted, result): (bool, mlua::Value) = pcall.call((&tostring, value))?;
+            let reason = match result {
+                mlua::Value::String(text) if converted => {
+                    parts.push(text.to_string_lossy());
+                    continue;
+                }
+                mlua::Value::String(reason) => reason.to_string_lossy(),
+                other => format!("(error object is a {} value)", other.type_name()),
+            };
+            return Err(caller_error(lua, &format!("{LOG_VALUE_ERROR}: {reason}")));
+        }
+        emit(&parts.join(" "));
+        Ok(())
+    })
 }
 
 // One userdata per bit pattern. Interning makes `Cmd` the very same value as
@@ -539,6 +584,104 @@ return n"#,
                 .eval()
                 .unwrap();
             assert!(present);
+        }
+    }
+
+    #[test]
+    fn each_log_function_emits_at_its_level() {
+        let events = logged_events(
+            r#"dome.log_debug("d") dome.log_info("i") dome.log_warn("w") dome.log_error("e")"#,
+        );
+        assert_eq!(
+            events,
+            [
+                (tracing::Level::DEBUG, "d".to_string()),
+                (tracing::Level::INFO, "i".to_string()),
+                (tracing::Level::WARN, "w".to_string()),
+                (tracing::Level::ERROR, "e".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn log_joins_every_value_with_a_space() {
+        let events = logged_events(
+            r#"local custom = setmetatable({}, { __tostring = function() return "custom" end })
+dome.log_info("count", 3, 1.5, true, nil, custom, "\xff")
+dome.log_info()"#,
+        );
+        assert_eq!(
+            events,
+            [
+                (
+                    tracing::Level::INFO,
+                    "count 3 1.5 true nil custom \u{fffd}".to_string()
+                ),
+                (tracing::Level::INFO, String::new()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failing_tostring_names_the_config_line_that_logged() {
+        let lua = new_vm().unwrap();
+        let error = lua
+            .load(
+                r#"local broken = setmetatable({}, { __tostring = function() error("boom") end })
+dome.log_warn("ok", broken)"#,
+            )
+            .set_name("config.lua")
+            .exec()
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error.lines().next(),
+            Some(
+                format!(
+                    r#"runtime error: [string "config.lua"]:2: {LOG_VALUE_ERROR}: [string "config.lua"]:1: boom"#
+                )
+                .as_str()
+            ),
+            "{error}"
+        );
+    }
+
+    fn logged_events(chunk: &str) -> Vec<(tracing::Level, String)> {
+        use tracing_subscriber::layer::SubscriberExt;
+
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let subscriber =
+            tracing_subscriber::registry().with(CapturedEvents(std::sync::Arc::clone(&events)));
+        tracing::subscriber::with_default(subscriber, || {
+            new_vm().unwrap().load(chunk).exec().unwrap();
+        });
+        events.lock().unwrap().clone()
+    }
+
+    struct CapturedEvents(std::sync::Arc<std::sync::Mutex<Vec<(tracing::Level, String)>>>);
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CapturedEvents {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            let mut message = MessageField(String::new());
+            event.record(&mut message);
+            self.0
+                .lock()
+                .unwrap()
+                .push((*event.metadata().level(), message.0));
+        }
+    }
+
+    struct MessageField(String);
+
+    impl tracing::field::Visit for MessageField {
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            if field.name() == "message" {
+                self.0 = format!("{value:?}");
+            }
         }
     }
 

@@ -109,6 +109,15 @@ local config = dome.with_default_modifier(Meta).defaults()
 
 Returns `true` when `name` resolves on `PATH`.
 
+### `dome.log_debug(...: any)`, `log_info(...: any)`, `log_warn(...: any)`, `log_error(...: any)`
+
+Log a message at the level in the function name.
+
+Example:
+```lua
+dome.log_info("loaded on", dome.os, "with", 3, "keymaps")
+```
+
 ### `Meta`/`Alt`/`Ctrl`/`Shift`
 
 Combines with a key or another modifier using `+`, for example
