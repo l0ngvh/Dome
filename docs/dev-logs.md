@@ -1,4 +1,5 @@
 # Dev logs
+- Luau is Lua with type, which should provide runtime type enforcement, but unfortunately it's not supported by lua-language-server.
 - Perhaps we can try disable blocking all commands on exclusive fullscreen windows. Those windows behaved erratically when Dome tried to manage them, but it was a bug caused by minimizing those windows immediately on insert. I suspect the worst case scenario that can happen now is that the window will be minimized because focus leaves them, but idk.
 - Terminal in remote box should be managed as windows by Dome. Wezterm does this well, but all its windows are closed on disconnect, and it's hard to have Dome memorize Wezterm windows position.
 - Maintaining those status bars integration seems to be as much work as building a status bar ourselves.
