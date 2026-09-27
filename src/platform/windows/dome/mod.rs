@@ -19,13 +19,14 @@ use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessage
 use crate::action::Query;
 use crate::action::{Actions, MinimizedWindow, WorkspaceInfo};
 use crate::config::{
-    Appearance, Config, KeymapRuntime, Keystroke, PlatformEffects, PreferredLayouts,
+    Appearance, Config, KeymapEffects, Keystroke, LuaRuntime, PlatformEffects, PreferredLayouts,
 };
 use crate::core::TilingConfig;
 use crate::core::{
     ContainerId, Hub, LimitObservation, MonitorId, MonitorLayout, Physical, PixelRect,
     TilingAction, TilingWindowPlacement, WindowId, WindowRestrictions,
 };
+use crate::platform::keymap::KeymapPublisher;
 
 use self::placement_tracker::PlacementTracker;
 use self::recovery::Recovery;
@@ -144,7 +145,8 @@ pub(super) struct Dome {
     float_overlays: HashMap<WindowId, Arc<dyn ManageOverlay>>,
     recovery: Recovery,
     status_bars: StatusBars,
-    runtime: KeymapRuntime,
+    runtime: LuaRuntime,
+    keymap_publisher: KeymapPublisher,
     env: HashMap<String, String>,
 }
 
@@ -155,13 +157,18 @@ impl Drop for Dome {
 }
 
 impl Dome {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "constructor wiring the platform collaborators, the runtime, and the keymap publisher"
+    )]
     pub(super) fn new(
         tiling: TilingConfig,
         workspace_overrides: PreferredLayouts,
         taskbar: Rc<dyn ManageTaskbar>,
         display: Box<dyn QueryDisplay>,
         mut window: Box<dyn SceneSender>,
-        runtime: KeymapRuntime,
+        runtime: LuaRuntime,
+        keymap_publisher: KeymapPublisher,
         env: HashMap<String, String>,
     ) -> anyhow::Result<Self> {
         let monitors = display.get_all_monitors()?;
@@ -241,6 +248,7 @@ impl Dome {
             recovery: Recovery::new(taskbar),
             status_bars: StatusBars::default(),
             runtime,
+            keymap_publisher,
             env,
         })
     }
@@ -541,18 +549,23 @@ impl Dome {
                 main_thread_id,
                 env: &self.env,
             };
-            self.runtime
-                .dispatch(keymap, keystroke, &mut self.hub, &mut effects);
+            self.runtime.dispatch(
+                keymap,
+                keystroke,
+                &mut self.hub,
+                &mut effects,
+                &mut self.keymap_publisher,
+            );
         }
         self.apply_layout();
     }
 
     pub(super) fn reload(&mut self) -> Option<Box<Config>> {
-        self.runtime.reload()
+        self.runtime.reload(&mut self.keymap_publisher)
     }
 
     pub(super) fn switch_mode(&mut self, name: &str) {
-        self.runtime.switch_mode(name);
+        self.keymap_publisher.switch_mode(name);
     }
 
     #[tracing::instrument(level = "trace", skip_all)]

@@ -25,13 +25,14 @@ use objc2_core_graphics::CGWindowID;
 
 use crate::action::MinimizedWindow;
 use crate::config::{
-    Appearance, Config, KeymapRuntime, Keystroke, PlatformEffects, PreferredLayouts,
+    Appearance, Config, KeymapEffects, Keystroke, LuaRuntime, PlatformEffects, PreferredLayouts,
 };
 use crate::core::{
     ContainerId, Dimension, Hub, Length, Logical, PixelRect, TilingAction, WindowId,
     WindowMetadata, WindowRestrictions,
 };
 use crate::core::{TilingConfig, WindowMatcher, pattern_matches};
+use crate::platform::keymap::KeymapPublisher;
 use crate::platform::macos::accessibility::ExternalWindow;
 
 use monitor::MonitorRegistry;
@@ -204,7 +205,8 @@ pub(in crate::platform::macos) struct Dome {
     monitors: Vec<MonitorInfo>,
     /// Detection is suppressed while the display settles after a monitor change.
     monitor_settling: bool,
-    runtime: KeymapRuntime,
+    runtime: LuaRuntime,
+    keymap_publisher: KeymapPublisher,
     env: HashMap<String, String>,
 }
 
@@ -214,7 +216,8 @@ impl Dome {
         tiling: TilingConfig,
         workspace_overrides: PreferredLayouts,
         sender: Box<dyn SceneSender>,
-        runtime: KeymapRuntime,
+        runtime: LuaRuntime,
+        keymap_publisher: KeymapPublisher,
         env: HashMap<String, String>,
     ) -> Self {
         let primary = monitors
@@ -246,6 +249,7 @@ impl Dome {
             monitors: monitors.to_vec(),
             monitor_settling: false,
             runtime,
+            keymap_publisher,
             env,
         }
     }
@@ -670,17 +674,22 @@ impl Dome {
             signal,
             env: &self.env,
         };
-        self.runtime
-            .dispatch(keymap, keystroke, &mut self.hub, &mut effects);
+        self.runtime.dispatch(
+            keymap,
+            keystroke,
+            &mut self.hub,
+            &mut effects,
+            &mut self.keymap_publisher,
+        );
         self.flush_layout();
     }
 
     pub(in crate::platform::macos) fn reload(&mut self) -> Option<Box<Config>> {
-        self.runtime.reload()
+        self.runtime.reload(&mut self.keymap_publisher)
     }
 
     pub(in crate::platform::macos) fn switch_mode(&mut self, name: &str) {
-        self.runtime.switch_mode(name);
+        self.keymap_publisher.switch_mode(name);
     }
 
     pub(in crate::platform::macos) fn handle_tiling_action(&mut self, action: TilingAction) {

@@ -26,7 +26,7 @@ pub(crate) mod tests;
 
 pub(crate) use crate::core::PreferredLayouts;
 pub(crate) use keybinding::{BASE_MODE, Keystroke, ModalKeymaps, Modifiers};
-pub(crate) use lua::{KeymapEffects, KeymapRuntime, LuaRuntime, PlatformEffects};
+pub(crate) use lua::{KeymapEffects, LuaRuntime, PlatformEffects};
 
 #[cfg(target_os = "macos")]
 const BUNDLED_IGNORE: &str = include_str!("../../resources/ignore/macos.lua");
