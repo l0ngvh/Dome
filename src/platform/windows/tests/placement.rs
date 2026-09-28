@@ -203,7 +203,7 @@ fn degenerate_content_box_hides_window() {
 
     assert!(env.is_offscreen(w1));
 
-    env.change_config(|config| config.tiling.border_size = baseline_config().tiling.border_size);
+    env.change_config("return {}");
 
     let placement = env.only_painted_window();
     assert!(!env.is_offscreen(w1));

@@ -10,7 +10,8 @@ use super::mock::{
     MockDisplay, MockExternalHwnd, MockSceneSender, MockWiring, MoveLog, NoopTaskbar,
     OverlayReport, ZOrderStack,
 };
-use crate::action::Action;
+use crate::action::{Action, Actions};
+use crate::config::tests::{CleanupFile, temp_lua_path};
 use crate::config::{Appearance, Config, LuaRuntime, PreferredLayouts};
 use crate::core::{
     ContainerPlacement, Dimension, FloatWindowPlacement, Length, MonitorId, Physical, PixelRect,
@@ -35,6 +36,7 @@ pub(super) struct TestEnv {
     moves: MoveLog,
     monitors: Arc<Mutex<Vec<MonitorInfo>>>,
     config: Config,
+    config_file: CleanupFile,
     z_stack: ZOrderStack,
     pub(super) focus_target: Arc<Mutex<FocusTarget>>,
     mocks: HashMap<HwndId, Arc<MockExternalHwnd>>,
@@ -88,7 +90,9 @@ impl TestEnvBuilder {
         let scene = Rc::new(RefCell::new(MockSceneSender::new(wiring.clone())));
         let (keymap_tx, _keymap_rx) = std::sync::mpsc::channel();
         let keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
-        let runtime = LuaRuntime::new(String::new()).expect("build test Lua VM");
+        let config_file = CleanupFile(temp_lua_path("windows_env"));
+        let runtime = LuaRuntime::new(config_file.0.to_string_lossy().into_owned())
+            .expect("build test Lua VM");
         let dome = Dome::new(
             config.tiling.clone(),
             PreferredLayouts::default(),
@@ -105,6 +109,7 @@ impl TestEnvBuilder {
             moves: wiring.moves,
             monitors: shared_monitors,
             config,
+            config_file,
             z_stack: wiring.z_stack,
             focus_target: wiring.focus_target,
             mocks: HashMap::new(),
@@ -529,13 +534,9 @@ impl TestEnv {
         self.scene.borrow().appearance()
     }
 
-    pub(super) fn change_config(&mut self, adjust: impl FnOnce(&mut Config)) {
-        adjust(&mut self.config);
-        self.dome.config_changed(
-            self.config.tiling.clone(),
-            self.config.appearance.clone(),
-            self.config.env.clone(),
-        );
+    pub(super) fn change_config(&mut self, source: &str) {
+        std::fs::write(&self.config_file.0, source).expect("write the test config");
+        self.config = *self.dome.reload().expect("the test config should load");
         self.layout();
     }
 
@@ -673,21 +674,12 @@ impl TestEnv {
         self.scene.borrow().tiling_overlay_ids()
     }
 
-    /// Mirrors the runner's action dispatch, so keep the two in step.
     fn send_action(&mut self, action: &Action) {
-        match action {
-            Action::Focus { target } => self.dome.handle_tiling_action(target.into()),
-            Action::Move { target } => self.dome.handle_tiling_action(target.into()),
-            Action::Toggle { target } => self.dome.handle_tiling_action(target.into()),
-            Action::Master { target } => self.dome.handle_tiling_action(target.into()),
-            Action::Close => self.dome.close_focused_window(),
-            Action::Mode { name } => self.dome.switch_mode(name),
-            Action::UnminimizeWindow { id } => self.dome.unminimize_window(*id),
-            Action::Execute { .. } | Action::Exit => {
-                panic!("{action:?} needs the runner, which the harness does not build")
-            }
-        }
-        self.layout();
+        // The harness runs no main thread, so an `exit` action has nothing to quit.
+        let main_thread_id = 0;
+        self.dome
+            .handle_actions(&Actions::new(vec![action.clone()]), main_thread_id);
+        self.deliver_overlay_reports();
     }
 
     /// Replay the restore event, which Win32 reports as a move at the window's

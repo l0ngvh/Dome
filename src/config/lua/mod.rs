@@ -53,6 +53,7 @@ pub(crate) trait PlatformEffects {
     fn close(&mut self, id: WindowId);
     fn execute(&mut self, command: &str);
     fn exit(&mut self);
+    fn unminimize(&mut self, id: WindowId);
 }
 
 /// Verbs that need the keyboard thread, so the config layer cannot serve them.
@@ -96,38 +97,12 @@ impl LuaRuntime {
         config
     }
 
-    pub(crate) fn dispatch(
-        &mut self,
-        keymap: &str,
-        keystroke: &Keystroke,
-        hub: &mut Hub,
-        effects: &mut dyn PlatformEffects,
-        keymap_effects: &mut dyn KeymapEffects,
-    ) {
-        // A reload between the keypress and here can drop the binding, so a miss
-        // is expected rather than a bug.
-        let Some(func) = self
-            .keymaps
-            .modes
-            .get(keymap)
-            .and_then(|b| b.get(keystroke))
-        else {
-            tracing::warn!(%keymap, %keystroke, "Binding is gone, dropping");
-            return;
-        };
-        let mut context = ActionContext {
-            hub,
-            effects,
-            keymap_effects,
-        };
-        let cx = RefCell::new(&mut context);
-        let result = self.lua.scope(|scope| {
-            let actions = build_actions(&self.lua, scope, &cx)?;
-            func.call::<()>(actions)
-        });
-        if let Err(e) = result {
-            tracing::warn!(%keymap, %keystroke, error = %e, "Callback handler errored");
-        }
+    pub(crate) fn binding(&self, keymap: &str, keystroke: &Keystroke) -> Option<Binding> {
+        let function = self.keymaps.modes.get(keymap)?.get(keystroke)?.clone();
+        Some(Binding {
+            lua: self.lua.clone(),
+            function,
+        })
     }
 
     pub(crate) fn reload(&mut self, keymap_effects: &mut dyn KeymapEffects) -> Option<Box<Config>> {
@@ -149,6 +124,21 @@ impl LuaRuntime {
     }
 }
 
+pub(crate) struct Binding {
+    lua: mlua::Lua,
+    function: mlua::Function,
+}
+
+impl Binding {
+    pub(crate) fn call(&self, cx: &mut ActionContext) -> mlua::Result<()> {
+        let cx = RefCell::new(cx);
+        self.lua.scope(|scope| {
+            let actions = build_actions(&self.lua, scope, &cx)?;
+            self.function.call::<()>(actions)
+        })
+    }
+}
+
 fn log_initial_load_error(path: &str, e: &anyhow::Error) {
     if e.downcast_ref::<std::io::Error>()
         .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
@@ -161,7 +151,7 @@ fn log_initial_load_error(path: &str, e: &anyhow::Error) {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::{KeymapEffects, PlatformEffects};
+    use super::{KeymapEffects, LuaRuntime, PlatformEffects};
     use crate::config::ModalKeymaps;
     use crate::core::{
         Hub, PixelRect, PreferredLayouts, ReportedMonitor, WindowId, WindowMatcher, WindowMetadata,
@@ -169,6 +159,10 @@ pub(crate) mod test_support {
     };
 
     pub(crate) fn test_hub() -> Hub {
+        test_hub_with(LuaRuntime::new(String::new()).expect("the test Lua VM should build"))
+    }
+
+    pub(crate) fn test_hub_with(runtime: LuaRuntime) -> Hub {
         let monitor = ReportedMonitor {
             device_name: "test".to_string(),
             work_area: PixelRect::new(0, 0, 1920, 1080),
@@ -180,6 +174,7 @@ pub(crate) mod test_support {
             monitor,
             crate::config::tests::tiling_config(),
             PreferredLayouts::default(),
+            runtime,
         )
     }
 
@@ -229,6 +224,7 @@ pub(crate) mod test_support {
         pub closed: Vec<WindowId>,
         pub executed: Vec<String>,
         pub exited: bool,
+        pub unminimized: Vec<WindowId>,
     }
 
     impl PlatformEffects for RecordingEffects {
@@ -240,6 +236,9 @@ pub(crate) mod test_support {
         }
         fn exit(&mut self) {
             self.exited = true;
+        }
+        fn unminimize(&mut self, id: WindowId) {
+            self.unminimized.push(id);
         }
     }
 
@@ -319,23 +318,23 @@ mod tests {
         std::fs::write(&good.0, "this is not lua {{{").unwrap();
         assert!(runtime.reload(&mut keymap).is_none());
 
-        let mut hub = test_support::test_hub();
+        let mut hub = test_support::test_hub_with(runtime);
         let mut effects = test_support::RecordingEffects::default();
-        runtime.dispatch("main", &meta_c(), &mut hub, &mut effects, &mut keymap);
+        hub.run_binding("main", &meta_c(), &mut effects, &mut keymap);
         assert_eq!(effects.executed, vec!["ok".to_string()]);
     }
 
     #[test]
-    fn dispatch_drives_context() {
+    fn run_binding_drives_context() {
         let cfg = write_temp(
             "cb",
             "return { keymaps = { main = { ['meta+c'] = function(a) a.execute('wt') end } } }",
         );
         let (mut runtime, mut keymap) = recording_runtime(path_str(&cfg));
         runtime.load(&mut keymap);
-        let mut hub = test_support::test_hub();
+        let mut hub = test_support::test_hub_with(runtime);
         let mut effects = test_support::RecordingEffects::default();
-        runtime.dispatch("main", &meta_c(), &mut hub, &mut effects, &mut keymap);
+        hub.run_binding("main", &meta_c(), &mut effects, &mut keymap);
         assert_eq!(effects.executed, vec!["wt".to_string()]);
     }
 
@@ -355,9 +354,9 @@ mod tests {
         .unwrap();
         assert!(runtime.reload(&mut keymap).is_some());
 
-        let mut hub = test_support::test_hub();
+        let mut hub = test_support::test_hub_with(runtime);
         let mut effects = test_support::RecordingEffects::default();
-        runtime.dispatch("main", &meta_c(), &mut hub, &mut effects, &mut keymap);
+        hub.run_binding("main", &meta_c(), &mut effects, &mut keymap);
         assert_eq!(effects.executed, vec!["new".to_string()]);
     }
 
@@ -404,9 +403,9 @@ mod tests {
         .unwrap();
         assert!(runtime.reload(&mut keymap).is_some());
 
-        let mut hub = test_support::test_hub();
+        let mut hub = test_support::test_hub_with(runtime);
         let mut effects = test_support::RecordingEffects::default();
-        runtime.dispatch("main", &meta_c(), &mut hub, &mut effects, &mut keymap);
+        hub.run_binding("main", &meta_c(), &mut effects, &mut keymap);
         assert!(effects.executed.is_empty());
     }
 }

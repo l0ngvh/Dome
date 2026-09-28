@@ -18,13 +18,11 @@ use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessage
 
 use crate::action::Query;
 use crate::action::{Actions, MinimizedWindow, WorkspaceInfo};
-use crate::config::{
-    Appearance, Config, KeymapEffects, Keystroke, LuaRuntime, PlatformEffects, PreferredLayouts,
-};
+use crate::config::{Config, Keystroke, LuaRuntime, PlatformEffects, PreferredLayouts};
 use crate::core::TilingConfig;
 use crate::core::{
     ContainerId, Hub, LimitObservation, MonitorId, MonitorLayout, Physical, PixelRect,
-    TilingAction, TilingWindowPlacement, WindowId, WindowRestrictions,
+    TilingWindowPlacement, WindowId, WindowRestrictions,
 };
 use crate::platform::keymap::KeymapPublisher;
 
@@ -55,6 +53,10 @@ impl PlatformEffects for WinPlatformEffects<'_> {
         unsafe { PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
         unsafe { PostQuitMessage(0) };
     }
+
+    fn unminimize(&mut self, id: WindowId) {
+        self.registry.unminimize_window(id);
+    }
 }
 
 pub(super) use self::window::NewWindow;
@@ -68,7 +70,7 @@ use self::external_bar::StatusBars;
 use crate::platform::reserve_for_bar;
 
 use self::monitor::MonitorRegistry;
-use super::external::{HwndId, ManageExternalWindow, ManageOverlay, ShowCmd, ZOrder};
+use super::external::{HwndId, ManageExternalWindow, ManageOverlay, ZOrder};
 use super::taskbar::ManageTaskbar;
 
 pub(super) enum HubEvent {
@@ -145,7 +147,6 @@ pub(super) struct Dome {
     float_overlays: HashMap<WindowId, Arc<dyn ManageOverlay>>,
     recovery: Recovery,
     status_bars: StatusBars,
-    runtime: LuaRuntime,
     keymap_publisher: KeymapPublisher,
     env: HashMap<String, String>,
 }
@@ -177,7 +178,7 @@ impl Dome {
             .iter()
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
-        let mut hub = Hub::new(primary.into(), tiling, workspace_overrides.clone());
+        let mut hub = Hub::new(primary.into(), tiling, workspace_overrides.clone(), runtime);
         let primary_monitor_id = hub.primary_monitor();
         let mut monitors_reg = MonitorRegistry::new();
         let mut new_overlays: Vec<NewTilingOverlay> = Vec::new();
@@ -247,7 +248,6 @@ impl Dome {
             displayed_windows: HashSet::new(),
             recovery: Recovery::new(taskbar),
             status_bars: StatusBars::default(),
-            runtime,
             keymap_publisher,
             env,
         })
@@ -269,19 +269,6 @@ impl Dome {
         overlay: Arc<dyn ManageOverlay>,
     ) {
         self.float_overlays.insert(window, overlay);
-    }
-
-    pub(super) fn config_changed(
-        &mut self,
-        tiling: TilingConfig,
-        appearance: Appearance,
-        env: HashMap<String, String>,
-    ) {
-        self.env = env;
-        self.hub.sync_configuration(tiling);
-        self.dispatch(HubMessage::AppearanceChanged(appearance));
-        tracing::info!("Config reloaded");
-        self.apply_layout();
     }
 
     pub(super) fn layout_changed(&mut self, new_layout: PreferredLayouts) {
@@ -513,35 +500,6 @@ impl Dome {
         serde_json::to_string(&entries).expect("MinimizedWindow is infallibly serializable")
     }
 
-    pub(super) fn handle_tiling_action(&mut self, action: TilingAction) {
-        self.hub.handle_tiling_action(action);
-    }
-
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn unminimize_window(&mut self, id: WindowId) {
-        let Some(entry) = self.registry.get(id) else {
-            return;
-        };
-        if !entry.is_minimized {
-            return;
-        }
-        entry.ext.show_cmd(ShowCmd::Restore);
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub(super) fn close_focused_window(&mut self) {
-        let Some(window_id) = self.hub.focused_window(self.hub.current_workspace()) else {
-            return;
-        };
-        self.registry.close_window(window_id);
-    }
-
-    pub(super) fn execute(&self, command: &str) {
-        if let Err(e) = crate::platform::windows::spawn::spawn(command, &self.env) {
-            tracing::warn!(%command, "Failed to execute: {e:#}");
-        }
-    }
-
     pub(super) fn run_binding(&mut self, keymap: &str, keystroke: &Keystroke, main_thread_id: u32) {
         {
             let mut effects = WinPlatformEffects {
@@ -549,23 +507,31 @@ impl Dome {
                 main_thread_id,
                 env: &self.env,
             };
-            self.runtime.dispatch(
-                keymap,
-                keystroke,
-                &mut self.hub,
-                &mut effects,
-                &mut self.keymap_publisher,
-            );
+            self.hub
+                .run_binding(keymap, keystroke, &mut effects, &mut self.keymap_publisher);
         }
         self.apply_layout();
     }
 
-    pub(super) fn reload(&mut self) -> Option<Box<Config>> {
-        self.runtime.reload(&mut self.keymap_publisher)
+    #[tracing::instrument(skip(self))]
+    pub(super) fn handle_actions(&mut self, actions: &Actions, main_thread_id: u32) {
+        let mut effects = WinPlatformEffects {
+            registry: &mut self.registry,
+            main_thread_id,
+            env: &self.env,
+        };
+        self.hub
+            .handle_actions(actions, &mut effects, &mut self.keymap_publisher);
+        self.apply_layout();
     }
 
-    pub(super) fn switch_mode(&mut self, name: &str) {
-        self.keymap_publisher.switch_mode(name);
+    pub(super) fn reload(&mut self) -> Option<Box<Config>> {
+        let config = self.hub.reload_config(&mut self.keymap_publisher)?;
+        self.env = config.env.clone();
+        self.dispatch(HubMessage::AppearanceChanged(config.appearance.clone()));
+        tracing::info!("Config reloaded");
+        self.apply_layout();
+        Some(config)
     }
 
     #[tracing::instrument(level = "trace", skip_all)]

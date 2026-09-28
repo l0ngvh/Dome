@@ -149,13 +149,9 @@ where
     actions.set(
         "close",
         scope.create_function(move |_, ()| {
-            let target = {
-                let c = cx.borrow();
-                c.hub.focused_window(c.hub.current_workspace())
-            };
-            if let Some(id) = target {
-                cx.borrow_mut().effects.close(id);
-            }
+            let mut guard = cx.borrow_mut();
+            let c = &mut **guard;
+            c.hub.close_focused_window(c.effects);
             Ok(())
         })?,
     )?;

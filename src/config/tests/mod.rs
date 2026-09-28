@@ -42,14 +42,14 @@ fn try_config(src: &str) -> Result<Config> {
     Config::from_lua_src("test config", src).map_err(|e| anyhow!("{e}"))
 }
 
-struct CleanupFile(std::path::PathBuf);
+pub(crate) struct CleanupFile(pub(crate) std::path::PathBuf);
 impl Drop for CleanupFile {
     fn drop(&mut self) {
         std::fs::remove_file(&self.0).ok();
     }
 }
 
-fn temp_lua_path(tag: &str) -> std::path::PathBuf {
+pub(crate) fn temp_lua_path(tag: &str) -> std::path::PathBuf {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
