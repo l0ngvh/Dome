@@ -1,5 +1,6 @@
 use super::*;
-use crate::core::{Length, Pixels};
+use crate::core::{Length, Logical, Pixels};
+use crate::platform::windows::handle::{ROUND_RADIUS, SMALL_RADIUS};
 
 #[test]
 fn single_window_fills_screen() {
@@ -824,4 +825,25 @@ fn open_bar_adjust_multiple_monitors() {
 
     assert_eq!(env.dim(w1), dim(4, 34, 1912, 1042));
     assert_eq!(env.dim(w2), dim(1924, 4, 2552, 1432));
+}
+
+#[test]
+fn tiling_border_takes_the_latest_corner_radius() {
+    let mut env = TestEnv::new();
+    let w1 = env.open();
+    assert_eq!(env.painted_corner_radii(0), vec![ROUND_RADIUS]);
+
+    env.set_corner_radius(w1, Length::ZERO);
+    env.layout();
+    assert_eq!(env.painted_corner_radii(0), vec![Length::<Logical>::ZERO]);
+}
+
+#[test]
+fn float_border_takes_the_window_corner_radius() {
+    let mut env = TestEnv::new();
+    let w1 = env.open();
+    env.set_corner_radius(w1, SMALL_RADIUS);
+    env.run_actions("toggle float");
+    env.settle(10);
+    assert_eq!(env.painted_float_corner_radius(), Some(SMALL_RADIUS));
 }

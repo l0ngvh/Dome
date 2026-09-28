@@ -75,6 +75,7 @@ impl WindowThread {
                     z_order,
                     scale,
                     border_thickness,
+                    corner_radius,
                 } => {
                     if !self.float_overlays.contains_key(window_id) {
                         match self.overlay_factory.create_float_overlay(
@@ -96,16 +97,17 @@ impl WindowThread {
                     self.float_overlays
                         .get_mut(window_id)
                         .expect("float overlay inserted above")
-                        .update(placement, *scale, *border_thickness);
+                        .update(placement, *scale, *border_thickness, *corner_radius);
                 }
                 FloatOverlayAction::Update {
                     window_id,
                     placement,
                     scale,
                     border_thickness,
+                    corner_radius,
                 } => {
                     if let Some(overlay) = self.float_overlays.get_mut(window_id) {
-                        overlay.update(placement, *scale, *border_thickness);
+                        overlay.update(placement, *scale, *border_thickness, *corner_radius);
                     }
                 }
                 FloatOverlayAction::Hide(window_id) => {

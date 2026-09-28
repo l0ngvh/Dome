@@ -2,8 +2,9 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::MockWiring;
-use crate::core::{Dimension, Length, LimitObservation, LimitUpdate, PixelRect};
+use crate::core::{Dimension, Length, LimitObservation, LimitUpdate, Logical, PixelRect};
 use crate::platform::windows::external::{HwndId, ManageExternalWindow, ShowCmd, ZOrder};
+use crate::platform::windows::handle::ROUND_RADIUS;
 use crate::platform::windows::tests::env::FocusTarget;
 use crate::platform::windows::tests::fixtures::OFFSCREEN_POS;
 
@@ -17,6 +18,7 @@ pub(crate) struct MockExternalHwnd {
     pub(crate) dimension: Mutex<Dimension>,
     pub(crate) minimized: AtomicBool,
     pub(crate) constraints: LimitObservation,
+    corner_radius: Mutex<Length<Logical>>,
     override_position: Mutex<Option<(i32, i32, i32, i32)>>,
     wiring: MockWiring,
 }
@@ -46,6 +48,7 @@ impl MockExternalHwnd {
                 max_width: LimitUpdate::Cleared,
                 max_height: LimitUpdate::Cleared,
             },
+            corner_radius: Mutex::new(ROUND_RADIUS),
             override_position: Mutex::new(None),
             wiring,
         }
@@ -86,6 +89,10 @@ impl MockExternalHwnd {
 
     pub(crate) fn set_override_position(&self, pos: Option<(i32, i32, i32, i32)>) {
         *self.override_position.lock().unwrap() = pos;
+    }
+
+    pub(crate) fn set_corner_radius(&self, radius: Length<Logical>) {
+        *self.corner_radius.lock().unwrap() = radius;
     }
 
     pub(crate) fn get_dim(&self) -> Dimension {
@@ -179,6 +186,10 @@ impl ManageExternalWindow for MockExternalHwnd {
         let mut dim = self.dimension.lock().unwrap();
         dim.x = Length::new(100.0);
         dim.y = Length::new(100.0);
+    }
+
+    fn corner_radius(&self) -> Length<Logical> {
+        *self.corner_radius.lock().unwrap()
     }
 }
 

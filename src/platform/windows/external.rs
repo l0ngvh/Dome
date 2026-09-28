@@ -1,7 +1,7 @@
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST};
 
-use crate::core::{LimitObservation, Physical, PixelRect};
+use crate::core::{Length, LimitObservation, Logical, Physical, PixelRect};
 
 /// Opaque window identity.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -82,6 +82,10 @@ pub(crate) trait ManageExternalWindow: Send + Sync {
     fn set_foreground_window(&self);
     fn is_maximized(&self) -> bool;
     fn recover(&self, was_maximized: bool);
+    /// Predicted, because Windows has no public API for the radius DWM draws.
+    /// The reads behind it send no message to the window, so a hung app cannot
+    /// stall them.
+    fn corner_radius(&self) -> Length<Logical>;
 }
 
 pub(crate) trait ManageOverlay: Send + Sync {

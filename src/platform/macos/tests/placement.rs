@@ -517,3 +517,77 @@ fn apply_layout_file_that_fails_to_load_keeps_the_arrangement() {
         before
     );
 }
+
+#[test]
+fn tiling_border_takes_the_latest_corner_radius() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Finder", "Home");
+    macos.window(cg1).corner_radius.set(Length::new(26.0));
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
+    macos.settle(&mut dome, 10);
+    let id = dome.tracked_window(cg1).unwrap().window_id;
+    assert_eq!(
+        macos.last_scene_state().tiling_corner_radii[&id],
+        Length::new(26.0)
+    );
+
+    // Hiding Finder's toolbar shrinks its corner radius without resizing the window.
+    let (x, y, w, h) = macos.window_frame(cg1);
+    macos.window(cg1).corner_radius.set(Length::new(16.0));
+    macos.simulate_external_move(&mut dome, cg1, x, y, w, h);
+    assert_eq!(
+        macos.last_scene_state().tiling_corner_radii[&id],
+        Length::new(16.0)
+    );
+}
+
+#[test]
+fn float_border_takes_the_window_corner_radius() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Chrome", "Google");
+    macos.window(cg1).corner_radius.set(Length::new(20.0));
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
+    macos.settle(&mut dome, 10);
+    send(&mut dome, "toggle float");
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(
+        macos.last_float_snapshot(cg1).unwrap().corner_radius,
+        Length::new(20.0)
+    );
+}
+
+#[test]
+fn a_window_first_seen_in_native_fullscreen_takes_its_corner_radius_on_exit() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Finder", "Home");
+    macos.window(cg1).set_native_fullscreen(true);
+    let PendingAdd::Positioned { new, .. } = new_window(&macos, cg1) else {
+        unreachable!("new_window builds a positioned add");
+    };
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![PendingAdd::NativeFullscreen { new }],
+        &[],
+        &[],
+    );
+    macos.settle(&mut dome, 10);
+
+    macos.window(cg1).corner_radius.set(Length::new(26.0));
+    macos.exit_native_fullscreen(&mut dome, cg1, 200, 200, 800, 600);
+    macos.settle(&mut dome, 10);
+
+    let id = dome.tracked_window(cg1).unwrap().window_id;
+    assert_eq!(
+        macos.last_scene_state().tiling_corner_radii[&id],
+        Length::new(26.0)
+    );
+}

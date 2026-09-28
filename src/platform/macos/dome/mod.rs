@@ -7,7 +7,7 @@ mod recovery;
 mod registry;
 mod window;
 
-pub(super) use events::{ContainerShow, HubEvent, HubMessage};
+pub(super) use events::{ContainerShow, FloatShow, HubEvent, HubMessage, TilingWindowShow};
 pub(in crate::platform::macos) use external_bar::{BarGeometry, ExternalBarProbe};
 pub(super) use inspect::{
     ExitNativeFullscreen, ExtRefresh, compute_reconcile_all, compute_reconciliation,
@@ -153,11 +153,10 @@ pub(in crate::platform::macos) enum PendingAdd {
     Positioned {
         new: NewWindow,
         rect: PixelRect,
+        corner_radius: Length<Logical>,
     },
     /// Native fullscreen windows lives on their own space and thus has no dimension
-    NativeFullscreen {
-        new: NewWindow,
-    },
+    NativeFullscreen { new: NewWindow },
 }
 
 /// Timestamps of the first and last AX move/resize notifications in a
@@ -256,7 +255,10 @@ impl Dome {
 
     pub(in crate::platform::macos) fn refresh_ext_cache(&mut self, refresh: &[ExtRefresh]) {
         for r in refresh {
-            if self.registry.replace_ext(r.cg_id, r.ext.clone()) {
+            if self
+                .registry
+                .replace_ext(r.cg_id, r.ext.clone(), r.corner_radius)
+            {
                 tracing::trace!(cg_id = %r.cg_id, pid = r.ext.pid(), "Replaced stale ext handle");
             }
         }
@@ -295,7 +297,11 @@ impl Dome {
                 PendingAdd::NativeFullscreen { new } => {
                     self.add_native_fullscreen_window(new);
                 }
-                PendingAdd::Positioned { new, rect } => {
+                PendingAdd::Positioned {
+                    new,
+                    rect,
+                    corner_radius,
+                } => {
                     let ax_for_recovery = new.ax.clone();
                     let borderless_fs = self.is_borderless_fullscreen_at(rect);
                     let restrictions = if borderless_fs {
@@ -323,7 +329,7 @@ impl Dome {
                             window::OffscreenPlacement::new(rect),
                         ))
                     };
-                    self.registry.insert(new, id, state);
+                    self.registry.insert(new, id, state, corner_radius);
                     self.pending_created.push(id);
                     self.recovery.track(
                         ax_for_recovery,
@@ -341,9 +347,10 @@ impl Dome {
             }
         }
         for e in to_exit_native_fullscreen {
-            if let Some(entry) = self.registry.get(e.cg_id)
+            if let Some(entry) = self.registry.get_mut(e.cg_id)
                 && matches!(entry.state, WindowState::NativeFullscreen)
             {
+                entry.corner_radius = e.corner_radius;
                 let window_id = entry.window_id;
                 let now = Instant::now();
                 // NativeFullscreen doesn't emit any move/resize event, so we need to simulate one
@@ -454,6 +461,17 @@ impl Dome {
                 tracing::trace!(title = %title, "Title changed");
             }
             self.flush_layout();
+        }
+    }
+
+    /// Takes effect at the next `flush_layout`.
+    pub(in crate::platform::macos) fn update_corner_radius(
+        &mut self,
+        cg_id: CGWindowID,
+        corner_radius: Length<Logical>,
+    ) {
+        if let Some(entry) = self.registry.get_mut(cg_id) {
+            entry.corner_radius = corner_radius;
         }
     }
 

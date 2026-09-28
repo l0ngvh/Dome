@@ -334,6 +334,7 @@ impl Dome {
                     placement: *wp,
                     scale,
                     border_thickness,
+                    corner_radius: ext.corner_radius(),
                 }
             }
             None => FloatOverlayAction::Create {
@@ -342,6 +343,7 @@ impl Dome {
                 z_order,
                 scale,
                 border_thickness,
+                corner_radius: ext.corner_radius(),
             },
         })
     }

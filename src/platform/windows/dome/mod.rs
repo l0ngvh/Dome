@@ -64,7 +64,7 @@ pub(super) use self::window::WindowsMetadata;
 
 use self::events::{
     FloatOverlayAction, HubMessage, MonitorScene, MonitorSetChange, NewTilingOverlay, RenderScene,
-    SceneSender,
+    SceneSender, TilingWindowShow,
 };
 use self::external_bar::StatusBars;
 use crate::platform::reserve_for_bar;
@@ -577,9 +577,9 @@ impl Dome {
                     // That is a current choice, not an invariant. macOS trims instead.
                     for wp in tiling_windows {
                         window_ids.insert(wp.id);
-                        if self.registry.get(wp.id).is_none() {
+                        let Some(entry) = self.registry.get(wp.id) else {
                             continue;
-                        }
+                        };
                         if wp.content_box.is_empty() {
                             tracing::debug!(
                                 window_id = %wp.id,
@@ -589,7 +589,10 @@ impl Dome {
                             float_actions.extend(self.hide_window(wp.id));
                             continue;
                         }
-                        placed_tiling.push(*wp);
+                        placed_tiling.push(TilingWindowShow {
+                            placement: *wp,
+                            corner_radius: entry.ext.corner_radius(),
+                        });
                     }
                     for wp in fw {
                         window_ids.insert(wp.id);
@@ -871,8 +874,12 @@ impl Dome {
             }
 
             let z = reference.map_or(ZOrder::Unchanged, |(_, ext)| ZOrder::After(ext.id()));
-            for wp in data.tiling_windows.iter().filter(|wp| !wp.is_highlighted) {
-                self.position_tiling_window(wp, data.monitor_id, z);
+            for show in data
+                .tiling_windows
+                .iter()
+                .filter(|show| !show.placement.is_highlighted)
+            {
+                self.position_tiling_window(&show.placement, data.monitor_id, z);
             }
         }
         float_actions
@@ -885,7 +892,11 @@ impl Dome {
         &self,
         data: &'a MonitorScene,
     ) -> Option<(&'a TilingWindowPlacement, Arc<dyn ManageExternalWindow>)> {
-        let wp = data.tiling_windows.iter().find(|wp| wp.is_highlighted)?;
+        let wp = &data
+            .tiling_windows
+            .iter()
+            .find(|show| show.placement.is_highlighted)?
+            .placement;
         let entry = self.registry.get(wp.id)?;
         Some((wp, Arc::clone(&entry.ext)))
     }

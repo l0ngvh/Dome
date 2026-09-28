@@ -21,9 +21,10 @@ use windows::core::Interface;
 
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, Physical,
-    PixelRect, Pixels, TilingWindowPlacement,
+    PixelRect, Pixels,
 };
 use crate::overlay;
+use crate::platform::windows::dome::events::TilingWindowShow;
 use crate::platform::windows::external::{ManageOverlay, ZOrder};
 use crate::platform::windows::handle::OverlayHwnd;
 
@@ -91,7 +92,7 @@ pub(in crate::platform::windows) struct TilingOverlay {
     monitor: PixelRect,
     width_phys: u32,
     height_phys: u32,
-    windows: Vec<TilingWindowPlacement>,
+    windows: Vec<TilingWindowShow>,
     containers: Vec<ContainerPlacement>,
     border_thickness: Pixels<Physical>,
     aux: AuxiliaryWindow,
@@ -158,12 +159,13 @@ impl TilingOverlay {
         let windows_logical: Vec<overlay::LogicalTiledWindow> = self
             .windows
             .iter()
-            .map(|wp| overlay::LogicalTiledWindow {
-                id: wp.id,
-                frame: wp.border_box.to_logical(scale),
-                visible_frame: wp.visible_border_box.to_logical(scale),
-                is_highlighted: wp.is_highlighted,
-                spawn_direction: wp.spawn_direction,
+            .map(|show| overlay::LogicalTiledWindow {
+                id: show.placement.id,
+                frame: show.placement.border_box.to_logical(scale),
+                visible_frame: show.placement.visible_border_box.to_logical(scale),
+                is_highlighted: show.placement.is_highlighted,
+                spawn_direction: show.placement.spawn_direction,
+                corner_radius: show.corner_radius,
             })
             .collect();
         let containers_logical: Vec<overlay::LogicalTiledContainer> = self
@@ -204,7 +206,7 @@ impl TilingOverlay {
     pub(super) fn update(
         &mut self,
         monitor: PixelRect,
-        windows: &[TilingWindowPlacement],
+        windows: &[TilingWindowShow],
         containers: &[ContainerPlacement],
         scale: f32,
         border_thickness: Pixels<Physical>,
@@ -304,6 +306,7 @@ impl FloatOverlay {
         wp: &FloatWindowPlacement,
         scale: f32,
         border_thickness: Pixels<Physical>,
+        corner_radius: Length<Logical>,
     ) {
         let vf = wp.visible_border_box;
         let (x_phys, y_phys, w_phys, h_phys) = vf.to_surface_size();
@@ -345,6 +348,7 @@ impl FloatOverlay {
                 frame_logical,
                 vf_logical,
                 is_highlighted,
+                corner_radius,
                 &theme,
                 border,
             );

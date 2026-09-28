@@ -1,8 +1,8 @@
 use crate::action::WorkspaceInfo;
 use crate::config::Appearance;
 use crate::core::{
-    ContainerPlacement, FloatWindowPlacement, MonitorId, Physical, PixelRect, Pixels,
-    TilingWindowPlacement, WindowId,
+    ContainerPlacement, FloatWindowPlacement, Length, Logical, MonitorId, Physical, PixelRect,
+    Pixels, TilingWindowPlacement, WindowId,
 };
 use crate::platform::windows::external::ZOrder;
 
@@ -45,12 +45,14 @@ pub(in crate::platform::windows) enum FloatOverlayAction {
         z_order: ZOrder,
         scale: f32,
         border_thickness: Pixels<Physical>,
+        corner_radius: Length<Logical>,
     },
     Update {
         window_id: WindowId,
         placement: FloatWindowPlacement,
         scale: f32,
         border_thickness: Pixels<Physical>,
+        corner_radius: Length<Logical>,
     },
     /// Absent overlay is normal here, because a window leaving the float state can be hidden
     /// before its overlay is retained away.
@@ -63,7 +65,13 @@ pub(in crate::platform::windows) struct MonitorScene {
     /// Resolved on the domain side, since the monitor registry does not cross the seam.
     pub(in crate::platform::windows) scale: f32,
     pub(in crate::platform::windows) border_thickness: Pixels<Physical>,
-    pub(in crate::platform::windows) tiling_windows: Vec<TilingWindowPlacement>,
+    pub(in crate::platform::windows) tiling_windows: Vec<TilingWindowShow>,
     pub(in crate::platform::windows) float_windows: Vec<FloatWindowPlacement>,
     pub(in crate::platform::windows) containers: Vec<ContainerPlacement>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(in crate::platform::windows) struct TilingWindowShow {
+    pub(in crate::platform::windows) placement: TilingWindowPlacement,
+    pub(in crate::platform::windows) corner_radius: Length<Logical>,
 }

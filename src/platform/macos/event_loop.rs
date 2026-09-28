@@ -257,6 +257,9 @@ fn dispatch_check_positions(runner: &mut DomeRunner, pid: i32, observed_at: Debo
         },
         move |result, runner| {
             if let Some(existing) = result {
+                for e in &existing {
+                    runner.dome.update_corner_radius(e.cg_id, e.corner_radius);
+                }
                 let moves = existing
                     .into_iter()
                     .map(|e| WindowMove {

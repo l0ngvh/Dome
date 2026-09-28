@@ -15,12 +15,10 @@ use objc2_foundation::NSRect;
 use objc2_io_surface::IOSurface;
 use objc2_quartz_core::{CAAutoresizingMask, CALayer, CATransaction, kCAGravityResize};
 
-use super::super::dome::{ContainerShow, HubEvent};
+use super::super::dome::{ContainerShow, FloatShow, HubEvent, TilingWindowShow};
 use super::compositor::{MacOsCompositor, physical_size};
 use crate::config::Appearance;
-use crate::core::{
-    ContainerId, Dimension, FloatWindowPlacement, Length, Logical, TilingWindowPlacement,
-};
+use crate::core::{ContainerId, Dimension, FloatWindowPlacement, Length, Logical};
 use crate::font::FontConfig;
 use crate::overlay::{self, BorderMetrics, LogicalTiledContainer, LogicalTiledWindow};
 use crate::platform::macos::objc2_wrapper::{kAXFrontmostAttribute, set_attribute_value};
@@ -59,6 +57,7 @@ pub(super) struct FloatOverlay {
     placement: Option<FloatWindowPlacement>,
     scale: f64,
     border_thickness: Length<Logical>,
+    corner_radius: Length<Logical>,
 }
 
 impl FloatOverlay {
@@ -121,20 +120,18 @@ impl FloatOverlay {
             placement: None,
             scale: 1.0,
             border_thickness: Length::new(0.0),
+            corner_radius: Length::ZERO,
         }
     }
 
-    pub(super) fn render(
-        &mut self,
-        placement: &FloatWindowPlacement,
-        cocoa_frame: NSRect,
-        scale: f64,
-        border_thickness: Length<Logical>,
-        is_focused: bool,
-    ) {
-        self.placement = Some(*placement);
+    pub(super) fn render(&mut self, show: &FloatShow, is_focused: bool) {
+        let cocoa_frame = show.cocoa_frame;
+        let scale = show.scale;
+        let placement = show.placement;
+        self.placement = Some(placement);
         self.scale = scale;
-        self.border_thickness = border_thickness;
+        self.border_thickness = show.border_thickness;
+        self.corner_radius = show.corner_radius;
         self.is_focused = is_focused;
 
         let (position, size) = frame_attrs(cocoa_frame);
@@ -163,38 +160,34 @@ impl FloatOverlay {
             self.mirror_layer.setHidden(true);
         }
 
-        let border = BorderMetrics::from_thickness(self.border_thickness);
-        let theme = self.renderer.theme();
-        self.renderer.render(scale as f32, Vec::new(), |ui| {
-            overlay::paint_float_border(
-                ui.ctx(),
-                placement.border_box.to_dimension(),
-                placement.visible_border_box.to_dimension(),
-                placement.is_highlighted,
-                &theme,
-                border,
-            );
-        });
+        self.paint();
         self.window.set_visible(true);
     }
 
     pub(super) fn set_appearance(&mut self, appearance: &Appearance) {
         // Borders only, no text, so the font is not applied.
         self.renderer.set_theme(appearance.theme);
-        if let Some(placement) = self.placement {
-            let border = BorderMetrics::from_thickness(self.border_thickness);
-            let theme = self.renderer.theme();
-            self.renderer.render(self.scale as f32, Vec::new(), |ui| {
-                overlay::paint_float_border(
-                    ui.ctx(),
-                    placement.border_box.to_dimension(),
-                    placement.visible_border_box.to_dimension(),
-                    placement.is_highlighted,
-                    &theme,
-                    border,
-                );
-            });
-        }
+        self.paint();
+    }
+
+    fn paint(&mut self) {
+        let Some(placement) = self.placement else {
+            return;
+        };
+        let corner_radius = self.corner_radius;
+        let border = BorderMetrics::from_thickness(self.border_thickness);
+        let theme = self.renderer.theme();
+        self.renderer.render(self.scale as f32, Vec::new(), |ui| {
+            overlay::paint_float_border(
+                ui.ctx(),
+                placement.border_box.to_dimension(),
+                placement.visible_border_box.to_dimension(),
+                placement.is_highlighted,
+                corner_radius,
+                &theme,
+                border,
+            );
+        });
     }
 
     pub(super) fn apply_frame(&mut self, surface: &IOSurface) {
@@ -226,7 +219,7 @@ pub(super) struct TilingOverlay {
     window: AuxiliaryWindow,
     renderer: Renderer,
     monitor: Dimension,
-    windows: Vec<TilingWindowPlacement>,
+    windows: Vec<TilingWindowShow>,
     containers: Vec<ContainerShow>,
     border_thickness: Length<Logical>,
     scale: f64,
@@ -289,7 +282,7 @@ impl TilingOverlay {
         cocoa_frame: NSRect,
         scale: f64,
         monitor: Dimension,
-        windows: &[TilingWindowPlacement],
+        windows: &[TilingWindowShow],
         containers: &[ContainerShow],
     ) {
         let (position, size) = frame_attrs(cocoa_frame);
@@ -321,7 +314,7 @@ impl TilingOverlay {
     fn update(
         &mut self,
         monitor: Dimension,
-        windows: &[TilingWindowPlacement],
+        windows: &[TilingWindowShow],
         containers: &[ContainerShow],
         scale: f64,
     ) {
@@ -343,12 +336,13 @@ impl TilingOverlay {
         let windows_logical: Vec<LogicalTiledWindow> = self
             .windows
             .iter()
-            .map(|wp| LogicalTiledWindow {
-                id: wp.id,
-                frame: wp.border_box.to_dimension(),
-                visible_frame: wp.visible_border_box.to_dimension(),
-                is_highlighted: wp.is_highlighted,
-                spawn_direction: wp.spawn_direction,
+            .map(|show| LogicalTiledWindow {
+                id: show.placement.id,
+                frame: show.placement.border_box.to_dimension(),
+                visible_frame: show.placement.visible_border_box.to_dimension(),
+                is_highlighted: show.placement.is_highlighted,
+                spawn_direction: show.placement.spawn_direction,
+                corner_radius: show.corner_radius,
             })
             .collect();
         let containers_logical: Vec<LogicalTiledContainer> = self

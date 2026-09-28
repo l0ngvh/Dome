@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use objc2_core_graphics::CGWindowID;
 
-use crate::core::{Dimension, PixelRect};
+use crate::core::{Dimension, Length, Logical, PixelRect};
 use crate::platform::macos::accessibility::{AXApp, ExternalWindow};
+use crate::platform::macos::corner_radius::corner_radius;
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::registry::ManagedWindow;
 use crate::platform::macos::dome::window::WindowState;
@@ -16,11 +17,13 @@ use crate::platform::macos::running_application::RunningApp;
 pub(in crate::platform::macos) struct ExistingWindow {
     pub(in crate::platform::macos) cg_id: CGWindowID,
     pub(in crate::platform::macos) rect: PixelRect,
+    pub(in crate::platform::macos) corner_radius: Length<Logical>,
 }
 
 pub(in crate::platform::macos) struct ExitNativeFullscreen {
     pub(in crate::platform::macos) cg_id: CGWindowID,
     pub(in crate::platform::macos) rect: PixelRect,
+    pub(in crate::platform::macos) corner_radius: Length<Logical>,
 }
 
 pub(in crate::platform::macos) struct ReconcileResult {
@@ -46,6 +49,7 @@ pub(in crate::platform::macos) struct ReconcileAllResult {
 pub(in crate::platform::macos) struct ExtRefresh {
     pub(in crate::platform::macos) cg_id: CGWindowID,
     pub(in crate::platform::macos) ext: Arc<dyn ExternalWindow>,
+    pub(in crate::platform::macos) corner_radius: Length<Logical>,
 }
 
 pub(in crate::platform::macos) fn compute_reconciliation(
@@ -125,6 +129,7 @@ pub(in crate::platform::macos) fn compute_reconciliation(
             to_exit_native_fullscreen.push(ExitNativeFullscreen {
                 cg_id,
                 rect: PixelRect::from_dimension(Dimension::new(x, y, w, h)),
+                corner_radius: corner_radius((x, y), entry.ext.read_close_button_frame(marker)),
             });
         }
     }
@@ -134,9 +139,15 @@ pub(in crate::platform::macos) fn compute_reconciliation(
     for ax in ax_windows {
         let cg_id = ax.cg_id();
         if needs_refresh.contains(&cg_id) {
+            let ext: Arc<dyn ExternalWindow> = Arc::new(ax);
+            let radius = match ext.get_position(marker) {
+                Ok(origin) => corner_radius(origin, ext.read_close_button_frame(marker)),
+                Err(_) => tracked[&cg_id].corner_radius,
+            };
             refresh.push(ExtRefresh {
                 cg_id,
-                ext: Arc::new(ax),
+                ext,
+                corner_radius: radius,
             });
             continue;
         }
@@ -168,6 +179,7 @@ pub(in crate::platform::macos) fn compute_reconciliation(
             continue;
         };
         to_add.push(PendingAdd::Positioned {
+            corner_radius: corner_radius((x, y), new.ax.read_close_button_frame(marker)),
             new,
             rect: PixelRect::from_dimension(Dimension::new(x, y, w, h)),
         });
@@ -226,6 +238,7 @@ fn read_existing_window(
     Some(ExistingWindow {
         cg_id,
         rect: PixelRect::from_dimension(Dimension::new(x, y, w, h)),
+        corner_radius: corner_radius((x, y), window.ext.read_close_button_frame(marker)),
     })
 }
 
