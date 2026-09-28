@@ -10,7 +10,6 @@ use objc2::rc::autoreleasepool;
 use objc2_app_kit::NSWorkspace;
 use objc2_core_graphics::CGWindowID;
 
-use crate::action::{Action, Actions};
 use crate::logging::Logger;
 use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::dispatcher::GcdDispatcher;
@@ -126,9 +125,6 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
             if let Some(config) = runner.dome.reload() {
                 runner.logger.set_level(config.log_level);
                 login_item::sync_login_item(config.start_at_login, runner.bundle_path.as_deref());
-                runner
-                    .dome
-                    .config_changed(config.tiling, config.appearance, config.env);
             }
         }
         HubEvent::LayoutConfigChanged(new_layout) => {
@@ -142,7 +138,7 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
         }
         HubEvent::Action(actions) => {
             tracing::debug!(%actions, "Executing actions");
-            process_actions(runner, &actions);
+            runner.dome.handle_actions(&actions, &runner.signal);
         }
         HubEvent::Query { query, sender } => {
             let json = match query {
@@ -195,37 +191,6 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
             runner.dome.export_layout(std::path::Path::new(&path));
         }
     });
-}
-
-fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
-    for action in actions {
-        match action {
-            Action::Focus { target } => dispatch_tiling(runner, target.into()),
-            Action::Move { target } => dispatch_tiling(runner, target.into()),
-            Action::Toggle { target } => dispatch_tiling(runner, target.into()),
-            Action::Master { target } => dispatch_tiling(runner, target.into()),
-            Action::Execute { command } => runner.dome.execute(command),
-            Action::Exit => {
-                tracing::debug!("Exit action received");
-                runner.signal.stop();
-            }
-            Action::Close => {
-                runner.dome.close_focused_window();
-            }
-            Action::UnminimizeWindow { id } => {
-                runner.dome.unminimize_window(*id);
-            }
-            Action::Mode { name } => {
-                runner.dome.switch_mode(name);
-                tracing::debug!(mode = %name, "Switching to mode");
-            }
-        }
-    }
-}
-
-fn dispatch_tiling(runner: &mut DomeRunner, tiling: crate::core::TilingAction) {
-    runner.dome.handle_tiling_action(tiling);
-    runner.dome.flush_layout();
 }
 
 fn start_move_timer(runner: &mut DomeRunner, pid: i32, observed_at: Instant) {

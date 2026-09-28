@@ -1,15 +1,14 @@
 use crate::config::tests as fixtures;
-use crate::core::ReportedMonitor;
 use crate::core::TilingConfig;
 use crate::core::hub::Hub;
 use crate::core::master::PaneConfig;
 use crate::core::node::{PixelRect, WindowRestrictions};
-use crate::core::tests::{PRIMARY_MONITOR, preferred_layout, setup_logger_with_level};
+use crate::core::tests::{preferred_layout, setup_logger_with_level};
 use crate::core::{MasterConfig, PreferredWorkspace, SplitMode, Strategy, TreeLayoutNode};
 
 use super::{
-    LayoutWorkspaceConfigBuilder, TilingConfigBuilder, default_rect, setup_hub, setup_with_tiling,
-    snapshot, titled, titled_matcher,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect, setup_hub,
+    setup_with_tiling, snapshot, titled, titled_matcher,
 };
 use insta::assert_snapshot;
 
@@ -31,23 +30,6 @@ fn tiling(
         .with_float(floats.iter().map(|t| titled_matcher(t)).collect())
         .with_fullscreen(fullscreens.iter().map(|t| titled_matcher(t)).collect())
         .build()
-}
-
-fn setup_hub_with_tiling(
-    tiling: TilingConfig,
-    overrides: impl IntoIterator<Item = (String, PreferredWorkspace)>,
-) -> Hub {
-    Hub::new(
-        ReportedMonitor {
-            device_name: PRIMARY_MONITOR.to_string(),
-            work_area: PixelRect::new(0, 0, 150, 30),
-            scale: 1.0,
-            cg_display_id: None,
-            gdi_device: None,
-        },
-        tiling,
-        preferred_layout(overrides),
-    )
 }
 
 #[test]
@@ -215,7 +197,9 @@ fn sync_config_switch_to_master_applies_the_new_master_ratio() {
 
 #[test]
 fn sync_config_switches_master_to_partition_tree() {
-    let mut hub = setup_hub_with_tiling(tiling(Strategy::Master, 0.5, 1, &[], &[]), Vec::new());
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(tiling(Strategy::Master, 0.5, 1, &[], &[]))
+        .build();
     hub.insert_window(titled("w8"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w9"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w10"), default_rect(), WindowRestrictions::None);
@@ -489,9 +473,8 @@ fn sync_config_swap_iterates_every_active_workspace() {
 
 #[test]
 fn per_workspace_switch_leaves_sibling_unchanged() {
-    let mut hub = setup_hub_with_tiling(
-        TilingConfigBuilder::new().build(),
-        [(
+    let mut hub = TestHubBuilder::new()
+        .with_preferred_layout([(
             "1".to_string(),
             PreferredWorkspace::Master {
                 master_ratio: None,
@@ -501,8 +484,8 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
                 float: Vec::new(),
                 fullscreen: Vec::new(),
             },
-        )],
-    );
+        )])
+        .build();
 
     hub.insert_window(titled("w26"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w27"), default_rect(), WindowRestrictions::None);
@@ -600,14 +583,14 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
 
 #[test]
 fn switch_into_preferred_tree_layout_focuses_every_migrated_window_in_turn() {
-    let mut hub = setup_hub_with_tiling(
-        tiling(Strategy::Master, 0.5, 1, &[], &[]),
-        vec![
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(tiling(Strategy::Master, 0.5, 1, &[], &[]))
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
                 .build(),
-        ],
-    );
+        ])
+        .build();
     let w30 = hub
         .insert_window(titled("w30"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -702,9 +685,8 @@ fn switching_a_workspace_to_master_frees_its_containers() {
 /// Workspace "0" stays partition tree, "1" runs master with one slot so the pane split is
 /// observable with two windows.
 fn setup_master_on_workspace_one() -> Hub {
-    setup_hub_with_tiling(
-        TilingConfigBuilder::new().build(),
-        [(
+    TestHubBuilder::new()
+        .with_preferred_layout([(
             "1".to_string(),
             PreferredWorkspace::Master {
                 master_ratio: None,
@@ -714,8 +696,8 @@ fn setup_master_on_workspace_one() -> Hub {
                 float: Vec::new(),
                 fullscreen: Vec::new(),
             },
-        )],
-    )
+        )])
+        .build()
 }
 
 #[test]

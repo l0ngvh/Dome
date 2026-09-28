@@ -83,6 +83,19 @@ impl WindowRegistry {
         }
     }
 
+    #[tracing::instrument(skip(self), fields(window_id = %window_id))]
+    pub(in crate::platform::macos) fn unminimize_window(&self, window_id: WindowId) {
+        let Some(window) = self.by_id(window_id) else {
+            return;
+        };
+        if !window.is_minimized {
+            return;
+        }
+        if let Err(e) = window.ext.unminimize() {
+            tracing::debug!("Failed to unminimize window: {e:#}");
+        }
+    }
+
     pub(super) fn by_id_mut(&mut self, window_id: WindowId) -> Option<&mut ManagedWindow> {
         self.id_to_cg
             .get(&window_id)

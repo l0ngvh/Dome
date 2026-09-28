@@ -1,3 +1,4 @@
+mod actions;
 mod export;
 mod float_window;
 mod focus_workspace;
@@ -16,6 +17,7 @@ mod strategy_switch;
 
 use std::collections::HashSet;
 
+use crate::config::LuaRuntime;
 use crate::core::PaneDisplay;
 use crate::core::TilingConfig;
 use crate::core::hub::{Hub, MonitorLayout};
@@ -710,6 +712,7 @@ impl TestHubBuilder {
             },
             self.tiling,
             self.preferred_layout,
+            LuaRuntime::new(String::new()).expect("the test Lua VM should build"),
         )
     }
 }

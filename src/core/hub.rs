@@ -11,6 +11,9 @@ use super::preferred_layout::PreferredLayouts;
 use super::strategy::{StrategyAction, StrategySet, TilingAction, WorkspaceExport};
 use super::tiling::TilingConfig;
 use super::workspace::{Attachment, Workspace};
+use crate::action::{Action, Actions};
+use crate::config::lua::ActionContext;
+use crate::config::{Config, KeymapEffects, Keystroke, LuaRuntime, PlatformEffects};
 
 pub(crate) struct VisiblePlacements {
     pub(crate) focused_window: Option<WindowId>,
@@ -97,9 +100,7 @@ pub(super) enum RestrictedAction {
 }
 
 /// Non-strategy fields of Hub, extracted so that `TilingStrategy` methods can
-/// receive `&mut HubAccess` while Hub holds `&mut strategy` separately. This
-/// solves the split-borrow problem: strategy and access are disjoint fields.
-#[derive(Debug)]
+/// receive `&mut HubAccess` while Hub holds `&mut strategy` separately.
 pub(crate) struct HubAccess {
     pub(super) monitors: Allocator<Monitor>,
     pub(super) focused_monitor: MonitorId,
@@ -191,7 +192,6 @@ impl HubAccess {
     }
 }
 
-#[derive(Debug)]
 pub(crate) struct Hub {
     pub(super) access: HubAccess,
     pub(super) strategies: StrategySet,
@@ -199,6 +199,7 @@ pub(crate) struct Hub {
     pub(super) float_fullscreen_matchers: Allocator<WindowMatcher>,
     pub(super) global_float_matchers: Vec<FloatFullscreenMatcherId>,
     pub(super) global_fullscreen_matchers: Vec<FloatFullscreenMatcherId>,
+    runtime: LuaRuntime,
 }
 
 impl Hub {
@@ -206,6 +207,7 @@ impl Hub {
         primary: ReportedMonitor,
         tiling: TilingConfig,
         preferred_layouts: PreferredLayouts,
+        runtime: LuaRuntime,
     ) -> Self {
         let strategies = StrategySet::new(&tiling);
 
@@ -226,12 +228,82 @@ impl Hub {
             float_fullscreen_matchers: Allocator::new(),
             global_float_matchers: Vec::new(),
             global_fullscreen_matchers: Vec::new(),
+            runtime,
         };
 
         let primary_id = hub.add_monitor(primary);
         hub.access.focused_monitor = primary_id;
         hub.access.primary_monitor = primary_id;
         hub
+    }
+
+    #[tracing::instrument(skip(self, effects, keymap_effects))]
+    pub(crate) fn run_binding(
+        &mut self,
+        keymap: &str,
+        keystroke: &Keystroke,
+        effects: &mut dyn PlatformEffects,
+        keymap_effects: &mut dyn KeymapEffects,
+    ) {
+        // A reload between the keypress and here can drop the binding, so a miss
+        // is expected rather than a bug.
+        let Some(binding) = self.runtime.binding(keymap, keystroke) else {
+            tracing::warn!(%keymap, %keystroke, "Binding is gone, dropping");
+            return;
+        };
+        let mut cx = ActionContext {
+            hub: self,
+            effects,
+            keymap_effects,
+        };
+        if let Err(e) = binding.call(&mut cx) {
+            tracing::warn!(%keymap, %keystroke, error = %e, "Callback handler errored");
+        }
+    }
+
+    #[tracing::instrument(skip(self, keymap_effects))]
+    pub(crate) fn reload_config(
+        &mut self,
+        keymap_effects: &mut dyn KeymapEffects,
+    ) -> Option<Box<Config>> {
+        let config = self.runtime.reload(keymap_effects)?;
+        self.sync_configuration(config.tiling.clone());
+        Some(config)
+    }
+
+    #[tracing::instrument(skip(self, effects, keymap_effects))]
+    pub(crate) fn handle_actions(
+        &mut self,
+        actions: &Actions,
+        effects: &mut dyn PlatformEffects,
+        keymap_effects: &mut dyn KeymapEffects,
+    ) {
+        for action in actions {
+            match action {
+                Action::Focus { target } => self.handle_tiling_action(target),
+                Action::Move { target } => self.handle_tiling_action(target),
+                Action::Toggle { target } => self.handle_tiling_action(target),
+                Action::Master { target } => self.handle_tiling_action(target),
+                Action::Execute { command } => effects.execute(command),
+                Action::Exit => {
+                    tracing::debug!("Exit action received");
+                    effects.exit();
+                }
+                Action::Close => self.close_focused_window(effects),
+                Action::UnminimizeWindow { id } => effects.unminimize(*id),
+                Action::Mode { name } => {
+                    tracing::debug!(mode = %name, "Switching to mode");
+                    keymap_effects.switch_mode(name);
+                }
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self, effects))]
+    pub(crate) fn close_focused_window(&self, effects: &mut dyn PlatformEffects) {
+        if let Some(id) = self.focused_window(self.current_workspace()) {
+            effects.close(id);
+        }
     }
 
     pub(crate) fn current_workspace(&self) -> WorkspaceId {

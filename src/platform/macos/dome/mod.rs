@@ -23,13 +23,11 @@ use std::time::Instant;
 use calloop::LoopSignal;
 use objc2_core_graphics::CGWindowID;
 
-use crate::action::MinimizedWindow;
-use crate::config::{
-    Appearance, Config, KeymapEffects, Keystroke, LuaRuntime, PlatformEffects, PreferredLayouts,
-};
+use crate::action::{Actions, MinimizedWindow};
+use crate::config::{Config, Keystroke, LuaRuntime, PlatformEffects, PreferredLayouts};
 use crate::core::{
-    ContainerId, Dimension, Hub, Length, Logical, PixelRect, TilingAction, WindowId,
-    WindowMetadata, WindowRestrictions,
+    ContainerId, Dimension, Hub, Length, Logical, PixelRect, WindowId, WindowMetadata,
+    WindowRestrictions,
 };
 use crate::core::{TilingConfig, WindowMatcher, pattern_matches};
 use crate::platform::keymap::KeymapPublisher;
@@ -59,6 +57,10 @@ impl PlatformEffects for MacPlatformEffects<'_> {
 
     fn exit(&mut self) {
         self.signal.stop();
+    }
+
+    fn unminimize(&mut self, id: WindowId) {
+        self.registry.unminimize_window(id);
     }
 }
 
@@ -205,7 +207,6 @@ pub(in crate::platform::macos) struct Dome {
     monitors: Vec<MonitorInfo>,
     /// Detection is suppressed while the display settles after a monitor change.
     monitor_settling: bool,
-    runtime: LuaRuntime,
     keymap_publisher: KeymapPublisher,
     env: HashMap<String, String>,
 }
@@ -224,7 +225,7 @@ impl Dome {
             .iter()
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
-        let mut hub = Hub::new(primary.into(), tiling, workspace_overrides.clone());
+        let mut hub = Hub::new(primary.into(), tiling, workspace_overrides.clone(), runtime);
         let primary_monitor_id = hub.primary_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         for monitor in monitors {
@@ -248,7 +249,6 @@ impl Dome {
             bar_geometry: None,
             monitors: monitors.to_vec(),
             monitor_settling: false,
-            runtime,
             keymap_publisher,
             env,
         }
@@ -405,19 +405,6 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn config_changed(
-        &mut self,
-        tiling: TilingConfig,
-        appearance: Appearance,
-        env: HashMap<String, String>,
-    ) {
-        self.env = env;
-        self.hub.sync_configuration(tiling);
-        self.sender.send(HubMessage::AppearanceChanged(appearance));
-        tracing::info!("Config reloaded");
-        self.flush_layout();
-    }
-
     pub(in crate::platform::macos) fn layout_changed(&mut self, new_layout: PreferredLayouts) {
         self.hub.sync_preferred_layout(new_layout);
         tracing::info!("Layout reloaded");
@@ -440,7 +427,7 @@ impl Dome {
         // A minimized window holds no workspace, so the hub cannot focus it
         // until the deminiaturize notification reattaches it.
         if entry.is_minimized {
-            self.unminimize_window(window_id);
+            self.registry.unminimize_window(window_id);
             return;
         }
         self.hub.set_focus(window_id);
@@ -483,7 +470,7 @@ impl Dome {
         let window_id = entry.window_id;
         let ext = entry.ext.clone();
         if entry.is_minimized {
-            self.unminimize_window(window_id);
+            self.registry.unminimize_window(window_id);
             return;
         }
         if let Err(e) = ext.focus() {
@@ -636,33 +623,6 @@ impl Dome {
         serde_json::to_string(&entries).expect("MinimizedWindow is infallibly serializable")
     }
 
-    #[tracing::instrument(skip(self), fields(window_id = %window_id))]
-    pub(in crate::platform::macos) fn unminimize_window(&mut self, window_id: WindowId) {
-        let Some(window) = self.registry.by_id(window_id) else {
-            return;
-        };
-        if !window.is_minimized {
-            return;
-        }
-        if let Err(e) = window.ext.unminimize() {
-            tracing::debug!("Failed to unminimize window: {e:#}");
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub(in crate::platform::macos) fn close_focused_window(&mut self) {
-        let Some(window_id) = self.hub.focused_window(self.hub.current_workspace()) else {
-            return;
-        };
-        self.registry.close_window(window_id);
-    }
-
-    pub(in crate::platform::macos) fn execute(&self, command: &str) {
-        if let Err(e) = crate::platform::macos::spawn::spawn_disclaimed_sh(command, &self.env) {
-            tracing::warn!(%command, "Failed to execute: {e}");
-        }
-    }
-
     pub(in crate::platform::macos) fn run_binding(
         &mut self,
         keymap: &str,
@@ -674,26 +634,34 @@ impl Dome {
             signal,
             env: &self.env,
         };
-        self.runtime.dispatch(
-            keymap,
-            keystroke,
-            &mut self.hub,
-            &mut effects,
-            &mut self.keymap_publisher,
-        );
+        self.hub
+            .run_binding(keymap, keystroke, &mut effects, &mut self.keymap_publisher);
+        self.flush_layout();
+    }
+
+    pub(in crate::platform::macos) fn handle_actions(
+        &mut self,
+        actions: &Actions,
+        signal: &LoopSignal,
+    ) {
+        let mut effects = MacPlatformEffects {
+            registry: &mut self.registry,
+            signal,
+            env: &self.env,
+        };
+        self.hub
+            .handle_actions(actions, &mut effects, &mut self.keymap_publisher);
         self.flush_layout();
     }
 
     pub(in crate::platform::macos) fn reload(&mut self) -> Option<Box<Config>> {
-        self.runtime.reload(&mut self.keymap_publisher)
-    }
-
-    pub(in crate::platform::macos) fn switch_mode(&mut self, name: &str) {
-        self.keymap_publisher.switch_mode(name);
-    }
-
-    pub(in crate::platform::macos) fn handle_tiling_action(&mut self, action: TilingAction) {
-        self.hub.handle_tiling_action(action);
+        let config = self.hub.reload_config(&mut self.keymap_publisher)?;
+        self.env = config.env.clone();
+        self.sender
+            .send(HubMessage::AppearanceChanged(config.appearance.clone()));
+        tracing::info!("Config reloaded");
+        self.flush_layout();
+        Some(config)
     }
 }
 

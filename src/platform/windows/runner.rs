@@ -2,9 +2,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{LPARAM, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessageW, WM_QUIT};
+use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessageW};
 
-use crate::action::{Action, Actions};
 use crate::core::{Physical, PixelRect};
 use crate::logging::Logger;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
@@ -81,8 +80,6 @@ impl Runner {
                 if let Some(config) = self.dome.reload() {
                     self.logger.set_level(config.log_level);
                     login_item::sync_login_item(config.start_at_login);
-                    self.dome
-                        .config_changed(config.tiling, config.appearance, config.env);
                 }
             }
             HubEvent::LayoutConfigChanged(c) => {
@@ -144,7 +141,7 @@ impl Runner {
                 self.dispatch_title_changed(hwnd_id);
             }
             HubEvent::Action(a) => {
-                self.handle_actions(&a);
+                self.dome.handle_actions(&a, self.main_thread_id);
             }
             HubEvent::Query { query, sender } => {
                 let json = match query {
@@ -231,36 +228,6 @@ impl Runner {
                 CreatedWindow::Skip => {}
             },
         );
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn handle_actions(&mut self, actions: &Actions) {
-        for action in actions {
-            match action {
-                Action::Focus { target } => self.dome.handle_tiling_action(target.into()),
-                Action::Move { target } => self.dome.handle_tiling_action(target.into()),
-                Action::Toggle { target } => self.dome.handle_tiling_action(target.into()),
-                Action::Master { target } => self.dome.handle_tiling_action(target.into()),
-                Action::Execute { command } => self.dome.execute(command),
-                Action::Exit => {
-                    unsafe {
-                        PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok()
-                    };
-                    unsafe { PostQuitMessage(0) };
-                }
-                Action::Close => {
-                    self.dome.close_focused_window();
-                }
-                Action::UnminimizeWindow { id } => {
-                    self.dome.unminimize_window(*id);
-                }
-                Action::Mode { name } => {
-                    self.dome.switch_mode(name);
-                    tracing::debug!(mode = %name, "Switching to mode");
-                }
-            }
-        }
-        self.dome.apply_layout();
     }
 
     fn dispatch_placement_read(&mut self, hwnd_id: HwndId, observed_at: Instant) {

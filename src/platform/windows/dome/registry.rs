@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::core::WindowId;
-use crate::platform::windows::external::{HwndId, ManageExternalWindow};
+use crate::platform::windows::external::{HwndId, ManageExternalWindow, ShowCmd};
 
 use super::window::WindowState;
 
@@ -48,6 +48,17 @@ impl WindowRegistry {
             return;
         };
         entry.ext.close();
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(in crate::platform::windows) fn unminimize_window(&self, window_id: WindowId) {
+        let Some(entry) = self.get(window_id) else {
+            return;
+        };
+        if !entry.is_minimized {
+            return;
+        }
+        entry.ext.show_cmd(ShowCmd::Restore);
     }
 
     pub(super) fn get_mut(&mut self, id: WindowId) -> Option<&mut ManagedWindow> {

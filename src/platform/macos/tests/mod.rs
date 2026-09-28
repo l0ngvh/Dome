@@ -14,7 +14,8 @@ use std::time::Instant;
 use anyhow::Result;
 use objc2_core_graphics::CGWindowID;
 
-use crate::action::Action;
+use crate::action::{Action, Actions};
+use crate::config::tests::{CleanupFile, temp_lua_path};
 use crate::config::{Config, LuaRuntime, PreferredLayouts};
 use crate::core::{Dimension, Length, Logical, MonitorId, PixelRect, TilingConfig, WindowId};
 use crate::platform::macos::MonitorInfo;
@@ -259,6 +260,7 @@ struct MacOS {
     next_cg_id: u32,
     scene_state: Arc<Mutex<SceneState>>,
     config: Config,
+    config_file: CleanupFile,
 }
 
 struct DomeBuilder<'env> {
@@ -279,7 +281,8 @@ impl DomeBuilder<'_> {
         };
         let (keymap_tx, _keymap_rx) = std::sync::mpsc::channel();
         let keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
-        let runtime = LuaRuntime::new(String::new()).expect("build test Lua VM");
+        let runtime = LuaRuntime::new(env.config_file.0.to_string_lossy().into_owned())
+            .expect("build test Lua VM");
         let dome = Dome::new(
             &[default_monitor()],
             config.tiling.clone(),
@@ -306,6 +309,7 @@ impl MacOS {
                 floats: HashMap::new(),
             })),
             config: baseline_config(),
+            config_file: CleanupFile(temp_lua_path("macos_env")),
         }
     }
 
@@ -545,13 +549,9 @@ impl MacOS {
         Length::from_pixels(self.config.tiling.border_size).logical()
     }
 
-    fn change_config(&mut self, dome: &mut Dome, adjust: impl FnOnce(&mut Config)) {
-        adjust(&mut self.config);
-        dome.config_changed(
-            self.config.tiling.clone(),
-            self.config.appearance.clone(),
-            self.config.env.clone(),
-        );
+    fn change_config(&mut self, dome: &mut Dome, source: &str) {
+        std::fs::write(&self.config_file.0, source).expect("write the test config");
+        self.config = *dome.reload().expect("the test config should load");
     }
 
     fn last_scene_state(&self) -> SceneState {
@@ -653,25 +653,12 @@ fn end_drag(
     }]);
 }
 
-/// Mirrors the runner's action dispatch, so keep the two in step.
 fn send_action(dome: &mut Dome, action: &Action) {
-    match action {
-        Action::Focus { target } => dispatch_tiling(dome, target.into()),
-        Action::Move { target } => dispatch_tiling(dome, target.into()),
-        Action::Toggle { target } => dispatch_tiling(dome, target.into()),
-        Action::Master { target } => dispatch_tiling(dome, target.into()),
-        Action::Close => dome.close_focused_window(),
-        Action::Mode { name } => dome.switch_mode(name),
-        Action::UnminimizeWindow { id } => dome.unminimize_window(*id),
-        Action::Execute { .. } | Action::Exit => {
-            panic!("{action:?} needs the runner, which the harness does not build")
-        }
-    }
-}
-
-fn dispatch_tiling(dome: &mut Dome, tiling: crate::core::TilingAction) {
-    dome.handle_tiling_action(tiling);
-    dome.flush_layout();
+    let event_loop = calloop::EventLoop::<()>::try_new().expect("the test event loop should build");
+    dome.handle_actions(
+        &Actions::new(vec![action.clone()]),
+        &event_loop.get_signal(),
+    );
 }
 
 fn send(dome: &mut Dome, s: &str) {

@@ -50,9 +50,7 @@ fn degenerate_content_box_parks_window() {
 
     assert!(macos.is_offscreen(cg1));
 
-    macos.change_config(&mut dome, |config| {
-        config.tiling.border_size = baseline_config().tiling.border_size
-    });
+    macos.change_config(&mut dome, "return {}");
     macos.settle(&mut dome, 10);
 
     assert!(!macos.is_offscreen(cg1));
@@ -226,9 +224,7 @@ fn float_window_reshaped_on_border_size_change() {
 
     // A border several points above the default, so the delta cannot be
     // mistaken for rounding noise.
-    macos.change_config(&mut dome, |config| {
-        config.tiling.border_size = Pixels::new(12)
-    });
+    macos.change_config(&mut dome, "return { border_size = 12 }");
 
     // Check before settle because settle drains the move log.
     let reshape_moves: Vec<_> = macos

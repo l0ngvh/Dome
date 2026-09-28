@@ -553,9 +553,8 @@ fn border_size_changed_resize_managed_windows() {
     let prev_d1 = env.dim(w1);
     let prev_d2 = env.dim(w2);
     let prev_d3 = env.dim(w3);
-    env.change_config(|config| {
-        config.tiling.border_size = config.tiling.border_size + Pixels::new(2)
-    });
+    let border_size = baseline_config().tiling.border_size.value() + 2;
+    env.change_config(&format!("return {{ border_size = {border_size} }}"));
 
     let d1 = env.dim(w1);
     let d2 = env.dim(w2);
@@ -583,7 +582,7 @@ fn config_reload_dispatches_apply_theme_on_flavor_change() {
     );
 
     assert_ne!(crate::theme::Flavor::Latte, configured);
-    env.change_config(|config| config.appearance.theme = crate::theme::Flavor::Latte);
+    env.change_config("return { theme = 'latte' }");
 
     assert_eq!(
         env.window_appearance()
