@@ -1,4 +1,5 @@
 # Dev logs
+- There are private APIs on macOS to query the window's border radius that can allow us to draw matching rounded borders around windows. But, getting the full Skylight framework stack into Dome will be heavy, and I have zero experience in reversing engineering macOS APIs. So if this breaks I'm stuck. According to the official document, there seems to be a limited number of possible values for the corner. So I guess we can use some heuristics to find the corner radius.
 - Luau is Lua with type, which should provide runtime type enforcement, but unfortunately it's not supported by lua-language-server.
 - Perhaps we can try disable blocking all commands on exclusive fullscreen windows. Those windows behaved erratically when Dome tried to manage them, but it was a bug caused by minimizing those windows immediately on insert. I suspect the worst case scenario that can happen now is that the window will be minimized because focus leaves them, but idk.
 - Terminal in remote box should be managed as windows by Dome. Wezterm does this well, but all its windows are closed on disconnect, and it's hard to have Dome memorize Wezterm windows position.
