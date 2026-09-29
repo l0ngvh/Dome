@@ -23,7 +23,6 @@ fn empty_hub() {
     assert_eq!(ws[0].name, "0");
     assert!(ws[0].is_focused);
     assert!(ws[0].is_visible);
-    assert_eq!(ws[0].window_count, 0);
 }
 
 #[test]
@@ -34,7 +33,6 @@ fn single_workspace_with_windows() {
     hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 1);
-    assert_eq!(ws[0].window_count, 3);
     assert!(ws[0].is_focused);
     assert!(ws[0].is_visible);
 }
@@ -50,34 +48,12 @@ fn multiple_workspaces() {
     assert_eq!(ws.len(), 2);
 
     let ws0 = ws.iter().find(|w| w.name == "0").unwrap();
-    assert_eq!(ws0.window_count, 2);
     assert!(!ws0.is_focused);
     assert!(!ws0.is_visible);
 
     let web = ws.iter().find(|w| w.name == "web").unwrap();
-    assert_eq!(web.window_count, 1);
     assert!(web.is_focused);
     assert!(web.is_visible);
-}
-
-#[test]
-fn workspace_with_floats_and_fullscreen() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w7"]));
-    hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
-    hub.insert_window(
-        titled("w7"),
-        PixelRect::new(0, 0, 200, 100),
-        WindowRestrictions::None,
-    )
-    .unwrap();
-    let third = hub
-        .insert_window(titled("w8"), default_rect(), WindowRestrictions::None)
-        .unwrap();
-    hub.set_fullscreen(third, WindowRestrictions::None);
-    let ws = hub.query_workspaces();
-    assert_eq!(ws.len(), 1);
-    // 1 tiling + 1 float + 1 fullscreen = 3, no double-counting
-    assert_eq!(ws[0].window_count, 3);
 }
 
 #[test]
@@ -97,25 +73,20 @@ fn focused_vs_visible_multi_monitor() {
     // Both monitors default to a workspace named "0", so disambiguate by focus.
     let unfocused = ws.iter().find(|w| !w.is_focused).unwrap();
     assert!(unfocused.is_visible);
-    assert_eq!(unfocused.window_count, 1);
 
     let focused = ws.iter().find(|w| w.is_focused).unwrap();
     assert!(focused.is_visible);
-    assert_eq!(focused.window_count, 1);
 }
 
 #[test]
-fn empty_non_active_workspace_persists() {
+fn empty_non_active_workspace_is_skipped() {
     let mut hub = setup();
     hub.insert_window(titled("w11"), default_rect(), WindowRestrictions::None);
     hub.focus_workspace("empty", None);
     hub.focus_workspace("0", None);
     let ws = hub.query_workspaces();
-    assert_eq!(ws.len(), 2);
-    let ws0 = ws.iter().find(|w| w.name == "0").unwrap();
-    assert_eq!(ws0.window_count, 1);
-    let empty = ws.iter().find(|w| w.name == "empty").unwrap();
-    assert_eq!(empty.window_count, 0);
+    assert_eq!(ws.len(), 1);
+    assert_eq!(ws[0].name, "0");
 }
 
 #[test]
@@ -126,7 +97,6 @@ fn workspace_info_json_shape() {
         state: WorkspaceState::Attached,
         is_focused: true,
         is_visible: false,
-        window_count: 3,
     };
     let json: serde_json::Value = serde_json::to_value(&info).unwrap();
     assert_eq!(json["name"], "main");
@@ -134,16 +104,12 @@ fn workspace_info_json_shape() {
     assert_eq!(json["state"], "attached");
     assert_eq!(json["is_focused"], true);
     assert_eq!(json["is_visible"], false);
-    assert_eq!(json["window_count"], 3);
     let back: WorkspaceInfo = serde_json::from_value(json).unwrap();
     assert_eq!(back, info);
 }
 
 #[test]
 fn monitor_details_json_shape() {
-    // The bars parse these JSON keys (SketchyBar reads unique_name and
-    // cg_display_id, Zebar reads gdi_device), so the field names are the
-    // stability contract. A rename here breaks all three bars silently.
     let details = MonitorDetails {
         device_name: "DELL SE2416H".to_string(),
         unique_name: "DELL SE2416H #1".to_string(),
@@ -181,7 +147,7 @@ fn monitor_details_json_shape() {
 }
 
 #[test]
-fn workspace_with_only_floats() {
+fn hidden_workspace_with_only_floats_is_listed() {
     let mut hub = setup_with_tiling(tiling_floating(&["w12", "w13"]));
     hub.insert_window(
         titled("w12"),
@@ -195,13 +161,14 @@ fn workspace_with_only_floats() {
         WindowRestrictions::None,
     )
     .unwrap();
+    hub.focus_workspace("other", None);
     let ws = hub.query_workspaces();
-    assert_eq!(ws.len(), 1);
-    assert_eq!(ws[0].window_count, 2);
+    let ws0 = ws.iter().find(|w| w.name == "0").unwrap();
+    assert!(!ws0.is_visible);
 }
 
 #[test]
-fn workspace_with_only_fullscreen() {
+fn hidden_workspace_with_only_fullscreen_is_listed() {
     let mut hub = setup();
     let first = hub
         .insert_window(titled("w14"), default_rect(), WindowRestrictions::None)
@@ -211,10 +178,10 @@ fn workspace_with_only_fullscreen() {
         .unwrap();
     hub.set_fullscreen(first, WindowRestrictions::None);
     hub.set_fullscreen(second, WindowRestrictions::None);
+    hub.focus_workspace("other", None);
     let ws = hub.query_workspaces();
-    assert_eq!(ws.len(), 1);
-    // Both detached from tiling by set_fullscreen, so tiling count is 0
-    assert_eq!(ws[0].window_count, 2);
+    let ws0 = ws.iter().find(|w| w.name == "0").unwrap();
+    assert!(!ws0.is_visible);
 }
 
 #[test]
@@ -231,11 +198,9 @@ fn multi_monitor_no_windows() {
     // Both monitors default to a workspace named "0", so disambiguate by focus.
     let focused = ws.iter().find(|w| w.is_focused).unwrap();
     assert!(focused.is_visible);
-    assert_eq!(focused.window_count, 0);
 
     let unfocused = ws.iter().find(|w| !w.is_focused).unwrap();
     assert!(unfocused.is_visible);
-    assert_eq!(unfocused.window_count, 0);
 }
 
 #[test]

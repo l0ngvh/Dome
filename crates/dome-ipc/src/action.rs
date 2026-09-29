@@ -85,7 +85,6 @@ pub struct WorkspaceInfo {
     pub state: WorkspaceState,
     pub is_focused: bool,
     pub is_visible: bool,
-    pub window_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

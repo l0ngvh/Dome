@@ -527,6 +527,8 @@ fn primary_change_to_a_new_display_carries_the_workspaces() {
 fn primary_change_to_a_tracked_display_parks_the_displaced_workspaces() {
     let mut env = TestEnv::new();
     env.add_monitor(second_monitor());
+    env.open();
+    env.run_actions("move monitor right");
 
     let mut demoted = default_monitor();
     demoted.is_primary = false;

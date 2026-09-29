@@ -288,7 +288,7 @@ fn set_focus_in_other_workspace_keeps_origin_workspace() {
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************
     ");
-    assert_eq!(hub.query_workspaces().len(), 2);
+    assert_eq!(hub.access.workspaces.sorted_ids().len(), 2);
 }
 
 #[test]

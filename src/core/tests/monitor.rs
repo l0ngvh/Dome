@@ -263,7 +263,6 @@ fn replug_cycles_do_not_accumulate_default_workspaces() {
         .collect();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].name, "0");
-    assert_eq!(rows[0].window_count, 1);
     assert!(rows[0].is_visible);
 }
 
@@ -298,7 +297,6 @@ fn replug_shows_a_returning_workspace_that_holds_windows() {
         .collect();
     assert_eq!(visible.len(), 1);
     assert_eq!(visible[0].name, "2");
-    assert_eq!(visible[0].window_count, 1);
 }
 
 #[test]
@@ -1564,6 +1562,7 @@ fn primary_change_onto_an_occupied_display_parks_the_displaced_under_its_bare_na
     hub.focus_workspace("p", None);
     hub.insert_window(titled("pwin"), default_rect(), WindowRestrictions::None);
     hub.focus_monitor(&MonitorSelector::Name("DELL".to_string()));
+    hub.insert_window(titled("dwin0"), default_rect(), WindowRestrictions::None);
     hub.focus_workspace("d", None);
     hub.insert_window(titled("dwin"), default_rect(), WindowRestrictions::None);
 
@@ -1592,7 +1591,7 @@ fn primary_change_onto_an_occupied_display_parks_the_displaced_under_its_bare_na
     let carried: Vec<_> = hub
         .query_workspaces()
         .into_iter()
-        .filter(|w| w.state == WorkspaceState::Attached && w.window_count > 0)
+        .filter(|w| w.state == WorkspaceState::Attached)
         .collect();
     assert_eq!(carried.len(), 1);
     assert_eq!(carried[0].name, "p");
@@ -1626,11 +1625,7 @@ fn primary_change_onto_an_untracked_display_carries_the_workspaces() {
             .iter()
             .all(|w| w.state == WorkspaceState::Attached)
     );
-    let carried: Vec<_> = hub
-        .query_workspaces()
-        .into_iter()
-        .filter(|w| w.window_count > 0)
-        .collect();
+    let carried = hub.query_workspaces();
     assert_eq!(carried.len(), 1);
     assert_eq!(carried[0].name, "p");
     assert_eq!(carried[0].monitor, "DELL");

@@ -435,9 +435,7 @@ impl Hub {
             .collect()
     }
 
-    /// Returns metadata for all active workspaces, ordered by WorkspaceId
-    /// (creation order). Workspaces persist for the lifetime of the Hub once
-    /// created, so emptied workspaces continue to appear with `window_count == 0`.
+    /// Returns each workspace that is visible or holds a window, in creation order.
     pub(crate) fn query_workspaces(&self) -> Vec<crate::action::WorkspaceInfo> {
         let focused_ws = self.current_workspace();
         let visible: Vec<WorkspaceId> = self.visible_workspaces();
@@ -445,8 +443,12 @@ impl Hub {
             .workspaces
             .sorted_ids()
             .into_iter()
-            .map(|ws_id| {
+            .filter_map(|ws_id| {
                 let ws = self.access.workspaces.get(ws_id);
+                let is_visible = visible.contains(&ws_id);
+                if !is_visible && self.count_workspace_windows(ws_id, ws) == 0 {
+                    return None;
+                }
                 let (monitor, state) = match &ws.attachment {
                     Attachment::Attached => (
                         self.access.monitors.get(ws.monitor).unique_name.clone(),
@@ -456,14 +458,13 @@ impl Hub {
                         (origin.clone(), crate::action::WorkspaceState::Parked)
                     }
                 };
-                crate::action::WorkspaceInfo {
+                Some(crate::action::WorkspaceInfo {
                     name: ws.name.clone(),
                     monitor,
                     state,
                     is_focused: ws_id == focused_ws,
-                    is_visible: visible.contains(&ws_id),
-                    window_count: self.count_workspace_windows(ws_id, ws),
-                }
+                    is_visible,
+                })
             })
             .collect()
     }

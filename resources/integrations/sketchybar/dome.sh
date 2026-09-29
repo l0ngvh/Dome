@@ -87,7 +87,7 @@ if [ -n "$SENDER" ]; then
             | ( [ $ws[] | select(.state == "attached" and (.monitor | slug) != "")
                   | { item: ("dome." + (.monitor | slug) + ".ws." + .name), sl: (.monitor | slug), name: .name, w: . } ] ) as $live
             | ( $live | map(.item) ) as $live_items
-            | ( [ $ws[] | select(.state == "parked" and .window_count > 0 and (.monitor | slug) != "")
+            | ( [ $ws[] | select(.state == "parked" and (.monitor | slug) != "")
                   | { o: (.monitor | slug), n: .name, origin: .monitor } ] ) as $parked
             | ( $parked | map(.o) | unique ) as $origins
             | ( $parked | map("dome.parked." + .o + "." + .n) ) as $parked_items
@@ -107,7 +107,7 @@ if [ -n "$SENDER" ]; then
                 ( $live[]
                   | .item as $it | .sl as $sl | .name as $nm | .w as $w
                   | ($arr_by_slug[$sl]) as $arr
-                  | if $arr != null and ($w.is_visible or $w.window_count > 0)
+                  | if $arr != null
                     then ( ( if $w.is_focused then [$focused_bg, $focused_fg]
                              elif $w.is_visible then [$visible_bg, $visible_fg]
                              else [$occupied_bg, $occupied_fg] end ) as $c

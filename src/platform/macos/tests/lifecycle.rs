@@ -399,6 +399,9 @@ fn primary_change_to_a_tracked_display_parks_the_displaced_workspaces() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
     dome.monitors_changed(vec![default_monitor(), second_monitor()]);
+    send(&mut dome, "focus monitor right");
+    let win = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);
     macos.settle(&mut dome, 10);
 
     let mut demoted = default_monitor();
