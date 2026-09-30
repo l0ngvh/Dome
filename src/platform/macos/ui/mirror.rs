@@ -2,15 +2,15 @@ use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2::{AnyThread, DefinedClass, define_class, msg_send};
+use objc2::{AnyThread, DefinedClass, available, define_class, msg_send};
 use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::{CGWindowID, kCGColorSpaceSRGB};
 use objc2_core_media::CMSampleBuffer;
 use objc2_foundation::{NSError, NSObject, NSObjectProtocol};
 use objc2_io_surface::IOSurface;
 use objc2_screen_capture_kit::{
-    SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamOutput,
-    SCStreamOutputType,
+    SCCaptureResolutionType, SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration,
+    SCStreamOutput, SCStreamOutputType,
 };
 
 use super::{CaptureMessage, CaptureSender};
@@ -51,6 +51,15 @@ impl WindowCapture {
             config.setCapturesAudio(false);
             config.setCaptureMicrophone(false);
             config.setExcludesCurrentProcessAudio(false);
+            config.setShowsCursor(false);
+            if available!(macos = 14.0) {
+                // With the shadow, the output also holds the shadow margin. The window's
+                // transparent rounded corners then fill with shadow pixels.
+                config.setIgnoreShadowsSingleWindow(true);
+                // A parked window lies mostly off the screen. The global clip would crop that part.
+                config.setIgnoreGlobalClipSingleWindow(true);
+                config.setCaptureResolution(SCCaptureResolutionType::Best);
+            }
         }
         let block = RcBlock::new(move |error: *mut NSError| {
             if !error.is_null() {

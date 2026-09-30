@@ -9,7 +9,7 @@ use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_application_services::AXUIElement;
-use objc2_core_foundation::kCFBooleanTrue;
+use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize, kCFBooleanTrue};
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::NSRect;
 use objc2_io_surface::IOSurface;
@@ -92,7 +92,6 @@ impl FloatOverlay {
         let mirror_layer = CALayer::layer();
         let mask = CAAutoresizingMask::LayerWidthSizable | CAAutoresizingMask::LayerHeightSizable;
         unsafe {
-            mirror_layer.setAutoresizingMask(mask);
             mirror_layer.setContentsGravity(kCAGravityResize);
             mirror_layer.setContentsScale(scale);
             metal_layer.setAutoresizingMask(mask);
@@ -143,6 +142,18 @@ impl FloatOverlay {
         let (pw, ph) = physical_size(cocoa_frame.size.width, cocoa_frame.size.height, scale);
         self.renderer.resize(scale as f32, pw, ph);
         self.mirror_layer.setContentsScale(scale);
+        // The capture covers only the content box, while this window covers the border box.
+        let content = placement.content_box;
+        // The border is equally thick on every side, so one inset places the layer.
+        let inset = (content.x() - placement.border_box.x()).value() as CGFloat;
+        let content_frame = CGRect::new(
+            CGPoint::new(inset, inset),
+            CGSize::new(
+                content.width().value() as CGFloat,
+                content.height().value() as CGFloat,
+            ),
+        );
+        without_implicit_animation(|| self.mirror_layer.setFrame(content_frame));
 
         if !is_focused {
             self.window.set_click_through(false);
@@ -191,17 +202,20 @@ impl FloatOverlay {
             return;
         }
         // Core Animation applies a 0.25s implicit crossfade when contents changes.
-        // Wrapping in a transaction with disabled actions swaps surfaces atomically.
-        unsafe {
-            CATransaction::begin();
-            CATransaction::setDisableActions(true);
+        without_implicit_animation(|| {
             // Explicit typed binding avoids deref-coercion ambiguity through the
             // IOSurface -> NSObject -> AnyObject chain in argument position.
             let obj: &AnyObject = surface;
-            self.mirror_layer.setContents(Some(obj));
-            CATransaction::commit();
-        }
+            unsafe { self.mirror_layer.setContents(Some(obj)) };
+        });
     }
+}
+
+fn without_implicit_animation(change: impl FnOnce()) {
+    CATransaction::begin();
+    CATransaction::setDisableActions(true);
+    change();
+    CATransaction::commit();
 }
 
 struct TilingHandler;
