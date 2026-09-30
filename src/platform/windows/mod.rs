@@ -207,14 +207,13 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
                     .ok()
                     .expect("CoInitializeEx failed");
                 let mut keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
-                let mut runtime = match LuaRuntime::new(config_path.clone()) {
-                    Ok(runtime) => runtime,
+                let (runtime, config) = match LuaRuntime::load(config_path.clone(), &mut keymap) {
+                    Ok(loaded) => loaded,
                     Err(e) => {
                         tracing::error!(error = %e, "Failed to build the Lua VM, aborting startup");
                         return;
                     }
                 };
-                let config = runtime.load(&mut keymap);
                 // Log before set_level so the line survives a configured level
                 // above info.
                 tracing::info!(%config_path, "Loaded config");

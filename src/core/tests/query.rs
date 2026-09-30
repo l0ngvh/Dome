@@ -1,11 +1,12 @@
 use crate::action::{MonitorDetails, MonitorFrame, WorkspaceInfo, WorkspaceState};
+use crate::config::lua::test_support::{loaded_runtime, test_hub_with};
 use crate::core::MonitorSelector;
 use crate::core::ReportedMonitor;
 use crate::core::TilingConfig;
 use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    TilingConfigBuilder, default_rect, reported_monitor, setup, setup_with_tiling, titled,
-    titled_matcher, work_area_at,
+    STACKED_DELL_RESERVED_AREA, TilingConfigBuilder, default_rect, reported_monitor, setup,
+    setup_with_tiling, titled, titled_matcher, work_area_at,
 };
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
@@ -332,4 +333,24 @@ fn monitors_are_ordered_by_screen_position() {
     let monitors = hub.query_monitors();
     let names: Vec<&str> = monitors.iter().map(|m| m.unique_name.as_str()).collect();
     assert_eq!(names, ["primary", "middle", "right"]);
+}
+
+#[test]
+fn monitors_stay_ordered_by_the_system_work_area() {
+    let (runtime, _cfg) = loaded_runtime("system_order", STACKED_DELL_RESERVED_AREA);
+    let mut hub = test_hub_with(runtime);
+    hub.add_monitor(reported_monitor(
+        "DELL".to_string(),
+        PixelRect::new(1920, 0, 100, 30),
+        1.0,
+    ));
+    hub.add_monitor(reported_monitor(
+        "DELL".to_string(),
+        PixelRect::new(1920, 30, 100, 30),
+        1.0,
+    ));
+
+    let monitors = hub.query_monitors();
+    let names: Vec<&str> = monitors.iter().map(|m| m.unique_name.as_str()).collect();
+    assert_eq!(names, ["test", "DELL #1", "DELL #2"]);
 }

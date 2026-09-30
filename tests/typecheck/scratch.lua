@@ -15,6 +15,11 @@ local config = {
   theme = "latte",
   border_size = 2,
   env = { EDITOR = "nvim" },
+  reserved_area = function(monitor)
+    if monitor.name == "DELL P2419H" then
+      return { top = 32 }
+    end
+  end,
   keymaps = {
     main = {
       [Meta + "h"] = function(actions) actions.focus_left() end,

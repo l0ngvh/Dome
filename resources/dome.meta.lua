@@ -63,6 +63,17 @@
 ---@field master_ratio? number
 ---@field master_count? number
 
+-- The monitor Dome passes to reserved_area.
+---@class dome.Monitor
+---@field name string The unique_name that dome query monitors lists.
+
+-- Logical pixels. An absent edge is 0.
+---@class dome.ReservedArea
+---@field top? number
+---@field bottom? number
+---@field left? number
+---@field right? number
+
 ---@class Config
 ---@field border_size? number Logical pixels.
 ---@field theme? "latte" | "frappe" | "macchiato" | "mocha" Catppuccin flavor.
@@ -82,6 +93,7 @@
 ---@field ignore? WindowMatcher[]
 ---@field env? table<string, string> Extra variables for actions.execute commands.
 ---@field keymaps? Keymaps
+---@field reserved_area? fun(monitor: dome.Monitor): dome.ReservedArea?
 
 -- Keyed by monitor name.
 ---@alias dome.Layout table<string, dome.MonitorLayout>

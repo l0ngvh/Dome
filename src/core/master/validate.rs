@@ -87,25 +87,27 @@ impl ValidateStrategy for MasterStrategy {
                 continue;
             }
 
-            let pane_height = Length::from_pixels(
-                hub.monitors
-                    .get(hub.workspaces.get(ws_id).monitor)
-                    .work_area
-                    .height(),
-            );
+            let work_area = hub
+                .monitors
+                .get(hub.workspaces.get(ws_id).monitor)
+                .work_area;
+            let pane_height = Length::from_pixels(work_area.height());
 
             for &wid in &master {
                 let dim = self.window_states[&wid].dimension;
-                assert!(
-                    dim.width > Length::ZERO,
-                    "master-stack workspace {ws_id}: window {wid:?} has non-positive width {}",
-                    dim.width
-                );
-                assert!(
-                    dim.height > Length::ZERO,
-                    "master-stack workspace {ws_id}: window {wid:?} has non-positive height {}",
-                    dim.height
-                );
+                // On an empty work area a window is legitimately zero-size.
+                if !work_area.is_empty() {
+                    assert!(
+                        dim.width > Length::ZERO,
+                        "master-stack workspace {ws_id}: window {wid:?} has non-positive width {}",
+                        dim.width
+                    );
+                    assert!(
+                        dim.height > Length::ZERO,
+                        "master-stack workspace {ws_id}: window {wid:?} has non-positive height {}",
+                        dim.height
+                    );
+                }
                 let c = window_constraints(hub, &self.size_constraints, wid);
                 assert!(
                     dim.height >= c.min_height - VALIDATION_TOLERANCE,
@@ -133,16 +135,18 @@ impl ValidateStrategy for MasterStrategy {
 
             for &wid in &secondary {
                 let dim = self.window_states[&wid].dimension;
-                assert!(
-                    dim.width > Length::ZERO,
-                    "master-stack workspace {ws_id}: window {wid:?} has non-positive width {}",
-                    dim.width
-                );
-                assert!(
-                    dim.height > Length::ZERO,
-                    "master-stack workspace {ws_id}: window {wid:?} has non-positive height {}",
-                    dim.height
-                );
+                if !work_area.is_empty() {
+                    assert!(
+                        dim.width > Length::ZERO,
+                        "master-stack workspace {ws_id}: window {wid:?} has non-positive width {}",
+                        dim.width
+                    );
+                    assert!(
+                        dim.height > Length::ZERO,
+                        "master-stack workspace {ws_id}: window {wid:?} has non-positive height {}",
+                        dim.height
+                    );
+                }
                 let c = window_constraints(hub, &self.size_constraints, wid);
                 assert!(
                     dim.height >= c.min_height - VALIDATION_TOLERANCE,

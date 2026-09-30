@@ -14,4 +14,5 @@ return {
   { class = "TaskManagerWindow" },
   { class = "Windows.UI.Core.CoreWindow" }, -- UWP core window
   { class = [[/^MessageWindowClass\+/]] },
+  { process = "zebar.exe", title = [[/^Zebar -/]] }, -- Zebar widget windows
 }

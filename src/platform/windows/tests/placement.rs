@@ -219,12 +219,6 @@ fn show_tiling_places_at_200pct_offset_monitor() {
         name: "Primary".to_string(),
         gdi_device: "\\\\.\\DISPLAY1".to_string(),
         work_area: PixelRect::new(0, 0, 1920, 1080),
-        bounds: Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(1920.0),
-            Length::new(1080.0),
-        ),
         is_primary: true,
         scale: 1.0,
     };
@@ -234,12 +228,6 @@ fn show_tiling_places_at_200pct_offset_monitor() {
         name: "Secondary".to_string(),
         gdi_device: "\\\\.\\DISPLAY2".to_string(),
         work_area: PixelRect::new(1920, 0, 5120, 2880),
-        bounds: Dimension::new(
-            Length::new(1920.0),
-            Length::new(0.0),
-            Length::new(5120.0),
-            Length::new(2880.0),
-        ),
         is_primary: false,
         scale: 2.0,
     };
@@ -384,12 +372,6 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
         name: "Primary".to_string(),
         gdi_device: "\\\\.\\DISPLAY1".to_string(),
         work_area: PixelRect::new(0, 0, 1920, 1080),
-        bounds: Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(1920.0),
-            Length::new(1080.0),
-        ),
         is_primary: true,
         scale: 1.0,
     };
@@ -398,12 +380,6 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
         name: "Secondary".to_string(),
         gdi_device: "\\\\.\\DISPLAY2".to_string(),
         work_area: PixelRect::new(1920, 0, 3840, 2160),
-        bounds: Dimension::new(
-            Length::new(1920.0),
-            Length::new(0.0),
-            Length::new(3840.0),
-            Length::new(2160.0),
-        ),
         is_primary: false,
         scale: 2.0,
     };
@@ -441,12 +417,6 @@ fn dpi_reconcile_reruns_layout_with_new_scale() {
         name: "Test".to_string(),
         gdi_device: "\\\\.\\DISPLAY1".to_string(),
         work_area: PixelRect::new(0, 0, 1920, 1080),
-        bounds: Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(1920.0),
-            Length::new(1080.0),
-        ),
         is_primary: true,
         scale: 1.0,
     };
@@ -563,12 +533,6 @@ fn float_move_monitor_different_dpi_rescales_border() {
         name: "Primary".to_string(),
         gdi_device: "\\\\.\\DISPLAY1".to_string(),
         work_area: PixelRect::new(0, 0, 1920, 1080),
-        bounds: Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(1920.0),
-            Length::new(1080.0),
-        ),
         is_primary: true,
         scale: 1.0,
     };
@@ -577,12 +541,6 @@ fn float_move_monitor_different_dpi_rescales_border() {
         name: "Secondary".to_string(),
         gdi_device: "\\\\.\\DISPLAY2".to_string(),
         work_area: PixelRect::new(1920, 0, 5120, 2880),
-        bounds: Dimension::new(
-            Length::new(1920.0),
-            Length::new(0.0),
-            Length::new(5120.0),
-            Length::new(2880.0),
-        ),
         is_primary: false,
         scale: 2.0,
     };
@@ -625,12 +583,6 @@ fn dome_new_assigns_per_monitor_scale() {
             SCREEN_WIDTH * 1.5,
             SCREEN_HEIGHT * 1.5,
         )),
-        bounds: Dimension::new(
-            Length::ZERO,
-            Length::ZERO,
-            SCREEN_WIDTH * 1.5,
-            SCREEN_HEIGHT * 1.5,
-        ),
         is_primary: true,
         scale: 1.5,
     };
@@ -644,12 +596,6 @@ fn dome_new_assigns_per_monitor_scale() {
             Length::new(5120.0),
             Length::new(2880.0),
         )),
-        bounds: Dimension::new(
-            SCREEN_WIDTH * 1.5,
-            Length::ZERO,
-            Length::new(5120.0),
-            Length::new(2880.0),
-        ),
         is_primary: false,
         scale: 2.0,
     };
@@ -767,52 +713,64 @@ fn float_overlay_geometry_is_stable_across_repeated_apply_layout() {
     );
 }
 
-#[test]
-fn open_bar_shrinks_work_area() {
-    let mut env = TestEnv::new();
-    let win = env.open();
-    env.settle(10);
-    env.open_bar();
-    env.settle(10);
-
-    assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
+fn reserved_area_config(body: &str) -> String {
+    format!("return {{ reserved_area = function(monitor) {body} end }}")
 }
 
 #[test]
-fn bar_move_updates_work_area() {
-    let mut env = TestEnv::new();
-    let win = env.open();
-    env.settle(10);
-    let bar_id = env.open_bar();
-    env.settle(10);
-    assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
-
-    env.dome
-        .bar_moved(bar_id, 1, PixelRect::new(0, 0, 1920, 60));
-    env.settle(10);
-
-    assert_eq!(env.dim(win), dim(4, 64, 1912, 1012));
-}
-
-#[test]
-fn destroy_bar_restores_work_area() {
-    let mut env = TestEnv::new();
-    let win = env.open();
-    env.settle(10);
-    let bar_id = env.open_bar();
-    env.settle(10);
-    assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
-
-    env.destroy_window(bar_id);
-    env.settle(10);
-
-    assert_eq!(env.dim(win), env.full_work_area());
-}
-
-#[test]
-fn open_bar_adjust_multiple_monitors() {
+fn a_reserved_area_applies_from_startup() {
     let mut env = TestEnv::builder()
-        .monitors(vec![default_monitor(), second_monitor()])
+        .config_source(&reserved_area_config("return { top = 30 }"))
+        .build();
+    let win = env.open();
+
+    assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
+    assert_eq!(env.painted_work_area(0), PixelRect::new(0, 30, 1920, 1050));
+}
+
+#[test]
+fn a_reserved_area_scales_with_the_monitor() {
+    let mut env = TestEnv::builder()
+        .monitors(vec![scaled_monitor(1.5)])
+        .config_source(&reserved_area_config("return { top = 20 }"))
+        .build();
+    let win = env.open();
+
+    assert_eq!(env.dim(win), env.inset_at(dim(0, 30, 2880, 1590), 1.5));
+}
+
+#[test]
+fn a_fullscreen_window_starts_below_the_reserved_area() {
+    let mut env = TestEnv::builder()
+        .config_source(&reserved_area_config("return { top = 30 }"))
+        .build();
+    let win = env.open();
+
+    env.clear_moves();
+    env.run_actions("toggle fullscreen");
+
+    assert!(
+        env.moved(win),
+        "apply_layout must emit a placement for the fullscreen window"
+    );
+    assert_eq!(env.dim(win), dim(0, 30, 1920, 1050));
+}
+
+#[test]
+fn a_reserved_area_matches_the_numbered_name() {
+    let left = MonitorInfo {
+        name: "DELL".to_string(),
+        ..default_monitor()
+    };
+    let right = MonitorInfo {
+        name: "DELL".to_string(),
+        ..second_monitor()
+    };
+    let mut env = TestEnv::builder()
+        .monitors(vec![left, right])
+        .config_source(&reserved_area_config(
+            "if monitor.name == 'DELL #2' then return { top = 30 } end",
+        ))
         .build();
     let w1 = env.open();
     env.settle(10);
@@ -820,11 +778,58 @@ fn open_bar_adjust_multiple_monitors() {
     let w2 = env.open();
     env.settle(10);
 
-    env.open_bar();
+    assert_eq!(env.dim(w1), dim(4, 4, 1912, 1072));
+    assert_eq!(env.dim(w2), dim(1924, 34, 2552, 1402));
+}
+
+#[test]
+fn a_reserved_area_applies_to_an_added_monitor() {
+    let mut env = TestEnv::builder()
+        .config_source(&reserved_area_config(
+            "if monitor.name == 'External' then return { top = 40 } end",
+        ))
+        .build();
+    env.add_monitor(second_monitor());
+    env.run_actions("focus monitor right");
+    let win = env.open();
+    env.settle(10);
+
+    assert_eq!(env.dim(win), dim(1924, 44, 2552, 1392));
+}
+
+#[test]
+fn a_reserved_area_reduces_only_its_own_monitor() {
+    let mut env = TestEnv::builder()
+        .monitors(vec![default_monitor(), second_monitor()])
+        .config_source(&reserved_area_config(
+            "if monitor.name == 'Test' then return { top = 30 } end",
+        ))
+        .build();
+    let w1 = env.open();
+    env.settle(10);
+    env.run_actions("focus monitor right");
+    let w2 = env.open();
     env.settle(10);
 
     assert_eq!(env.dim(w1), dim(4, 34, 1912, 1042));
     assert_eq!(env.dim(w2), dim(1924, 4, 2552, 1432));
+}
+
+#[test]
+fn a_reload_reapplies_the_reserved_area() {
+    let mut env = TestEnv::builder().build();
+    let win = env.open();
+    assert_eq!(env.dim(win), dim(4, 4, 1912, 1072));
+
+    env.change_config(&reserved_area_config("return { top = 30 }"));
+    assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
+    assert_eq!(env.painted_work_area(0), PixelRect::new(0, 30, 1920, 1050));
+
+    env.change_config(&reserved_area_config(
+        "return { top = 0, bottom = 0, left = 0, right = 0 }",
+    ));
+    assert_eq!(env.dim(win), dim(4, 4, 1912, 1072));
+    assert_eq!(env.painted_work_area(0), PixelRect::new(0, 0, 1920, 1080));
 }
 
 #[test]

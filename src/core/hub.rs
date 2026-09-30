@@ -67,6 +67,8 @@ pub(crate) struct ContainerPlacement {
 
 pub(crate) struct MonitorPlacements {
     pub(crate) monitor_id: MonitorId,
+    /// The monitor's work area with its reserved area subtracted.
+    pub(crate) work_area: PixelRect,
     pub(crate) border_thickness: Pixels<Unit>,
     pub(crate) layout: MonitorLayout,
 }
@@ -196,7 +198,7 @@ pub(crate) struct Hub {
     pub(super) access: HubAccess,
     pub(super) strategies: StrategySet,
     pub(super) minimized_windows: Vec<WindowId>,
-    runtime: LuaRuntime,
+    pub(super) runtime: LuaRuntime,
 }
 
 impl Hub {
@@ -262,6 +264,9 @@ impl Hub {
     ) -> Option<Box<Config>> {
         let config = self.runtime.reload(keymap_effects)?;
         self.sync_configuration(config.tiling.clone());
+        // Last, so each monitor whose work area moved is placed from the new work
+        // area and the new tiling config.
+        self.rederive_monitors();
         Some(config)
     }
 
@@ -469,8 +474,8 @@ impl Hub {
     pub(crate) fn query_monitors(&self) -> Vec<crate::action::MonitorDetails> {
         let mut ids = self.access.monitors.sorted_ids();
         ids.sort_by_key(|&id| {
-            let work_area = self.access.monitors.get(id).work_area;
-            (work_area.x(), work_area.y())
+            let system_work_area = self.access.monitors.get(id).system_work_area;
+            (system_work_area.x(), system_work_area.y())
         });
         ids.into_iter()
             .map(|id| {
@@ -645,16 +650,31 @@ impl Hub {
     pub(crate) fn get_visible_placements(&self) -> VisiblePlacements {
         let current_ws = self.current_workspace();
 
-        let monitors = self
+        let monitors: Vec<MonitorPlacements> = self
             .visible_workspaces()
             .into_iter()
             .map(|ws_id| {
                 let ws = self.access.workspaces.get(ws_id);
                 let screen = self.access.monitors.get(ws.monitor).work_area;
 
+                // A work area with zero width or height fits no window.
+                if screen.is_empty() {
+                    return MonitorPlacements {
+                        monitor_id: ws.monitor,
+                        work_area: screen,
+                        border_thickness: self.access.border(ws.monitor),
+                        layout: MonitorLayout::Normal {
+                            tiling_windows: Vec::new(),
+                            float_windows: Vec::new(),
+                            containers: Vec::new(),
+                        },
+                    };
+                }
+
                 if let Some(&fs_id) = ws.fullscreen_windows.last() {
                     return MonitorPlacements {
                         monitor_id: ws.monitor,
+                        work_area: screen,
                         border_thickness: self.access.border(ws.monitor),
                         layout: MonitorLayout::Fullscreen(fs_id),
                     };
@@ -694,6 +714,7 @@ impl Hub {
 
                 MonitorPlacements {
                     monitor_id: ws.monitor,
+                    work_area: screen,
                     border_thickness: border,
                     layout: MonitorLayout::Normal {
                         tiling_windows,
@@ -704,7 +725,19 @@ impl Hub {
             })
             .collect();
 
-        let focused_window = self.focused_window(current_ws);
+        let focused_window = self.focused_window(current_ws).filter(|&id| {
+            monitors.iter().any(|placements| match &placements.layout {
+                MonitorLayout::Fullscreen(fullscreen_id) => *fullscreen_id == id,
+                MonitorLayout::Normal {
+                    tiling_windows,
+                    float_windows,
+                    ..
+                } => {
+                    tiling_windows.iter().any(|placement| placement.id == id)
+                        || float_windows.iter().any(|placement| placement.id == id)
+                }
+            })
+        });
 
         VisiblePlacements {
             focused_window,

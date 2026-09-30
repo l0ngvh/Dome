@@ -18,6 +18,7 @@ mod strategy_switch;
 use std::collections::HashSet;
 
 use crate::config::LuaRuntime;
+use crate::config::lua::test_support::RecordingKeymap;
 use crate::core::PaneDisplay;
 use crate::core::TilingConfig;
 use crate::core::hub::{Hub, MonitorLayout};
@@ -525,6 +526,21 @@ fn validate_visible_placements(hub: &Hub) {
             );
         }
     }
+
+    if let Some(focused) = all_placements.focused_window {
+        let shown = all_placements.monitors.iter().any(|mp| match &mp.layout {
+            MonitorLayout::Fullscreen(id) => *id == focused,
+            MonitorLayout::Normal {
+                tiling_windows,
+                float_windows,
+                ..
+            } => {
+                tiling_windows.iter().any(|wp| wp.id == focused)
+                    || float_windows.iter().any(|wp| wp.id == focused)
+            }
+        });
+        assert!(shown, "focused_window {focused} is shown by no placement");
+    }
 }
 
 fn validate_minimized(hub: &Hub) {
@@ -712,7 +728,9 @@ impl TestHubBuilder {
             },
             self.tiling,
             self.preferred_layout,
-            LuaRuntime::new(String::new()).expect("the test Lua VM should build"),
+            LuaRuntime::load(String::new(), &mut RecordingKeymap::default())
+                .expect("the test Lua VM should build")
+                .0,
         )
     }
 }
@@ -1140,6 +1158,11 @@ pub(super) fn reported_monitor(name: String, work_area: PixelRect, scale: f32) -
         gdi_device: None,
     }
 }
+
+pub(super) const STACKED_DELL_RESERVED_AREA: &str = "return { reserved_area = function(monitor)
+    if monitor.name == 'DELL #1' then return { left = 50 } end
+    return {}
+end }";
 
 /// Name of the monitor whose active workspace currently holds focus.
 pub(super) fn focused_monitor_name(hub: &Hub) -> String {

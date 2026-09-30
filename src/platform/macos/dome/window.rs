@@ -3,8 +3,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 
 use crate::core::{
-    Length, LimitObservation, LimitUpdate, MonitorId, PixelRect, Pixels, WindowId,
-    WindowRestrictions,
+    Length, LimitObservation, LimitUpdate, PixelRect, Pixels, WindowId, WindowRestrictions,
 };
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
@@ -387,13 +386,11 @@ impl Dome {
     }
 
     #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
-    pub(super) fn place_fullscreen_window(&mut self, window_id: WindowId, monitor_id: MonitorId) {
+    pub(super) fn place_fullscreen_window(&mut self, window_id: WindowId, target: PixelRect) {
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
         tracing::Span::current().record("window", window.to_string());
-        let monitor = self.monitor_registry.monitor(monitor_id);
-        let target = monitor.work_area();
         match &mut window.state {
             WindowState::BorderlessMinimized { .. } => {
                 if let Err(err) = window.ext.unminimize() {
@@ -577,7 +574,7 @@ impl Dome {
                 let monitor_id = self
                     .monitor_registry
                     .find_closest_monitor(new_placement.to_dimension())
-                    .map(|m| m.id())
+                    .map(|(id, _)| id)
                     .unwrap_or_else(|| self.hub.primary_monitor());
                 self.hub
                     .update_float_rect(window_id, new_placement, monitor_id);

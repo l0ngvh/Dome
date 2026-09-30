@@ -17,6 +17,7 @@ pub(super) struct ConfigOverrides {
     /// A present table replaces the bundled keymaps rather than merging, so a
     /// binding the user set to nil stays gone.
     keymaps: Option<ModalKeymaps>,
+    reserved_area: Option<mlua::Function>,
     layout: Option<Strategy>,
     border_size: Option<Pixels<Logical>>,
     partition_tree: Option<PartitionTreeOverrides>,
@@ -67,16 +68,26 @@ impl ConfigOverrides {
         require(self.keymaps, "keymaps")
     }
 
+    pub(super) fn needs_default_reserved_area(&self) -> bool {
+        self.reserved_area.is_none()
+    }
+
+    pub(super) fn into_reserved_area(self) -> mlua::Result<mlua::Function> {
+        require(self.reserved_area, "reserved_area")
+    }
+
     pub(super) fn merge_over(
         self,
         defaults: &DefaultValues,
         default_keymaps: Option<ModalKeymaps>,
+        default_reserved_area: Option<mlua::Function>,
         cx: &mut LoadContext,
     ) -> Config {
         // Destructured without `..` so a field added above and left unmerged
         // fails the build rather than silently doing nothing.
         let ConfigOverrides {
             keymaps,
+            reserved_area,
             layout,
             border_size,
             partition_tree,
@@ -96,6 +107,9 @@ impl ConfigOverrides {
             keymaps: keymaps
                 .or(default_keymaps)
                 .expect("keymaps must come from the user config or the bundled defaults"),
+            reserved_area: reserved_area
+                .or(default_reserved_area)
+                .expect("reserved_area must come from the user config or the bundled defaults"),
             tiling: TilingConfig {
                 layout: layout.unwrap_or(tiling.layout),
                 border_size: border_size.unwrap_or(tiling.border_size),
@@ -250,6 +264,7 @@ impl FromLuaValue for ConfigOverrides {
         let table = as_table(value, "a config table")?;
         Ok(ConfigOverrides {
             keymaps: cx.field(table, "keymaps"),
+            reserved_area: cx.field(table, "reserved_area"),
             layout: cx.field(table, "layout"),
             border_size: cx.field(table, "border_size"),
             partition_tree: cx.field(table, "partition_tree"),

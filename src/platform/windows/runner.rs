@@ -4,7 +4,6 @@ use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessageW};
 
-use crate::core::{Physical, PixelRect};
 use crate::logging::Logger;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
 use crate::platform::windows::dome::{Dome, HubEvent, NewWindow, WindowsMetadata};
@@ -89,9 +88,7 @@ impl Runner {
                 self.dispatch_window_created(hwnd_id);
             }
             HubEvent::WindowDestroyed(hwnd_id) => {
-                if !self.dome.remove_bar(hwnd_id) {
-                    self.dome.window_destroyed(hwnd_id);
-                }
+                self.dome.window_destroyed(hwnd_id);
             }
             HubEvent::WindowMinimized(hwnd_id) => {
                 self.dome.window_minimized(hwnd_id);
@@ -135,7 +132,10 @@ impl Runner {
                 hwnd_id,
                 observed_at,
             } => {
-                self.dispatch_location_changed(hwnd_id, observed_at);
+                if self.dome.location_changed(hwnd_id) {
+                    self.timers
+                        .schedule_move_settle(hwnd_id, observed_at, DEBOUNCE_INTERVAL);
+                }
             }
             HubEvent::WindowTitleChanged(hwnd_id) => {
                 self.dispatch_title_changed(hwnd_id);
@@ -189,26 +189,10 @@ impl Runner {
         self.dispatcher.dispatch(
             move || {
                 let metadata = read_metadata(&*inspect);
-                if Dome::is_known_bar(&metadata) {
-                    let rect = inspect.get_visible_rect();
-                    let monitor = inspect.get_monitor();
-                    tracing::info!(
-                        hwnd = %manage.id(),
-                        ?rect,
-                        monitor,
-                        ?metadata,
-                        "Known bar window recognized"
-                    );
-                    return CreatedWindow::KnownBar {
-                        ext: manage,
-                        rect,
-                        monitor,
-                    };
-                }
                 if inspect.check_unmanageable() {
-                    return CreatedWindow::Skip;
+                    return None;
                 }
-                CreatedWindow::Manageable(
+                Some((
                     NewWindow {
                         ext: manage,
                         metadata,
@@ -216,16 +200,12 @@ impl Runner {
                     },
                     inspect.get_visible_rect(),
                     inspect.get_monitor(),
-                )
+                ))
             },
-            move |result, runner| match result {
-                CreatedWindow::KnownBar { ext, rect, monitor } => {
-                    runner.dome.capture_bar(ext.id(), monitor, rect);
-                }
-                CreatedWindow::Manageable(new, rect, monitor) => {
+            move |result, runner| {
+                if let Some((new, rect, monitor)) = result {
                     runner.dome.add_window(new, rect, monitor);
                 }
-                CreatedWindow::Skip => {}
             },
         );
     }
@@ -255,67 +235,11 @@ impl Runner {
         );
     }
 
-    fn dispatch_location_changed(&mut self, hwnd_id: HwndId, observed_at: Instant) {
-        let is_tracked = self.dome.is_tracked_bar(hwnd_id);
-        let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
-        self.dispatcher.dispatch(
-            move || {
-                if is_tracked {
-                    return Some((inspect.get_visible_rect(), inspect.get_monitor()));
-                }
-                let metadata = read_metadata(&*inspect);
-                if !Dome::is_known_bar(&metadata) {
-                    return None;
-                }
-                Some((inspect.get_visible_rect(), inspect.get_monitor()))
-            },
-            move |observation, runner| {
-                if is_tracked {
-                    let Some((rect, monitor)) = observation else {
-                        return;
-                    };
-                    runner.dome.bar_moved(hwnd_id, monitor, rect);
-                    return;
-                }
-                if let Some((rect, monitor)) = observation {
-                    runner.dome.capture_bar(hwnd_id, monitor, rect);
-                } else if runner.dome.location_changed(hwnd_id) {
-                    runner
-                        .timers
-                        .schedule_move_settle(hwnd_id, observed_at, DEBOUNCE_INTERVAL);
-                }
-            },
-        );
-    }
-
     fn dispatch_title_changed(&mut self, hwnd_id: HwndId) {
         let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
         self.dispatcher.dispatch(
-            move || {
-                let metadata = read_metadata(&*inspect);
-                let is_bar = Dome::is_known_bar(&metadata);
-                (
-                    metadata.title,
-                    is_bar,
-                    inspect.get_visible_rect(),
-                    inspect.get_monitor(),
-                )
-            },
-            move |(title, is_bar, rect, monitor), runner| {
-                let is_tracked = runner.dome.is_tracked_bar(hwnd_id);
-                match (is_tracked, is_bar) {
-                    (true, false) => {
-                        runner.dome.remove_bar(hwnd_id);
-                    }
-                    (false, true) => {
-                        if runner.dome.is_managed(hwnd_id) {
-                            runner.dome.window_destroyed(hwnd_id);
-                        }
-                        runner.dome.capture_bar(hwnd_id, monitor, rect);
-                        return;
-                    }
-                    _ => {}
-                }
+            move || inspect.get_window_title(),
+            move |title, runner| {
                 runner.dome.update_titles(vec![(hwnd_id, title)]);
             },
         );
@@ -353,15 +277,6 @@ fn read_metadata(inspect: &dyn InspectExternalWindow) -> WindowsMetadata {
 
 pub(super) type ApplyFn = Box<dyn FnOnce(&mut Runner)>;
 
-enum CreatedWindow {
-    KnownBar {
-        ext: Arc<dyn ManageExternalWindow>,
-        rect: PixelRect<Physical>,
-        monitor: isize,
-    },
-    Manageable(NewWindow, PixelRect<Physical>, isize),
-    Skip,
-}
 struct ReadDispatcher {
     pool: rayon::ThreadPool,
     thread_id: u32,

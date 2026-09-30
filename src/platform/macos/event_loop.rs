@@ -14,8 +14,8 @@ use crate::logging::Logger;
 use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::dispatcher::GcdDispatcher;
 use crate::platform::macos::dome::{
-    DebounceBurst, Dome, ExternalBarProbe, HubEvent, MacOSMetadata, NewWindow, PendingAdd,
-    WindowMove, compute_reconcile_all, compute_reconciliation, compute_window_positions,
+    DebounceBurst, Dome, HubEvent, MacOSMetadata, NewWindow, PendingAdd, WindowMove,
+    compute_reconcile_all, compute_reconciliation, compute_window_positions,
 };
 use crate::platform::macos::login_item;
 use crate::platform::macos::running_application::RunningApp;
@@ -85,7 +85,6 @@ pub(super) fn run_dome(
         .expect("Failed to insert channel source");
 
     dispatch_reconcile_all(&mut runner);
-    dispatch_bar_probe(&mut runner);
     event_loop
         .run(None, &mut runner, |runner| {
             if SIGNAL_RECEIVED.load(Ordering::Relaxed) {
@@ -112,7 +111,6 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
         }
         HubEvent::Sync => {
             dispatch_reconcile_all(runner);
-            dispatch_bar_probe(runner);
         }
         HubEvent::Shutdown => {
             tracing::info!("Shutdown requested");
@@ -170,7 +168,6 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
                 )
                 .expect("Failed to insert settle timer");
             runner.settle_token = Some(token);
-            dispatch_bar_probe(runner);
         }
         HubEvent::MirrorClicked(cg_id) => {
             runner.dome.mirror_clicked(cg_id);
@@ -362,13 +359,6 @@ fn dispatch_space_changed(runner: &mut DomeRunner) {
                 runner.dome.exit_native_fullscreen(cg_id, pos, size);
             }
         },
-    );
-}
-
-fn dispatch_bar_probe(runner: &mut DomeRunner) {
-    runner.dispatcher.dispatch(
-        move |_marker| ExternalBarProbe::query(),
-        |result, runner| runner.dome.set_reserved_bar(result),
     );
 }
 

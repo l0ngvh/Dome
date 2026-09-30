@@ -702,7 +702,7 @@ fn insert_float_offscreen_does_not_scroll_viewport() {
 
     let _ws_id = hub.current_workspace();
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1))
+    Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )

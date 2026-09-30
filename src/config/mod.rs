@@ -40,6 +40,7 @@ const BUNDLED_IGNORE: &str = "return {}";
 #[derive(Debug, Clone)]
 pub(crate) struct Config {
     pub(crate) keymaps: ModalKeymaps,
+    pub(crate) reserved_area: mlua::Function,
     pub(crate) tiling: TilingConfig,
     pub(crate) appearance: Appearance,
     pub(crate) log_level: LogLevel,
@@ -81,7 +82,16 @@ impl Config {
             true => Some(defaults::bundled_keymaps(lua, &mut cx)?),
             false => None,
         };
-        let mut config = overrides.merge_over(&defaults::bundled()?, default_keymaps, &mut cx);
+        let default_reserved_area = match overrides.needs_default_reserved_area() {
+            true => Some(defaults::bundled_reserved_area(lua, &mut cx)?),
+            false => None,
+        };
+        let mut config = overrides.merge_over(
+            &defaults::bundled()?,
+            default_keymaps,
+            default_reserved_area,
+            &mut cx,
+        );
         let floor = Self::default_ignore();
         tracing::info!(count = floor.len(), "Applying built-in window-ignore floor");
         tracing::debug!(rules = ?floor, "Built-in window-ignore floor");

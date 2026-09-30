@@ -89,16 +89,15 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
         move || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
-                let mut runtime = match LuaRuntime::new(config_path.clone()) {
-                    Ok(runtime) => runtime,
+                // Load before init_tx.send, so no keypress resolves against an
+                // empty keymap.
+                let (runtime, config) = match LuaRuntime::load(config_path.clone(), &mut keymap) {
+                    Ok(loaded) => loaded,
                     Err(e) => {
                         tracing::error!(error = %e, "Failed to build the Lua VM, aborting startup");
                         return;
                     }
                 };
-                // Load before init_tx.send, so no keypress resolves against an
-                // empty keymap.
-                let config = runtime.load(&mut keymap);
                 tracing::info!(%config_path, "Loaded config");
                 logger.set_level(config.log_level);
                 login_item::sync_login_item(config.start_at_login, bundle_path.as_deref());

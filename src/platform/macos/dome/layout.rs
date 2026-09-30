@@ -92,9 +92,9 @@ impl Dome {
     ) -> (MonitorTilingData, Vec<FloatShow>) {
         match &mp.layout {
             MonitorLayout::Fullscreen(window_id) => {
-                self.place_fullscreen_window(*window_id, mp.monitor_id);
-                let monitor = self.monitor_registry.monitor(mp.monitor_id);
-                let dim = monitor.work_area().to_dimension();
+                self.place_fullscreen_window(*window_id, mp.work_area);
+                let scale = self.monitor_registry.monitor(mp.monitor_id).backing_scale;
+                let dim = mp.work_area.to_dimension();
                 (
                     MonitorTilingData {
                         monitor_id: mp.monitor_id,
@@ -103,7 +103,7 @@ impl Dome {
                             Length::new(self.primary_full_height),
                             dim,
                         ),
-                        scale: monitor.egui_scale(),
+                        scale,
                         border_thickness: Length::from_pixels(mp.border_thickness),
                         windows: Vec::new(),
                         containers: Vec::new(),
@@ -116,9 +116,8 @@ impl Dome {
                 float_windows,
                 containers,
             } => {
-                let monitor = self.monitor_registry.monitor(mp.monitor_id);
-                let monitor_dim = monitor.work_area().to_dimension();
-                let scale = monitor.egui_scale();
+                let monitor_dim = mp.work_area.to_dimension();
+                let scale = self.monitor_registry.monitor(mp.monitor_id).backing_scale;
 
                 let mut placed_tiling = Vec::new();
                 let mut float_shows = Vec::new();

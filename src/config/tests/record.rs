@@ -153,7 +153,7 @@ fn theme_recovers_from_unknown_flavor() {
         config_from(r#"return { theme = "dracula" }"#)
             .appearance
             .theme,
-        super::config().appearance.theme
+        super::bundled().appearance.theme
     );
 }
 
@@ -161,7 +161,7 @@ fn theme_recovers_from_unknown_flavor() {
 fn font_missing_is_default() {
     assert_eq!(
         config_from("return {}").appearance.font,
-        super::config().appearance.font
+        super::bundled().appearance.font
     );
 }
 
@@ -220,7 +220,7 @@ fn font_size_out_of_range_falls_back_to_default() {
     for src in ["return { font_size = 2.0 }", "return { font_size = 200.0 }"] {
         assert_eq!(
             config_from(src).appearance.font.size,
-            super::config().appearance.font.size,
+            super::bundled().appearance.font.size,
             "{src}"
         );
     }

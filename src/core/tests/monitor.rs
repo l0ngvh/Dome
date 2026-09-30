@@ -4,6 +4,7 @@ use super::TilingConfigBuilder;
 #[cfg(target_os = "windows")]
 use super::{PartitionTreeConfigBuilder, TestHubBuilder};
 use crate::action::WorkspaceState;
+use crate::config::lua::test_support::{RecordingKeymap, loaded_runtime, test_hub_with};
 use crate::core::MonitorSelector;
 #[cfg(target_os = "windows")]
 use crate::core::SizeConstraint;
@@ -15,8 +16,8 @@ use crate::core::node::Pixels;
 use crate::core::node::{PixelRect, WindowRestrictions};
 
 use crate::core::tests::{
-    default_rect, focused_monitor_name, reported_monitor, setup, setup_with_tiling, snapshot,
-    snapshot_text, titled, titled_matcher, work_area_at,
+    STACKED_DELL_RESERVED_AREA, default_rect, focused_monitor_name, reported_monitor, setup,
+    setup_with_tiling, snapshot, snapshot_text, titled, titled_matcher, validate_hub, work_area_at,
 };
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
@@ -1650,4 +1651,126 @@ fn removing_the_primary_monitor_panics() {
     let mut hub = setup();
     let primary = hub.primary_monitor();
     hub.remove_monitor(primary);
+}
+
+#[test]
+fn a_monitor_with_an_empty_work_area_places_no_window() {
+    use crate::core::Strategy;
+    use crate::core::hub::MonitorLayout;
+
+    for strategy in [Strategy::PartitionTree, Strategy::Master] {
+        for rect in [
+            PixelRect::new(150, 0, 0, 30),
+            PixelRect::new(150, 0, 150, 0),
+            PixelRect::new(150, 0, 0, 0),
+        ] {
+            let tiling = TilingConfigBuilder::new().with_strategy(strategy).build();
+            let mut hub = setup_with_tiling(tiling);
+
+            let empty = hub.add_monitor(reported_monitor("empty".to_string(), rect, 1.0));
+            hub.focus_monitor(&MonitorSelector::Name("empty".to_string()));
+
+            for title in ["e0", "e1", "e2"] {
+                hub.insert_window(titled(title), default_rect(), WindowRestrictions::None);
+            }
+            hub.toggle_container_layout();
+            hub.insert_window(titled("e3"), default_rect(), WindowRestrictions::None);
+            hub.toggle_float();
+            hub.insert_window(titled("e4"), default_rect(), WindowRestrictions::None);
+            hub.toggle_fullscreen();
+
+            validate_hub(&hub);
+
+            let placements = hub.get_visible_placements();
+            let entry = placements
+                .monitors
+                .iter()
+                .find(|mp| mp.monitor_id == empty)
+                .expect("the empty monitor has a placement entry");
+            match &entry.layout {
+                MonitorLayout::Normal {
+                    tiling_windows,
+                    float_windows,
+                    containers,
+                } => {
+                    assert!(
+                        tiling_windows.is_empty(),
+                        "{strategy:?} {rect:?}: tiling window placed on an empty work area"
+                    );
+                    assert!(
+                        float_windows.is_empty(),
+                        "{strategy:?} {rect:?}: float window placed on an empty work area"
+                    );
+                    assert!(
+                        containers.is_empty(),
+                        "{strategy:?} {rect:?}: container placed on an empty work area"
+                    );
+                }
+                MonitorLayout::Fullscreen(_) => {
+                    panic!("{strategy:?} {rect:?}: fullscreen shown on an empty work area")
+                }
+            }
+            assert_eq!(
+                placements.focused_window, None,
+                "{strategy:?} {rect:?}: a focused window survives on an empty work area"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_reserved_area_shrinks_the_effective_work_area() {
+    let (runtime, _cfg) = loaded_runtime(
+        "shrinks",
+        "return { reserved_area = function() return { top = 30 } end }",
+    );
+    let hub = test_hub_with(runtime);
+    let work_area = &hub.query_monitors()[0].work_area;
+    assert_eq!((work_area.y, work_area.height), (30, 1050));
+}
+
+#[test]
+fn a_config_reload_reapplies_the_reserved_area() {
+    let (runtime, cfg) = loaded_runtime(
+        "reload_reapplies",
+        "return { reserved_area = function() return { top = 30 } end }",
+    );
+    let mut hub = test_hub_with(runtime);
+    let work_area = &hub.query_monitors()[0].work_area;
+    assert_eq!((work_area.y, work_area.height), (30, 1050));
+
+    cfg.rewrite(
+        "return { reserved_area = function() return { top = 0, bottom = 0, left = 0, right = 0 } end }",
+    );
+    assert!(hub.reload_config(&mut RecordingKeymap::default()).is_some());
+    let work_area = &hub.query_monitors()[0].work_area;
+    assert_eq!((work_area.y, work_area.height), (0, 1080));
+}
+
+#[test]
+fn a_reserved_area_does_not_rerank_names() {
+    let (runtime, _cfg) = loaded_runtime("rerank", STACKED_DELL_RESERVED_AREA);
+    let mut hub = test_hub_with(runtime);
+    hub.add_monitor(reported_monitor(
+        "DELL".to_string(),
+        PixelRect::new(1920, 0, 100, 30),
+        1.0,
+    ));
+    hub.add_monitor(reported_monitor(
+        "DELL".to_string(),
+        PixelRect::new(1920, 30, 100, 30),
+        1.0,
+    ));
+    hub.add_monitor(reported_monitor(
+        "LG".to_string(),
+        work_area_at(2020, 0),
+        1.0,
+    ));
+    assert_snapshot!(snapshot_text(&hub), @r#"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), name="test", screen=(x=0.00 y=0.00 w=1920.00 h=1080.00))
+      Monitor(id=MonitorId(1), name="DELL #1", screen=(x=1970.00 y=0.00 w=50.00 h=30.00))
+      Monitor(id=MonitorId(2), name="DELL #2", screen=(x=1920.00 y=30.00 w=100.00 h=30.00))
+      Monitor(id=MonitorId(3), name="LG", screen=(x=2020.00 y=0.00 w=100.00 h=30.00))
+    "#);
 }

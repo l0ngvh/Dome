@@ -780,6 +780,6 @@ fn taller_right_monitor() -> MonitorInfo {
         ),
         full_height: 1440.0,
         is_primary: false,
-        scale: 2.0,
+        backing_scale: 2.0,
     }
 }

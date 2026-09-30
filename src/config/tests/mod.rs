@@ -5,24 +5,9 @@ mod record;
 
 use anyhow::{Result, anyhow};
 
+use super::Config;
 use super::defaults::{self, DefaultValues};
-use super::{Config, ModalKeymaps};
 use crate::core::TilingConfig;
-
-pub(crate) fn config() -> Config {
-    let defaults = bundled();
-    Config {
-        keymaps: ModalKeymaps::default(),
-        tiling: TilingConfig {
-            ignore: Config::default_ignore(),
-            ..defaults.tiling
-        },
-        appearance: defaults.appearance,
-        log_level: defaults.log_level,
-        start_at_login: defaults.start_at_login,
-        env: std::collections::HashMap::new(),
-    }
-}
 
 /// The matcher lists stay empty, so a fixture manages every window it inserts.
 pub(crate) fn tiling_config() -> TilingConfig {

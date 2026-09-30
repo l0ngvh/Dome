@@ -15,16 +15,16 @@ use anyhow::Result;
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::{Action, Actions};
-use crate::config::tests::{CleanupFile, temp_lua_path};
-use crate::config::{Config, LuaRuntime, PreferredLayouts};
+use crate::config::lua::test_support::{TempFile, loaded_runtime};
+use crate::config::{Config, PreferredLayouts};
 use crate::core::{Dimension, Length, Logical, MonitorId, PixelRect, TilingConfig, WindowId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::corner_radius::FALLBACK_CORNER_RADIUS;
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::{
-    BarGeometry, DebounceBurst, Dome, ExitNativeFullscreen, HubMessage, MacOSMetadata, NewWindow,
-    PendingAdd, SceneSender, WindowMove,
+    DebounceBurst, Dome, ExitNativeFullscreen, HubMessage, MacOSMetadata, NewWindow, PendingAdd,
+    SceneSender, WindowMove,
 };
 
 const SCREEN_WIDTH: Length = Length::new(1920.0);
@@ -60,8 +60,11 @@ fn assert_inside_work_area(frame: (i32, i32, i32, i32), reported: Dimension) {
     );
 }
 
-fn baseline_config() -> Config {
-    crate::config::tests::config()
+fn baseline_tiling() -> TilingConfig {
+    TilingConfig {
+        ignore: Config::default_ignore(),
+        ..crate::config::tests::tiling_config()
+    }
 }
 
 fn default_monitor() -> MonitorInfo {
@@ -77,7 +80,7 @@ fn default_monitor() -> MonitorInfo {
         bounds: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
         full_height: SCREEN_HEIGHT.value(),
         is_primary: true,
-        scale: 2.0,
+        backing_scale: 2.0,
     }
 }
 
@@ -94,7 +97,7 @@ fn second_monitor() -> MonitorInfo {
         ),
         full_height: 1440.0,
         is_primary: false,
-        scale: 2.0,
+        backing_scale: 2.0,
     }
 }
 
@@ -265,40 +268,50 @@ struct MacOS {
     moves: MoveLog,
     next_cg_id: u32,
     scene_state: Arc<Mutex<SceneState>>,
-    config: Config,
-    config_file: CleanupFile,
+    tiling: TilingConfig,
+    config_file: Option<TempFile>,
 }
 
 struct DomeBuilder<'env> {
     env: &'env mut MacOS,
-    config: Config,
+    tiling: TilingConfig,
+    config_source: String,
 }
 
 impl DomeBuilder<'_> {
     fn tiling(mut self, adjust: impl FnOnce(&mut TilingConfig)) -> Self {
-        adjust(&mut self.config.tiling);
+        adjust(&mut self.tiling);
+        self
+    }
+
+    fn config_source(mut self, source: &str) -> Self {
+        self.config_source = source.to_string();
         self
     }
 
     fn build(self) -> Dome {
-        let Self { env, config } = self;
+        let Self {
+            env,
+            tiling,
+            config_source,
+        } = self;
         let sender = TestSender {
             scene_state: env.scene_state.clone(),
         };
         let (keymap_tx, _keymap_rx) = std::sync::mpsc::channel();
         let keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
-        let runtime = LuaRuntime::new(env.config_file.0.to_string_lossy().into_owned())
-            .expect("build test Lua VM");
+        let (runtime, config_file) = loaded_runtime("macos_env", &config_source);
         let dome = Dome::new(
             &[default_monitor()],
-            config.tiling.clone(),
+            tiling.clone(),
             PreferredLayouts::default(),
             Box::new(sender),
             runtime,
             keymap,
-            config.env.clone(),
+            HashMap::new(),
         );
-        env.config = config;
+        env.tiling = tiling;
+        env.config_file = Some(config_file);
         dome
     }
 }
@@ -314,9 +327,10 @@ impl MacOS {
                 focused_monitor_id: None,
                 floats: HashMap::new(),
                 tiling_corner_radii: HashMap::new(),
+                monitor_dims: Vec::new(),
             })),
-            config: baseline_config(),
-            config_file: CleanupFile(temp_lua_path("macos_env")),
+            tiling: baseline_tiling(),
+            config_file: None,
         }
     }
 
@@ -550,21 +564,33 @@ impl MacOS {
     }
 
     fn dome_builder(&mut self) -> DomeBuilder<'_> {
-        let config = self.config.clone();
-        DomeBuilder { env: self, config }
+        let tiling = self.tiling.clone();
+        DomeBuilder {
+            env: self,
+            tiling,
+            config_source: "return {}".to_string(),
+        }
     }
 
     fn border(&self) -> f32 {
-        Length::from_pixels(self.config.tiling.border_size).logical()
+        Length::from_pixels(self.tiling.border_size).logical()
     }
 
     fn change_config(&mut self, dome: &mut Dome, source: &str) {
-        std::fs::write(&self.config_file.0, source).expect("write the test config");
-        self.config = *dome.reload().expect("the test config should load");
+        self.config_file
+            .as_ref()
+            .expect("change_config needs a built dome")
+            .rewrite(source);
+        self.tiling = dome.reload().expect("the test config should load").tiling;
     }
 
     fn last_scene_state(&self) -> SceneState {
         self.scene_state.lock().unwrap().clone()
+    }
+
+    /// The tiling overlay rect of the monitor at `index` in the newest scene.
+    fn painted_work_area(&self, index: usize) -> Dimension {
+        self.scene_state.lock().unwrap().monitor_dims[index]
     }
 
     fn last_float_snapshot(&self, cg_id: CGWindowID) -> Option<FloatSnapshot> {
@@ -585,6 +611,8 @@ struct SceneState {
     focused_monitor_id: Option<MonitorId>,
     floats: HashMap<CGWindowID, FloatSnapshot>,
     tiling_corner_radii: HashMap<WindowId, Length<Logical>>,
+    /// Each tiling overlay's `monitor_dim`, in scene order.
+    monitor_dims: Vec<Dimension>,
 }
 
 struct TestSender {
@@ -617,6 +645,7 @@ impl SceneSender for TestSender {
                     )
                 })
                 .collect();
+            state.monitor_dims = scene.tiling.iter().map(|t| t.monitor_dim).collect();
         }
     }
 }

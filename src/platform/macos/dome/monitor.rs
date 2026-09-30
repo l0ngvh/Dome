@@ -7,9 +7,8 @@ use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
 use objc2_foundation::{NSNumber, NSString};
 
 use crate::core::{Dimension, Hub, Length, MonitorId, PixelRect, Pixels, ReportedMonitor};
-use crate::platform::reserve_for_bar;
 
-use super::{Dome, external_bar};
+use super::Dome;
 
 #[derive(Clone, Debug)]
 pub(in crate::platform::macos) struct MonitorInfo {
@@ -17,21 +16,18 @@ pub(in crate::platform::macos) struct MonitorInfo {
     pub(in crate::platform::macos) name: String,
     /// Visible area: `bounds` minus the menu bar and dock insets. Rounded
     /// inward at construction, so a window can never be placed onto a fraction
-    /// of a pixel the menu bar, the dock or a status bar reserved.
+    /// of a pixel the menu bar or the dock reserved.
     pub(in crate::platform::macos) work_area: PixelRect,
     /// Full physical bounds reported by `CGDisplayBounds`, used for monitor
     /// lookup against raw window coordinates (e.g. borderless fullscreen).
     pub(in crate::platform::macos) bounds: Dimension,
     pub(in crate::platform::macos) full_height: f32,
     pub(in crate::platform::macos) is_primary: bool,
-    /// NSScreen.backingScaleFactor — used for egui render density only.
-    /// This is NOT core Monitor.scale (which is always 1.0 on macOS because
-    /// AppKit already reports points, so no DPI conversion is needed).
-    pub(in crate::platform::macos) scale: f64,
+    /// `NSScreen.backingScaleFactor`, for egui render density only.
+    pub(in crate::platform::macos) backing_scale: f64,
 }
 
 impl From<&MonitorInfo> for ReportedMonitor {
-    /// Core scale is always `1.0` on macOS, never the backing factor in `scale`.
     fn from(info: &MonitorInfo) -> Self {
         ReportedMonitor {
             device_name: info.name.clone(),
@@ -47,8 +43,8 @@ impl std::fmt::Display for MonitorInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{} (id={}, work_area={:?}, scale={})",
-            self.name, self.display_id, self.work_area, self.scale
+            "{} (id={}, work_area={:?}, backing_scale={})",
+            self.name, self.display_id, self.work_area, self.backing_scale
         )
     }
 }
@@ -88,7 +84,7 @@ pub(in crate::platform::macos) fn get_all_monitors(
                 ),
                 full_height: bounds.size.height as f32,
                 is_primary: display_id == primary_id,
-                scale: screen.backingScaleFactor(),
+                backing_scale: screen.backingScaleFactor(),
             })
         })
         .collect()
@@ -108,154 +104,100 @@ fn get_display_id(screen: &NSScreen) -> anyhow::Result<CGDirectDisplayID> {
 
 type DisplayId = u32;
 
-/// True when a display was added or removed, or a surviving display's bounds
-/// changed. A work-area-only update (dock or bar) leaves bounds unchanged and
-/// returns false.
-pub(in crate::platform::macos) struct Monitor {
-    id: MonitorId,
-    info: MonitorInfo,
-}
-
-impl Monitor {
-    pub(in crate::platform::macos) fn id(&self) -> MonitorId {
-        self.id
-    }
-
-    pub(in crate::platform::macos) fn work_area(&self) -> PixelRect {
-        self.info.work_area
-    }
-
-    pub(in crate::platform::macos) fn egui_scale(&self) -> f64 {
-        self.info.scale
-    }
-}
-
 pub(super) struct MonitorRegistry {
-    map: HashMap<DisplayId, Monitor>,
-    reverse: HashMap<MonitorId, DisplayId>,
-    primary_display_id: DisplayId,
+    monitors: HashMap<MonitorId, MonitorInfo>,
+    /// Never changes. A primary change overwrites the `monitors` entry under
+    /// this id with the new display.
+    primary_id: MonitorId,
 }
 
 impl MonitorRegistry {
     pub(super) fn new(primary: &MonitorInfo, primary_monitor_id: MonitorId) -> Self {
-        let mut map = HashMap::new();
-        let mut reverse = HashMap::new();
-        map.insert(
-            primary.display_id,
-            Monitor {
-                id: primary_monitor_id,
-                info: primary.clone(),
-            },
-        );
-        reverse.insert(primary_monitor_id, primary.display_id);
         Self {
-            map,
-            reverse,
-            primary_display_id: primary.display_id,
+            monitors: HashMap::from([(primary_monitor_id, primary.clone())]),
+            primary_id: primary_monitor_id,
         }
     }
 
-    pub(super) fn contains(&self, display_id: DisplayId) -> bool {
-        self.map.contains_key(&display_id)
+    fn id_for_display(&self, display_id: DisplayId) -> Option<MonitorId> {
+        self.monitors
+            .iter()
+            .find(|(_, info)| info.display_id == display_id)
+            .map(|(&id, _)| id)
     }
 
-    pub(in crate::platform::macos) fn monitor(&self, monitor_id: MonitorId) -> &Monitor {
-        self.reverse
+    pub(in crate::platform::macos) fn monitor(&self, monitor_id: MonitorId) -> &MonitorInfo {
+        self.monitors
             .get(&monitor_id)
-            .and_then(|d| self.map.get(d))
             .expect("monitor not found in registry")
     }
 
-    pub(super) fn primary_monitor(&self) -> &Monitor {
-        self.map
-            .get(&self.primary_display_id)
+    pub(super) fn primary_monitor(&self) -> &MonitorInfo {
+        self.monitors
+            .get(&self.primary_id)
             .expect("primary monitor present")
     }
 
     pub(in crate::platform::macos) fn primary_full_height(&self) -> f32 {
-        self.map
-            .get(&self.primary_display_id)
-            .expect("primary monitor present")
-            .info
-            .full_height
+        self.primary_monitor().full_height
     }
 
     /// Returns the monitor displaced from the incoming primary display, if this
     /// registry already tracked one there.
     pub(super) fn replace_primary(&mut self, new_info: &MonitorInfo) -> Option<MonitorId> {
-        let displaced = self.map.get(&new_info.display_id).map(|m| m.id);
-        if let Some(displaced_id) = displaced {
-            self.reverse.remove(&displaced_id);
+        let displaced = self.id_for_display(new_info.display_id);
+        if let Some(id) = displaced {
+            self.monitors.remove(&id);
         }
-        if let Some(mut entry) = self.map.remove(&self.primary_display_id) {
-            let old = self.primary_display_id;
-            let monitor_id = entry.id;
-            entry.info = new_info.clone();
-            self.map.insert(new_info.display_id, entry);
-            self.reverse.insert(monitor_id, new_info.display_id);
-            self.primary_display_id = new_info.display_id;
-            tracing::info!(old, new = new_info.display_id, "Primary monitor replaced");
-        }
+        let old = self.primary_monitor().display_id;
+        self.monitors.insert(self.primary_id, new_info.clone());
+        tracing::info!(old, new = new_info.display_id, "Primary monitor replaced");
         displaced
     }
 
     pub(super) fn insert(&mut self, monitor: &MonitorInfo, monitor_id: MonitorId) {
-        self.map.insert(
-            monitor.display_id,
-            Monitor {
-                id: monitor_id,
-                info: monitor.clone(),
-            },
-        );
-        self.reverse.insert(monitor_id, monitor.display_id);
-    }
-
-    fn remove_by_id(&mut self, monitor_id: MonitorId) {
-        if let Some(display_id) = self.reverse.remove(&monitor_id) {
-            self.map.remove(&display_id);
-        }
+        self.monitors.insert(monitor_id, monitor.clone());
     }
 
     pub(super) fn remove_stale(&mut self, current: &HashSet<DisplayId>) -> Vec<MonitorId> {
         let stale: Vec<_> = self
-            .map
+            .monitors
             .iter()
-            .filter(|(key, _)| !current.contains(key))
-            .map(|(_, e)| e.id)
+            .filter(|(_, info)| !current.contains(&info.display_id))
+            .map(|(&id, _)| id)
             .collect();
-        for &id in &stale {
-            self.remove_by_id(id);
+        for id in &stale {
+            self.monitors.remove(id);
         }
         stale
     }
 
     pub(super) fn all_monitors(&self) -> Vec<MonitorInfo> {
-        self.map.values().map(|e| e.info.clone()).collect()
+        self.monitors.values().cloned().collect()
     }
 
-    /// Returns the `Monitor` whose full display bounds overlap `dim` the most by
-    /// intersection area. The intersection is pure Rust over the cached
-    /// `MonitorInfo.bounds` rather than a CoreGraphics call, so it is safe to hit
-    /// from test contexts where CGS is not initialized.
-    pub(super) fn find_closest_monitor(&self, dim: Dimension) -> Option<&Monitor> {
-        let mut best: Option<(&Monitor, f32)> = None;
-        for monitor in self.map.values() {
-            let area = intersection_area(dim, monitor.info.bounds);
+    /// Returns the monitor whose `bounds` overlap `dim` the most by intersection
+    /// area. Reads only the cached `bounds`, so it works in tests where
+    /// CoreGraphics is not initialized.
+    pub(super) fn find_closest_monitor(&self, dim: Dimension) -> Option<(MonitorId, &MonitorInfo)> {
+        let mut best: Option<(MonitorId, &MonitorInfo, f32)> = None;
+        for (&id, info) in &self.monitors {
+            let area = intersection_area(dim, info.bounds);
             if area <= 0.0 {
                 continue;
             }
-            if best.map(|(_, b)| area > b).unwrap_or(true) {
-                best = Some((monitor, area));
+            if best.map(|(_, _, b)| area > b).unwrap_or(true) {
+                best = Some((id, info, area));
             }
         }
-        best.map(|(m, _)| m)
+        best.map(|(id, info, _)| (id, info))
     }
 
     /// A rect that overlaps no monitor on either side counts as no crossing.
     pub(super) fn crosses_monitor(&self, from: PixelRect, to: PixelRect) -> bool {
         let id = |rect: PixelRect| {
             self.find_closest_monitor(rect.to_dimension())
-                .map(Monitor::id)
+                .map(|(id, _)| id)
         };
         match (id(from), id(to)) {
             (Some(a), Some(b)) => a != b,
@@ -271,8 +213,8 @@ impl MonitorRegistry {
             Length::new(1.0),
         );
         let monitor = self.find_closest_monitor(point);
-        monitor.is_some_and(|m| {
-            let mon = m.info.work_area;
+        monitor.is_some_and(|(_, info)| {
+            let mon = info.work_area;
             let tolerance = Pixels::new(2);
             rect.x() <= mon.x() + tolerance
                 && rect.y() <= mon.y() + tolerance
@@ -285,10 +227,13 @@ impl MonitorRegistry {
         &mut self,
         monitor: &MonitorInfo,
     ) -> Option<(MonitorId, PixelRect)> {
-        let entry = self.map.get_mut(&monitor.display_id)?;
-        let old_work_area = entry.info.work_area;
-        entry.info = monitor.clone();
-        Some((entry.id, old_work_area))
+        let (&id, entry) = self
+            .monitors
+            .iter_mut()
+            .find(|(_, info)| info.display_id == monitor.display_id)?;
+        let old_work_area = entry.work_area;
+        *entry = monitor.clone();
+        Some((id, old_work_area))
     }
 }
 
@@ -309,7 +254,7 @@ impl MonitorRegistry {
         // Mirroring moves the primary role between displays, and the workspaces
         // follow the role instead of parking.
         if let Some(new_primary) = monitors.iter().find(|s| s.is_primary)
-            && new_primary.display_id != self.primary_display_id
+            && new_primary.display_id != self.primary_monitor().display_id
         {
             let occupant = self.replace_primary(new_primary);
             let primary_monitor_id = hub.primary_monitor();
@@ -318,7 +263,7 @@ impl MonitorRegistry {
 
         // Add new monitors first to prevent exhausting all monitors
         for monitor in monitors {
-            if !self.contains(monitor.display_id) {
+            if self.id_for_display(monitor.display_id).is_none() {
                 let id = hub.add_monitor(monitor.into());
                 self.insert(monitor, id);
                 tracing::info!(%monitor, "Monitor added");
@@ -352,34 +297,8 @@ impl MonitorRegistry {
 
 impl Dome {
     pub(super) fn reconcile_monitors(&mut self) {
-        match &self.bar_geometry {
-            None => self
-                .monitor_registry
-                .reconcile(&mut self.hub, &self.monitors),
-            Some(geo) => {
-                let rects = external_bar::reserved_rects(geo, &self.monitors);
-                let shrunk: Vec<MonitorInfo> = self
-                    .monitors
-                    .iter()
-                    .map(|m| {
-                        // Bar-edge math is f32 and shared with Windows.
-                        let work_area = match rects.get(&m.display_id) {
-                            Some(bar) => PixelRect::from_dimension_inward(reserve_for_bar(
-                                m.bounds,
-                                m.work_area.to_dimension(),
-                                *bar,
-                            )),
-                            None => m.work_area,
-                        };
-                        MonitorInfo {
-                            work_area,
-                            ..m.clone()
-                        }
-                    })
-                    .collect();
-                self.monitor_registry.reconcile(&mut self.hub, &shrunk);
-            }
-        }
+        self.monitor_registry
+            .reconcile(&mut self.hub, &self.monitors);
         self.primary_full_height = self.monitor_registry.primary_full_height();
     }
 }

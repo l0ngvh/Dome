@@ -47,6 +47,11 @@ return function(mod1)
 			---@type boolean
 			automatic_tiling = true,
 		},
+		-- Space on each monitor edge that Dome leaves out when it arranges windows.
+		---@type fun(monitor: dome.Monitor): dome.ReservedArea?
+		reserved_area = function(monitor)
+			return { top = 0, bottom = 0, left = 0, right = 0 }
+		end,
 		---@type dome.MasterConfig
 		master = {
 			---@type number

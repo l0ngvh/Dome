@@ -1,5 +1,4 @@
 pub(super) mod events;
-mod external_bar;
 pub(super) mod monitor;
 mod placement_tracker;
 mod recovery;
@@ -66,8 +65,6 @@ use self::events::{
     FloatOverlayAction, HubMessage, MonitorScene, MonitorSetChange, NewTilingOverlay, RenderScene,
     SceneSender, TilingWindowShow,
 };
-use self::external_bar::StatusBars;
-use crate::platform::reserve_for_bar;
 
 use self::monitor::MonitorRegistry;
 use super::external::{HwndId, ManageExternalWindow, ManageOverlay, ZOrder};
@@ -146,7 +143,6 @@ pub(super) struct Dome {
     tiling_overlays: HashMap<MonitorId, Arc<dyn ManageOverlay>>,
     float_overlays: HashMap<WindowId, Arc<dyn ManageOverlay>>,
     recovery: Recovery,
-    status_bars: StatusBars,
     keymap_publisher: KeymapPublisher,
     env: HashMap<String, String>,
 }
@@ -182,14 +178,7 @@ impl Dome {
         let primary_monitor_id = hub.primary_monitor();
         let mut monitors_reg = MonitorRegistry::new();
         let mut new_overlays: Vec<NewTilingOverlay> = Vec::new();
-        monitors_reg.insert(
-            primary.handle,
-            primary_monitor_id,
-            primary.name.clone(),
-            primary.gdi_device.clone(),
-            primary.work_area,
-            primary.scale,
-        );
+        monitors_reg.insert(primary_monitor_id, primary);
         new_overlays.push(NewTilingOverlay {
             monitor_id: primary_monitor_id,
             work_area: primary.work_area,
@@ -205,14 +194,7 @@ impl Dome {
         for monitor in &monitors {
             if monitor.handle != primary.handle {
                 let id = hub.add_monitor(monitor.into());
-                monitors_reg.insert(
-                    monitor.handle,
-                    id,
-                    monitor.name.clone(),
-                    monitor.gdi_device.clone(),
-                    monitor.work_area,
-                    monitor.scale,
-                );
+                monitors_reg.insert(id, monitor);
                 new_overlays.push(NewTilingOverlay {
                     monitor_id: id,
                     work_area: monitor.work_area,
@@ -247,7 +229,6 @@ impl Dome {
             float_overlays: HashMap::new(),
             displayed_windows: HashSet::new(),
             recovery: Recovery::new(taskbar),
-            status_bars: StatusBars::default(),
             keymap_publisher,
             env,
         })
@@ -555,7 +536,7 @@ impl Dome {
         let mut float_actions: Vec<FloatOverlayAction> = Vec::new();
 
         for mp in result.monitors {
-            let work_area = self.monitors.monitor(mp.monitor_id).work_area();
+            let work_area = mp.work_area;
 
             let mut window_ids = HashSet::new();
 
@@ -620,7 +601,7 @@ impl Dome {
                     per_monitor.push(MonitorScene {
                         monitor_id: mp.monitor_id,
                         work_area,
-                        scale: self.monitors.monitor(mp.monitor_id).scale(),
+                        scale: self.monitors.monitor(mp.monitor_id).scale,
                         border_thickness: mp.border_thickness,
                         tiling_windows: placed_tiling,
                         float_windows: placed_floats,
@@ -743,76 +724,6 @@ impl Dome {
         self.apply_layout();
     }
 
-    pub(super) fn capture_bar(
-        &mut self,
-        hwnd_id: HwndId,
-        monitor: isize,
-        rect: PixelRect<Physical>,
-    ) {
-        if let Some(mid) = self.monitors.id_for_handle(monitor) {
-            if !self.is_edge_bar(rect, monitor) {
-                tracing::debug!(%hwnd_id, %mid, ?rect, "Ignoring non-edge bar at capture");
-                return;
-            }
-            self.status_bars.capture(hwnd_id, mid, rect);
-            tracing::info!(%hwnd_id, %mid, ?rect, "Status bar recognized, reserving work area");
-            self.recompute_work_areas();
-        } else {
-            tracing::warn!(handle = monitor, "known bar on unknown monitor handle");
-        }
-    }
-
-    pub(super) fn remove_bar(&mut self, hwnd_id: HwndId) -> bool {
-        if self.status_bars.remove(hwnd_id).is_some() {
-            self.recompute_work_areas();
-            true
-        } else {
-            false
-        }
-    }
-
-    pub(super) fn is_known_bar(metadata: &WindowsMetadata) -> bool {
-        StatusBars::is_known_bar(metadata)
-    }
-
-    pub(super) fn is_tracked_bar(&self, hwnd_id: HwndId) -> bool {
-        self.status_bars.is_tracked(hwnd_id)
-    }
-
-    pub(in crate::platform::windows) fn bar_moved(
-        &mut self,
-        hwnd_id: HwndId,
-        monitor_handle: isize,
-        rect: PixelRect<Physical>,
-    ) {
-        if let Some(mid) = self.monitors.id_for_handle(monitor_handle) {
-            if !self.is_edge_bar(rect, monitor_handle) {
-                tracing::debug!(%hwnd_id, %mid, ?rect, "Ignoring non-edge bar move");
-                return;
-            }
-            self.status_bars.move_to(hwnd_id, mid, rect);
-            tracing::info!(%hwnd_id, %mid, ?rect, "Status bar moved, reserving work area");
-            self.recompute_work_areas();
-        }
-    }
-
-    pub(super) fn is_edge_bar(&self, rect: PixelRect<Physical>, monitor_handle: isize) -> bool {
-        // Don't let a non-edge (still positioning) bar overwrite an edge bar. Reuse the reserve math to
-        // detect an edge and keep the rect if enumeration fails.
-        let Ok(monitors) = self.display.get_all_monitors() else {
-            return true;
-        };
-        let Some(info) = monitors.iter().find(|m| m.handle == monitor_handle) else {
-            return true;
-        };
-        let reserved = reserve_for_bar(
-            info.bounds,
-            info.work_area.to_dimension(),
-            rect.to_dimension(),
-        );
-        reserved != info.work_area.to_dimension()
-    }
-
     pub(super) fn retry_drifted_windows(&mut self) {
         let window_ids: Vec<(HwndId, WindowId)> = self.registry.iter().collect();
         for (_hwnd_id, window_id) in window_ids {
@@ -917,12 +828,11 @@ impl Dome {
         self.show_tiling(wp.id, wp, monitor, z);
     }
 
-    fn update_monitors(&mut self, mut monitors: Vec<MonitorInfo>) -> Vec<HwndId> {
+    fn update_monitors(&mut self, monitors: Vec<MonitorInfo>) -> Vec<HwndId> {
         if monitors.is_empty() {
             tracing::warn!("Empty monitor list, skipping update");
             return Vec::new();
         }
-        self.status_bars.reserve(&mut monitors, &self.monitors);
         let change = self.monitors.reconcile(&mut self.hub, &monitors);
         let added: Vec<NewTilingOverlay> = change
             .added
@@ -931,8 +841,8 @@ impl Dome {
                 let m = self.monitors.monitor(monitor_id);
                 NewTilingOverlay {
                     monitor_id,
-                    work_area: m.work_area(),
-                    scale: m.scale(),
+                    work_area: m.work_area,
+                    scale: m.scale,
                 }
             })
             .collect();
@@ -953,16 +863,6 @@ impl Dome {
             })
             .map(|(hwnd_id, _)| hwnd_id)
             .collect()
-    }
-
-    fn recompute_work_areas(&mut self) {
-        match self.display.get_all_monitors() {
-            Ok(monitors) => {
-                self.update_monitors(monitors);
-                self.apply_layout();
-            }
-            Err(e) => tracing::warn!("Failed to enumerate monitors for bar reservation: {e}"),
-        }
     }
 }
 

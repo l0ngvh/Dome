@@ -15,7 +15,7 @@ use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotific
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, MONITORINFOF_PRIMARY};
 use windows::core::BOOL;
 
-use crate::core::{Dimension, Hub, MonitorId, Physical, PixelRect, ReportedMonitor};
+use crate::core::{Hub, MonitorId, Physical, PixelRect, ReportedMonitor};
 use crate::platform::windows::external::HwndId;
 use crate::platform::windows::handle;
 
@@ -30,9 +30,6 @@ pub(in crate::platform::windows) struct MonitorInfo {
     /// display label.
     pub(in crate::platform::windows) gdi_device: String,
     pub(in crate::platform::windows) work_area: PixelRect,
-    /// Stays fractional because its only consumer is `reserve_for_bar`, whose
-    /// f32 edge math is shared with macOS.
-    pub(in crate::platform::windows) bounds: Dimension,
     pub(in crate::platform::windows) is_primary: bool,
     /// Always > 0.
     pub(in crate::platform::windows) scale: f32,
@@ -72,44 +69,13 @@ impl QueryDisplay for Win32Display {
     }
 }
 
-pub(super) struct Monitor {
-    id: MonitorId,
-    handle: isize,
-    name: String,
-    gdi_device: String,
-    work_area: PixelRect,
-    scale: f32,
-}
-
-impl Monitor {
-    pub(super) fn work_area(&self) -> PixelRect {
-        self.work_area
-    }
-
-    pub(super) fn scale(&self) -> f32 {
-        self.scale
-    }
-}
-
-impl From<&Monitor> for ReportedMonitor {
-    fn from(m: &Monitor) -> Self {
-        ReportedMonitor {
-            device_name: m.name.clone(),
-            work_area: m.work_area,
-            scale: m.scale,
-            cg_display_id: None,
-            gdi_device: Some(m.gdi_device.clone()),
-        }
-    }
-}
-
 pub(super) struct MonitorChange {
     pub(super) added: Vec<MonitorId>,
     pub(super) removed: Vec<MonitorId>,
 }
 
 pub(super) struct MonitorRegistry {
-    monitors: HashMap<MonitorId, Monitor>,
+    monitors: HashMap<MonitorId, MonitorInfo>,
 }
 
 impl MonitorRegistry {
@@ -119,7 +85,7 @@ impl MonitorRegistry {
         }
     }
 
-    pub(super) fn monitor(&self, id: MonitorId) -> &Monitor {
+    pub(super) fn monitor(&self, id: MonitorId) -> &MonitorInfo {
         &self.monitors[&id]
     }
 
@@ -127,33 +93,15 @@ impl MonitorRegistry {
         self.monitors.contains_key(&id)
     }
 
-    pub(super) fn insert(
-        &mut self,
-        handle: isize,
-        id: MonitorId,
-        name: String,
-        gdi_device: String,
-        work_area: PixelRect,
-        scale: f32,
-    ) {
-        self.monitors.insert(
-            id,
-            Monitor {
-                id,
-                handle,
-                name,
-                gdi_device,
-                work_area,
-                scale,
-            },
-        );
+    pub(super) fn insert(&mut self, id: MonitorId, info: &MonitorInfo) {
+        self.monitors.insert(id, info.clone());
     }
 
     pub(super) fn id_for_handle(&self, handle: isize) -> Option<MonitorId> {
         self.monitors
-            .values()
-            .find(|m| m.handle == handle)
-            .map(|m| m.id)
+            .iter()
+            .find(|(_, m)| m.handle == handle)
+            .map(|(&id, _)| id)
     }
 
     pub(super) fn is_borderless_fullscreen_at(
@@ -195,14 +143,7 @@ impl MonitorRegistry {
             let already_tracked = self.monitors.values().any(|m| m.handle == monitor.handle);
             if !already_tracked {
                 let id = hub.add_monitor(monitor.into());
-                self.insert(
-                    monitor.handle,
-                    id,
-                    monitor.name.clone(),
-                    monitor.gdi_device.clone(),
-                    monitor.work_area,
-                    monitor.scale,
-                );
+                self.insert(id, monitor);
                 added.push(id);
                 tracing::info!(
                     name = %monitor.name,
@@ -215,9 +156,9 @@ impl MonitorRegistry {
 
         let to_remove: Vec<MonitorId> = self
             .monitors
-            .values()
-            .filter(|m| !current_handles.contains(&m.handle))
-            .map(|m| m.id)
+            .iter()
+            .filter(|(_, m)| !current_handles.contains(&m.handle))
+            .map(|(&id, _)| id)
             .collect();
 
         for monitor_id in &to_remove {
@@ -267,11 +208,7 @@ impl MonitorRegistry {
         // Keyed by MonitorId with the handle in the value, so the carry is an
         // in-place move onto the new panel.
         if let Some(entry) = self.monitors.get_mut(&primary_id) {
-            entry.handle = new_primary.handle;
-            entry.name = new_primary.name.clone();
-            entry.gdi_device = new_primary.gdi_device.clone();
-            entry.work_area = new_primary.work_area;
-            entry.scale = new_primary.scale;
+            *entry = new_primary.clone();
         }
         tracing::info!(
             name = %new_primary.name,
@@ -286,15 +223,12 @@ impl MonitorRegistry {
     /// previous work area and scale. Windows can move a szDevice or rename a
     /// display with no geometry change, so the mirror is unconditional.
     fn update_monitor(&mut self, monitor: &MonitorInfo) -> Option<(MonitorId, PixelRect, f32)> {
-        let entry = self
+        let (&id, entry) = self
             .monitors
-            .values_mut()
-            .find(|m| m.handle == monitor.handle)?;
-        let previous = (entry.id, entry.work_area, entry.scale);
-        entry.name = monitor.name.clone();
-        entry.gdi_device = monitor.gdi_device.clone();
-        entry.work_area = monitor.work_area;
-        entry.scale = monitor.scale;
+            .iter_mut()
+            .find(|(_, m)| m.handle == monitor.handle)?;
+        let previous = (id, entry.work_area, entry.scale);
+        *entry = monitor.clone();
         Some(previous)
     }
 }
@@ -340,7 +274,6 @@ fn get_all_monitors() -> anyhow::Result<Vec<MonitorInfo>> {
 
         if unsafe { GetMonitorInfoW(hmonitor, &mut info.monitorInfo) }.as_bool() {
             let rc = info.monitorInfo.rcWork;
-            let rc_monitor = info.monitorInfo.rcMonitor;
             let gdi_device = utf16_to_string(&info.szDevice);
 
             let scale = scale_for_monitor(hmonitor);
@@ -353,7 +286,6 @@ fn get_all_monitors() -> anyhow::Result<Vec<MonitorInfo>> {
                 name: String::new(),
                 gdi_device,
                 work_area: handle::rect_to_pixel_rect(rc),
-                bounds: handle::rect_to_dimension(rc_monitor),
                 is_primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
                 scale,
             });
