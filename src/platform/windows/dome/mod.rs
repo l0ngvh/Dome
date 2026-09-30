@@ -102,8 +102,8 @@ pub(super) enum HubEvent {
         keystroke: Keystroke,
     },
     ReloadConfig,
-    LayoutConfigChanged(Box<PreferredLayouts>),
-    ExportLayout(String),
+    ApplyLayout(String),
+    SaveLayout(String),
     TabClicked(ContainerId, usize),
     /// A monitor's effective DPI changed (WM_DPICHANGED).
     DpiChanged,
@@ -271,9 +271,16 @@ impl Dome {
         self.float_overlays.insert(window, overlay);
     }
 
-    pub(super) fn layout_changed(&mut self, new_layout: PreferredLayouts) {
-        self.hub.sync_preferred_layout(new_layout);
-        tracing::info!("Layout reloaded");
+    pub(super) fn apply_layout_file(&mut self, path: &str) {
+        let layouts = match PreferredLayouts::load(path) {
+            Ok(layouts) => layouts,
+            Err(e) => {
+                tracing::error!("Apply layout failed: {e:#}");
+                return;
+            }
+        };
+        self.hub.apply_preferred_layouts(layouts);
+        tracing::info!(%path, "Layout applied");
         self.apply_layout();
     }
 
@@ -337,9 +344,9 @@ impl Dome {
         self.apply_layout();
     }
 
-    pub(super) fn export_layout(&mut self, path: &std::path::Path) {
-        if let Err(e) = self.hub.export_layout(path) {
-            tracing::error!("Export layout failed: {e:#}");
+    pub(super) fn save_layout_file(&mut self, path: &std::path::Path) {
+        if let Err(e) = self.hub.save_layout(path) {
+            tracing::error!("Save layout failed: {e:#}");
         }
     }
 

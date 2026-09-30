@@ -82,8 +82,8 @@ impl Runner {
                     login_item::sync_login_item(config.start_at_login);
                 }
             }
-            HubEvent::LayoutConfigChanged(c) => {
-                self.dome.layout_changed(*c);
+            HubEvent::ApplyLayout(path) => {
+                self.dome.apply_layout_file(&path);
             }
             HubEvent::WindowCreated(hwnd_id) => {
                 self.dispatch_window_created(hwnd_id);
@@ -158,8 +158,8 @@ impl Runner {
             HubEvent::TabClicked(id, idx) => {
                 self.dome.tab_clicked(id, idx);
             }
-            HubEvent::ExportLayout(path) => {
-                self.dome.export_layout(std::path::Path::new(&path));
+            HubEvent::SaveLayout(path) => {
+                self.dome.save_layout_file(std::path::Path::new(&path));
             }
             HubEvent::DpiChanged => {
                 let to_refresh = self.dome.handle_dpi_change();

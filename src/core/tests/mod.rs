@@ -29,8 +29,8 @@ use crate::core::{
     WindowMetadata,
 };
 use crate::core::{
-    MasterConfig, PartitionTreeConfig, PreferredLayouts, PreferredWorkspace, SizeConstraint,
-    SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
+    MasterConfig, PartitionTreeConfig, PreferredLayouts, PreferredMaster, PreferredTiling,
+    PreferredWorkspace, SizeConstraint, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
 };
 
 const ASCII_WIDTH: usize = 150;
@@ -956,8 +956,8 @@ impl LayoutWorkspaceConfigBuilder {
     }
 
     fn build(self) -> (String, PreferredWorkspace) {
-        let entry = match self.strategy {
-            Strategy::Master => PreferredWorkspace::Master {
+        let tiling = match self.strategy {
+            Strategy::Master => PreferredTiling::Master(PreferredMaster {
                 master_count: self.master_count,
                 master_ratio: self.master_ratio,
                 master: PaneConfig {
@@ -968,16 +968,31 @@ impl LayoutWorkspaceConfigBuilder {
                     display: self.secondary_display,
                     children: self.secondary,
                 },
-                float: self.float,
-                fullscreen: self.fullscreen,
-            },
-            Strategy::PartitionTree => PreferredWorkspace::PartitionTree {
-                tree: self.tree,
-                float: self.float,
-                fullscreen: self.fullscreen,
-            },
+            }),
+            Strategy::PartitionTree => PreferredTiling::PartitionTree { tree: self.tree },
+        };
+        let entry = PreferredWorkspace {
+            tiling,
+            float: self.float,
+            fullscreen: self.fullscreen,
         };
         (self.name, entry)
+    }
+}
+
+pub(super) fn partition_tree_entry(tree: Option<TreeLayoutNode>) -> PreferredWorkspace {
+    PreferredWorkspace {
+        tiling: PreferredTiling::PartitionTree { tree },
+        float: Vec::new(),
+        fullscreen: Vec::new(),
+    }
+}
+
+pub(super) fn master_entry(master: PreferredMaster) -> PreferredWorkspace {
+    PreferredWorkspace {
+        tiling: PreferredTiling::Master(master),
+        float: Vec::new(),
+        fullscreen: Vec::new(),
     }
 }
 
@@ -1096,6 +1111,12 @@ pub(crate) fn parse_exported_layout(path: &str) -> PreferredLayouts {
     let mut cx = LoadContext::new();
     PreferredLayouts::from_lua_value(&value, &mut cx)
         .expect("exported layout.lua reads as the layout vocabulary")
+}
+
+pub(super) fn save_then_apply(hub: &mut Hub) {
+    let text = crate::core::export::render_layout(&hub.capture_live_layouts());
+    let layouts = PreferredLayouts::from_lua("layout.lua", &text).expect("saved layout loads back");
+    hub.apply_preferred_layouts(layouts);
 }
 
 /// Rect for test inserts where geometry is not under assertion. Tiling ignores it.

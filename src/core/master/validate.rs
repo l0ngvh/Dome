@@ -51,27 +51,34 @@ impl ValidateStrategy for MasterStrategy {
                     self.window_states.contains_key(&wid),
                     "master-stack workspace {ws_id}: window {wid:?} missing from window_states"
                 );
+                if let Some(held_slot) = self.window_states[&wid].held_slot {
+                    assert_eq!(
+                        self.slots.get(held_slot).window,
+                        Some(wid),
+                        "master-stack workspace {ws_id}: window {wid:?} holds slot {held_slot:?}, \
+                         which holds another window"
+                    );
+                }
+            }
+            for &slot in state.master.slots.iter().chain(&state.secondary.slots) {
+                if let Some(wid) = self.slots.get(slot).window {
+                    assert!(
+                        seen.contains(&wid),
+                        "master-stack workspace {ws_id}: slot {slot:?} holds window {wid:?}, \
+                         which is in neither pane"
+                    );
+                    assert_eq!(
+                        self.window_states.get(&wid).and_then(|w| w.held_slot),
+                        Some(slot),
+                        "master-stack workspace {ws_id}: slot {slot:?} holds window {wid:?}, \
+                         which does not hold it"
+                    );
+                }
             }
 
-            for &wid in &master {
-                if let Some(occupy) = self.window_states.get(&wid).and_then(|w| w.occupy) {
-                    assert!(
-                        state.master.matchers.contains(&occupy),
-                        "master-stack workspace {ws_id}: master window {wid:?} occupies slot {occupy:?} outside master pane"
-                    );
-                }
-            }
-            for &wid in &secondary {
-                if let Some(occupy) = self.window_states.get(&wid).and_then(|w| w.occupy) {
-                    assert!(
-                        state.secondary.matchers.contains(&occupy),
-                        "master-stack workspace {ws_id}: secondary window {wid:?} occupies slot {occupy:?} outside secondary pane"
-                    );
-                }
-            }
-            for slot in &state.master.matchers {
+            for slot in &state.master.slots {
                 assert!(
-                    !state.secondary.matchers.contains(slot),
+                    !state.secondary.slots.contains(slot),
                     "master-stack workspace {ws_id}: slot {slot:?} shared between master and secondary panes"
                 );
             }

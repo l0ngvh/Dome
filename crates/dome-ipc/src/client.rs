@@ -23,8 +23,12 @@ impl DomeClient {
         .into_unit()
     }
 
-    pub fn export_layout(&self) -> anyhow::Result<()> {
-        self.send(&IpcMessage::ExportLayout)?.into_unit()
+    pub fn save_layout(&self) -> anyhow::Result<()> {
+        self.send(&IpcMessage::SaveLayout)?.into_unit()
+    }
+
+    pub fn apply_layout(&self) -> anyhow::Result<()> {
+        self.send(&IpcMessage::ApplyLayout)?.into_unit()
     }
 
     pub fn query<T: DeserializeOwned>(&self, query: &Query) -> anyhow::Result<T> {

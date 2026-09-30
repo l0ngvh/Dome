@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
 
 use crate::core::allocator::{Node, NodeId};
-use crate::core::matcher::{FloatFullscreenMatcherId, WindowMatcher};
+use crate::core::matcher::WindowMatcher;
 
 pub use dome_ipc::WindowId;
 
@@ -47,11 +47,8 @@ pub(super) enum DisplayMode {
     Tiling,
     Float {
         border_box: PixelRect,
-        occupy: Option<FloatFullscreenMatcherId>,
     },
-    Fullscreen {
-        occupy: Option<FloatFullscreenMatcherId>,
-    },
+    Fullscreen,
 }
 
 impl std::fmt::Display for DisplayMode {
@@ -59,7 +56,7 @@ impl std::fmt::Display for DisplayMode {
         match self {
             Self::Tiling => write!(f, "tiling"),
             Self::Float { .. } => write!(f, "float"),
-            Self::Fullscreen { .. } => write!(f, "fullscreen"),
+            Self::Fullscreen => write!(f, "fullscreen"),
         }
     }
 }
@@ -159,10 +156,7 @@ impl Window {
     ) -> Self {
         Self {
             workspace: Some(workspace),
-            mode: DisplayMode::Float {
-                border_box,
-                occupy: None,
-            },
+            mode: DisplayMode::Float { border_box },
             restrictions: WindowRestrictions::None,
             is_minimized: false,
             metadata,
@@ -177,7 +171,7 @@ impl Window {
     ) -> Self {
         Self {
             workspace: Some(workspace),
-            mode: DisplayMode::Fullscreen { occupy: None },
+            mode: DisplayMode::Fullscreen,
             restrictions,
             is_minimized: false,
             metadata,
@@ -198,7 +192,7 @@ impl Window {
     }
 
     pub(crate) fn is_fullscreen(&self) -> bool {
-        matches!(self.mode, DisplayMode::Fullscreen { .. })
+        matches!(self.mode, DisplayMode::Fullscreen)
     }
 }
 

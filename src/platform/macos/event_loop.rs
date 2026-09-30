@@ -127,8 +127,8 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
                 login_item::sync_login_item(config.start_at_login, runner.bundle_path.as_deref());
             }
         }
-        HubEvent::LayoutConfigChanged(new_layout) => {
-            runner.dome.layout_changed(*new_layout);
+        HubEvent::ApplyLayout(path) => {
+            runner.dome.apply_layout_file(&path);
         }
         HubEvent::SyncFocus { pid } => {
             dispatch_sync_focus(runner, pid);
@@ -187,8 +187,8 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
         HubEvent::ObservedPidsRefreshed(pids) => {
             runner.dome.set_observed_pids(pids);
         }
-        HubEvent::ExportLayout(path) => {
-            runner.dome.export_layout(std::path::Path::new(&path));
+        HubEvent::SaveLayout(path) => {
+            runner.dome.save_layout_file(std::path::Path::new(&path));
         }
     });
 }

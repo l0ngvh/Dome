@@ -115,9 +115,16 @@ Switch to the named keymap.
 
 Stop Dome and restore all windows.
 
-## `dome export`
+## `dome save-layout`
 
-Export the current window layout to the layout file. See
+Save the current window layout to the layout file. See
+[Preferred layout](../README.md#preferred-layout).
+
+## `dome apply-layout`
+
+Reset every workspace from the layout file. The reset discards what you
+arranged by hand or with the keyboard. This includes a workspace that the file
+does not name. Float and fullscreen windows keep their place. See
 [Preferred layout](../README.md#preferred-layout).
 
 ## `dome query workspaces`

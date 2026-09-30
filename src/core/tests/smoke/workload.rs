@@ -177,7 +177,9 @@ impl Category {
             | OpKind::RemoveMonitor
             | OpKind::FocusMonitor
             | OpKind::MoveToMonitor => Category::Monitor,
-            OpKind::ConfigReload | OpKind::SyncPreferredLayout => Category::Config,
+            OpKind::ConfigReload | OpKind::ApplyPreferredLayouts | OpKind::ExportLayout => {
+                Category::Config
+            }
         }
     }
 

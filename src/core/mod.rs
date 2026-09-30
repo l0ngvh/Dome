@@ -36,7 +36,9 @@ pub(crate) use node::{
     WindowId, WindowMetadata, WindowRestrictions,
 };
 pub(crate) use partition_tree::{PartitionTreeConfig, SplitMode, TreeLayoutNode};
-pub(crate) use preferred_layout::{PreferredLayouts, PreferredWorkspace};
+pub(crate) use preferred_layout::{
+    PreferredLayouts, PreferredMaster, PreferredTiling, PreferredWorkspace,
+};
 pub(crate) use strategy::{StrategyAction, TilingAction};
 pub(crate) use tiling::{SizeConstraint, SizeConstraints, Strategy, TilingConfig};
 

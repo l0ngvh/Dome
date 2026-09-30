@@ -54,7 +54,7 @@ Dome can remember how a workspace is arranged and restore it the next time those
 windows open:
 
 ```bash
-dome export
+dome save-layout
 ```
 
 That writes the arrangement to the `layout.lua` file in your configuration
@@ -80,7 +80,8 @@ return {
 ```
 
 You can edit it by hand to refine a rule, for example `title = "/Picture in
-Picture/"` to match a window with a regular expression.
+Picture/"` to match a window with a regular expression. After you edit the
+file, run `dome apply-layout`.
 
 ## Credits
 

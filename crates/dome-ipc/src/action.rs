@@ -27,7 +27,8 @@ impl fmt::Display for WindowId {
 pub enum IpcMessage {
     Action { action: Action },
     Query { query: Query },
-    ExportLayout,
+    SaveLayout,
+    ApplyLayout,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -595,6 +596,8 @@ mod tests {
                 },
                 r#"{"type":"query","query":{"type":"monitors"}}"#,
             ),
+            (IpcMessage::SaveLayout, r#"{"type":"save_layout"}"#),
+            (IpcMessage::ApplyLayout, r#"{"type":"apply_layout"}"#),
         ];
         for (msg, expected) in &cases {
             let json = serde_json::to_string(msg).unwrap();

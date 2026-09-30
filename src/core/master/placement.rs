@@ -202,7 +202,7 @@ impl MasterStrategy {
                 .entry(id)
                 .and_modify(|s| s.dimension = dim)
                 .or_insert(WindowState {
-                    occupy: None,
+                    held_slot: None,
                     dimension: dim,
                 });
             y += heights[i];
@@ -255,7 +255,7 @@ impl MasterStrategy {
                 .entry(wid)
                 .and_modify(|s| s.dimension = dim)
                 .or_insert(WindowState {
-                    occupy: None,
+                    held_slot: None,
                     dimension: dim,
                 });
         }

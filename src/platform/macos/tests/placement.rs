@@ -422,3 +422,98 @@ fn failed_probe_keeps_previous_reservation() {
     macos.settle(&mut dome, 10);
     assert_eq!(macos.window_frame(win), (4, 34, 1912, 1042));
 }
+
+fn temp_layout_path(name: &str) -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("dome_{name}_{nanos}.lua"))
+}
+
+/// Removes the file when dropped, so a failed assertion does not leave it in the temp
+/// directory.
+struct TempLayoutFile(std::path::PathBuf);
+
+impl TempLayoutFile {
+    fn new(name: &str, contents: &str) -> Self {
+        let path = temp_layout_path(name);
+        std::fs::write(&path, contents).unwrap();
+        Self(path)
+    }
+
+    fn path(&self) -> &str {
+        self.0.to_str().unwrap()
+    }
+}
+
+impl Drop for TempLayoutFile {
+    fn drop(&mut self) {
+        std::fs::remove_file(&self.0).ok();
+    }
+}
+
+const TERMINAL_THEN_SAFARI: &str = r#"
+return {
+  ["Test"] = {
+    ["0"] = {
+      layout = "partition_tree",
+      tree = {
+        split = "horizontal",
+        children = { { app = "Terminal" }, { app = "Safari" } },
+      },
+    },
+  },
+}
+"#;
+
+#[test]
+fn apply_layout_file_places_windows_from_the_file() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    let safari = macos.spawn_window(100, "Safari", "Google");
+    let terminal = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, safari), new_window(&macos, terminal)],
+        &[],
+        &[],
+    );
+    macos.settle(&mut dome, 10);
+    assert!(macos.window_frame(safari).0 < macos.window_frame(terminal).0);
+    let layout = TempLayoutFile::new("apply_layout_places_windows", TERMINAL_THEN_SAFARI);
+
+    dome.apply_layout_file(layout.path());
+    macos.settle(&mut dome, 10);
+
+    assert!(macos.window_frame(terminal).0 < macos.window_frame(safari).0);
+}
+
+#[test]
+fn apply_layout_file_that_fails_to_load_keeps_the_arrangement() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    let safari = macos.spawn_window(100, "Safari", "Google");
+    let terminal = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, safari), new_window(&macos, terminal)],
+        &[],
+        &[],
+    );
+    macos.settle(&mut dome, 10);
+    let before = (macos.window_frame(safari), macos.window_frame(terminal));
+    let missing = temp_layout_path("apply_layout_missing");
+
+    dome.apply_layout_file(missing.to_str().unwrap());
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(
+        (macos.window_frame(safari), macos.window_frame(terminal)),
+        before
+    );
+}

@@ -8,7 +8,7 @@ use objc2_foundation::NSRect;
 use crate::action::Actions;
 use crate::action::Query;
 use crate::action::WorkspaceInfo;
-use crate::config::{Appearance, Keystroke, PreferredLayouts};
+use crate::config::{Appearance, Keystroke};
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, MonitorId,
     TilingWindowPlacement, WindowId,
@@ -50,8 +50,8 @@ pub(in crate::platform::macos) enum HubEvent {
         keystroke: Keystroke,
     },
     ReloadConfig,
-    LayoutConfigChanged(Box<PreferredLayouts>),
-    ExportLayout(String),
+    ApplyLayout(String),
+    SaveLayout(String),
     /// Periodic sync to catch missed AX notifications, as AX notifications are unreliable. Only
     /// syncs window state, not focus, as focus changes should come from user interactions. Beside
     /// we receive plenty of focus events, so missing them isn't a concern.
@@ -87,8 +87,8 @@ impl fmt::Display for HubEvent {
                 write!(f, "RunBinding(keymap={keymap}, keystroke={keystroke})")
             }
             Self::ReloadConfig => write!(f, "ReloadConfig"),
-            Self::LayoutConfigChanged(_) => write!(f, "LayoutConfigChanged"),
-            Self::ExportLayout(_) => write!(f, "ExportLayout"),
+            Self::ApplyLayout(_) => write!(f, "ApplyLayout"),
+            Self::SaveLayout(_) => write!(f, "SaveLayout"),
             Self::Sync => write!(f, "Sync"),
             Self::MonitorsChanged(monitors) => {
                 write!(f, "MonitorsChanged(count={})", monitors.len())

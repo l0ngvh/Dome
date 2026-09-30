@@ -24,7 +24,7 @@ use std::thread;
 
 use objc2::MainThreadMarker;
 
-use crate::config::watch::{load_or_else, start_config_watcher, start_file_watcher};
+use crate::config::watch::start_file_watcher;
 use crate::config::{
     Appearance, LuaRuntime, PreferredLayouts, bootstrap::resolve_config_path, paths,
 };
@@ -45,11 +45,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
             .to_string_lossy()
             .into_owned()
     });
-    let layout = load_or_else(
-        &layout_path,
-        PreferredLayouts::load,
-        PreferredLayouts::default,
-    );
+    let layout = PreferredLayouts::load_or_default(&layout_path);
     tracing::info!(path = %layout_path, "Loaded layout");
 
     let bundle_path = login_item::detect_bundle_path();
@@ -135,16 +131,6 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))
     .ok();
 
-    let _layout_watcher = start_config_watcher(&layout_path, PreferredLayouts::load, {
-        let tx = event_tx.clone();
-        move |new_layout| {
-            tx.send(HubEvent::LayoutConfigChanged(Box::new(new_layout)))
-                .ok();
-        }
-    })
-    .inspect_err(|e| tracing::warn!("Failed to setup layout watcher: {e:#}"))
-    .ok();
-
     ipc::start_server(layout_path.clone(), {
         let tx = event_tx.clone();
         move |ev| match ev {
@@ -157,8 +143,11 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
                     sender: reply,
                 })
                 .or(Err(anyhow::anyhow!("channel closed"))),
-            ipc::IpcEvent::ExportLayout(path) => tx
-                .send(HubEvent::ExportLayout(path))
+            ipc::IpcEvent::SaveLayout(path) => tx
+                .send(HubEvent::SaveLayout(path))
+                .or(Err(anyhow::anyhow!("channel closed"))),
+            ipc::IpcEvent::ApplyLayout(path) => tx
+                .send(HubEvent::ApplyLayout(path))
                 .or(Err(anyhow::anyhow!("channel closed"))),
         }
     })?;

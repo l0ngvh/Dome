@@ -2,7 +2,6 @@ mod bootstrap;
 mod lua;
 mod preferred_layout;
 mod record;
-mod watch;
 
 use anyhow::{Result, anyhow};
 

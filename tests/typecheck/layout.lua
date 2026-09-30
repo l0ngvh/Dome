@@ -1,7 +1,6 @@
--- Typecheck fixture: a preferred layout file. Dome writes this file with
--- `dome export`, but CI runs lua-language-server --check on it against
--- resources/dome.meta.lua, which catches a field name or a value type that
--- dome.Layout does not accept.
+-- Typecheck fixture: a preferred layout file. CI runs lua-language-server
+-- --check on it against resources/dome.meta.lua, which catches a value type
+-- that dome.Layout does not accept.
 
 ---@type dome.MonitorLayout
 local shared = {

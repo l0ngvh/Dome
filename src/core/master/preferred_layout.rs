@@ -1,12 +1,11 @@
 use crate::config::lua::deserializer::{
     FromLuaValue, LoadContext, Shape, as_table, warn_if_shape_mismatched,
 };
+use crate::core::WindowMatcher;
 use crate::core::allocator::{Node, NodeId};
 use crate::core::hub::HubAccess;
-use crate::core::master::{MasterStrategy, PaneDisplay};
-use crate::core::node::{Child, ContainerId, WindowId, WorkspaceId};
-use crate::core::strategy::TilingStrategy;
-use crate::core::{PreferredWorkspace, WindowMatcher};
+use crate::core::master::{MasterStrategy, PaneDisplay, PaneKind};
+use crate::core::node::{Child, WindowId, WindowMetadata, WorkspaceId};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct PaneConfig {
@@ -45,270 +44,117 @@ impl FromLuaValue for PaneConfig {
 }
 
 impl MasterStrategy {
-    pub(super) fn sync_preferred_layout(
-        &mut self,
-        hub: &mut HubAccess,
-        ws_id: WorkspaceId,
-        incoming: Option<&PreferredWorkspace>,
-    ) {
-        let Some(state) = self.workspaces.get(&ws_id) else {
-            return;
-        };
-
-        let (new_count_opt, new_ratio_opt, incoming_master, incoming_secondary, incoming_displays) =
-            match incoming {
-                Some(PreferredWorkspace::Master {
-                    master_count: incoming_count,
-                    master_ratio: incoming_ratio,
-                    master,
-                    secondary,
-                    ..
-                }) => (
-                    *incoming_count,
-                    *incoming_ratio,
-                    master.children.clone(),
-                    secondary.children.clone(),
-                    Some((master.display, secondary.display)),
-                ),
-                _ => (None, None, Vec::new(), Vec::new(), None),
-            };
-
-        let current_master: Vec<WindowMatcher> = state
-            .master
-            .matchers
-            .iter()
-            .map(|id| self.slots.get(*id).matcher.clone())
-            .collect();
-        let current_secondary: Vec<WindowMatcher> = state
-            .secondary
-            .matchers
-            .iter()
-            .map(|id| self.slots.get(*id).matcher.clone())
-            .collect();
-        let matchers_changed = current_master.as_slice() != incoming_master.as_slice()
-            || current_secondary.as_slice() != incoming_secondary.as_slice();
-        let new_effective_count = new_count_opt.unwrap_or(self.master_count);
-        let cur_effective_count = state.master_count.unwrap_or(self.master_count);
-        let count_changed = new_count_opt.is_some() && new_effective_count != cur_effective_count;
-        let new_effective_ratio = new_ratio_opt.unwrap_or(self.master_ratio);
-        let cur_effective_ratio = state.master_ratio.unwrap_or(self.master_ratio);
-        let ratio_changed = new_ratio_opt.is_some()
-            && (new_effective_ratio - cur_effective_ratio).abs() > f32::EPSILON;
-        let display_changed = incoming_displays
-            .is_some_and(|(m, s)| state.master.display != m || state.secondary.display != s);
-
-        if !matchers_changed && !count_changed && !ratio_changed && !display_changed {
-            return;
-        }
-
-        tracing::debug!(%ws_id, "Master preferred layout changed, reloading");
-
-        if let Some((m_disp, s_disp)) = incoming_displays {
-            let state = self.workspaces.get_mut(&ws_id).unwrap();
-            state.master.display = m_disp;
-            state.secondary.display = s_disp;
-        }
-
-        if matchers_changed {
-            let (master_cid, secondary_cid) = {
-                let state = self.workspaces.get(&ws_id).unwrap();
-                (state.master.container, state.secondary.container)
-            };
-            let mut tiling_windows = Self::pane_windows(hub, master_cid);
-            tiling_windows.extend(Self::pane_windows(hub, secondary_cid));
-
-            let focused = self.focused_tiling_window(ws_id);
-            let previous_history = self.workspaces.get(&ws_id).unwrap().focus_history.clone();
-
-            let state = self.workspaces.get_mut(&ws_id).unwrap();
-            for &id in &state.master.matchers {
-                self.slots.delete(id);
-            }
-            for &id in &state.secondary.matchers {
-                self.slots.delete(id);
-            }
-            state.master.matchers = incoming_master
-                .iter()
-                .map(|m| {
-                    self.slots.allocate(Slot {
-                        matcher: m.clone(),
-                        windows: Vec::new(),
-                    })
-                })
-                .collect();
-            state.secondary.matchers = incoming_secondary
-                .iter()
-                .map(|m| {
-                    self.slots.allocate(Slot {
-                        matcher: m.clone(),
-                        windows: Vec::new(),
-                    })
-                })
-                .collect();
-            // Every attach runs scroll_into_view, which resolves the focused window against
-            // the panes, so a full history over empty panes panics.
-            state.clear_focus_history();
-            state.master_count = new_count_opt;
-            state.master_ratio = new_ratio_opt;
-
-            // Clear both containers so the reattach loop rebuilds them without duplicates.
-            hub.containers.get_mut(master_cid).children.clear();
-            hub.containers.get_mut(secondary_cid).children.clear();
-
-            for &wid in &tiling_windows {
-                self.attach_window(hub, wid, ws_id);
-            }
-            // Re-attaching enrolls in pane order, losing recency. Same set, so
-            // the pre-reload order still holds.
-            self.workspaces.get_mut(&ws_id).unwrap().focus_history = previous_history;
-            if let Some(f) = focused {
-                self.set_focus(hub, f);
-            }
-        } else {
-            if count_changed {
-                self.workspaces.get_mut(&ws_id).unwrap().master_count = new_count_opt;
-                self.reconcile_master_count(hub, ws_id);
-            }
-            if ratio_changed {
-                let state = self.workspaces.get_mut(&ws_id).unwrap();
-                state.master_ratio = new_ratio_opt;
-            }
-            self.compute_placement(hub, ws_id);
-        }
-    }
-
     pub(super) fn sort_window_into_pane(
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
         window_id: WindowId,
-    ) -> Option<SlotId> {
-        let (effective_count, master, secondary, master_matchers, secondary_matchers) = {
+    ) {
+        // Resolve the matching slot before touching a container, because the match borrows the
+        // window metadata out of `hub` and the mutations below borrow `hub` exclusively.
+        let (effective_count, master, secondary, master_match, secondary_match) = {
             let state = self.workspaces.get(&ws_id).unwrap();
+            let metadata = hub.windows.get(window_id).metadata.as_ref();
             (
                 state.master_count.unwrap_or(self.master_count),
                 state.master.container,
                 state.secondary.container,
-                state.master.matchers.clone(),
-                state.secondary.matchers.clone(),
+                self.find_free_slot(&state.master.slots, metadata),
+                self.find_free_slot(&state.secondary.slots, metadata),
             )
         };
 
-        // Resolve the matching slot before touching a container, because the match borrows the
-        // window metadata out of `hub` and the mutations below borrow `hub` exclusively.
-        let metadata = hub.windows.get(window_id).metadata.as_ref();
-        let master_match = master_matchers
-            .iter()
-            .copied()
-            .find(|&sid| metadata.matches_window_matcher(&self.slots.get(sid).matcher));
-        let secondary_match = secondary_matchers
-            .iter()
-            .copied()
-            .find(|&sid| metadata.matches_window_matcher(&self.slots.get(sid).matcher));
-
-        if let Some(sid) = master_match {
+        if let Some(slot) = master_match {
             if Self::pane_len(hub, master) < effective_count {
-                self.join_slot_and_place(hub, master, &master_matchers, window_id, sid);
-                return Some(sid);
+                self.hold_slot(slot, window_id);
+                self.insert_in_slot_order(hub, ws_id, PaneKind::Master, window_id, slot);
+                return;
             }
             // Master is full. Evict an unmatched window if one exists, otherwise let this
             // window fall through to the secondary stack.
             let evict = hub.containers.get(master).children().iter().rposition(|c| {
                 matches!(c, Child::Window(w)
-                    if self.window_states.get(w).is_some_and(|e| e.occupy.is_none()))
+                    if self.window_states.get(w).is_some_and(|e| e.held_slot.is_none()))
             });
             if let Some(evict_pos) = evict {
                 let evicted = Self::remove_from_pane(hub, master, evict_pos);
                 Self::insert_into_pane(hub, secondary, 0, evicted);
-                self.join_slot_and_place(hub, master, &master_matchers, window_id, sid);
-                return Some(sid);
+                self.hold_slot(slot, window_id);
+                self.insert_in_slot_order(hub, ws_id, PaneKind::Master, window_id, slot);
+                return;
             }
         }
 
-        if let Some(sid) = secondary_match {
-            self.join_slot_and_place(hub, secondary, &secondary_matchers, window_id, sid);
-            return Some(sid);
+        if let Some(slot) = secondary_match {
+            self.hold_slot(slot, window_id);
+            self.insert_in_slot_order(hub, ws_id, PaneKind::Secondary, window_id, slot);
+            return;
         }
 
-        if Self::pane_len(hub, master) < effective_count {
-            Self::push_to_pane(hub, master, window_id);
-        } else {
-            Self::push_to_pane(hub, secondary, window_id);
-        }
-        None
+        self.push_unmatched_window(hub, ws_id, window_id);
     }
 
-    pub(super) fn remap_slot_on_pane_change(
-        &mut self,
-        hub: &mut HubAccess,
-        ws_id: WorkspaceId,
-        window_id: WindowId,
-        dest_slots: &[SlotId],
-    ) {
-        if let Some(src) = self.window_states.get(&window_id).and_then(|e| e.occupy) {
-            self.slots.get_mut(src).windows.retain(|w| w != &window_id);
-        }
-        let metadata = hub.windows.get(window_id).metadata.as_ref();
-        let matched = dest_slots
+    pub(super) fn find_free_slot(
+        &self,
+        slots: &[SlotId],
+        metadata: &dyn WindowMetadata,
+    ) -> Option<SlotId> {
+        slots
             .iter()
             .copied()
-            .find(|&sid| metadata.matches_window_matcher(&self.slots.get(sid).matcher));
-        if let Some(entry) = self.window_states.get_mut(&window_id) {
-            entry.occupy = matched;
-        }
-
-        let Some(sid) = matched else {
-            return;
-        };
-        // dest_slots is the destination pane's matcher list, so the destination pane is the one
-        // whose matcher list contains sid. Picking the other pane would order the window against
-        // the wrong pane.
-        let container = {
-            let state = self.workspaces.get(&ws_id).unwrap();
-            if state.master.matchers.contains(&sid) {
-                state.master.container
-            } else {
-                state.secondary.container
-            }
-        };
-        if let Some(pos) = Self::position_in_pane(hub, container, window_id) {
-            Self::remove_from_pane(hub, container, pos);
-        }
-        self.join_slot_and_place(hub, container, dest_slots, window_id, sid);
+            .find(|&id| self.slots.get(id).is_free_for(metadata))
     }
 
-    fn join_slot_and_place(
-        &mut self,
+    /// The window must already have its `WindowState`.
+    fn hold_slot(&mut self, slot: SlotId, window_id: WindowId) {
+        self.slots.get_mut(slot).window = Some(window_id);
+        self.window_states.get_mut(&window_id).unwrap().held_slot = Some(slot);
+    }
+
+    /// Must run before `window_states` drops the window. After that, nothing can find the
+    /// slot, so it stays held.
+    pub(super) fn release_slot(&mut self, window_id: WindowId) {
+        let held_slot = self
+            .window_states
+            .get_mut(&window_id)
+            .and_then(|entry| entry.held_slot.take());
+        if let Some(slot_id) = held_slot {
+            self.slots.get_mut(slot_id).window = None;
+        }
+    }
+
+    fn insert_in_slot_order(
+        &self,
         hub: &mut HubAccess,
-        container: ContainerId,
-        pane_matchers: &[SlotId],
+        ws_id: WorkspaceId,
+        kind: PaneKind,
         window_id: WindowId,
-        slot_id: SlotId,
+        slot: SlotId,
     ) {
-        self.slots.get_mut(slot_id).windows.push(window_id);
-        let slot_position = pane_matchers.iter().position(|&x| x == slot_id).unwrap();
+        let pane = self.workspaces.get(&ws_id).unwrap().pane(kind);
+        let slot_position = pane.slots.iter().position(|&x| x == slot).unwrap();
         // Insert in preferred-layout order. Moved windows break that order, so placing the
         // window right before the first later slot is acceptable.
         let insert_position = hub
             .containers
-            .get(container)
+            .get(pane.container)
             .children()
             .iter()
             .position(|c| {
                 let Child::Window(w) = c else {
                     return false;
                 };
-                let Some(mid) = self.window_states.get(w).unwrap().occupy else {
+                let Some(held) = self.window_states.get(w).unwrap().held_slot else {
                     return false;
                 };
-                pane_matchers
+                pane.slots
                     .iter()
-                    .position(|&m| m == mid)
+                    .position(|&s| s == held)
                     .is_some_and(|s| s > slot_position)
             })
-            .unwrap_or_else(|| hub.containers.get(container).children().len());
+            .unwrap_or_else(|| hub.containers.get(pane.container).children().len());
         hub.containers
-            .get_mut(container)
+            .get_mut(pane.container)
             .children
             .insert(insert_position, Child::Window(window_id));
     }
@@ -329,9 +175,15 @@ impl NodeId for SlotId {
 #[derive(Debug, Clone)]
 pub(super) struct Slot {
     pub(super) matcher: WindowMatcher,
-    pub(super) windows: Vec<WindowId>,
+    pub(super) window: Option<WindowId>,
 }
 
 impl Node for Slot {
     type Id = SlotId;
+}
+
+impl Slot {
+    pub(super) fn is_free_for(&self, metadata: &dyn WindowMetadata) -> bool {
+        self.window.is_none() && metadata.matches_window_matcher(&self.matcher)
+    }
 }
