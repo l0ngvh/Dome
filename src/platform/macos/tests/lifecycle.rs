@@ -226,6 +226,7 @@ fn reconcile_keeps_and_refreshes_when_cg_id_present() {
         &[ExtRefresh {
             cg_id: cg1,
             ext: fresh_ext.clone(),
+            corner_radius: FALLBACK_CORNER_RADIUS,
         }],
         &[],
         &[],

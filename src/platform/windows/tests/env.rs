@@ -14,8 +14,8 @@ use crate::action::{Action, Actions};
 use crate::config::tests::{CleanupFile, temp_lua_path};
 use crate::config::{Appearance, Config, LuaRuntime, PreferredLayouts};
 use crate::core::{
-    ContainerPlacement, Dimension, FloatWindowPlacement, Length, MonitorId, Physical, PixelRect,
-    Pixels, TilingConfig, TilingWindowPlacement, WindowId,
+    ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, MonitorId, Physical,
+    PixelRect, Pixels, TilingConfig, TilingWindowPlacement, WindowId,
 };
 use crate::platform::keymap::{KeymapPublisher, KeymapView};
 use crate::platform::windows::dome::events::{FloatOverlayAction, RenderScene};
@@ -432,7 +432,19 @@ impl TestEnv {
     }
 
     pub(super) fn painted_windows(&self, index: usize) -> Vec<TilingWindowPlacement> {
-        self.painted_scene().monitors[index].tiling_windows.clone()
+        self.painted_scene().monitors[index]
+            .tiling_windows
+            .iter()
+            .map(|show| show.placement)
+            .collect()
+    }
+
+    pub(super) fn painted_corner_radii(&self, index: usize) -> Vec<Length<Logical>> {
+        self.painted_scene().monitors[index]
+            .tiling_windows
+            .iter()
+            .map(|show| show.corner_radius)
+            .collect()
     }
 
     pub(super) fn painted_containers(&self, index: usize) -> Vec<ContainerPlacement> {
@@ -453,6 +465,21 @@ impl TestEnv {
                 | FloatOverlayAction::Update { placement, .. } => Some(*placement),
                 FloatOverlayAction::Hide(_) => None,
             })
+    }
+
+    pub(super) fn painted_float_corner_radius(&self) -> Option<Length<Logical>> {
+        self.painted_scene()
+            .float_overlays
+            .iter()
+            .find_map(|a| match a {
+                FloatOverlayAction::Create { corner_radius, .. }
+                | FloatOverlayAction::Update { corner_radius, .. } => Some(*corner_radius),
+                FloatOverlayAction::Hide(_) => None,
+            })
+    }
+
+    pub(super) fn set_corner_radius(&self, hwnd: HwndId, radius: Length<Logical>) {
+        self.mock(hwnd).set_corner_radius(radius);
     }
 
     pub(super) fn only_painted_window(&self) -> TilingWindowPlacement {

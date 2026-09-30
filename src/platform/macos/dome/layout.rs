@@ -4,7 +4,9 @@ use crate::core::{Length, MonitorLayout, MonitorPlacements, WindowId};
 use crate::platform::macos::objc2_wrapper::dimension_to_ns_rect_cocoa;
 
 use super::Dome;
-use super::events::{ContainerShow, FloatShow, HubMessage, MonitorTilingData, RenderScene};
+use super::events::{
+    ContainerShow, FloatShow, HubMessage, MonitorTilingData, RenderScene, TilingWindowShow,
+};
 
 impl Dome {
     /// All fullscreen -> normal and normal -> fullscreen must be resolved before this step
@@ -136,7 +138,13 @@ impl Dome {
                         continue;
                     }
                     self.show_tiling(wp.id, wp.visible_content_box);
-                    placed_tiling.push(*wp);
+                    let Some(entry) = self.registry.by_id(wp.id) else {
+                        continue;
+                    };
+                    placed_tiling.push(TilingWindowShow {
+                        placement: *wp,
+                        corner_radius: entry.corner_radius,
+                    });
                 }
 
                 for wp in float_windows {
@@ -165,6 +173,7 @@ impl Dome {
                         scale,
                         border_thickness: Length::from_pixels(mp.border_thickness),
                         content_dim: wp.content_box.to_dimension(),
+                        corner_radius: entry.corner_radius,
                     });
                 }
 

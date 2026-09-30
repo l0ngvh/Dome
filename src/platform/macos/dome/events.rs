@@ -137,8 +137,14 @@ pub(in crate::platform::macos) struct MonitorTilingData {
     pub(in crate::platform::macos) cocoa_frame: NSRect,
     pub(in crate::platform::macos) scale: f64,
     pub(in crate::platform::macos) border_thickness: Length<Logical>,
-    pub(in crate::platform::macos) windows: Vec<TilingWindowPlacement>,
+    pub(in crate::platform::macos) windows: Vec<TilingWindowShow>,
     pub(in crate::platform::macos) containers: Vec<ContainerShow>,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::platform::macos) struct TilingWindowShow {
+    pub(in crate::platform::macos) placement: TilingWindowPlacement,
+    pub(in crate::platform::macos) corner_radius: Length<Logical>,
 }
 
 /// Per-container render bundle. Mirrors `FloatShow` for tabbed containers:
@@ -161,4 +167,5 @@ pub(in crate::platform::macos) struct FloatShow {
     pub(in crate::platform::macos) scale: f64,
     pub(in crate::platform::macos) border_thickness: Length<Logical>,
     pub(in crate::platform::macos) content_dim: Dimension,
+    pub(in crate::platform::macos) corner_radius: Length<Logical>,
 }

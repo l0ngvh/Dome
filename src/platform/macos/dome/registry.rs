@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use objc2_core_graphics::CGWindowID;
 
-use crate::core::WindowId;
+use crate::core::{Length, Logical, WindowId};
 
 use super::super::accessibility::ExternalWindow;
 use super::NewWindow;
@@ -17,6 +17,8 @@ pub(in crate::platform::macos) struct ManagedWindow {
     pub(super) state: WindowState,
     pub(super) is_minimized: bool,
     pub(super) is_moving: bool,
+    /// Predicted from the close button, because macOS has no public API for the real radius.
+    pub(super) corner_radius: Length<Logical>,
 }
 
 impl std::fmt::Display for ManagedWindow {
@@ -115,7 +117,13 @@ impl WindowRegistry {
         self.windows.iter().map(|(&cg_id, w)| (cg_id, w))
     }
 
-    pub(super) fn insert(&mut self, new: NewWindow, window_id: WindowId, state: WindowState) {
+    pub(super) fn insert(
+        &mut self,
+        new: NewWindow,
+        window_id: WindowId,
+        state: WindowState,
+        corner_radius: Length<Logical>,
+    ) {
         let NewWindow { ax, metadata: _ } = new;
         let cg_id = ax.cg_id();
         let pid = ax.pid();
@@ -133,6 +141,7 @@ impl WindowRegistry {
                 state,
                 is_minimized: false,
                 is_moving: false,
+                corner_radius,
             },
         );
     }
@@ -147,9 +156,14 @@ impl WindowRegistry {
         }
     }
 
-    /// Replaces the `ext` handle of an existing tracked entry. Returns true if
-    /// the entry existed.
-    pub(super) fn replace_ext(&mut self, cg_id: CGWindowID, ext: Arc<dyn ExternalWindow>) -> bool {
+    /// Replaces the `ext` handle and the corner radius of an existing tracked
+    /// entry. Returns true if the entry existed.
+    pub(super) fn replace_ext(
+        &mut self,
+        cg_id: CGWindowID,
+        ext: Arc<dyn ExternalWindow>,
+        corner_radius: Length<Logical>,
+    ) -> bool {
         let Some(entry) = self.windows.get_mut(&cg_id) else {
             return false;
         };
@@ -161,6 +175,7 @@ impl WindowRegistry {
             tracing::warn!(%cg_id, old_pid, new_pid, "Window has a different pid than tracked");
         }
         entry.ext = ext;
+        entry.corner_radius = corner_radius;
         true
     }
 }

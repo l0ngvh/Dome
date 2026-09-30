@@ -10,10 +10,7 @@ use egui::{
 use crate::core::{ContainerId, Dimension, Direction, Length, Logical, WindowId};
 use crate::theme::Theme;
 
-/// Hardcoded corner radius for window borders and tabbed-container body
-/// borders. Kept private: rendering knobs should not leak into the config
-/// surface or into core, which has no view on pixels.
-const WINDOW_BORDER_RADIUS_LOGICAL: f32 = 12.0;
+const CONTAINER_BORDER_RADIUS_LOGICAL: f32 = 12.0;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct BorderMetrics {
@@ -25,8 +22,19 @@ impl BorderMetrics {
     pub(crate) fn from_thickness(thickness: Length<Logical>) -> Self {
         Self {
             thickness,
-            radius: Length::new(WINDOW_BORDER_RADIUS_LOGICAL),
+            radius: Length::new(CONTAINER_BORDER_RADIUS_LOGICAL),
         }
+    }
+
+    /// The ring sits outside the window, so its outer radius adds the thickness
+    /// to keep the inner edge concentric with the window's corner.
+    fn around_window(self, window_corner_radius: Length<Logical>) -> Self {
+        let radius = if window_corner_radius > Length::ZERO {
+            window_corner_radius + self.thickness
+        } else {
+            Length::ZERO
+        };
+        Self { radius, ..self }
     }
 }
 
@@ -37,6 +45,7 @@ pub(crate) struct LogicalTiledWindow {
     pub visible_frame: Dimension<Logical>,
     pub is_highlighted: bool,
     pub spawn_direction: Option<Direction>,
+    pub corner_radius: Length<Logical>,
 }
 
 #[derive(Clone, Debug)]
@@ -88,7 +97,7 @@ pub(crate) fn paint_tiling_overlay(
             wp.is_highlighted,
             wp.spawn_direction,
             theme,
-            border,
+            border.around_window(wp.corner_radius),
             origin,
         );
     }
@@ -158,6 +167,7 @@ pub(crate) fn paint_float_border(
     frame: Dimension<Logical>,
     visible_frame: Dimension<Logical>,
     is_highlighted: bool,
+    corner_radius: Length<Logical>,
     theme: &Theme,
     border: BorderMetrics,
 ) {
@@ -176,7 +186,7 @@ pub(crate) fn paint_float_border(
         is_highlighted,
         None,
         theme,
-        border,
+        border.around_window(corner_radius),
         vec2(0.0, 0.0),
     );
 }
@@ -351,7 +361,7 @@ fn show_container(
                 f,
                 vf,
                 b,
-                WINDOW_BORDER_RADIUS_LOGICAL,
+                CONTAINER_BORDER_RADIUS_LOGICAL,
                 colors,
                 focused,
                 origin,
@@ -498,9 +508,8 @@ fn cr_u8(r: f32) -> u8 {
     r.clamp(0.0, 255.0) as u8
 }
 
-/// A quarter of the tab-bar thickness gives a visibly softer corner than
-/// `WINDOW_BORDER_RADIUS_LOGICAL` while still scaling with the
-/// user-configured bar thickness.
+/// Proportional because the user configures the bar height, so the corner keeps its shape at
+/// any height.
 fn tab_bar_corner_radius(tab_bar_height: f32) -> f32 {
     effective_radius(tab_bar_height * 0.25, tab_bar_height, tab_bar_height)
 }
@@ -696,6 +705,16 @@ fn corner_colors(edge_colors: [Color32; 4], focused: Color32) -> [Color32; 4] {
 mod tests {
     use super::*;
     use crate::core::Length;
+
+    #[test]
+    fn a_window_border_stays_concentric_with_the_window_corner() {
+        let border = BorderMetrics::from_thickness(Length::new(2.0));
+        assert_eq!(
+            border.around_window(Length::new(16.0)).radius,
+            Length::new(18.0)
+        );
+        assert_eq!(border.around_window(Length::ZERO).radius, Length::ZERO);
+    }
 
     #[test]
     fn effective_radius_cases() {

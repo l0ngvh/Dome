@@ -8,6 +8,7 @@ use crate::core::{
 };
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
+use crate::platform::macos::corner_radius::FALLBACK_CORNER_RADIUS;
 
 use super::{DebounceBurst, Dome, NewWindow};
 
@@ -279,8 +280,14 @@ impl Dome {
             PixelRect::new(0, 0, 1, 1),
             WindowRestrictions::ProtectFullscreen,
         )?;
-        self.registry
-            .insert(new, window_id, WindowState::NativeFullscreen);
+        // A native fullscreen window has square corners, so its windowed corner radius is
+        // unknown until it leaves fullscreen.
+        self.registry.insert(
+            new,
+            window_id,
+            WindowState::NativeFullscreen,
+            FALLBACK_CORNER_RADIUS,
+        );
         self.pending_created.push(window_id);
         tracing::info!(%window_id, "New native fullscreen window");
         Some(window_id)

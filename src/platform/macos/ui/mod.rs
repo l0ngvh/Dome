@@ -309,13 +309,7 @@ impl AppHandler for WindowLoopHandler {
                                 &appearance.font,
                             )
                         });
-                        overlay.render(
-                            &show.placement,
-                            show.cocoa_frame,
-                            show.scale,
-                            show.border_thickness,
-                            scene.focused_window == Some(show.placement.id),
-                        );
+                        overlay.render(show, scene.focused_window == Some(show.placement.id));
 
                         if is_new {
                             capture_pairs.push(show.cg_id);

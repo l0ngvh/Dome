@@ -3,10 +3,13 @@ use std::mem::size_of;
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT};
 use windows::Win32::Foundation::{LRESULT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
+    DWM_WINDOW_CORNER_PREFERENCE, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS,
+    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND, DWMWCP_ROUNDSMALL,
+    DwmGetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect, MonitorFromWindow,
+    GetMonitorInfoW, GetWindowRgnBox, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect,
+    MonitorFromWindow, RGN_ERROR,
 };
 use windows::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_ELEVATION,
@@ -26,16 +29,16 @@ use windows::Win32::UI::HiDpi::{
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GW_OWNER, GWL_EXSTYLE, GWL_STYLE,
     GetAncestor, GetClassNameW, GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
-    HWND_BOTTOM, IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO, PostMessageW, SMTO_ABORTIFHUNG,
-    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, SetWindowPos, ShowWindow, ShowWindowAsync,
-    WM_CLOSE, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CHILD, WS_EX_APPWINDOW,
-    WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX,
-    WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
+    HWND_BOTTOM, IsIconic, IsWindowArranged, IsWindowVisible, IsZoomed, MINMAXINFO, PostMessageW,
+    SMTO_ABORTIFHUNG, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, SetWindowPos, ShowWindow,
+    ShowWindowAsync, WM_CLOSE, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CAPTION,
+    WS_CHILD, WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
-use crate::core::{Dimension, Length, LimitObservation, LimitUpdate, PixelRect, Pixels};
+use crate::core::{Dimension, Length, LimitObservation, LimitUpdate, Logical, PixelRect, Pixels};
 use crate::platform::windows::external::{
     HwndId, InspectExternalWindow, ManageExternalWindow, ManageOverlay, ShowCmd, ZOrder,
 };
@@ -43,6 +46,12 @@ use crate::platform::windows::foreground::force_set_foreground;
 
 // Unlike macOS, we are allowed to move windows completely offscreen on Windows
 pub(crate) const OFFSCREEN_POS: Pixels = Pixels::new(-32000);
+
+/// The radius Microsoft's Windows 11 geometry guidance gives a top-level window.
+pub(super) const ROUND_RADIUS: Length<Logical> = Length::new(8.0);
+/// Microsoft gives no pixel value for `DWMWCP_ROUNDSMALL`. This value was
+/// measured on Windows 11 build 26200.
+pub(super) const SMALL_RADIUS: Length<Logical> = Length::new(4.0);
 
 const MSG_TIMEOUT_MS: u32 = 100;
 
@@ -282,6 +291,53 @@ impl ManageExternalWindow for ExternalHwnd {
             if was_maximized {
                 let _ = ShowWindow(hwnd, SW_MAXIMIZE);
             }
+        }
+    }
+
+    fn corner_radius(&self) -> Length<Logical> {
+        let hwnd = self.0;
+        let mut preference = DWM_WINDOW_CORNER_PREFERENCE::default();
+        let read = unsafe {
+            DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                std::ptr::from_mut(&mut preference).cast(),
+                size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+            )
+        };
+        // The attribute exists from Windows 11 build 22000. Earlier builds reject it and draw
+        // square corners.
+        if read.is_err() {
+            return Length::ZERO;
+        }
+        // Microsoft lists these as states that are never rounded, even when the app
+        // asks for rounding. Microsoft also lists a layered window with per-pixel
+        // alpha, but `WS_EX_LAYERED` also marks a window that uses one alpha over
+        // the whole window, so a layered window can be round or square. This check
+        // skips the style, so the preference and the frame styles decide whether a
+        // layered window is round. A wrong guess then puts a round border around a
+        // square window, which looks better than a square border around a round
+        // one.
+        if self.is_maximized()
+            || unsafe { IsWindowArranged(hwnd) }.as_bool()
+            || unsafe { GetWindowRgnBox(hwnd, &mut RECT::default()) } != RGN_ERROR
+        {
+            return Length::ZERO;
+        }
+        match preference {
+            DWMWCP_DONOTROUND => return Length::ZERO,
+            DWMWCP_ROUNDSMALL => return SMALL_RADIUS,
+            DWMWCP_ROUND => return ROUND_RADIUS,
+            _ => {}
+        }
+        // Microsoft's guide says DWM rounds a window that sets both WS_CAPTION and
+        // WS_THICKFRAME. Measured windows that set only one of the two were rounded
+        // as well.
+        let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
+        if style & WS_CAPTION.0 == WS_CAPTION.0 || style & WS_THICKFRAME.0 != 0 {
+            ROUND_RADIUS
+        } else {
+            Length::ZERO
         }
     }
 }

@@ -12,7 +12,7 @@ use objc2_core_foundation::{
 };
 use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
 
-use crate::core::{Length, Logical, PixelRect};
+use crate::core::{Dimension, Length, Logical, PixelRect};
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::objc2_wrapper::{
     AXError, get_attribute, get_cg_window_id, is_attribute_settable, kAXCloseButtonAttribute,
@@ -240,7 +240,9 @@ impl AXWindow {
             .with_context(|| format!("get_position for {self}"))?;
         let mut cg_pos = CGPoint::new(0.0, 0.0);
         let ptr = NonNull::new((&mut cg_pos as *mut CGPoint).cast()).unwrap();
-        unsafe { pos.value(AXValueType::CGPoint, ptr) };
+        if !unsafe { pos.value(AXValueType::CGPoint, ptr) } {
+            anyhow::bail!("get_position for {self}: AXValue is not a CGPoint");
+        }
         Ok((Length::new(cg_pos.x as f32), Length::new(cg_pos.y as f32)))
     }
 
@@ -326,7 +328,9 @@ impl AXWindow {
             .with_context(|| format!("get_size for {self}"))?;
         let mut cg_size = CGSize::new(0.0, 0.0);
         let ptr = NonNull::new((&mut cg_size as *mut CGSize).cast()).unwrap();
-        unsafe { size.value(AXValueType::CGSize, ptr) };
+        if !unsafe { size.value(AXValueType::CGSize, ptr) } {
+            anyhow::bail!("get_size for {self}: AXValue is not a CGSize");
+        }
         Ok((
             Length::new(cg_size.width as f32),
             Length::new(cg_size.height as f32),
@@ -528,6 +532,9 @@ pub(crate) trait ExternalWindow: Send + Sync + std::fmt::Display {
     fn is_valid(&self, marker: &DispatcherMarker) -> bool;
     fn is_minimized(&self, marker: &DispatcherMarker) -> bool;
     fn read_title(&self, marker: &DispatcherMarker) -> Option<String>;
+    /// In logical points from the top-left of the primary display. `None` when the window has no
+    /// close button.
+    fn read_close_button_frame(&self, marker: &DispatcherMarker) -> Option<Dimension<Logical>>;
     /// Refresh the cached `kAXEnhancedUserInterfaceAttribute` probe for this
     /// window's app. Deduplication by PID is the caller's responsibility.
     fn refresh_enhanced_ui(&self, marker: &DispatcherMarker);
@@ -583,6 +590,26 @@ impl ExternalWindow for AXWindow {
         get_attribute::<CFString>(&self.element, &kAXTitleAttribute())
             .map(|t| t.to_string())
             .ok()
+    }
+    fn read_close_button_frame(&self, _marker: &DispatcherMarker) -> Option<Dimension<Logical>> {
+        let button =
+            get_attribute::<AXUIElement>(&self.element, &kAXCloseButtonAttribute()).ok()?;
+        let position = get_attribute::<AXValue>(&button, &kAXPositionAttribute()).ok()?;
+        let size = get_attribute::<AXValue>(&button, &kAXSizeAttribute()).ok()?;
+        let mut origin = CGPoint::new(0.0, 0.0);
+        let mut extent = CGSize::new(0.0, 0.0);
+        let has_origin =
+            unsafe { position.value(AXValueType::CGPoint, NonNull::from(&mut origin).cast()) };
+        let has_extent =
+            unsafe { size.value(AXValueType::CGSize, NonNull::from(&mut extent).cast()) };
+        (has_origin && has_extent).then(|| {
+            Dimension::new(
+                Length::new(origin.x as f32),
+                Length::new(origin.y as f32),
+                Length::new(extent.width as f32),
+                Length::new(extent.height as f32),
+            )
+        })
     }
     fn refresh_enhanced_ui(&self, _marker: &DispatcherMarker) {
         self.app.refresh_enhanced_ui();

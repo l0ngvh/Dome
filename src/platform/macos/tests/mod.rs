@@ -20,6 +20,7 @@ use crate::config::{Config, LuaRuntime, PreferredLayouts};
 use crate::core::{Dimension, Length, Logical, MonitorId, PixelRect, TilingConfig, WindowId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
+use crate::platform::macos::corner_radius::FALLBACK_CORNER_RADIUS;
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::{
     BarGeometry, DebounceBurst, Dome, ExitNativeFullscreen, HubMessage, MacOSMetadata, NewWindow,
@@ -117,6 +118,7 @@ struct MockAXWindow {
     /// (in the dock).
     is_minimized: Rc<Cell<bool>>,
     is_valid: Rc<Cell<bool>>,
+    corner_radius: Rc<Cell<Length<Logical>>>,
     moves: MoveLog,
 }
 
@@ -145,6 +147,7 @@ impl MockAXWindow {
             override_frame: Rc::new(Cell::new(None)),
             is_minimized: Rc::new(Cell::new(false)),
             is_valid: Rc::new(Cell::new(true)),
+            corner_radius: Rc::new(Cell::new(FALLBACK_CORNER_RADIUS)),
             moves,
         }
     }
@@ -249,6 +252,9 @@ impl ExternalWindow for MockAXWindow {
     fn read_title(&self, _marker: &DispatcherMarker) -> Option<String> {
         Some(self.title.clone())
     }
+    fn read_close_button_frame(&self, _marker: &DispatcherMarker) -> Option<Dimension<Logical>> {
+        None
+    }
     fn refresh_enhanced_ui(&self, _marker: &DispatcherMarker) {}
 }
 
@@ -307,6 +313,7 @@ impl MacOS {
                 focused_window: None,
                 focused_monitor_id: None,
                 floats: HashMap::new(),
+                tiling_corner_radii: HashMap::new(),
             })),
             config: baseline_config(),
             config_file: CleanupFile(temp_lua_path("macos_env")),
@@ -387,6 +394,7 @@ impl MacOS {
             &[ExitNativeFullscreen {
                 cg_id,
                 rect: PixelRect::new(x, y, w, h),
+                corner_radius: ax.corner_radius.get(),
             }],
         );
     }
@@ -472,6 +480,7 @@ impl MacOS {
         ax.position.set((x, y));
         ax.size.set((w, h));
         ax.is_minimized.set(false);
+        dome.update_corner_radius(cg_id, ax.corner_radius.get());
         dome.windows_moved(vec![WindowMove {
             cg_id,
             rect: PixelRect::new(x, y, w, h),
@@ -567,6 +576,7 @@ impl MacOS {
 struct FloatSnapshot {
     outer_frame: Dimension,
     content_dim: Dimension,
+    corner_radius: Length<Logical>,
 }
 
 #[derive(Clone)]
@@ -574,6 +584,7 @@ struct SceneState {
     focused_window: Option<WindowId>,
     focused_monitor_id: Option<MonitorId>,
     floats: HashMap<CGWindowID, FloatSnapshot>,
+    tiling_corner_radii: HashMap<WindowId, Length<Logical>>,
 }
 
 struct TestSender {
@@ -586,6 +597,12 @@ impl SceneSender for TestSender {
             let mut state = self.scene_state.lock().unwrap();
             state.focused_window = scene.focused_window;
             state.focused_monitor_id = Some(scene.focused_monitor_id);
+            state.tiling_corner_radii = scene
+                .tiling
+                .iter()
+                .flat_map(|monitor| &monitor.windows)
+                .map(|show| (show.placement.id, show.corner_radius))
+                .collect();
             state.floats = scene
                 .float_shows
                 .iter()
@@ -595,6 +612,7 @@ impl SceneSender for TestSender {
                         FloatSnapshot {
                             outer_frame: show.placement.border_box.to_dimension(),
                             content_dim: show.content_dim,
+                            corner_radius: show.corner_radius,
                         },
                     )
                 })
@@ -617,6 +635,7 @@ fn new_window(macos: &MacOS, cg_id: CGWindowID) -> PendingAdd {
             },
         },
         rect: PixelRect::new(pos.0, pos.1, size.0, size.1),
+        corner_radius: ax.corner_radius.get(),
     }
 }
 
