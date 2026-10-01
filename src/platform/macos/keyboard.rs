@@ -14,7 +14,7 @@ use objc2_core_graphics::{
 };
 
 use crate::config::{Keystroke, Modifiers};
-use crate::platform::macos::dome::HubEvent;
+use crate::platform::macos::{dome::HubEvent, set_current_thread_qos};
 
 struct KeyboardCtx {
     keymap_rx: Receiver<KeymapView>,
@@ -32,6 +32,9 @@ pub(super) fn run_event_tap(
     is_suspended: Arc<AtomicBool>,
     event_sender: calloop::channel::Sender<HubEvent>,
 ) {
+    // Every key press in the session waits on this thread.
+    set_current_thread_qos(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE);
+
     let ctx = KeyboardCtx {
         keymap_rx,
         keymap: RefCell::new(KeymapView::new()),

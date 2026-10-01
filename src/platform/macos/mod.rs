@@ -87,6 +87,10 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
         let bundle_path = bundle_path.clone();
         let config_path = config_path.clone();
         move || {
+            // Key binding results wait on this thread. The thread also runs
+            // Lua callbacks. At USER_INTERACTIVE, a slow callback would take
+            // CPU time from the focused app.
+            set_current_thread_qos(libc::qos_class_t::QOS_CLASS_USER_INITIATED);
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
                 // Load before init_tx.send, so no keypress resolves against an
@@ -181,5 +185,14 @@ fn send_hub_event(hub_sender: &calloop::channel::Sender<HubEvent>, event: HubEve
         if let Some(mtm) = MainThreadMarker::new() {
             objc2_app_kit::NSApplication::sharedApplication(mtm).terminate(None);
         }
+    }
+}
+
+/// A `std::thread` starts at `QOS_CLASS_DEFAULT`, not at the QoS of the thread
+/// that spawned it.
+fn set_current_thread_qos(class: libc::qos_class_t) {
+    let rc = unsafe { libc::pthread_set_qos_class_self_np(class, 0) };
+    if rc != 0 {
+        tracing::warn!(rc, ?class, "Failed to set the thread QoS");
     }
 }
