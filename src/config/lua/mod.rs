@@ -19,20 +19,8 @@ pub(super) fn evaluate<T: deserializer::FromLuaValue>(
     name: &str,
     src: &str,
 ) -> mlua::Result<T> {
-    let mut cx = deserializer::LoadContext::new();
-    evaluate_with(lua, name, src, &mut cx)
-}
-
-/// The caller owns the `LoadContext` and can reuse it across calls, so later
-/// warnings share the same field-path root.
-pub(super) fn evaluate_with<T: deserializer::FromLuaValue>(
-    lua: &mlua::Lua,
-    name: &str,
-    src: &str,
-    cx: &mut deserializer::LoadContext,
-) -> mlua::Result<T> {
     let value: mlua::Value = lua.load(src).set_name(name).eval()?;
-    T::from_lua_value(&value, cx)
+    T::from_lua_value(&value, &mut deserializer::LoadContext::new())
 }
 
 // Raise through Lua's `error` at level 2 so the message names the config line

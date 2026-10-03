@@ -6,16 +6,18 @@ mod record;
 use anyhow::{Result, anyhow};
 
 use super::Config;
-use super::defaults::{self, DefaultValues};
 use crate::core::TilingConfig;
 
 /// The matcher lists stay empty, so a fixture manages every window it inserts.
 pub(crate) fn tiling_config() -> TilingConfig {
-    bundled().tiling
+    TilingConfig {
+        ignore: Vec::new(),
+        ..bundled().tiling
+    }
 }
 
-fn bundled() -> DefaultValues {
-    defaults::bundled().expect("the bundled defaults should read")
+fn bundled() -> Config {
+    config_from("return {}")
 }
 
 fn config_from(src: &str) -> Config {
