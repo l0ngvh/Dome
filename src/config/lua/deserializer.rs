@@ -222,6 +222,12 @@ impl FromLuaValue for usize {
     }
 }
 
+impl FromLuaValue for mlua::Table {
+    fn from_lua_value(value: &mlua::Value, _cx: &mut LoadContext) -> mlua::Result<Self> {
+        as_table(value, "a table").cloned()
+    }
+}
+
 impl FromLuaValue for mlua::Function {
     fn from_lua_value(value: &mlua::Value, _cx: &mut LoadContext) -> mlua::Result<Self> {
         match value {

@@ -10,10 +10,9 @@ use crate::core::{TilingConfig, WindowMatcher};
 use crate::font::FontConfig;
 use crate::theme::Flavor;
 use lua::deserializer::{LoadContext, string_enum};
-use overrides::ConfigOverrides;
 
 pub(crate) mod bootstrap;
-pub(crate) mod defaults;
+mod defaults;
 pub(crate) mod keybinding;
 pub(crate) mod lua;
 mod overrides;
@@ -76,22 +75,12 @@ impl Config {
     }
 
     fn from_lua(lua: &mlua::Lua, path: &str, src: &str) -> mlua::Result<Config> {
-        let mut cx = LoadContext::new();
-        let overrides: ConfigOverrides = lua::evaluate_with(lua, path, src, &mut cx)?;
-        let default_keymaps = match overrides.needs_default_keymaps() {
-            true => Some(defaults::bundled_keymaps(lua, &mut cx)?),
-            false => None,
-        };
-        let default_reserved_area = match overrides.needs_default_reserved_area() {
-            true => Some(defaults::bundled_reserved_area(lua, &mut cx)?),
-            false => None,
-        };
-        let mut config = overrides.merge_over(
-            &defaults::bundled()?,
-            default_keymaps,
-            default_reserved_area,
-            &mut cx,
-        );
+        let user: mlua::Value = lua.load(src).set_name(path).eval()?;
+        let defaults: mlua::Value = lua
+            .load(defaults::BUNDLED_SOURCE)
+            .set_name("default.lua")
+            .eval()?;
+        let mut config = overrides::read_config(&user, &defaults, &mut LoadContext::new())?;
         let floor = Self::default_ignore();
         tracing::info!(count = floor.len(), "Applying built-in window-ignore floor");
         tracing::debug!(rules = ?floor, "Built-in window-ignore floor");
