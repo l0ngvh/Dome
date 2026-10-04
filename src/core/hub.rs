@@ -1,13 +1,13 @@
 use super::allocator::{Allocator, NodeId};
-use super::matcher::{MatcherHit, WindowMode};
+use super::matcher::WindowMode;
 use super::monitor::{Monitor, ReportedMonitor};
 use super::node::{
-    Container, ContainerId, Direction, DisplayMode, Length, LimitObservation, LimitUpdate,
-    MonitorId, PixelRect, Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions,
-    WorkspaceId,
+    Container, ContainerId, Direction, DisplayMode, Length, LimitObservation, MonitorId, PixelRect,
+    Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions, WorkspaceId,
 };
 use super::partition_tree::Child;
 use super::preferred_layout::{PreferredLayouts, PreferredWorkspace};
+use super::slot::{Slot, find_free_slot};
 use super::strategy::{StrategyAction, StrategySet, TilingAction};
 use super::tiling::TilingConfig;
 use super::workspace::{Attachment, Workspace};
@@ -101,6 +101,26 @@ pub(super) enum RestrictedAction {
     MonitorMove,
 }
 
+fn restriction_of(action: &StrategyAction) -> RestrictedAction {
+    match action {
+        StrategyAction::ToggleFloat | StrategyAction::ToggleFullscreen => {
+            RestrictedAction::DisplayModeChange
+        }
+        StrategyAction::FocusDirection { .. }
+        | StrategyAction::MoveDirection { .. }
+        | StrategyAction::ToggleSpawnMode
+        | StrategyAction::ToggleDirection
+        | StrategyAction::ToggleContainerLayout
+        | StrategyAction::FocusParent
+        | StrategyAction::FocusTab { .. }
+        | StrategyAction::TabClicked { .. }
+        | StrategyAction::GrowMaster
+        | StrategyAction::ShrinkMaster
+        | StrategyAction::MoreMaster
+        | StrategyAction::FewerMaster => RestrictedAction::TilingNavigation,
+    }
+}
+
 /// Non-strategy fields of Hub, extracted so that `TilingStrategy` methods can
 /// receive `&mut HubAccess` while Hub holds `&mut strategy` separately.
 pub(crate) struct HubAccess {
@@ -114,6 +134,7 @@ pub(crate) struct HubAccess {
     pub(super) workspaces: Allocator<Workspace>,
     pub(super) windows: Allocator<Window>,
     pub(super) containers: Allocator<Container>,
+    pub(super) slots: Allocator<Slot>,
 }
 
 impl HubAccess {
@@ -129,8 +150,15 @@ impl HubAccess {
         }
     }
 
-    pub(super) fn allocate_container(&mut self, container: Container) -> ContainerId {
-        self.containers.allocate(container)
+    pub(super) fn allocate_container(
+        &mut self,
+        children: Vec<Child>,
+        workspace: WorkspaceId,
+    ) -> ContainerId {
+        self.containers.allocate(Container {
+            children,
+            workspace,
+        })
     }
 
     pub(super) fn free_container(&mut self, id: ContainerId) {
@@ -197,7 +225,8 @@ impl HubAccess {
 pub(crate) struct Hub {
     pub(super) access: HubAccess,
     pub(super) strategies: StrategySet,
-    pub(super) minimized_windows: Vec<WindowId>,
+    /// Each minimized window with the display mode it returns in.
+    pub(super) minimized_windows: Vec<(WindowId, DisplayMode)>,
     pub(super) runtime: LuaRuntime,
 }
 
@@ -221,6 +250,7 @@ impl Hub {
                 workspaces: Allocator::new(),
                 windows: Allocator::new(),
                 containers: Allocator::new(),
+                slots: Allocator::new(),
             },
             strategies,
             minimized_windows: Vec::new(),
@@ -312,23 +342,13 @@ impl Hub {
             .active_workspace
     }
 
-    /// The top most fullscreen window will get the focus, if any, as fullscreen windows take over
-    /// the whole workspaces they are in.
-    /// If none is present, focus between float and tiling windows will be decided by is_float_focused
+    /// The window that has keyboard focus on the workspace, in any display mode. `None` when the
+    /// workspace is empty or a container has focus.
     pub(crate) fn focused_window(&self, ws_id: WorkspaceId) -> Option<WindowId> {
-        let workspace = self.access.workspaces.get(ws_id);
-
-        if let Some(&id) = workspace.fullscreen_windows.last() {
-            return Some(id);
+        match self.strategies.for_workspace(ws_id).focused_child(ws_id)? {
+            Child::Window(id) => Some(id),
+            Child::Container(_) => None,
         }
-        if workspace.is_float_focused
-            && let Some(&id) = workspace.float_windows.last()
-        {
-            return Some(id);
-        }
-        self.strategies
-            .for_workspace(ws_id)
-            .focused_tiling_window(ws_id)
     }
 
     pub(super) fn is_restricted(&self, action: RestrictedAction) -> bool {
@@ -354,12 +374,15 @@ impl Hub {
     ) {
         match action.into() {
             TilingAction::Strategy(action) => {
-                if self.is_restricted(RestrictedAction::TilingNavigation) {
+                if self.is_restricted(restriction_of(&action)) {
                     return;
                 }
                 let ws_id = self.current_workspace();
-                self.strategies
-                    .handle_action(&mut self.access, ws_id, action);
+                self.strategies.for_workspace_mut(ws_id).handle_action(
+                    &mut self.access,
+                    ws_id,
+                    action,
+                );
             }
             TilingAction::FocusWorkspace { name, monitor } => {
                 self.focus_workspace(&name, monitor.as_deref())
@@ -369,16 +392,30 @@ impl Hub {
             }
             TilingAction::FocusMonitor { selector } => self.focus_monitor(&selector),
             TilingAction::MoveToMonitor { selector } => self.move_focused_to_monitor(&selector),
-            TilingAction::ToggleFloat => self.toggle_float(),
-            TilingAction::ToggleFullscreen => self.toggle_fullscreen(),
         }
     }
 
+    /// Activates tab `index` of `container_id` on the workspace that holds the container, which
+    /// can be on a monitor without focus. Does nothing when the focused window blocks tiling
+    /// navigation, or when the container no longer exists.
+    #[tracing::instrument(skip(self))]
     pub(crate) fn focus_tab_index(&mut self, container_id: ContainerId, index: usize) {
-        self.handle_tiling_action(StrategyAction::TabClicked {
-            container_id,
-            index,
-        });
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
+        if !self.access.containers.contains(container_id) {
+            tracing::debug!("Clicked container no longer exists, dropping the click");
+            return;
+        }
+        let ws_id = self.access.containers.get(container_id).workspace;
+        self.strategies.for_workspace_mut(ws_id).handle_action(
+            &mut self.access,
+            ws_id,
+            StrategyAction::TabClicked {
+                container_id,
+                index,
+            },
+        );
     }
 
     #[tracing::instrument(skip(self))]
@@ -396,29 +433,15 @@ impl Hub {
 
     /// Focus `window_id` within its own workspace, without switching workspace.
     pub(super) fn set_workspace_focus(&mut self, window_id: WindowId) {
-        let window = self.access.windows.get(window_id);
-        let ws = window
+        let ws = self
+            .access
+            .windows
+            .get(window_id)
             .workspace()
             .expect("non-minimized window has a workspace");
-        match window.mode {
-            DisplayMode::Fullscreen => {
-                let fs = &mut self.access.workspaces.get_mut(ws).fullscreen_windows;
-                if let Some(pos) = fs.iter().position(|&w| w == window_id) {
-                    fs.remove(pos);
-                    fs.push(window_id);
-                }
-                self.access.workspaces.get_mut(ws).is_float_focused = false;
-            }
-            DisplayMode::Float { .. } => {
-                self.focus_float(ws, window_id);
-            }
-            DisplayMode::Tiling => {
-                self.access.workspaces.get_mut(ws).is_float_focused = false;
-                self.strategies
-                    .for_workspace_mut(ws)
-                    .set_focus(&mut self.access, window_id);
-            }
-        }
+        self.strategies
+            .for_workspace_mut(ws)
+            .set_focus(&mut self.access, window_id);
     }
 
     pub(crate) fn primary_monitor(&self) -> MonitorId {
@@ -445,7 +468,7 @@ impl Hub {
             .filter_map(|ws_id| {
                 let ws = self.access.workspaces.get(ws_id);
                 let is_visible = visible.contains(&ws_id);
-                if !is_visible && self.count_workspace_windows(ws_id, ws) == 0 {
+                if !is_visible && !self.workspace_has_windows(ws_id) {
                     return None;
                 }
                 let (monitor, state) = match &ws.attachment {
@@ -496,21 +519,17 @@ impl Hub {
             .collect()
     }
 
-    pub(super) fn count_workspace_windows(&self, ws_id: WorkspaceId, ws: &Workspace) -> usize {
-        let tiling_count = self
-            .strategies
+    pub(super) fn workspace_has_windows(&self, ws_id: WorkspaceId) -> bool {
+        self.strategies
             .for_workspace(ws_id)
-            .tiling_window_count(&self.access, ws_id);
-        tiling_count + ws.float_windows.len() + ws.fullscreen_windows.len()
+            .focused_child(ws_id)
+            .is_some()
     }
 
     pub(crate) fn export_workspace(&self, ws_id: WorkspaceId) -> PreferredWorkspace {
-        let ws = self.access.workspaces.get(ws_id);
-        PreferredWorkspace {
-            tiling: self.strategies.export_workspace(&self.access, ws_id),
-            float: self.synthesize_display_matchers(&ws.float_windows),
-            fullscreen: self.synthesize_display_matchers(&ws.fullscreen_windows),
-        }
+        self.strategies
+            .for_workspace(ws_id)
+            .export_workspace(&self.access, ws_id)
     }
 
     pub(crate) fn sync_configuration(&mut self, tiling: TilingConfig) {
@@ -526,41 +545,31 @@ impl Hub {
         self.access.preferred_layouts = preferred_layouts;
         self.create_named_workspaces();
         for ws_id in self.access.workspaces.sorted_ids() {
-            self.load_entries(ws_id);
-            self.strategies.reset_workspace(&mut self.access, ws_id);
+            self.reset_workspace(ws_id);
         }
     }
 
     #[cfg(test)]
     pub(crate) fn validate(&self) {
-        self.strategies.validate(&self.access);
-        self.validate_entry_holders();
-    }
-
-    #[cfg(test)]
-    fn validate_entry_holders(&self) {
-        for ws_id in self.access.workspaces.sorted_ids() {
-            let ws = self.access.workspaces.get(ws_id);
-            let mut held = rustc_hash::FxHashSet::default();
-            for (windows, entries) in [
-                (&ws.float_windows, &ws.float_entries),
-                (&ws.fullscreen_windows, &ws.fullscreen_entries),
-            ] {
-                for entry in entries {
-                    let Some(window_id) = entry.window else {
-                        continue;
-                    };
-                    assert!(
-                        windows.contains(&window_id),
-                        "workspace {ws_id}: entry holder {window_id} is not in its own workspace and mode"
-                    );
-                    assert!(
-                        held.insert(window_id),
-                        "workspace {ws_id}: window {window_id} holds more than one entry"
-                    );
-                }
-            }
+        let owners = self.strategies.validate(&self.access);
+        for window_id in self.access.windows.sorted_ids() {
+            let window = self.access.windows.get(window_id);
+            assert_eq!(
+                owners.get(&window_id).copied(),
+                window.workspace(),
+                "{window_id} records workspace {:?} but sits in the strategy of {:?}",
+                window.workspace(),
+                owners.get(&window_id)
+            );
         }
+        for &(window_id, mode) in &self.minimized_windows {
+            assert!(
+                self.access.windows.get(window_id).restrictions == WindowRestrictions::None
+                    || mode == DisplayMode::Fullscreen,
+                "{window_id} has restrictions but was minimized as {mode}"
+            );
+        }
+        self.validate_slots();
     }
 
     #[tracing::instrument(skip(self))]
@@ -580,60 +589,43 @@ impl Hub {
             tracing::debug!("Window ignored by rule {r:?}");
             return None;
         }
-        let matcher = self.resolve_matcher(&*metadata);
-        let target_ws = matcher
-            .as_ref()
-            .and_then(|hit| hit.ws_id)
-            .unwrap_or_else(|| self.current_workspace());
-
-        let (mode, restrictions, entry_index) = if restrictions == WindowRestrictions::None {
-            match matcher {
-                Some(MatcherHit {
-                    mode, entry_index, ..
-                }) => (mode, restrictions, entry_index),
-                None => (WindowMode::Tiling, restrictions, None),
+        let slot = find_free_slot(&self.access.slots, &*metadata, None);
+        let (target_ws, slot_mode) = match slot {
+            Some(id) => {
+                let slot = self.access.slots.get(id);
+                (slot.workspace, slot.mode)
             }
+            None => (self.current_workspace(), WindowMode::Tiling),
+        };
+        let mode = if restrictions == WindowRestrictions::None {
+            slot_mode
         } else {
-            // Restrictions force fullscreen, so the matcher only routes the
-            // workspace here, and a restricted window never holds an entry.
-            (WindowMode::Fullscreen, restrictions, None)
+            WindowMode::Fullscreen
         };
 
-        let window_id = match mode {
-            WindowMode::Tiling => {
-                let window_id = self
-                    .access
-                    .windows
-                    .allocate(Window::tiling(target_ws, metadata));
-                self.strategies.for_workspace_mut(target_ws).attach_window(
-                    &mut self.access,
-                    window_id,
-                    target_ws,
-                );
-                self.set_focus(window_id);
-                window_id
-            }
+        let window_id =
+            self.access
+                .windows
+                .allocate(Window::new(target_ws, restrictions, metadata));
+        let (mode, tiling_slot) = match mode {
+            WindowMode::Tiling => (DisplayMode::Tiling, slot),
             WindowMode::Float => {
-                let window_id = self
-                    .access
-                    .windows
-                    .allocate(Window::float(target_ws, rect, metadata));
                 tracing::debug!(%window_id, ?rect, "Inserting float window");
-                self.attach_float_to_workspace(target_ws, window_id, rect, entry_index);
-                self.set_focus(window_id);
-                window_id
+                (DisplayMode::Float { border_box: rect }, None)
             }
-            WindowMode::Fullscreen => {
-                let window_id = self.access.windows.allocate(Window::fullscreen(
-                    target_ws,
-                    restrictions,
-                    metadata,
-                ));
-                self.attach_fullscreen_to_workspace(target_ws, window_id, entry_index);
-                self.set_focus(window_id);
-                window_id
-            }
+            WindowMode::Fullscreen => (DisplayMode::Fullscreen, None),
         };
+        self.strategies.for_workspace_mut(target_ws).attach_window(
+            &mut self.access,
+            window_id,
+            target_ws,
+            mode,
+            tiling_slot,
+        );
+        if let Some(id) = slot {
+            self.access.slots.get_mut(id).hold(window_id);
+        }
+        self.set_focus(window_id);
 
         Some(window_id)
     }
@@ -654,15 +646,15 @@ impl Hub {
             .visible_workspaces()
             .into_iter()
             .map(|ws_id| {
-                let ws = self.access.workspaces.get(ws_id);
-                let screen = self.access.monitors.get(ws.monitor).work_area;
+                let monitor_id = self.access.workspaces.get(ws_id).monitor;
+                let screen = self.access.monitors.get(monitor_id).work_area;
 
                 // A work area with zero width or height fits no window.
                 if screen.is_empty() {
                     return MonitorPlacements {
-                        monitor_id: ws.monitor,
+                        monitor_id,
                         work_area: screen,
-                        border_thickness: self.access.border(ws.monitor),
+                        border_thickness: self.access.border(monitor_id),
                         layout: MonitorLayout::Normal {
                             tiling_windows: Vec::new(),
                             float_windows: Vec::new(),
@@ -671,56 +663,15 @@ impl Hub {
                     };
                 }
 
-                if let Some(&fs_id) = ws.fullscreen_windows.last() {
-                    return MonitorPlacements {
-                        monitor_id: ws.monitor,
-                        work_area: screen,
-                        border_thickness: self.access.border(ws.monitor),
-                        layout: MonitorLayout::Fullscreen(fs_id),
-                    };
-                }
-
-                let tiling = self
-                    .strategies
-                    .for_workspace(ws_id)
-                    .collect_tiling_placements(&self.access, ws_id, ws_id == current_ws);
-                let tiling_windows = tiling.windows;
-                let containers = tiling.containers;
-
-                let focused = if ws_id == current_ws {
-                    self.focused_window(ws_id)
-                } else {
-                    None
-                };
-
-                let border = self.access.border(ws.monitor);
-                let mut float_windows = Vec::new();
-                for &id in &ws.float_windows {
-                    let window = self.access.windows.get(id);
-                    let DisplayMode::Float { border_box, .. } = window.mode else {
-                        panic!("window {id} in float_windows but mode is not Float");
-                    };
-                    if let Some(visible_border_box) = border_box.clip(screen) {
-                        let is_highlighted = focused == Some(id);
-                        float_windows.push(FloatWindowPlacement {
-                            id,
-                            border_box,
-                            visible_border_box,
-                            content_box: border_box.inset_by(border),
-                            is_highlighted,
-                        });
-                    }
-                }
-
                 MonitorPlacements {
-                    monitor_id: ws.monitor,
+                    monitor_id,
                     work_area: screen,
-                    border_thickness: border,
-                    layout: MonitorLayout::Normal {
-                        tiling_windows,
-                        float_windows,
-                        containers,
-                    },
+                    border_thickness: self.access.border(monitor_id),
+                    layout: self.strategies.for_workspace(ws_id).collect_placements(
+                        &self.access,
+                        ws_id,
+                        ws_id == current_ws,
+                    ),
                 }
             })
             .collect();
@@ -749,103 +700,40 @@ impl Hub {
     #[tracing::instrument(skip(self))]
     pub(crate) fn delete_window(&mut self, id: WindowId) {
         let window = self.access.windows.get(id);
-        let is_minimized = window.is_minimized();
-        let mode = window.mode;
-
-        if is_minimized {
-            self.minimized_windows.retain(|&w| w != id);
+        if window.is_minimized() {
+            self.minimized_windows.retain(|&(w, _)| w != id);
         } else {
             let ws_id = window
                 .workspace()
                 .expect("non-minimized window has a workspace");
-            match mode {
-                DisplayMode::Float { .. } => {
-                    self.detach_float_from_workspace(id);
-                }
-                DisplayMode::Fullscreen => self.detach_fullscreen_from_workspace(id),
-                DisplayMode::Tiling => {
-                    let strategy = self.strategies.for_workspace_mut(ws_id);
-                    strategy.detach_window(&mut self.access, id);
-                    if strategy.tiling_window_count(&self.access, ws_id) == 0 {
-                        let ws = self.access.workspaces.get_mut(ws_id);
-                        if ws.fullscreen_windows.is_empty() {
-                            ws.is_float_focused = !ws.float_windows.is_empty();
-                        }
-                    }
-                }
-            }
+            self.strategies
+                .for_workspace_mut(ws_id)
+                .detach_window(&mut self.access, id);
         }
 
+        self.release_slot(id);
         self.access.windows.delete(id);
     }
 
     #[tracing::instrument(skip(self))]
-    /// If setting min above existing max, max is raised to match min.
     pub(crate) fn set_window_constraint(
         &mut self,
         window_id: WindowId,
         observed: LimitObservation,
     ) {
-        let window = self.access.windows.get_mut(window_id);
-
-        let update = |name: &str,
-                      min: &mut Option<Length<Unit>>,
-                      max: &mut Option<Length<Unit>>,
-                      new_min: LimitUpdate,
-                      new_max: LimitUpdate| {
-            match new_min {
-                LimitUpdate::Unchanged => {}
-                LimitUpdate::Cleared => *min = None,
-                LimitUpdate::Set(new_min) => {
-                    *min = Some(new_min);
-                    if max.is_some_and(|m| m < new_min) {
-                        tracing::debug!(
-                            "{name}: existing max {:.2} < new min {:.2}, raising max",
-                            max.unwrap_or(Length::ZERO).value(),
-                            new_min.value()
-                        );
-                        *max = Some(new_min);
-                    }
-                }
-            }
-            match new_max {
-                LimitUpdate::Unchanged => {}
-                LimitUpdate::Cleared => *max = None,
-                LimitUpdate::Set(new_max) => {
-                    *max = Some(new_max);
-                    if min.is_some_and(|m| m > new_max) {
-                        tracing::debug!(
-                            "{name}: existing min {:.2} > new max {:.2}, lowering min",
-                            min.unwrap_or(Length::ZERO).value(),
-                            new_max.value()
-                        );
-                        *min = Some(new_max);
-                    }
-                }
-            }
-        };
-
-        update(
-            "width",
-            &mut window.limits.min_width,
-            &mut window.limits.max_width,
-            observed.min_width,
-            observed.max_width,
-        );
-        update(
-            "height",
-            &mut window.limits.min_height,
-            &mut window.limits.max_height,
-            observed.min_height,
-            observed.max_height,
-        );
-
-        tracing::debug!("Window constraint set");
-
-        if let Some(ws) = window.workspace() {
-            self.strategies
-                .for_workspace_mut(ws)
-                .compute_placement(&self.access, ws);
+        match self.access.windows.get(window_id).workspace() {
+            Some(ws_id) => self
+                .strategies
+                .for_workspace_mut(ws_id)
+                .update_window_size_limits(&mut self.access, window_id, observed),
+            // A window without a workspace is minimized.
+            None => self
+                .access
+                .windows
+                .get_mut(window_id)
+                .limits
+                .apply_observation(observed),
         }
+        tracing::debug!("Window constraint set");
     }
 }

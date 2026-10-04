@@ -88,8 +88,6 @@
 ---@field master? dome.MasterConfig
 ---@field font_size? number Widget text size, in logical pixels.
 ---@field font_family? string
----@field float? WindowMatcher[]
----@field fullscreen? WindowMatcher[]
 ---@field ignore? WindowMatcher[]
 ---@field env? table<string, string> Extra variables for actions.execute commands.
 ---@field keymaps? Keymaps

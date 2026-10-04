@@ -1,29 +1,17 @@
 use crate::core::MonitorSelector;
-use crate::core::TilingConfig;
+use crate::core::hub::RestrictedAction;
 use crate::core::node::PixelRect;
 use crate::core::node::WindowRestrictions;
 use crate::core::tests::{
-    TilingConfigBuilder, default_rect, reported_monitor, setup, setup_with_tiling, snapshot,
-    titled, titled_matcher,
+    default_rect, reported_monitor, setup, setup_with_modes, snapshot, titled,
 };
 use insta::assert_snapshot;
-
-/// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn tiling_floating(titles: &[&str]) -> TilingConfig {
-    TilingConfigBuilder::new()
-        .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
-        .build()
-}
 
 #[test]
 fn insert_fullscreen_sets_focus() {
     // Exact title, so the `titled("w0")` insert below stays tiling and the
     // focus assertion still means something.
-    let mut hub = setup_with_tiling(
-        TilingConfigBuilder::new()
-            .with_fullscreen(vec![titled_matcher("w1")])
-            .build(),
-    );
+    let mut hub = setup_with_modes("0", &[], &["w1"]);
     let w1 = hub
         .insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -123,7 +111,7 @@ fn set_fullscreen_from_tiling() {
 
 #[test]
 fn set_fullscreen_from_float() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w5"]));
+    let mut hub = setup_with_modes("0", &["w5"], &[]);
     hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
     let w2 = hub
         .insert_window(
@@ -180,7 +168,7 @@ fn set_fullscreen_already_fullscreen() {
     let w1 = hub
         .insert_window(titled("w6"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.set_fullscreen(w1, WindowRestrictions::None);
+    hub.set_fullscreen(w1, WindowRestrictions::BlockAll);
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"
@@ -220,8 +208,47 @@ fn set_fullscreen_already_fullscreen() {
     |                                                                                                                                                    |
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
-    hub.set_fullscreen(w1, WindowRestrictions::None);
+    assert!(hub.is_restricted(RestrictedAction::TilingNavigation));
+    hub.set_fullscreen(w1, WindowRestrictions::ProtectFullscreen);
     assert_eq!(snapshot(&hub), before);
+    assert!(
+        !hub.is_restricted(RestrictedAction::TilingNavigation),
+        "ProtectFullscreen replaced BlockAll"
+    );
+    assert!(hub.is_restricted(RestrictedAction::DisplayModeChange));
+}
+
+#[test]
+fn toggle_float_does_nothing_on_a_fullscreen_window() {
+    let mut hub = setup();
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    hub.toggle_fullscreen();
+    let before = snapshot(&hub);
+
+    hub.toggle_float();
+    assert_eq!(snapshot(&hub), before);
+}
+
+#[test]
+fn unset_fullscreen_does_nothing_on_a_window_that_is_not_fullscreen() {
+    let mut hub = setup_with_modes("0", &["w1"], &[]);
+    let w0 = hub
+        .insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
+        .unwrap();
+    let w1 = hub
+        .insert_window(
+            titled("w1"),
+            PixelRect::new(10, 5, 40, 10),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let before = snapshot(&hub);
+
+    hub.unset_fullscreen(w0);
+    assert_eq!(snapshot(&hub), before, "tiling");
+    hub.unset_fullscreen(w1);
+    assert_eq!(snapshot(&hub), before, "float");
 }
 
 #[test]
@@ -471,7 +498,7 @@ fn toggle_fullscreen_on_off() {
 
 #[test]
 fn insert_doesnt_steal_focus_from_fullscreen() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w18"]));
+    let mut hub = setup_with_modes("0", &["w18"], &[]);
     hub.insert_window(titled("w16"), default_rect(), WindowRestrictions::None);
     hub.toggle_fullscreen();
 

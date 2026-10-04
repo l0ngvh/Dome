@@ -3,8 +3,7 @@ use crate::core::node::Constraints;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, PixelRect, WorkspaceId};
 use crate::core::partition_tree::Child;
 use crate::core::strategy::{
-    TilingPlacements, clip, container_titles, distribute_space, tab_bar_band, translate,
-    window_constraints,
+    clip, container_titles, distribute_space, tab_bar_band, translate, window_constraints,
 };
 use crate::core::{ContainerPlacement, TilingWindowPlacement};
 
@@ -17,16 +16,15 @@ impl PartitionTreeStrategy {
     pub(super) fn compute_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
         let ws_state = self.workspaces.get(&ws_id).unwrap();
         let Some(root) = ws_state.root else { return };
+        let work_area = ws_state.work_area;
+        let scale = ws_state.scale;
 
         if let Child::Container(root_id) = root {
-            let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
-            let scale = monitor.scale;
-
             let order = hub.containers_preorder(root_id);
 
             // Reversed pre-order visits children before parents.
             for &cid in order.iter().rev() {
-                self.update_container_min_size(hub, cid, scale);
+                self.update_container_min_size(hub, cid, work_area, scale);
             }
         }
 
@@ -39,15 +37,15 @@ impl PartitionTreeStrategy {
         let ws_state = self.workspaces.get(&ws_id).unwrap();
         let Some(root) = ws_state.root else { return };
         let viewport_offset = ws_state.viewport_offset;
-        let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
-        let work_area = monitor.work_area;
+        let work_area = ws_state.work_area;
         let screen_width = Length::from_pixels(work_area.width());
         let screen_height = Length::from_pixels(work_area.height());
-        let scale = monitor.scale;
+        let scale = ws_state.scale;
         let (offset_x, offset_y) = viewport_offset;
         let viewport_rect = Dimension::new(offset_x, offset_y, screen_width, screen_height);
 
-        self.set_root_dimension(hub, root, screen_width, screen_height);
+        let root_constraints = self.get_effective_constraints(hub, root, work_area, scale);
+        self.set_root_dimension(root, root_constraints, screen_width, screen_height);
 
         let Child::Container(root_id) = root else {
             return;
@@ -60,40 +58,34 @@ impl PartitionTreeStrategy {
             let dim = data.dimension;
             let direction = data.direction();
             let children = hub.containers.get(cid).children.clone();
-            for (child, child_dim) in children.iter().zip(self.layout_children(
-                hub,
-                &children,
-                dim,
-                direction,
-                scale,
-                viewport_rect,
-            )) {
+            let constraints: Vec<Constraints> = children
+                .iter()
+                .map(|&c| self.get_effective_constraints(hub, c, work_area, scale))
+                .collect();
+            let dimensions =
+                self.layout_children(&constraints, dim, direction, scale, viewport_rect);
+            for (child, child_dim) in children.iter().zip(dimensions) {
                 self.set_child_dimension(*child, child_dim);
             }
         }
     }
 
+    /// When `highlighted` is true, the placement of the workspace's focused tiling child is
+    /// highlighted. Otherwise no placement is.
     pub(super) fn collect_tiling_placements(
         &self,
         hub: &HubAccess,
         ws_id: WorkspaceId,
-        focused: bool,
-    ) -> TilingPlacements {
+        highlighted: bool,
+    ) -> (Vec<TilingWindowPlacement>, Vec<ContainerPlacement>) {
         let Some(ws_state) = self.workspaces.get(&ws_id) else {
-            return TilingPlacements {
-                windows: Vec::new(),
-                containers: Vec::new(),
-            };
+            return (Vec::new(), Vec::new());
         };
-        let ws = hub.workspaces.get(ws_id);
         let (offset_x, offset_y) = ws_state.viewport_offset;
-        let monitor = hub.monitors.get(ws.monitor);
-        let screen = monitor.work_area;
-        let scale = monitor.scale;
-        let border = hub.border(ws.monitor);
-        // Fullscreen workspaces never reach here (hub returns early with
-        // MonitorLayout::Fullscreen).
-        let focused = if focused && !ws.is_float_focused {
+        let screen = ws_state.work_area;
+        let scale = ws_state.scale;
+        let border = hub.border_for_scale(scale);
+        let focused = if highlighted {
             ws_state.focused_tiling
         } else {
             None
@@ -178,41 +170,32 @@ impl PartitionTreeStrategy {
             }
         }
 
-        TilingPlacements {
-            windows,
-            containers,
-        }
+        (windows, containers)
     }
 
     /// Max constrained children are centered inside of the visible portion of the container, or
     /// just centered inside the container if it's completely offscreen
     fn layout_children(
         &self,
-        hub: &HubAccess,
-        children: &[Child],
+        constraints: &[Constraints],
         dim: Dimension,
         direction: Option<Direction>,
         scale: f32,
         viewport_rect: Dimension,
     ) -> Vec<Dimension> {
         match direction {
-            Some(dir) => self.layout_split_axis_children(hub, children, dim, dir, viewport_rect),
-            None => self.layout_tabbed_children(hub, children, dim, scale, viewport_rect),
+            Some(dir) => self.layout_split_axis_children(constraints, dim, dir, viewport_rect),
+            None => self.layout_tabbed_children(constraints, dim, scale, viewport_rect),
         }
     }
 
     fn layout_split_axis_children(
         &self,
-        hub: &HubAccess,
-        children: &[Child],
+        constraints: &[Constraints],
         dim: Dimension,
         direction: Direction,
         viewport_rect: Dimension,
     ) -> Vec<Dimension> {
-        let constraints: Vec<Constraints> = children
-            .iter()
-            .map(|&c| self.get_effective_constraints(hub, c))
-            .collect();
         let axis = Axis::from_direction(direction);
 
         let cross_extent = axis.cross_extent(dim).max(
@@ -234,7 +217,7 @@ impl PartitionTreeStrategy {
         );
 
         let mut along_cursor = axis.along_origin(dim) + group_off;
-        let mut result = Vec::with_capacity(children.len());
+        let mut result = Vec::with_capacity(constraints.len());
         for (i, &along_size) in along_sizes.iter().enumerate() {
             let (cross_size, cross_off) = apply_max_constraint(
                 axis.cross_max(&constraints[i]),
@@ -255,16 +238,11 @@ impl PartitionTreeStrategy {
 
     fn layout_tabbed_children(
         &self,
-        hub: &HubAccess,
-        children: &[Child],
+        constraints: &[Constraints],
         dim: Dimension,
         scale: f32,
         viewport_rect: Dimension,
     ) -> Vec<Dimension> {
-        let constraints: Vec<Constraints> = children
-            .iter()
-            .map(|&c| self.get_effective_constraints(hub, c))
-            .collect();
         let tab_bar = self.tab_bar_length(scale);
         let content = Dimension::new(dim.x, dim.y + tab_bar, dim.width, dim.height - tab_bar);
 
@@ -289,19 +267,22 @@ impl PartitionTreeStrategy {
     /// the viewport scrolls instead of clipping.
     fn set_root_dimension(
         &mut self,
-        hub: &HubAccess,
         root: Child,
+        constraints: Constraints,
         screen_width: Length,
         screen_height: Length,
     ) {
-        let c = self.get_effective_constraints(hub, root);
         let base_dim: Dimension = Dimension::new(
             Length::ZERO,
             Length::ZERO,
-            screen_width.max(c.min_width),
-            screen_height.max(c.min_height),
+            screen_width.max(constraints.min_width),
+            screen_height.max(constraints.min_height),
         );
-        let dim = place_in_visible(base_dim, (c.max_width, c.max_height), base_dim);
+        let dim = place_in_visible(
+            base_dim,
+            (constraints.max_width, constraints.max_height),
+            base_dim,
+        );
 
         self.set_child_dimension(root, dim);
     }
@@ -311,6 +292,7 @@ impl PartitionTreeStrategy {
         &mut self,
         hub: &HubAccess,
         container_id: ContainerId,
+        work_area: PixelRect,
         scale: f32,
     ) {
         let data = self.tiling_containers.get(&container_id).unwrap();
@@ -319,7 +301,7 @@ impl PartitionTreeStrategy {
 
         let child_constraints: Vec<Constraints> = children
             .iter()
-            .map(|&c| self.get_effective_constraints(hub, c))
+            .map(|&c| self.get_effective_constraints(hub, c, work_area, scale))
             .collect();
 
         let (min_w, min_h) = match direction {
@@ -389,9 +371,18 @@ impl PartitionTreeStrategy {
         }
     }
 
-    fn get_effective_constraints(&self, hub: &HubAccess, child: Child) -> Constraints {
+    /// `work_area` and `scale` belong to the workspace that holds `child`.
+    fn get_effective_constraints(
+        &self,
+        hub: &HubAccess,
+        child: Child,
+        work_area: PixelRect,
+        scale: f32,
+    ) -> Constraints {
         match child {
-            Child::Window(id) => window_constraints(hub, &self.size_constraints, id),
+            Child::Window(id) => {
+                window_constraints(hub, &self.size_constraints, id, work_area, scale)
+            }
             Child::Container(id) => {
                 let (min_w, min_h) = self.tiling_containers.get(&id).unwrap().min_size();
                 Constraints {

@@ -12,21 +12,18 @@ impl PartitionTreeStrategy {
     pub(super) fn scroll_into_view(&mut self, hub: &HubAccess, workspace_id: WorkspaceId) {
         let initial = self.workspaces.get(&workspace_id).unwrap().viewport_offset;
 
-        self.clamp_viewport_offset(hub, workspace_id);
+        self.clamp_viewport_offset(workspace_id);
 
         let Some(ws_state) = self.workspaces.get(&workspace_id) else {
             return;
         };
-        let monitor_id = hub.workspaces.get(workspace_id).monitor;
-        let work_area = hub.monitors.get(monitor_id).work_area;
-        let screen_width = Length::from_pixels(work_area.width());
-        let screen_height = Length::from_pixels(work_area.height());
+        let screen_width = Length::from_pixels(ws_state.work_area.width());
+        let screen_height = Length::from_pixels(ws_state.work_area.height());
         let (mut offset_x, mut offset_y) = ws_state.viewport_offset;
 
         if let Some(focused) = ws_state.focused_tiling {
             let focused_dim = self.child_dimension(focused);
-            let scale = hub.monitors.get(monitor_id).scale;
-            let reserved_top = self.enclosing_tabbed_strip_total(focused, scale);
+            let reserved_top = self.enclosing_tabbed_strip_total(focused, ws_state.scale);
 
             offset_x =
                 nudge_offset_into_view(offset_x, focused_dim.x, focused_dim.width, screen_width);
@@ -50,16 +47,12 @@ impl PartitionTreeStrategy {
 
     /// With no root, resets to `(ZERO, ZERO)` so a later attach starts from a
     /// known origin instead of inheriting a stale offset from a previous tree.
-    fn clamp_viewport_offset(&mut self, hub: &HubAccess, workspace_id: WorkspaceId) {
+    fn clamp_viewport_offset(&mut self, workspace_id: WorkspaceId) {
         let Some(ws_state) = self.workspaces.get(&workspace_id) else {
             return;
         };
-        let work_area = hub
-            .monitors
-            .get(hub.workspaces.get(workspace_id).monitor)
-            .work_area;
-        let screen_width = Length::from_pixels(work_area.width());
-        let screen_height = Length::from_pixels(work_area.height());
+        let screen_width = Length::from_pixels(ws_state.work_area.width());
+        let screen_height = Length::from_pixels(ws_state.work_area.height());
         let (mut offset_x, mut offset_y) = ws_state.viewport_offset;
 
         let root_dim = match ws_state.root {

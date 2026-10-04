@@ -1,9 +1,109 @@
 use crate::core::WindowRestrictions;
-use crate::core::node::{Length, LimitObservation, LimitUpdate};
+use crate::core::hub::MonitorLayout;
+use crate::core::node::{Length, LimitObservation, LimitUpdate, PixelRect, WindowId};
 use crate::core::strategy::StrategyAction;
 use crate::core::tests::{TestHubBuilder, TilingConfigBuilder, default_rect, snapshot, titled};
-use crate::core::{MasterConfig, Strategy};
+use crate::core::{Hub, MasterConfig, Strategy};
 use insta::assert_snapshot;
+
+fn border_box(hub: &Hub, window_id: WindowId) -> Option<PixelRect> {
+    let placements = hub.get_visible_placements();
+    let MonitorLayout::Normal {
+        tiling_windows,
+        float_windows,
+        ..
+    } = &placements.monitors[0].layout
+    else {
+        return None;
+    };
+    tiling_windows
+        .iter()
+        .map(|p| (p.id, p.border_box))
+        .chain(float_windows.iter().map(|p| (p.id, p.border_box)))
+        .find(|&(id, _)| id == window_id)
+        .map(|(_, border_box)| border_box)
+}
+
+#[test]
+fn a_scrolled_window_floats_at_the_rectangle_it_shows_at() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .with_master_config(MasterConfig {
+                    master_ratio: 0.5,
+                    master_count: 4,
+                })
+                .build(),
+        )
+        .build();
+    let windows: Vec<WindowId> = ["w0", "w1", "w2", "w3"]
+        .into_iter()
+        .map(|title| {
+            hub.insert_window(titled(title), default_rect(), WindowRestrictions::None)
+                .unwrap()
+        })
+        .collect();
+    for &window_id in &windows {
+        hub.set_window_constraint(
+            window_id,
+            LimitObservation {
+                min_height: LimitUpdate::Set(Length::new(20.0)),
+                ..Default::default()
+            },
+        );
+    }
+    let w3 = windows[3];
+    let tile = border_box(&hub, w3).unwrap();
+    assert_eq!(
+        border_box(&hub, windows[0]),
+        None,
+        "the pane scrolled w0 off the screen to show w3"
+    );
+
+    hub.handle_tiling_action(StrategyAction::ToggleFloat);
+
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=8.00)
+        Window(id=WindowId(2), x=0.00, y=8.00, w=150.00, h=22.00)
+        Window(id=WindowId(3), x=0.00, y=8.00, w=150.00, h=22.00, float, highlighted)
+      )
+
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                         W1                                                                         |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         F3                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    ");
+    assert_eq!(border_box(&hub, w3), Some(tile));
+}
 
 #[test]
 fn min_height_master_pane_overflows_and_scrolls_to_focus() {

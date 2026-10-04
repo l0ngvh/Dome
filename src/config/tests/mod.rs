@@ -8,7 +8,7 @@ use anyhow::{Result, anyhow};
 use super::Config;
 use crate::core::TilingConfig;
 
-/// The matcher lists stay empty, so a fixture manages every window it inserts.
+/// The `ignore` list stays empty, so a fixture manages every window it inserts.
 pub(crate) fn tiling_config() -> TilingConfig {
     TilingConfig {
         ignore: Vec::new(),

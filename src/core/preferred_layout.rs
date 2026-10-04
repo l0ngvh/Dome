@@ -108,6 +108,20 @@ impl PreferredTiling {
     }
 }
 
+impl PreferredWorkspace {
+    pub(crate) fn empty(strategy: Strategy) -> Self {
+        let tiling = match strategy {
+            Strategy::PartitionTree => PreferredTiling::PartitionTree { tree: None },
+            Strategy::Master => PreferredTiling::Master(PreferredMaster::default()),
+        };
+        Self {
+            tiling,
+            float: Vec::new(),
+            fullscreen: Vec::new(),
+        }
+    }
+}
+
 impl FromLuaValue for PreferredWorkspace {
     fn from_lua_value(value: &mlua::Value, cx: &mut LoadContext) -> mlua::Result<Self> {
         let table = as_table(value, "a workspace table")?;

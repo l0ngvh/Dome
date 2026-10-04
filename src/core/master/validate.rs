@@ -1,19 +1,39 @@
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::core::{
     Length, WindowId,
     hub::HubAccess,
     master::{MasterStrategy, PaneDisplay, PaneKind},
-    node::ContainerId,
-    strategy::{VALIDATION_TOLERANCE, ValidateStrategy, window_constraints},
+    slot::{SlotId, tiling_slots_by_workspace},
+    strategy::{
+        Reachable, VALIDATION_TOLERANCE, ValidateStrategy, validate_display_modes,
+        window_constraints,
+    },
 };
 
 impl ValidateStrategy for MasterStrategy {
-    fn validate(&self, hub: &HubAccess) -> FxHashSet<ContainerId> {
+    fn validate(&self, hub: &HubAccess) -> Reachable {
         let mut reachable = FxHashSet::default();
+        let mut windows = FxHashMap::default();
+        let mut tiling_slots = tiling_slots_by_workspace(&hub.slots);
         for (&ws_id, state) in &self.workspaces {
+            let host = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
+            assert_eq!(
+                (state.work_area, state.scale),
+                (host.work_area, host.scale),
+                "master-stack workspace {ws_id}: layout work area and scale differ from the host \
+                 monitor's"
+            );
             reachable.insert(state.master.container);
             reachable.insert(state.secondary.container);
+            for pane in [&state.master, &state.secondary] {
+                let reported = hub.containers.get(pane.container).workspace;
+                assert_eq!(
+                    reported, ws_id,
+                    "master-stack workspace {ws_id}: pane container {} reports workspace {reported}",
+                    pane.container
+                );
+            }
             let master = Self::pane_windows(hub, state.master.container);
             let secondary = Self::pane_windows(hub, state.secondary.container);
             let mut seen = FxHashSet::default();
@@ -51,52 +71,43 @@ impl ValidateStrategy for MasterStrategy {
                     self.window_states.contains_key(&wid),
                     "master-stack workspace {ws_id}: window {wid:?} missing from window_states"
                 );
-                if let Some(held_slot) = self.window_states[&wid].held_slot {
-                    assert_eq!(
-                        self.slots.get(held_slot).window,
-                        Some(wid),
-                        "master-stack workspace {ws_id}: window {wid:?} holds slot {held_slot:?}, \
-                         which holds another window"
-                    );
-                }
             }
-            for &slot in state.master.slots.iter().chain(&state.secondary.slots) {
-                if let Some(wid) = self.slots.get(slot).window {
-                    assert!(
-                        seen.contains(&wid),
-                        "master-stack workspace {ws_id}: slot {slot:?} holds window {wid:?}, \
-                         which is in neither pane"
-                    );
-                    assert_eq!(
-                        self.window_states.get(&wid).and_then(|w| w.held_slot),
-                        Some(slot),
-                        "master-stack workspace {ws_id}: slot {slot:?} holds window {wid:?}, \
-                         which does not hold it"
-                    );
-                }
-            }
-
-            for slot in &state.master.slots {
-                assert!(
-                    !state.secondary.slots.contains(slot),
-                    "master-stack workspace {ws_id}: slot {slot:?} shared between master and secondary panes"
-                );
-            }
+            let tiling: Vec<WindowId> = master.iter().chain(&secondary).copied().collect();
+            validate_display_modes(
+                hub,
+                ws_id,
+                &tiling,
+                &state.float_windows,
+                &state.fullscreen_windows,
+            );
+            let mut all = tiling;
+            all.extend(state.float_windows.windows());
+            all.extend(state.fullscreen_windows.windows());
+            windows.insert(ws_id, all);
+            let pane_slots: Vec<SlotId> = state
+                .master
+                .slots
+                .iter()
+                .chain(&state.secondary.slots)
+                .copied()
+                .collect();
+            assert_eq!(
+                pane_slots,
+                tiling_slots.remove(&ws_id).unwrap_or_default(),
+                "master-stack workspace {ws_id}: the panes must list each tiling slot of the \
+                 workspace once, in arena order, master slots first"
+            );
 
             if master.is_empty() && secondary.is_empty() {
                 continue;
             }
 
-            let work_area = hub
-                .monitors
-                .get(hub.workspaces.get(ws_id).monitor)
-                .work_area;
-            let pane_height = Length::from_pixels(work_area.height());
+            let pane_height = Length::from_pixels(host.work_area.height());
 
             for &wid in &master {
                 let dim = self.window_states[&wid].dimension;
                 // On an empty work area a window is legitimately zero-size.
-                if !work_area.is_empty() {
+                if !host.work_area.is_empty() {
                     assert!(
                         dim.width > Length::ZERO,
                         "master-stack workspace {ws_id}: window {wid:?} has non-positive width {}",
@@ -108,7 +119,13 @@ impl ValidateStrategy for MasterStrategy {
                         dim.height
                     );
                 }
-                let c = window_constraints(hub, &self.size_constraints, wid);
+                let c = window_constraints(
+                    hub,
+                    &self.size_constraints,
+                    wid,
+                    host.work_area,
+                    host.scale,
+                );
                 assert!(
                     dim.height >= c.min_height - VALIDATION_TOLERANCE,
                     "master-stack workspace {ws_id}: window {wid:?} height {} < effective min_height {}",
@@ -135,7 +152,7 @@ impl ValidateStrategy for MasterStrategy {
 
             for &wid in &secondary {
                 let dim = self.window_states[&wid].dimension;
-                if !work_area.is_empty() {
+                if !host.work_area.is_empty() {
                     assert!(
                         dim.width > Length::ZERO,
                         "master-stack workspace {ws_id}: window {wid:?} has non-positive width {}",
@@ -147,7 +164,13 @@ impl ValidateStrategy for MasterStrategy {
                         dim.height
                     );
                 }
-                let c = window_constraints(hub, &self.size_constraints, wid);
+                let c = window_constraints(
+                    hub,
+                    &self.size_constraints,
+                    wid,
+                    host.work_area,
+                    host.scale,
+                );
                 assert!(
                     dim.height >= c.min_height - VALIDATION_TOLERANCE,
                     "master-stack workspace {ws_id}: window {wid:?} height {} < effective min_height {}",
@@ -219,6 +242,9 @@ impl ValidateStrategy for MasterStrategy {
                 }
             }
         }
-        reachable
+        Reachable {
+            containers: reachable,
+            windows,
+        }
     }
 }

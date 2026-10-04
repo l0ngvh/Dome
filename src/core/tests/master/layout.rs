@@ -2,7 +2,7 @@ use crate::core::WindowRestrictions;
 use crate::core::strategy::StrategyAction;
 use crate::core::tests::{
     LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect, snapshot,
-    titled,
+    titled, titled_matcher,
 };
 use crate::core::{MasterConfig, Strategy, WindowMatcher};
 use insta::assert_snapshot;
@@ -482,6 +482,41 @@ fn increment_decrement_master_count() {
 }
 
 #[test]
+fn layout_actions_do_nothing_on_an_empty_workspace() {
+    let snapshot_after = |action: Option<StrategyAction>| {
+        let mut hub = TestHubBuilder::new()
+            .with_tiling(
+                TilingConfigBuilder::new()
+                    .with_strategy(Strategy::Master)
+                    .with_master_config(MasterConfig {
+                        master_ratio: 0.5,
+                        master_count: 2,
+                    })
+                    .build(),
+            )
+            .build();
+        if let Some(action) = action {
+            hub.handle_tiling_action(action);
+        }
+        for title in ["w0", "w1", "w2"] {
+            hub.insert_window(titled(title), default_rect(), WindowRestrictions::None);
+        }
+        snapshot(&hub)
+    };
+    let untouched = snapshot_after(None);
+
+    for action in [
+        StrategyAction::GrowMaster,
+        StrategyAction::ShrinkMaster,
+        StrategyAction::MoreMaster,
+        StrategyAction::FewerMaster,
+    ] {
+        let name = format!("{action:?}");
+        assert_eq!(snapshot_after(Some(action)), untouched, "{name}");
+    }
+}
+
+#[test]
 fn master_count_exceeds_window_count() {
     let mut hub = TestHubBuilder::new()
         .with_tiling(
@@ -798,6 +833,68 @@ fn more_master_noop_when_no_unmatched_in_stack() {
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
     +-------------------------------------------------------------------------+***************************************************************************
+    ");
+}
+
+#[test]
+fn more_master_promotes_a_window_that_holds_a_master_slot() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![titled_matcher("A"), titled_matcher("B")])
+                .with_master_count(2)
+                .build(),
+        ])
+        .build();
+    hub.insert_window(titled("A"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("B"), default_rect(), WindowRestrictions::None);
+    hub.handle_tiling_action(StrategyAction::FewerMaster);
+
+    hub.handle_tiling_action(StrategyAction::MoreMaster);
+
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
+        Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00, highlighted)
+      )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                         W0                                                                         |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W1                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
     ");
 }
 

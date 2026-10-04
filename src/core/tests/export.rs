@@ -28,14 +28,6 @@ fn export_synthesises_from_live_even_for_rule_placed_windows() {
         ..Default::default()
     };
     let mut hub = TestHubBuilder::new()
-        .with_tiling(
-            TilingConfigBuilder::new()
-                .with_float(vec![WindowMatcher {
-                    process: Some("orphan.exe".into()),
-                    ..Default::default()
-                }])
-                .build(),
-        )
         .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_float(vec![float_matcher.clone(), float_matcher.clone()])
@@ -62,6 +54,7 @@ fn export_synthesises_from_live_even_for_rule_placed_windows() {
         WindowRestrictions::None,
     )
     .unwrap();
+    hub.toggle_float();
     hub.insert_window(
         process_meta("fs-window-alpha"),
         default_rect(),

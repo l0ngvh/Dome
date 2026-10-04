@@ -96,7 +96,6 @@ pub(crate) trait WindowMetadata:
 #[derive(Debug)]
 pub(crate) struct Window {
     pub(super) workspace: Option<WorkspaceId>,
-    pub(super) mode: DisplayMode,
     pub(super) restrictions: WindowRestrictions,
     is_minimized: bool,
     pub(super) metadata: Box<dyn WindowMetadata>,
@@ -112,7 +111,6 @@ impl Clone for Window {
         Self {
             metadata: self.metadata.clone_box(),
             workspace: self.workspace,
-            mode: self.mode,
             restrictions: self.restrictions,
             is_minimized: self.is_minimized,
             limits: self.limits,
@@ -138,40 +136,13 @@ impl Window {
         self.workspace = ws;
     }
 
-    pub(super) fn tiling(workspace: WorkspaceId, metadata: Box<dyn WindowMetadata>) -> Self {
-        Self {
-            workspace: Some(workspace),
-            mode: DisplayMode::Tiling,
-            restrictions: WindowRestrictions::None,
-            is_minimized: false,
-            metadata,
-            limits: SizeLimits::default(),
-        }
-    }
-
-    pub(super) fn float(
-        workspace: WorkspaceId,
-        border_box: PixelRect,
-        metadata: Box<dyn WindowMetadata>,
-    ) -> Self {
-        Self {
-            workspace: Some(workspace),
-            mode: DisplayMode::Float { border_box },
-            restrictions: WindowRestrictions::None,
-            is_minimized: false,
-            metadata,
-            limits: SizeLimits::default(),
-        }
-    }
-
-    pub(super) fn fullscreen(
+    pub(super) fn new(
         workspace: WorkspaceId,
         restrictions: WindowRestrictions,
         metadata: Box<dyn WindowMetadata>,
     ) -> Self {
         Self {
             workspace: Some(workspace),
-            mode: DisplayMode::Fullscreen,
             restrictions,
             is_minimized: false,
             metadata,
@@ -185,14 +156,6 @@ impl Window {
 
     pub(crate) fn title(&self) -> &str {
         self.metadata.title().unwrap_or("")
-    }
-
-    pub(crate) fn is_float(&self) -> bool {
-        matches!(self.mode, DisplayMode::Float { .. })
-    }
-
-    pub(crate) fn is_fullscreen(&self) -> bool {
-        matches!(self.mode, DisplayMode::Fullscreen)
     }
 }
 
@@ -398,6 +361,64 @@ pub(crate) struct LimitObservation {
     pub(crate) min_height: LimitUpdate,
     pub(crate) max_width: LimitUpdate,
     pub(crate) max_height: LimitUpdate,
+}
+
+impl SizeLimits {
+    /// Applies each axis's minimum before its maximum. A new minimum above the stored maximum
+    /// raises the maximum, and a new maximum below the stored minimum lowers the minimum.
+    pub(super) fn apply_observation(&mut self, observed: LimitObservation) {
+        let update = |name: &str,
+                      min: &mut Option<Length<Unit>>,
+                      max: &mut Option<Length<Unit>>,
+                      new_min: LimitUpdate,
+                      new_max: LimitUpdate| {
+            match new_min {
+                LimitUpdate::Unchanged => {}
+                LimitUpdate::Cleared => *min = None,
+                LimitUpdate::Set(new_min) => {
+                    *min = Some(new_min);
+                    if max.is_some_and(|m| m < new_min) {
+                        tracing::debug!(
+                            "{name}: existing max {:.2} < new min {:.2}, raising max",
+                            max.unwrap_or(Length::ZERO).value(),
+                            new_min.value()
+                        );
+                        *max = Some(new_min);
+                    }
+                }
+            }
+            match new_max {
+                LimitUpdate::Unchanged => {}
+                LimitUpdate::Cleared => *max = None,
+                LimitUpdate::Set(new_max) => {
+                    *max = Some(new_max);
+                    if min.is_some_and(|m| m > new_max) {
+                        tracing::debug!(
+                            "{name}: existing min {:.2} > new max {:.2}, lowering min",
+                            min.unwrap_or(Length::ZERO).value(),
+                            new_max.value()
+                        );
+                        *min = Some(new_max);
+                    }
+                }
+            }
+        };
+
+        update(
+            "width",
+            &mut self.min_width,
+            &mut self.max_width,
+            observed.min_width,
+            observed.max_width,
+        );
+        update(
+            "height",
+            &mut self.min_height,
+            &mut self.max_height,
+            observed.min_height,
+            observed.max_height,
+        );
+    }
 }
 
 impl Length<Unit> {
@@ -860,6 +881,7 @@ impl std::fmt::Display for Child {
 #[derive(Debug, Clone)]
 pub(crate) struct Container {
     pub(super) children: Vec<Child>,
+    pub(super) workspace: WorkspaceId,
 }
 
 impl Node for Container {

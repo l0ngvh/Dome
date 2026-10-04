@@ -1,6 +1,9 @@
+use crate::config::lua::deserializer::string_enum;
 use crate::core::hub::HubAccess;
-use crate::core::node::ContainerId;
+use crate::core::node::{ContainerId, Dimension, Direction, Length};
 use crate::core::partition_tree::{Child, Parent, PartitionTreeStrategy};
+
+use super::preferred_layout::PreferredContainerSlotId;
 
 impl PartitionTreeStrategy {
     /// Partition-tree invariant: a container holds at least two children. When one child
@@ -8,7 +11,7 @@ impl PartitionTreeStrategy {
     pub(super) fn delete_container(&mut self, hub: &mut HubAccess, container_id: ContainerId) {
         debug_assert_eq!(hub.containers.get(container_id).children.len(), 1);
         let grandparent = self.tiling_containers.get(&container_id).unwrap().parent;
-        let ws = self.tiling_containers.get(&container_id).unwrap().workspace;
+        let ws = hub.containers.get(container_id).workspace;
         let last_child = hub.containers.get_mut(container_id).children.pop().unwrap();
 
         tracing::debug!(%container_id, %last_child, "Container has one child left, cleaning up");
@@ -156,6 +159,120 @@ impl PartitionTreeStrategy {
         let data = self.tiling_containers.get_mut(&container_id).unwrap();
         if data.is_tabbed && pos <= data.active_tab_index {
             data.active_tab_index = data.active_tab_index.saturating_sub(1);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SplitMode {
+    Horizontal,
+    Vertical,
+    Tabbed,
+}
+
+string_enum!(
+    SplitMode,
+    "\"horizontal\", \"vertical\" or \"tabbed\"",
+    "horizontal" => SplitMode::Horizontal,
+    "vertical" => SplitMode::Vertical,
+    "tabbed" => SplitMode::Tabbed,
+);
+
+/// Per-container tiling state.
+///
+/// Invariant: a non-tabbed container's `direction` differs from its non-tabbed
+/// parent's direction. A tabbed container is exempt: `direction()` returns
+/// `None` for it, so the alternation rule does not apply across a tabbed
+/// boundary. `validate_container_direction` enforces this.
+#[derive(Debug)]
+pub(super) struct TilingContainerData {
+    pub(super) parent: Parent,
+    pub(super) dimension: Dimension,
+    /// Split axis. Read through `direction()`, which returns `None` when
+    /// `is_tabbed` is set. A value is stored while tabbed to keep the field
+    /// initialised, but it is unused until the container converts back to split.
+    direction: Direction,
+    /// Direction the next child extends. Automatic tiling derives it from the
+    /// container's shape, so it can differ from `direction`.
+    spawn_direction: Direction,
+    pub(super) is_tabbed: bool,
+    pub(super) active_tab_index: usize,
+    pub(super) min_width: Length,
+    pub(super) min_height: Length,
+    /// Preferred container slot this live container materializes, if any.
+    pub(super) held_slot: Option<PreferredContainerSlotId>,
+}
+
+impl TilingContainerData {
+    pub(super) fn new(parent: Parent, split_mode: SplitMode) -> Self {
+        let (direction, is_tabbed) = match split_mode {
+            SplitMode::Horizontal => (Direction::Horizontal, false),
+            SplitMode::Vertical => (Direction::Vertical, false),
+            SplitMode::Tabbed => (Direction::Horizontal, true),
+        };
+        Self {
+            parent,
+            dimension: Dimension::default(),
+            direction,
+            spawn_direction: direction,
+            is_tabbed,
+            active_tab_index: 0,
+            min_width: Length::ZERO,
+            min_height: Length::ZERO,
+            held_slot: None,
+        }
+    }
+
+    pub(super) fn is_tabbed(&self) -> bool {
+        self.is_tabbed
+    }
+
+    pub(super) fn active_tab_index(&self) -> usize {
+        self.active_tab_index
+    }
+
+    pub(super) fn min_size(&self) -> (Length, Length) {
+        (self.min_width, self.min_height)
+    }
+
+    pub(super) fn direction(&self) -> Option<Direction> {
+        if self.is_tabbed {
+            None
+        } else {
+            Some(self.direction)
+        }
+    }
+
+    pub(super) fn has_direction(&self, direction: Direction) -> bool {
+        if self.is_tabbed {
+            false
+        } else {
+            self.direction == direction
+        }
+    }
+
+    pub(super) fn spawn_direction(&self) -> Direction {
+        self.spawn_direction
+    }
+
+    pub(super) fn set_spawn_direction(&mut self, spawn_direction: Direction) {
+        self.spawn_direction = spawn_direction
+    }
+
+    pub(super) fn toggle_direction(&mut self) -> Direction {
+        self.direction = match self.direction {
+            Direction::Horizontal => Direction::Vertical,
+            Direction::Vertical => Direction::Horizontal,
+        };
+        self.direction
+    }
+}
+
+impl From<Direction> for SplitMode {
+    fn from(direction: Direction) -> Self {
+        match direction {
+            Direction::Horizontal => SplitMode::Horizontal,
+            Direction::Vertical => SplitMode::Vertical,
         }
     }
 }

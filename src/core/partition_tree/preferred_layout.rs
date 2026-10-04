@@ -1,22 +1,22 @@
 //! Materializes the preferred layout onto the live tiling tree as windows
 //! arrive.
 //!
-//! A preferred layout is a tree of slots. A window slot has a matcher, and at
-//! most one window holds it. A window slot that no window holds is free, and
-//! only a free slot takes a new window. A container slot wraps children and
-//! sets a split direction. A container slot is held once a live container
-//! materializes it.
+//! A preferred layout is a tree of slots. Each leaf is a tiling slot of the
+//! workspace that the layout belongs to. A window that holds a leaf positions
+//! later windows only while it tiles on that workspace. A container slot is held
+//! once a live container materializes it.
 
 use std::cmp::Ordering;
 
 use crate::config::lua::deserializer::{FromLuaValue, LoadContext, as_table};
 use crate::core::WindowMatcher;
-use crate::core::WindowMetadata;
 use crate::core::allocator::{Node, NodeId};
 use crate::core::hub::HubAccess;
+use crate::core::matcher::WindowMode;
 use crate::core::node::{Child, ContainerId, WindowId, WorkspaceId};
 use crate::core::partition_tree::PartitionTreeStrategy;
 use crate::core::partition_tree::SplitMode;
+use crate::core::slot::{Slot, SlotId, held_tiling_slot};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum TreeLayoutNode {
@@ -60,37 +60,17 @@ impl FromLuaValue for TreeLayoutNode {
 }
 
 impl PartitionTreeStrategy {
-    pub(super) fn build_preferred_layout(&mut self, tree: &TreeLayoutNode) -> PreferredSlot {
-        self.build_preferred_layout_subtree(tree, None)
+    pub(super) fn build_preferred_layout(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        tree: &TreeLayoutNode,
+    ) -> PreferredSlot {
+        self.build_preferred_layout_subtree(hub, ws_id, tree, None)
     }
 
-    pub(super) fn find_free_slot(
-        &self,
-        root: PreferredSlot,
-        metadata: &dyn WindowMetadata,
-    ) -> Option<PreferredWindowSlotId> {
-        let mut stack = vec![root];
-        for _ in crate::core::bounded_loop() {
-            let slot = stack.pop()?;
-            match slot {
-                PreferredSlot::Window(id) => {
-                    if self.window_slots.get(id).is_free_for(metadata) {
-                        return Some(id);
-                    }
-                }
-                PreferredSlot::Container(id) => {
-                    let cs = self.container_slots.get(id);
-                    for &child in cs.children.iter().rev() {
-                        stack.push(child);
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    fn first_held_ancestor(&self, slot: PreferredWindowSlotId) -> Option<PreferredContainerSlotId> {
-        let mut current = self.window_slots.get(slot).parent;
+    fn first_held_ancestor(&self, slot: SlotId) -> Option<PreferredContainerSlotId> {
+        let mut current = self.leaf_parents[&slot];
         for _ in crate::core::bounded_loop() {
             let Some(parent_id) = current else {
                 break;
@@ -104,22 +84,14 @@ impl PartitionTreeStrategy {
         None
     }
 
-    fn hold_slot(&mut self, slot: PreferredWindowSlotId, window_id: WindowId) {
-        self.window_slots.get_mut(slot).window = Some(window_id);
-        self.tiling_windows.get_mut(&window_id).unwrap().held_slot = Some(slot);
-    }
-
-    fn release_slot(&mut self, window_id: WindowId) {
-        let data = self.tiling_windows.get_mut(&window_id).unwrap();
-        let Some(slot) = data.held_slot.take() else {
-            return;
-        };
-        self.window_slots.get_mut(slot).window = None;
-    }
-
-    /// The first held slot in a preorder walk of the preferred layout. When no manual
-    /// move has split the held slots, every other held slot is below this one.
-    pub(super) fn held_preferred_root(&self, ws_id: WorkspaceId) -> Option<PreferredSlot> {
+    /// The first slot in a preorder walk of the preferred layout that a live window or
+    /// container of the workspace holds. When no window has moved or come back since the
+    /// layout placed it, every other such slot is below this one.
+    pub(super) fn held_preferred_root(
+        &self,
+        hub: &HubAccess,
+        ws_id: WorkspaceId,
+    ) -> Option<PreferredSlot> {
         let mut stack: Vec<PreferredSlot> = self
             .workspaces
             .get(&ws_id)?
@@ -128,7 +100,7 @@ impl PartitionTreeStrategy {
             .collect();
         for _ in crate::core::bounded_loop() {
             let slot = stack.pop()?;
-            if self.child_of_preferred_slot(slot).is_some() {
+            if self.child_of_preferred_slot(hub, slot).is_some() {
                 return Some(slot);
             }
             if let PreferredSlot::Container(id) = slot {
@@ -138,10 +110,17 @@ impl PartitionTreeStrategy {
         None
     }
 
-    /// The live window or container that holds `slot`, or `None` when the slot is free.
-    fn child_of_preferred_slot(&self, slot: PreferredSlot) -> Option<Child> {
+    /// The live window or container that holds `slot`, or `None` when the slot is free or its
+    /// window does not tile on the slot's workspace.
+    fn child_of_preferred_slot(&self, hub: &HubAccess, slot: PreferredSlot) -> Option<Child> {
         match slot {
-            PreferredSlot::Window(id) => self.window_slots.get(id).window.map(Child::Window),
+            PreferredSlot::Window(id) => {
+                let leaf = hub.slots.get(id);
+                let window_id = leaf.window?;
+                let tiles_on_leaf_workspace = self.tiling_windows.contains_key(&window_id)
+                    && hub.windows.get(window_id).workspace() == Some(leaf.workspace);
+                tiles_on_leaf_workspace.then_some(Child::Window(window_id))
+            }
             PreferredSlot::Container(id) => {
                 self.container_slots.get(id).container.map(Child::Container)
             }
@@ -163,7 +142,7 @@ impl PartitionTreeStrategy {
         hub: &mut HubAccess,
         window_id: WindowId,
         ws_id: WorkspaceId,
-        slot_id: PreferredWindowSlotId,
+        slot_id: SlotId,
     ) {
         hub.windows.get_mut(window_id).set_workspace(Some(ws_id));
         self.workspaces
@@ -172,14 +151,11 @@ impl PartitionTreeStrategy {
             .add_to_history(window_id);
         if let Some(ancestor_slot) = self.first_held_ancestor(slot_id) {
             self.attach_window_into_held_ancestor(hub, window_id, ws_id, slot_id, ancestor_slot);
-        } else if let Some(root_slot) = self.held_preferred_root(ws_id) {
+        } else if let Some(root_slot) = self.held_preferred_root(hub, ws_id) {
             self.attach_window_to_free_ancestor(hub, window_id, ws_id, slot_id, root_slot);
         } else {
             self.attach_child_according_to_spawn_direction(hub, Child::Window(window_id), ws_id);
         }
-        // The slot is held after the branch above, so `held_preferred_root` never counts
-        // this window's own slot.
-        self.hold_slot(slot_id, window_id);
     }
 
     /// `ordering` tells whether the new window's slot comes before or after the
@@ -210,14 +186,14 @@ impl PartitionTreeStrategy {
         hub: &mut HubAccess,
         window_id: WindowId,
         ws_id: WorkspaceId,
-        slot_id: PreferredWindowSlotId,
+        slot_id: SlotId,
         root_slot: PreferredSlot,
     ) {
         tracing::debug!(%window_id, ?slot_id, ?root_slot, "Joining window to existing preferred root");
         let (lca, ordering) =
             self.lowest_common_ancestor(PreferredSlot::Window(slot_id), root_slot);
         let anchor = self
-            .child_of_preferred_slot(root_slot)
+            .child_of_preferred_slot(hub, root_slot)
             .expect("the held preferred root is held");
         self.materialize_container_slot(hub, lca, anchor, window_id, ordering);
         self.compute_placement(hub, ws_id);
@@ -228,7 +204,7 @@ impl PartitionTreeStrategy {
         hub: &mut HubAccess,
         window_id: WindowId,
         ws_id: WorkspaceId,
-        slot_id: PreferredWindowSlotId,
+        slot_id: SlotId,
         ancestor_slot: PreferredContainerSlotId,
     ) {
         let container_id = self.container_slots.get(ancestor_slot).container.unwrap();
@@ -237,7 +213,7 @@ impl PartitionTreeStrategy {
         let mut insert_pos = 0;
 
         for (i, &child) in live_children.iter().enumerate() {
-            let Some(child_slot) = self.preferred_slot_of_child(child) else {
+            let Some(child_slot) = self.preferred_slot_of_child(hub, ws_id, child) else {
                 continue;
             };
             let (lca, ordering) =
@@ -267,11 +243,10 @@ impl PartitionTreeStrategy {
         self.compute_placement(hub, ws_id);
     }
 
-    pub(super) fn release_slots_in(&mut self, hub: &HubAccess, subtree: Child) {
+    pub(super) fn release_container_slots_in(&mut self, hub: &HubAccess, subtree: Child) {
         for node in hub.children_dfs(subtree) {
-            match node {
-                Child::Window(wid) => self.release_slot(wid),
-                Child::Container(cid) => self.release_container_slot(cid),
+            if let Child::Container(cid) = node {
+                self.release_container_slot(cid);
             }
         }
     }
@@ -281,7 +256,9 @@ impl PartitionTreeStrategy {
         for _ in crate::core::bounded_loop() {
             let Some(slot) = stack.pop() else { break };
             match slot {
-                PreferredSlot::Window(id) => self.window_slots.delete(id),
+                PreferredSlot::Window(id) => {
+                    self.leaf_parents.remove(&id);
+                }
                 PreferredSlot::Container(id) => {
                     let children = self.container_slots.get(id).children.clone();
                     self.container_slots.delete(id);
@@ -301,7 +278,7 @@ impl PartitionTreeStrategy {
         self.container_slots.get_mut(slot).container = None;
     }
 
-    pub(in crate::core) fn export_workspace(
+    pub(super) fn export_tree(
         &self,
         hub: &HubAccess,
         ws_id: WorkspaceId,
@@ -351,16 +328,17 @@ impl PartitionTreeStrategy {
 
     fn build_preferred_layout_subtree(
         &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
         node: &TreeLayoutNode,
         parent: Option<PreferredContainerSlotId>,
     ) -> PreferredSlot {
         match node {
             TreeLayoutNode::Leaf(matcher) => {
-                let id = self.window_slots.allocate(PreferredWindowSlot {
-                    matcher: matcher.clone(),
-                    window: None,
-                    parent,
-                });
+                let id = hub
+                    .slots
+                    .allocate(Slot::new(matcher.clone(), ws_id, WindowMode::Tiling));
+                self.leaf_parents.insert(id, parent);
                 PreferredSlot::Window(id)
             }
             TreeLayoutNode::Container { split, children } => {
@@ -372,7 +350,7 @@ impl PartitionTreeStrategy {
                     parent,
                 });
                 for c in children {
-                    let child_slot = self.build_preferred_layout_subtree(c, Some(id));
+                    let child_slot = self.build_preferred_layout_subtree(hub, ws_id, c, Some(id));
                     child_slots.push(child_slot);
                 }
                 self.container_slots.get_mut(id).children = child_slots;
@@ -381,13 +359,16 @@ impl PartitionTreeStrategy {
         }
     }
 
-    fn preferred_slot_of_child(&self, child: Child) -> Option<PreferredSlot> {
+    fn preferred_slot_of_child(
+        &self,
+        hub: &HubAccess,
+        ws_id: WorkspaceId,
+        child: Child,
+    ) -> Option<PreferredSlot> {
         match child {
-            Child::Window(wid) => self
-                .tiling_windows
-                .get(&wid)?
-                .held_slot
-                .map(PreferredSlot::Window),
+            Child::Window(wid) => {
+                held_tiling_slot(&hub.slots, wid, ws_id).map(PreferredSlot::Window)
+            }
             Child::Container(cid) => self
                 .tiling_containers
                 .get(&cid)
@@ -451,7 +432,7 @@ impl PartitionTreeStrategy {
     fn slot_parents(&self, slot: PreferredSlot) -> Vec<PreferredContainerSlotId> {
         let mut ancestors = Vec::new();
         let mut current = match slot {
-            PreferredSlot::Window(id) => self.window_slots.get(id).parent,
+            PreferredSlot::Window(id) => self.leaf_parents[&id],
             PreferredSlot::Container(id) => self.container_slots.get(id).parent,
         };
         for _ in crate::core::bounded_loop() {
@@ -485,24 +466,6 @@ impl PartitionTreeStrategy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct PreferredWindowSlotId(usize);
-
-impl NodeId for PreferredWindowSlotId {
-    fn new(id: usize) -> Self {
-        Self(id)
-    }
-    fn get(self) -> usize {
-        self.0
-    }
-}
-
-impl std::fmt::Display for PreferredWindowSlotId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "PreferredWindowSlotId({})", self.0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct PreferredContainerSlotId(usize);
 
 impl NodeId for PreferredContainerSlotId {
@@ -517,24 +480,6 @@ impl NodeId for PreferredContainerSlotId {
 impl std::fmt::Display for PreferredContainerSlotId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "PreferredContainerSlotId({})", self.0)
-    }
-}
-
-/// A window slot in the preferred layout tree.
-#[derive(Debug, Clone)]
-pub(super) struct PreferredWindowSlot {
-    matcher: WindowMatcher,
-    pub(super) window: Option<WindowId>,
-    parent: Option<PreferredContainerSlotId>,
-}
-
-impl Node for PreferredWindowSlot {
-    type Id = PreferredWindowSlotId;
-}
-
-impl PreferredWindowSlot {
-    fn is_free_for(&self, metadata: &dyn WindowMetadata) -> bool {
-        self.window.is_none() && metadata.matches_window_matcher(&self.matcher)
     }
 }
 
@@ -554,6 +499,6 @@ impl Node for PreferredContainerSlot {
 /// Reference to a child slot within the preferred layout tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PreferredSlot {
-    Window(PreferredWindowSlotId),
+    Window(SlotId),
     Container(PreferredContainerSlotId),
 }

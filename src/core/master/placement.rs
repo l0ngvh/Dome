@@ -1,12 +1,9 @@
 use crate::core::{
     ContainerPlacement, Dimension, Length, PixelRect, TilingWindowPlacement, WindowId,
     hub::HubAccess,
-    master::{MasterStrategy, PaneDisplay, PaneKind, WindowState},
-    node::WorkspaceId,
-    strategy::{
-        TilingPlacements, container_titles, distribute_space, tab_bar_band, translate,
-        window_constraints,
-    },
+    master::{MasterStrategy, PaneDisplay, PaneKind},
+    node::{Constraints, WorkspaceId},
+    strategy::{container_titles, distribute_space, tab_bar_band, translate, window_constraints},
 };
 
 impl MasterStrategy {
@@ -22,10 +19,8 @@ impl MasterStrategy {
         let master_ratio = state.master_ratio.unwrap_or(self.master_ratio);
         let master_display = state.master.display;
         let secondary_display = state.secondary.display;
-
-        let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
-        let work_area = monitor.work_area;
-        let scale = monitor.scale;
+        let work_area = state.work_area;
+        let scale = state.scale;
         let screen_width = Length::from_pixels(work_area.width());
         let h = Length::from_pixels(work_area.height());
 
@@ -51,24 +46,21 @@ impl MasterStrategy {
         self.scroll_into_view(hub, ws_id);
     }
 
+    /// When `highlighted` is true, the placement of the workspace's most recently focused tiling
+    /// window is highlighted. Otherwise no placement is.
     pub(super) fn collect_tiling_placements(
         &self,
         hub: &HubAccess,
         ws_id: WorkspaceId,
-        focused: bool,
-    ) -> TilingPlacements {
+        highlighted: bool,
+    ) -> (Vec<TilingWindowPlacement>, Vec<ContainerPlacement>) {
         let Some(state) = self.workspaces.get(&ws_id) else {
-            return TilingPlacements {
-                windows: Vec::new(),
-                containers: Vec::new(),
-            };
+            return (Vec::new(), Vec::new());
         };
 
-        let ws = hub.workspaces.get(ws_id);
-        let monitor = hub.monitors.get(ws.monitor);
-        let screen = monitor.work_area;
-        let scale = monitor.scale;
-        let border = hub.border(ws.monitor);
+        let screen = state.work_area;
+        let scale = state.scale;
+        let border = hub.border_for_scale(scale);
 
         let master_ids = Self::pane_windows(hub, state.master.container);
         let stack_ids = Self::pane_windows(hub, state.secondary.container);
@@ -77,7 +69,7 @@ impl MasterStrategy {
         let ((master_x, master_w), (stack_x, stack_w)) =
             Self::split_widths(&master_ids, &stack_ids, screen_width, master_ratio);
 
-        let focused_id = if focused && !ws.is_float_focused {
+        let focused_id = if highlighted {
             state.focused_window()
         } else {
             None
@@ -162,10 +154,7 @@ impl MasterStrategy {
             }
         }
 
-        TilingPlacements {
-            windows,
-            containers,
-        }
+        (windows, containers)
     }
 
     fn do_pane_layout(
@@ -182,7 +171,7 @@ impl MasterStrategy {
         let constraints: Vec<(Length, Length)> = ids
             .iter()
             .map(|&id| {
-                let c = window_constraints(hub, &self.size_constraints, id);
+                let c = self.effective_constraints(hub, id);
                 (c.min_height, c.max_height)
             })
             .collect();
@@ -194,17 +183,14 @@ impl MasterStrategy {
             Length::ZERO
         };
         for (i, &id) in ids.iter().enumerate() {
-            let c = window_constraints(hub, &self.size_constraints, id);
+            let c = self.effective_constraints(hub, id);
             let (w, x_off) = apply_max_constraint(c.max_width, pane_width);
             let (slot_h, y_off) = apply_max_constraint(c.max_height, heights[i]);
             let dim = Dimension::new(x_start + x_off, y + y_off, w, slot_h);
             self.window_states
                 .entry(id)
                 .and_modify(|s| s.dimension = dim)
-                .or_insert(WindowState {
-                    held_slot: None,
-                    dimension: dim,
-                });
+                .or_insert(WindowState { dimension: dim });
             y += heights[i];
         }
     }
@@ -245,7 +231,7 @@ impl MasterStrategy {
         // though only the active one renders. The content box has zero height when
         // the tab bar is taller than the screen, so each window keeps its min height.
         for &wid in ids {
-            let c = window_constraints(hub, &self.size_constraints, wid);
+            let c = self.effective_constraints(hub, wid);
             let adjusted_w = c.min_width.max(pane_width);
             let (w, x_off) = apply_max_constraint(c.max_width, adjusted_w);
             let adjusted_h = c.min_height.max(content_h);
@@ -254,43 +240,59 @@ impl MasterStrategy {
             self.window_states
                 .entry(wid)
                 .and_modify(|s| s.dimension = dim)
-                .or_insert(WindowState {
-                    held_slot: None,
-                    dimension: dim,
-                });
+                .or_insert(WindowState { dimension: dim });
         }
     }
 
-    fn clamp_scroll(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
+    fn tab_bar_length(&self, scale: f32) -> Length {
+        Length::from_pixels(self.tab_bar_height).to_unit(scale)
+    }
+
+    pub(super) fn pane_content_height(
+        &self,
+        hub: &HubAccess,
+        pane_windows: &[WindowId],
+        pane_height: Length,
+    ) -> Length {
+        let heights = self.pane_slot_heights(hub, pane_windows, pane_height);
+        heights.iter().copied().sum()
+    }
+
+    pub(super) fn pane_slot_heights(
+        &self,
+        hub: &HubAccess,
+        pane_windows: &[WindowId],
+        pane_height: Length,
+    ) -> Vec<Length> {
+        if pane_windows.is_empty() {
+            return Vec::new();
+        }
+        let constraints: Vec<(Length, Length)> = pane_windows
+            .iter()
+            .map(|&id| {
+                let c = self.effective_constraints(hub, id);
+                (c.min_height, c.max_height)
+            })
+            .collect();
+        distribute_space(&constraints, pane_height)
+    }
+
+    /// Resolves the window's constraints against the work area and scale of the workspace it
+    /// sits on.
+    fn effective_constraints(&self, hub: &HubAccess, id: WindowId) -> Constraints {
+        let ws_id = hub
+            .windows
+            .get(id)
+            .workspace()
+            .expect("tiling window has a workspace");
         let state = self.workspaces.get(&ws_id).unwrap();
-        let pane_height = Length::from_pixels(
-            hub.monitors
-                .get(hub.workspaces.get(ws_id).monitor)
-                .work_area
-                .height(),
-        );
-
-        let master_ids: Vec<WindowId> = Self::pane_windows(hub, state.master.container);
-        let master_tabbed = state.master.display == PaneDisplay::Tabbed && master_ids.len() >= 2;
-        let master_max = if !master_ids.is_empty() && !master_tabbed {
-            let content_h = self.pane_content_height(hub, &master_ids, pane_height);
-            (content_h - pane_height).max(Length::ZERO)
-        } else {
-            Length::ZERO
-        };
-
-        let stack_ids: Vec<WindowId> = Self::pane_windows(hub, state.secondary.container);
-        let stack_tabbed = state.secondary.display == PaneDisplay::Tabbed && stack_ids.len() >= 2;
-        let stack_max = if !stack_ids.is_empty() && !stack_tabbed {
-            let content_h = self.pane_content_height(hub, &stack_ids, pane_height);
-            (content_h - pane_height).max(Length::ZERO)
-        } else {
-            Length::ZERO
-        };
-
-        let state = self.workspaces.get_mut(&ws_id).unwrap();
-        state.master.y_offset = state.master.y_offset.clamp(Length::ZERO, master_max);
-        state.secondary.y_offset = state.secondary.y_offset.clamp(Length::ZERO, stack_max);
+        window_constraints(
+            hub,
+            &self.size_constraints,
+            id,
+            state.work_area,
+            state.scale,
+        )
     }
 }
 
@@ -302,4 +304,9 @@ fn apply_max_constraint(max: Length, slot_extent: Length) -> (Length, Length) {
     };
     let offset = (slot_extent - size) / 2.0;
     (size, offset.max(Length::ZERO))
+}
+
+#[derive(Debug)]
+pub(super) struct WindowState {
+    pub(super) dimension: Dimension,
 }

@@ -191,15 +191,16 @@ fn focus_and_move_noop() {
 
     assert_eq!(snapshot(&hub), before);
 
-    // Nothing renders while the float holds focus, though master does hoist
-    // focus_history underneath.
     let mut hub = TestHubBuilder::new()
         .with_tiling(
             TilingConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_float(vec![titled_matcher("w17")])
                 .build(),
         )
+        .with_preferred_layout([LayoutWorkspaceConfigBuilder::new("0")
+            .with_strategy(Strategy::Master)
+            .with_float(vec![titled_matcher("w17")])
+            .build()])
         .build();
     hub.insert_window(titled("w18"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w19"), default_rect(), WindowRestrictions::None);

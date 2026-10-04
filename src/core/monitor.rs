@@ -1,7 +1,7 @@
 use super::allocator::{Node, NodeId};
 use super::hub::{Hub, RestrictedAction};
 use super::node::{Dimension, Length, Logical, MonitorId, PixelRect, Pixels, WorkspaceId};
-use super::workspace::{Attachment, Workspace};
+use super::workspace::Attachment;
 use crate::config::lua::deserializer::{FromLuaValue, LoadContext, as_table};
 
 #[derive(Debug, Clone)]
@@ -150,11 +150,7 @@ impl Hub {
         let target_ws = self.access.monitors.get(target_id).active_workspace;
         tracing::debug!("Moving to monitor");
         let current_ws = self.current_workspace();
-        if let Some(window_id) = self.focused_window(current_ws) {
-            self.move_child_to_workspace_with_id(window_id, target_ws);
-        } else {
-            self.move_focused_across_workspaces(current_ws, target_ws);
-        }
+        self.move_focused_across_workspaces(current_ws, target_ws);
     }
 
     pub(crate) fn add_monitor(&mut self, reported: ReportedMonitor) -> MonitorId {
@@ -188,6 +184,8 @@ impl Hub {
         // Ordered by name so the choice below is deterministic, not allocator order.
         returning.sort_by_key(|ws_id| self.access.workspaces.get(*ws_id).name.clone());
 
+        let host = self.access.monitors.get(monitor_id);
+        let (work_area, scale) = (host.work_area, host.scale);
         for &ws_id in &returning {
             let ws = self.access.workspaces.get_mut(ws_id);
             // While parked, `monitor` still points at the rental host. The
@@ -195,9 +193,12 @@ impl Hub {
             let previous_host = ws.monitor;
             ws.attachment = Attachment::Attached;
             ws.monitor = monitor_id;
-            self.strategies
-                .for_workspace_mut(ws_id)
-                .compute_placement(&self.access, ws_id);
+            self.strategies.for_workspace_mut(ws_id).update_work_area(
+                &self.access,
+                ws_id,
+                work_area,
+                scale,
+            );
             // If the old host's active pointer named this workspace, it now
             // dangles. Fall it back to a workspace the host still owns.
             if self.access.monitors.get(previous_host).active_workspace == ws_id {
@@ -225,25 +226,13 @@ impl Hub {
         // windows.
         let returning_active = returning
             .iter()
-            .find(|&&ws_id| {
-                let ws = self.access.workspaces.get(ws_id);
-                self.count_workspace_windows(ws_id, ws) > 0
-            })
+            .find(|&&ws_id| self.workspace_has_windows(ws_id))
             .or(returning.first())
             .copied();
 
         let active = match returning_active {
             Some(ws_id) => ws_id,
-            None => {
-                let workspace_name = "0".to_string();
-                let ws_id = self
-                    .access
-                    .workspaces
-                    .allocate(Workspace::new(workspace_name.clone(), monitor_id));
-                self.strategies.register(&mut self.access, ws_id);
-                self.load_entries(ws_id);
-                ws_id
-            }
+            None => self.create_workspace("0".to_string(), monitor_id),
         };
         self.access.monitors.get_mut(monitor_id).active_workspace = active;
 
@@ -311,6 +300,8 @@ impl Hub {
     }
 
     fn compute_monitor_placements(&mut self, monitor_id: MonitorId) {
+        let host = self.access.monitors.get(monitor_id);
+        let (work_area, scale) = (host.work_area, host.scale);
         let ws_ids: Vec<WorkspaceId> = self
             .access
             .workspaces
@@ -319,9 +310,12 @@ impl Hub {
             .filter(|&ws_id| self.access.workspaces.get(ws_id).monitor == monitor_id)
             .collect();
         for ws_id in ws_ids {
-            self.strategies
-                .for_workspace_mut(ws_id)
-                .compute_placement(&self.access, ws_id);
+            self.strategies.for_workspace_mut(ws_id).update_work_area(
+                &self.access,
+                ws_id,
+                work_area,
+                scale,
+            );
         }
     }
 
@@ -352,21 +346,25 @@ impl Hub {
             .filter(|&ws_id| self.access.workspaces.get(ws_id).monitor == monitor_id)
             .collect();
 
+        let host = self.access.monitors.get(primary);
+        let (work_area, scale) = (host.work_area, host.scale);
         // Every workspace here is Attached. A parked one rents to the primary,
         // which is never removed, so the frozen origin is always this monitor's
         // own name.
         for ws_id in ws_on_this {
             let ws = self.access.workspaces.get_mut(ws_id);
-            // Rent to the primary. A monitor stays detached for long essentially
-            // only on a laptop undock, so the primary is the display in front of
-            // the user.
+            // A monitor stays detached for long essentially only on a laptop
+            // undock, so the primary is the display in front of the user.
             ws.monitor = primary;
             ws.attachment = Attachment::Parked {
                 origin: this_origin.clone(),
             };
-            self.strategies
-                .for_workspace_mut(ws_id)
-                .compute_placement(&self.access, ws_id);
+            self.strategies.for_workspace_mut(ws_id).update_work_area(
+                &self.access,
+                ws_id,
+                work_area,
+                scale,
+            );
         }
 
         // Safe to delete now, because no workspace's `monitor` field points at it.

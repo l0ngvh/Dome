@@ -2,19 +2,11 @@ use crate::action::{MonitorDetails, MonitorFrame, WorkspaceInfo, WorkspaceState}
 use crate::config::lua::test_support::{loaded_runtime, test_hub_with};
 use crate::core::MonitorSelector;
 use crate::core::ReportedMonitor;
-use crate::core::TilingConfig;
 use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    STACKED_DELL_RESERVED_AREA, TilingConfigBuilder, default_rect, reported_monitor, setup,
-    setup_with_tiling, titled, titled_matcher, work_area_at,
+    STACKED_DELL_RESERVED_AREA, default_rect, reported_monitor, setup, setup_with_modes, titled,
+    work_area_at,
 };
-
-/// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn tiling_floating(titles: &[&str]) -> TilingConfig {
-    TilingConfigBuilder::new()
-        .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
-        .build()
-}
 
 #[test]
 fn empty_hub() {
@@ -149,7 +141,7 @@ fn monitor_details_json_shape() {
 
 #[test]
 fn hidden_workspace_with_only_floats_is_listed() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w12", "w13"]));
+    let mut hub = setup_with_modes("0", &["w12", "w13"], &[]);
     hub.insert_window(
         titled("w12"),
         PixelRect::new(0, 0, 200, 100),

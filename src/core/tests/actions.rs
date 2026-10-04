@@ -1,8 +1,10 @@
 use crate::action::{Action, Actions, WindowId};
 use crate::config::lua::test_support::{RecordingEffects, RecordingKeymap};
-use crate::core::Hub;
 use crate::core::node::WindowRestrictions;
-use crate::core::tests::{default_rect, setup, titled};
+use crate::core::tests::{
+    TestHubBuilder, TilingConfigBuilder, default_rect, setup, snapshot, titled,
+};
+use crate::core::{Hub, Strategy};
 
 fn run(hub: &mut Hub, actions: &[&str]) -> (RecordingEffects, RecordingKeymap) {
     let actions = Actions::new(actions.iter().map(|s| s.parse().unwrap()).collect());
@@ -64,4 +66,42 @@ fn tiling_verbs_drive_the_hub() {
         .expect("one workspace is focused");
     assert_eq!(focused.name, "3");
     assert!(effects.executed.is_empty() && effects.closed.is_empty() && !effects.exited);
+}
+
+#[test]
+fn master_verbs_do_nothing_on_a_partition_tree_workspace() {
+    let mut hub = setup();
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    let before = snapshot(&hub);
+
+    for verb in [
+        "master grow",
+        "master shrink",
+        "master more",
+        "master fewer",
+    ] {
+        run(&mut hub, &[verb]);
+        assert_eq!(snapshot(&hub), before, "{verb}");
+    }
+}
+
+#[test]
+fn partition_tree_verbs_do_nothing_on_a_master_workspace() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
+    let before = snapshot(&hub);
+
+    for verb in ["toggle spawn", "toggle direction", "focus parent"] {
+        run(&mut hub, &[verb]);
+        assert_eq!(snapshot(&hub), before, "{verb}");
+    }
 }

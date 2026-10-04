@@ -22,10 +22,6 @@ return function(mod1)
 		font_family = nil,
 		---@type WindowMatcher[]
 		ignore = {},
-		---@type WindowMatcher[]
-		float = {},
-		---@type WindowMatcher[]
-		fullscreen = {},
 		-- Extra variables for actions.execute commands.
 		---@type table<string, string>
 		env = {},

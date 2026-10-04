@@ -1,21 +1,31 @@
+use crate::core::allocator::NodeId;
 use crate::core::hub::HubAccess;
+use crate::core::monitor::Monitor;
 use crate::core::node::Constraints;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WindowId, WorkspaceId};
 use crate::core::partition_tree::{Child, Parent};
-use crate::core::strategy::{VALIDATION_TOLERANCE, ValidateStrategy, window_constraints};
+use crate::core::strategy::{
+    Reachable, VALIDATION_TOLERANCE, ValidateStrategy, validate_display_modes, window_constraints,
+};
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::PartitionTreeStrategy;
-use super::preferred_layout::PreferredSlot;
+use super::preferred_layout::{PreferredContainerSlotId, PreferredSlot};
+use crate::core::slot::{SlotId, tiling_slots_by_workspace};
 
 impl ValidateStrategy for PartitionTreeStrategy {
-    fn validate(&self, hub: &HubAccess) -> FxHashSet<ContainerId> {
+    fn validate(&self, hub: &HubAccess) -> Reachable {
         let mut reachable: FxHashSet<ContainerId> = FxHashSet::default();
-        for workspace_id in hub.workspaces.sorted_ids() {
-            let root = self.workspaces.get(&workspace_id).and_then(|s| s.root);
-            let mut tree_windows: FxHashSet<WindowId> = FxHashSet::default();
-            if let Some(root) = root {
+        let mut in_trees: FxHashSet<WindowId> = FxHashSet::default();
+        let mut windows: FxHashMap<WorkspaceId, Vec<WindowId>> = FxHashMap::default();
+        let mut workspace_ids: Vec<WorkspaceId> = self.workspaces.keys().copied().collect();
+        workspace_ids.sort_by_key(|id| id.get());
+        for workspace_id in workspace_ids {
+            self.validate_layout_inputs(hub, workspace_id);
+            let state = &self.workspaces[&workspace_id];
+            let mut tree_windows: Vec<WindowId> = Vec::new();
+            if let Some(root) = state.root {
                 // Hand-rolled DFS kept because the walk threads expected_parent
                 // derived from the traversal structure. Using children_dfs plus
                 // parent would check the parent field against itself.
@@ -26,7 +36,7 @@ impl ValidateStrategy for PartitionTreeStrategy {
                     };
                     match child {
                         Child::Window(wid) => {
-                            tree_windows.insert(wid);
+                            tree_windows.push(wid);
                             self.validate_window(hub, wid, expected_parent, workspace_id)
                         }
                         Child::Container(cid) => {
@@ -42,20 +52,49 @@ impl ValidateStrategy for PartitionTreeStrategy {
                     }
                 }
             }
-            self.validate_workspace_focus(hub, workspace_id, &tree_windows);
+            self.validate_workspace_focus(
+                hub,
+                workspace_id,
+                &tree_windows.iter().copied().collect(),
+            );
+            validate_display_modes(
+                hub,
+                workspace_id,
+                &tree_windows,
+                &state.float_windows,
+                &state.fullscreen_windows,
+            );
+            in_trees.extend(tree_windows.iter().copied());
+            let mut all = tree_windows;
+            all.extend(state.float_windows.windows());
+            all.extend(state.fullscreen_windows.windows());
+            windows.insert(workspace_id, all);
         }
         self.validate_container_arena(&reachable);
-        self.validate_leaf_holders();
-        self.validate_slot_arena();
-        reachable
+        self.validate_window_arena(&in_trees);
+        self.validate_preferred_layouts(hub);
+        Reachable {
+            containers: reachable,
+            windows,
+        }
     }
 }
 
 impl PartitionTreeStrategy {
+    fn validate_layout_inputs(&self, hub: &HubAccess, workspace_id: WorkspaceId) {
+        let Some(state) = self.workspaces.get(&workspace_id) else {
+            return;
+        };
+        let host = hub.monitors.get(hub.workspaces.get(workspace_id).monitor);
+        assert_eq!(
+            (state.work_area, state.scale),
+            (host.work_area, host.scale),
+            "Workspace {workspace_id}: layout work area and scale differ from the host monitor's"
+        );
+    }
+
     /// Validate workspace focus invariants:
-    /// - `is_float_focused` is false when `float_windows` is empty
-    /// - `focused_tiling` points to a tiling-mode window (not float/fullscreen)
-    /// - `root.is_some()` implies `focused_tiling.is_some()`
+    /// - `root` and `focused_tiling` are both set or both unset
     /// - `focus_history` is a permutation of the workspace's tiling windows
     /// - a focused window is the front of `focus_history`
     /// - every tabbed ancestor of `focused_tiling` has it as the active tab
@@ -65,21 +104,11 @@ impl PartitionTreeStrategy {
         workspace_id: WorkspaceId,
         tree_windows: &FxHashSet<WindowId>,
     ) {
-        use crate::core::node::DisplayMode;
-
         let focused_tiling = self
             .workspaces
             .get(&workspace_id)
             .and_then(|s| s.focused_tiling);
         let root = self.workspaces.get(&workspace_id).and_then(|s| s.root);
-
-        if let Some(Child::Window(wid)) = focused_tiling {
-            assert_eq!(
-                hub.windows.get(wid).mode,
-                DisplayMode::Tiling,
-                "Workspace {workspace_id}: focused_tiling points to non-tiling window {wid}"
-            );
-        }
 
         if let Some(child) = focused_tiling {
             assert!(
@@ -159,48 +188,58 @@ impl PartitionTreeStrategy {
         );
     }
 
-    fn validate_leaf_holders(&self) {
-        for leaf in self.window_slots.sorted_ids() {
-            let Some(wid) = self.window_slots.get(leaf).window else {
-                continue;
-            };
-            assert_eq!(
-                self.tiling_windows
-                    .get(&wid)
-                    .and_then(|data| data.held_slot),
-                Some(leaf),
-                "{leaf} holds window {wid}, which does not hold it"
-            );
-        }
+    fn validate_window_arena(&self, in_trees: &FxHashSet<WindowId>) {
+        let with_state: FxHashSet<WindowId> = self.tiling_windows.keys().copied().collect();
+        assert_eq!(
+            sorted_difference(&with_state, in_trees),
+            Vec::new(),
+            "Windows holding tiling state but in no workspace tree, so their state leaked"
+        );
     }
 
-    fn validate_slot_arena(&self) {
-        let mut leaves = FxHashSet::default();
+    fn validate_preferred_layouts(&self, hub: &HubAccess) {
+        let mut leaf_count = 0;
         let mut containers = FxHashSet::default();
-        for state in self.workspaces.values() {
-            let mut stack: Vec<PreferredSlot> = state.preferred_root.into_iter().collect();
+        let mut tiling_slots = tiling_slots_by_workspace(&hub.slots);
+        for (&ws_id, state) in &self.workspaces {
+            let mut leaves: Vec<SlotId> = Vec::new();
+            let mut stack: Vec<(PreferredSlot, Option<PreferredContainerSlotId>)> = state
+                .preferred_root
+                .map(|root| (root, None))
+                .into_iter()
+                .collect();
             for _ in crate::core::bounded_loop() {
-                let Some(slot) = stack.pop() else { break };
+                let Some((slot, parent)) = stack.pop() else {
+                    break;
+                };
                 match slot {
                     PreferredSlot::Window(id) => {
-                        leaves.insert(id);
+                        assert_eq!(
+                            self.leaf_parents.get(&id),
+                            Some(&parent),
+                            "workspace {ws_id}: leaf {id:?} records the wrong parent"
+                        );
+                        leaves.push(id);
                     }
                     PreferredSlot::Container(id) => {
                         containers.insert(id);
-                        stack.extend(self.container_slots.get(id).children.iter().copied());
+                        let children = &self.container_slots.get(id).children;
+                        stack.extend(children.iter().rev().map(|&c| (c, Some(id))));
                     }
                 }
             }
+            leaf_count += leaves.len();
+            assert_eq!(
+                leaves,
+                tiling_slots.remove(&ws_id).unwrap_or_default(),
+                "workspace {ws_id}: the preferred layout must hold each tiling slot of the \
+                 workspace once, in arena order"
+            );
         }
-        let leaked: Vec<_> = self
-            .window_slots
-            .sorted_ids()
-            .into_iter()
-            .filter(|id| !leaves.contains(id))
-            .collect();
-        assert!(
-            leaked.is_empty(),
-            "Leaves reachable from no preferred root: {leaked:?}"
+        assert_eq!(
+            self.leaf_parents.len(),
+            leaf_count,
+            "Leaf parents recorded for leaves reachable from no preferred root"
         );
         let leaked: Vec<_> = self
             .container_slots
@@ -229,7 +268,7 @@ impl PartitionTreeStrategy {
             "Container {cid} has wrong parent"
         );
         assert_eq!(
-            data.workspace, workspace_id,
+            container.workspace, workspace_id,
             "Container {cid} has wrong workspace"
         );
         assert!(
@@ -269,11 +308,19 @@ impl PartitionTreeStrategy {
         }
     }
 
-    fn child_constraints(&self, hub: &HubAccess, child: Child) -> (Dimension, Constraints) {
+    fn child_constraints(
+        &self,
+        hub: &HubAccess,
+        child: Child,
+        host: &Monitor,
+    ) -> (Dimension, Constraints) {
         let dim = self.child_dimension(child);
 
         match child {
-            Child::Window(wid) => (dim, window_constraints(hub, &self.size_constraints, wid)),
+            Child::Window(wid) => (
+                dim,
+                window_constraints(hub, &self.size_constraints, wid, host.work_area, host.scale),
+            ),
             Child::Container(id) => {
                 let (min_w, min_h) = self.tiling_containers.get(&id).unwrap().min_size();
                 (
@@ -292,10 +339,15 @@ impl PartitionTreeStrategy {
     fn validate_container_dimensions(&self, hub: &HubAccess, cid: ContainerId) {
         let data = self.tiling_containers.get(&cid).unwrap();
         let dim = data.dimension;
+        let host = hub.monitors.get(
+            hub.workspaces
+                .get(hub.containers.get(cid).workspace)
+                .monitor,
+        );
         let children = hub.containers.get(cid).children();
         let constraints: Vec<_> = children
             .iter()
-            .map(|&c| self.child_constraints(hub, c))
+            .map(|&c| self.child_constraints(hub, c, host))
             .collect();
 
         match data.direction() {
@@ -340,11 +392,7 @@ impl PartitionTreeStrategy {
                 }
             }
             None => {
-                let scale = hub
-                    .monitors
-                    .get(hub.workspaces.get(data.workspace).monitor)
-                    .scale;
-                let expected_height = dim.height - self.tab_bar_length(scale);
+                let expected_height = dim.height - self.tab_bar_length(host.scale);
                 for (i, (child_dim, c)) in constraints.iter().enumerate() {
                     let allows_smaller_w =
                         c.max_width.value() > 0.0 && c.max_width.value() < dim.width.value();
@@ -391,11 +439,6 @@ impl PartitionTreeStrategy {
         workspace_id: WorkspaceId,
     ) {
         let window = hub.windows.get(wid);
-        assert!(!window.is_float(), "Window {wid} in tree but mode is Float");
-        assert!(
-            !window.is_fullscreen(),
-            "Window {wid} in tree but mode is Fullscreen"
-        );
         assert!(
             !window.is_minimized(),
             "Window {wid} in tree but mode is Minimized"
@@ -411,16 +454,10 @@ impl PartitionTreeStrategy {
             Some(workspace_id),
             "Window {wid} has wrong workspace"
         );
-        if let Some(leaf) = self.tiling_windows.get(&wid).unwrap().held_slot {
-            assert_eq!(
-                self.window_slots.get(leaf).window,
-                Some(wid),
-                "Window {wid} holds {leaf}, which holds another window"
-            );
-        }
 
         let dim = self.tiling_windows.get(&wid).unwrap().dimension;
-        let c = window_constraints(hub, &self.size_constraints, wid);
+        let host = hub.monitors.get(hub.workspaces.get(workspace_id).monitor);
+        let c = window_constraints(hub, &self.size_constraints, wid, host.work_area, host.scale);
         let min_w = c.min_width.value();
         let min_h = c.min_height.value();
         let max_w = c.max_width.value();
@@ -474,11 +511,11 @@ impl PartitionTreeStrategy {
     }
 }
 
-fn sorted_difference(
-    from: &FxHashSet<ContainerId>,
-    minus: &FxHashSet<ContainerId>,
-) -> Vec<ContainerId> {
-    let mut extra: Vec<ContainerId> = from.difference(minus).copied().collect();
+fn sorted_difference<Id: Copy + Ord + std::hash::Hash>(
+    from: &FxHashSet<Id>,
+    minus: &FxHashSet<Id>,
+) -> Vec<Id> {
+    let mut extra: Vec<Id> = from.difference(minus).copied().collect();
     extra.sort_unstable();
     extra
 }

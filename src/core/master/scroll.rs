@@ -1,5 +1,5 @@
 use crate::core::{
-    Length,
+    Length, WindowId,
     hub::HubAccess,
     master::{MasterStrategy, PaneDisplay},
     node::WorkspaceId,
@@ -23,12 +23,7 @@ impl MasterStrategy {
             return;
         }
         let state = self.workspaces.get(&ws_id).unwrap();
-        let pane_height = Length::from_pixels(
-            hub.monitors
-                .get(hub.workspaces.get(ws_id).monitor)
-                .work_area
-                .height(),
-        );
+        let pane_height = Length::from_pixels(state.work_area.height());
 
         let offset = state.pane(kind).y_offset;
 
@@ -56,5 +51,32 @@ impl MasterStrategy {
 
         let state = self.workspaces.get_mut(&ws_id).unwrap();
         state.pane_mut(kind).y_offset = new_offset;
+    }
+
+    pub(super) fn clamp_scroll(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
+        let state = self.workspaces.get(&ws_id).unwrap();
+        let pane_height = Length::from_pixels(state.work_area.height());
+
+        let master_ids: Vec<WindowId> = Self::pane_windows(hub, state.master.container);
+        let master_tabbed = state.master.display == PaneDisplay::Tabbed && master_ids.len() >= 2;
+        let master_max = if !master_ids.is_empty() && !master_tabbed {
+            let content_h = self.pane_content_height(hub, &master_ids, pane_height);
+            (content_h - pane_height).max(Length::ZERO)
+        } else {
+            Length::ZERO
+        };
+
+        let stack_ids: Vec<WindowId> = Self::pane_windows(hub, state.secondary.container);
+        let stack_tabbed = state.secondary.display == PaneDisplay::Tabbed && stack_ids.len() >= 2;
+        let stack_max = if !stack_ids.is_empty() && !stack_tabbed {
+            let content_h = self.pane_content_height(hub, &stack_ids, pane_height);
+            (content_h - pane_height).max(Length::ZERO)
+        } else {
+            Length::ZERO
+        };
+
+        let state = self.workspaces.get_mut(&ws_id).unwrap();
+        state.master.y_offset = state.master.y_offset.clamp(Length::ZERO, master_max);
+        state.secondary.y_offset = state.secondary.y_offset.clamp(Length::ZERO, stack_max);
     }
 }

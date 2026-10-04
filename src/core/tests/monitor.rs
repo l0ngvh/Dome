@@ -1,31 +1,22 @@
 use insta::assert_snapshot;
 
-use super::TilingConfigBuilder;
 #[cfg(target_os = "windows")]
-use super::{PartitionTreeConfigBuilder, TestHubBuilder};
+use super::PartitionTreeConfigBuilder;
+use super::{TestHubBuilder, TilingConfigBuilder};
 use crate::action::WorkspaceState;
 use crate::config::lua::test_support::{RecordingKeymap, loaded_runtime, test_hub_with};
-use crate::core::MonitorSelector;
-#[cfg(target_os = "windows")]
-use crate::core::SizeConstraint;
-use crate::core::TilingConfig;
 #[cfg(target_os = "windows")]
 use crate::core::hub::MonitorLayout;
 #[cfg(target_os = "windows")]
 use crate::core::node::Pixels;
 use crate::core::node::{PixelRect, WindowRestrictions};
+use crate::core::{MonitorSelector, SizeConstraint, Strategy};
 
 use crate::core::tests::{
     STACKED_DELL_RESERVED_AREA, default_rect, focused_monitor_name, reported_monitor, setup,
-    setup_with_tiling, snapshot, snapshot_text, titled, titled_matcher, validate_hub, work_area_at,
+    setup_with_modes, setup_with_tiling, snapshot, snapshot_text, titled, validate_hub,
+    work_area_at,
 };
-
-/// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn tiling_floating(titles: &[&str]) -> TilingConfig {
-    TilingConfigBuilder::new()
-        .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
-        .build()
-}
 
 #[test]
 fn add_monitor_creates_workspace_on_new_monitor() {
@@ -841,6 +832,111 @@ fn update_monitor_dimension_adjusts_workspaces() {
 }
 
 #[test]
+fn percentage_max_width_follows_the_work_area_of_a_partition_tree_workspace() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
+                .with_max_width(SizeConstraint::Percent(50.0))
+                .build(),
+        )
+        .build();
+    let external = hub.add_monitor(reported_monitor(
+        "external".to_string(),
+        work_area_at(150, 0),
+        1.0,
+    ));
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    assert_snapshot!(snapshot(&hub), @r#"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00))
+      Monitor(id=MonitorId(1), name="external", screen=(x=150.00 y=0.00 w=100.00 h=30.00),
+        Window(id=WindowId(0), x=175.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
+      )
+    "#);
+
+    hub.update_monitor(
+        external,
+        reported_monitor("external".to_string(), PixelRect::new(150, 0, 200, 30), 1.0),
+        None,
+    );
+    assert_snapshot!(snapshot(&hub), @r#"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00))
+      Monitor(id=MonitorId(1), name="external", screen=(x=150.00 y=0.00 w=200.00 h=30.00),
+        Window(id=WindowId(0), x=200.00, y=0.00, w=100.00, h=30.00, highlighted, spawn=right)
+      )
+    "#);
+}
+
+#[test]
+fn percentage_max_width_follows_the_work_area_of_a_master_workspace() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .with_max_width(SizeConstraint::Percent(50.0))
+                .build(),
+        )
+        .build();
+    let external = hub.add_monitor(reported_monitor(
+        "external".to_string(),
+        work_area_at(150, 0),
+        1.0,
+    ));
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    assert_snapshot!(snapshot(&hub), @r#"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00))
+      Monitor(id=MonitorId(1), name="external", screen=(x=150.00 y=0.00 w=100.00 h=30.00),
+        Window(id=WindowId(0), x=175.00, y=0.00, w=50.00, h=30.00, highlighted)
+      )
+    "#);
+
+    hub.update_monitor(
+        external,
+        reported_monitor("external".to_string(), PixelRect::new(150, 0, 200, 30), 1.0),
+        None,
+    );
+    assert_snapshot!(snapshot(&hub), @r#"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00))
+      Monitor(id=MonitorId(1), name="external", screen=(x=150.00 y=0.00 w=200.00 h=30.00),
+        Window(id=WindowId(0), x=200.00, y=0.00, w=100.00, h=30.00, highlighted)
+      )
+    "#);
+}
+
+#[test]
+fn master_window_floats_at_its_tile_rectangle_on_another_monitor() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
+    hub.add_monitor(reported_monitor(
+        "external".to_string(),
+        work_area_at(150, 0),
+        1.0,
+    ));
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    hub.toggle_float();
+    assert_snapshot!(snapshot(&hub), @r#"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00))
+      Monitor(id=MonitorId(1), name="external", screen=(x=150.00 y=0.00 w=100.00 h=30.00),
+        Window(id=WindowId(0), x=150.00, y=0.00, w=100.00, h=30.00)
+        Window(id=WindowId(1), x=200.00, y=0.00, w=50.00, h=30.00, float, highlighted)
+      )
+    "#);
+}
+
+#[test]
 fn focus_monitor_by_direction() {
     let mut hub = setup();
     hub.insert_window(titled("w7"), default_rect(), WindowRestrictions::None);
@@ -974,13 +1070,14 @@ fn move_to_monitor_by_name() {
 
 #[test]
 fn move_float_to_monitor() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w12"]));
-    hub.insert_window(
-        titled("w12"),
-        PixelRect::new(10, 10, 50, 20),
-        WindowRestrictions::None,
-    )
-    .unwrap();
+    let mut hub = setup_with_modes("0", &["w12"], &[]);
+    let float = hub
+        .insert_window(
+            titled("w12"),
+            PixelRect::new(10, 10, 50, 20),
+            WindowRestrictions::None,
+        )
+        .unwrap();
 
     hub.add_monitor(reported_monitor(
         "external".to_string(),
@@ -995,6 +1092,13 @@ fn move_float_to_monitor() {
       Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00))
       Monitor(id=MonitorId(1), name="external", screen=(x=150.00 y=0.00 w=100.00 h=30.00))
     "#);
+
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
+    assert_eq!(
+        hub.focused_window(hub.current_workspace()),
+        Some(float),
+        "the float arrived on the external monitor"
+    );
 }
 
 #[test]
@@ -1261,15 +1365,17 @@ fn monitor_scale_multiplies_size_constraints() {
 #[cfg(target_os = "windows")]
 #[test]
 fn tabbed_band_bottom_lands_on_the_content_top() {
-    let mut hub = setup_with_tiling(
-        TilingConfigBuilder::new()
-            .with_partition_tree_config(
-                PartitionTreeConfigBuilder::new()
-                    .with_tab_bar_height(Pixels::new(25))
-                    .build(),
-            )
-            .build(),
-    );
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
+                .with_partition_tree_config(
+                    PartitionTreeConfigBuilder::new()
+                        .with_tab_bar_height(Pixels::new(25))
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
     let monitor_id = hub.primary_monitor();
     hub.update_monitor(
         monitor_id,

@@ -18,8 +18,6 @@ config.partition_tree = { tab_bar_height = 24, automatic_tiling = true }
 config.master = { master_ratio = 0.5, master_count = 1 }
 config.font_size = 14.0
 config.font_family = dome.env.DOME_FONT or "PingFang SC"
-config.float = { { process = "calculator.exe" } }
-config.fullscreen = { { process = "slides.exe" } }
 config.env = { EDITOR = "nvim" }
 config.reserved_area = function(monitor)
   if monitor.name == "Built-in Retina Display" then
