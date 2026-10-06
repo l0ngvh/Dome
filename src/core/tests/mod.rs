@@ -1,8 +1,10 @@
+mod action_targets;
 mod actions;
 mod export;
 mod float_window;
 mod focus_workspace;
 mod fullscreen;
+mod keyboard_focus;
 mod master;
 mod minimize;
 mod monitor;
@@ -14,6 +16,7 @@ mod query;
 mod set_focus;
 mod smoke;
 mod strategy_switch;
+mod tab_click;
 
 use std::collections::HashSet;
 
@@ -24,6 +27,7 @@ use crate::core::TilingConfig;
 use crate::core::hub::{Hub, MonitorLayout};
 use crate::core::master::PaneConfig;
 use crate::core::node::{Direction, Logical, Pixels, WindowId};
+use crate::core::slot::held_slot;
 use crate::core::strategy::StrategyAction;
 use crate::core::{
     ContainerPlacement, FloatWindowPlacement, PixelRect, ReportedMonitor, TilingWindowPlacement,
@@ -656,6 +660,14 @@ impl Hub {
     pub(crate) fn toggle_container_layout(&mut self) {
         self.handle_tiling_action(StrategyAction::ToggleContainerLayout);
     }
+
+    pub(crate) fn toggle_float(&mut self) {
+        self.handle_tiling_action(StrategyAction::ToggleFloat);
+    }
+
+    pub(crate) fn toggle_fullscreen(&mut self) {
+        self.handle_tiling_action(StrategyAction::ToggleFullscreen);
+    }
 }
 
 pub(super) fn setup_logger_with_level(level: &str) {
@@ -741,8 +753,6 @@ struct TilingConfigBuilder {
     master: MasterConfig,
     partition_tree: PartitionTreeConfig,
     size_constraints: SizeConstraints,
-    float: Vec<WindowMatcher>,
-    fullscreen: Vec<WindowMatcher>,
 }
 
 impl TilingConfigBuilder {
@@ -764,8 +774,6 @@ impl TilingConfigBuilder {
                 maximum_width: SizeConstraint::Pixels(Pixels::new(0)),
                 maximum_height: SizeConstraint::Pixels(Pixels::new(0)),
             },
-            float: vec![],
-            fullscreen: vec![],
         }
     }
     fn with_strategy(self, strategy: Strategy) -> Self {
@@ -830,14 +838,6 @@ impl TilingConfigBuilder {
         }
     }
 
-    fn with_float(self, float: Vec<WindowMatcher>) -> Self {
-        Self { float, ..self }
-    }
-
-    fn with_fullscreen(self, fullscreen: Vec<WindowMatcher>) -> Self {
-        Self { fullscreen, ..self }
-    }
-
     fn build(self) -> TilingConfig {
         TilingConfig {
             layout: self.strategy,
@@ -845,8 +845,6 @@ impl TilingConfigBuilder {
             partition_tree: self.partition_tree,
             master: self.master,
             size_constraints: self.size_constraints,
-            float: self.float,
-            fullscreen: self.fullscreen,
             ignore: Vec::new(),
         }
     }
@@ -1045,6 +1043,29 @@ pub(super) fn setup_with_tiling(tiling: TilingConfig) -> Hub {
     TestHubBuilder::new().with_tiling(tiling).build()
 }
 
+/// Puts float and fullscreen matchers on `workspace` of the primary monitor. The matchers take
+/// exact titles, so a test can still open tiling windows under other `wN` titles.
+pub(super) fn setup_with_modes(workspace: &str, floats: &[&str], fullscreens: &[&str]) -> Hub {
+    setup_modes_on(Strategy::PartitionTree, workspace, floats, fullscreens)
+}
+
+/// `setup_with_modes` with the workspace running `strategy`.
+pub(super) fn setup_modes_on(
+    strategy: Strategy,
+    workspace: &str,
+    floats: &[&str],
+    fullscreens: &[&str],
+) -> Hub {
+    setup_logger_with_level("warn");
+    TestHubBuilder::new()
+        .with_preferred_layout([LayoutWorkspaceConfigBuilder::new(workspace)
+            .with_strategy(strategy)
+            .with_float(floats.iter().map(|t| titled_matcher(t)).collect())
+            .with_fullscreen(fullscreens.iter().map(|t| titled_matcher(t)).collect())
+            .build()])
+        .build()
+}
+
 pub(super) fn titled_matcher(title: &str) -> WindowMatcher {
     WindowMatcher {
         title: Some(title.to_string()),
@@ -1129,6 +1150,27 @@ pub(crate) fn parse_exported_layout(path: &str) -> PreferredLayouts {
     let mut cx = LoadContext::new();
     PreferredLayouts::from_lua_value(&value, &mut cx)
         .expect("exported layout.lua reads as the layout vocabulary")
+}
+
+/// Asserts that the windows sit one on each named workspace, in any order, and that each
+/// holds a slot of the workspace it sits on.
+pub(super) fn assert_one_window_per_workspace(hub: &Hub, windows: &[WindowId], names: &[&str]) {
+    let homes: HashSet<String> = windows
+        .iter()
+        .map(|&window_id| {
+            let ws_id = hub.access.windows.get(window_id).workspace();
+            let slot_ws_id = held_slot(&hub.access.slots, window_id)
+                .map(|id| hub.access.slots.get(id).workspace);
+            assert_eq!(
+                slot_ws_id, ws_id,
+                "{window_id} holds no slot of the workspace it sits on"
+            );
+            let ws_id = ws_id.expect("a window that holds a slot has a workspace");
+            hub.access.workspaces.get(ws_id).name.clone()
+        })
+        .collect();
+    let expected: HashSet<String> = names.iter().map(|name| name.to_string()).collect();
+    assert_eq!(homes, expected);
 }
 
 pub(super) fn save_then_apply(hub: &mut Hub) {

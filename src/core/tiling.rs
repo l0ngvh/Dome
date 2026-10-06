@@ -15,8 +15,6 @@ pub(crate) struct TilingConfig {
     pub(crate) partition_tree: PartitionTreeConfig,
     pub(crate) master: MasterConfig,
     pub(crate) size_constraints: SizeConstraints,
-    pub(crate) float: Vec<WindowMatcher>,
-    pub(crate) fullscreen: Vec<WindowMatcher>,
     pub(crate) ignore: Vec<WindowMatcher>,
 }
 

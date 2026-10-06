@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use super::Hub;
 use super::node::WorkspaceId;
-use super::{Hub, WindowId};
 use crate::core::PaneDisplay;
 use crate::core::master::PaneConfig;
 use crate::core::{
@@ -10,19 +10,6 @@ use crate::core::{
 };
 
 impl Hub {
-    /// Synthesises one matcher per window from its live metadata. A window that a
-    /// rule placed is re-synthesised too, so a general rule expands into one
-    /// concrete matcher per matched window on export.
-    pub(super) fn synthesize_display_matchers(
-        &self,
-        window_ids: &[WindowId],
-    ) -> Vec<WindowMatcher> {
-        window_ids
-            .iter()
-            .map(|&wid| self.access.windows.get(wid).metadata.to_window_matcher())
-            .collect()
-    }
-
     /// Returns the in-memory layouts with each monitor that has a live workspace
     /// rewritten from the live state. A monitor with no live workspace keeps its
     /// entries, so a file written on the laptop still carries the desktop's layout.

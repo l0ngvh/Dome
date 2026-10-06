@@ -286,6 +286,21 @@ fn config_recovers_from_unknown_strategy() {
 }
 
 #[test]
+fn config_ignores_the_removed_float_and_fullscreen_lists() {
+    // Both configs set `layout = "master"`, so a reader that dropped the whole table over the
+    // removed keys would leave `with_lists` on the default strategy and fail the comparison.
+    let with_lists = config_from(
+        r#"return {
+  layout = "master",
+  float = { { app = "Calculator" } },
+  fullscreen = { { app = "Steam" } },
+}"#,
+    );
+    let without_lists = config_from(r#"return { layout = "master" }"#);
+    assert_eq!(with_lists.tiling, without_lists.tiling);
+}
+
+#[test]
 fn config_load_parses_root_schema() {
     let config = config_from(
         r#"return {

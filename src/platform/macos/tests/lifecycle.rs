@@ -173,10 +173,11 @@ fn render_frame_focused_container_after_focus_parent() {
     );
     send(&mut dome, "focus parent");
 
-    // After focus_parent, focused_tiling_window() returns None (container highlighted),
-    // so the platform receives focused_window: None and focuses the overlay.
     let state = macos.last_scene_state();
-    assert!(state.focused_window.is_none());
+    assert!(
+        state.focused_window.is_none(),
+        "the highlighted container holds focus, so no window does"
+    );
 }
 
 #[test]

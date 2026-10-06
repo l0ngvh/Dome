@@ -245,7 +245,7 @@ fn detach_keeps_matched_secondary_pinned() {
 }
 
 #[test]
-fn detach_focused_child_refills_master() {
+fn moving_the_master_window_away_refills_master() {
     let mut hub = TestHubBuilder::new()
         .with_tiling(
             TilingConfigBuilder::new()

@@ -41,6 +41,10 @@ impl<T: std::fmt::Debug + Node> Allocator<T> {
             .unwrap_or_else(|| panic!("Node {id:?} not found or was deleted"))
     }
 
+    pub(super) fn contains(&self, id: T::Id) -> bool {
+        self.storage.contains_key(&id)
+    }
+
     /// Sorted so iteration order stays deterministic regardless of the map's hasher.
     pub(super) fn sorted_ids(&self) -> Vec<T::Id> {
         let mut ids: Vec<T::Id> = self.storage.keys().copied().collect();
@@ -53,6 +57,10 @@ impl<T: std::fmt::Debug + Node> Allocator<T> {
             .iter()
             .find(|(_, node)| f(node))
             .map(|(id, _)| *id)
+    }
+
+    pub(super) fn retain(&mut self, keep: impl Fn(&T) -> bool) {
+        self.storage.retain(|_, node| keep(node));
     }
 }
 

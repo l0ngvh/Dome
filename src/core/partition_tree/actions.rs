@@ -5,23 +5,14 @@ use crate::core::partition_tree::{Child, Parent};
 use super::PartitionTreeStrategy;
 
 impl PartitionTreeStrategy {
-    pub(super) fn focused_child(&self, hub: &HubAccess) -> Option<Child> {
-        let ws_id = hub.monitors.get(hub.focused_monitor).active_workspace;
-        self.workspaces.get(&ws_id).and_then(|s| s.focused_tiling)
-    }
-
-    pub(super) fn focused_child_in(&self, _hub: &HubAccess, ws_id: WorkspaceId) -> Option<Child> {
-        self.workspaces.get(&ws_id).and_then(|s| s.focused_tiling)
-    }
-
     pub(super) fn move_in_direction(
         &mut self,
         hub: &mut HubAccess,
+        ws_id: WorkspaceId,
         direction: Direction,
         forward: bool,
     ) {
-        let current_ws = hub.monitors.get(hub.focused_monitor).active_workspace;
-        let Some(child) = self.focused_child_in(hub, current_ws) else {
+        let Some(child) = self.focused_child_in(ws_id) else {
             return;
         };
         let Parent::Container(direct_parent_id) = self.parent(child) else {
@@ -49,7 +40,7 @@ impl PartitionTreeStrategy {
                     .get_mut(direct_parent_id)
                     .children
                     .swap(pos, target_pos);
-                self.compute_placement(hub, current_ws);
+                self.compute_placement(hub, ws_id);
                 return;
             }
         }
@@ -78,19 +69,19 @@ impl PartitionTreeStrategy {
             );
             self.detach_child_from_container(hub, direct_parent_id, child);
             self.attach_child_to_container(hub, child, container_id, Some(insert_pos));
-            self.compute_placement(hub, current_ws);
+            self.compute_placement(hub, ws_id);
             self.set_focus(hub, child);
         } else {
-            tracing::debug!(?child, %current_ws, "Moving child to new root container");
+            tracing::debug!(?child, %ws_id, "Moving child to new root container");
             self.detach_child_from_container(hub, direct_parent_id, child);
-            let root = self.workspaces.get(&current_ws).unwrap().root.unwrap();
+            let root = self.workspaces.get(&ws_id).unwrap().root.unwrap();
             let children = if forward {
                 vec![root, child]
             } else {
                 vec![child, root]
             };
             self.replace_anchor_with_container(hub, root, children, direction.into());
-            self.compute_placement(hub, current_ws);
+            self.compute_placement(hub, ws_id);
             self.set_focus(hub, child);
         }
     }
@@ -98,10 +89,11 @@ impl PartitionTreeStrategy {
     pub(super) fn focus_in_direction(
         &mut self,
         hub: &mut HubAccess,
+        ws_id: WorkspaceId,
         direction: Direction,
         forward: bool,
     ) {
-        let Some(focused) = self.focused_child(hub) else {
+        let Some(focused) = self.focused_child_in(ws_id) else {
             return;
         };
 
@@ -130,15 +122,18 @@ impl PartitionTreeStrategy {
             }
         }
         if let Some(sibling) = sibling_found {
-            let focus_target = self.focus_target_in(sibling);
+            let focus_target = self.focus_target_in(hub, sibling);
             tracing::debug!(?direction, forward, from = ?focused, to = ?focus_target, "Changing focus");
             self.set_focus(hub, focus_target);
         }
     }
 
-    pub(in crate::core) fn toggle_focused_layout_direction(&mut self, hub: &mut HubAccess) {
-        let workspace_id = hub.monitors.get(hub.focused_monitor).active_workspace;
-        let Some(focused) = self.focused_child_in(hub, workspace_id) else {
+    pub(super) fn toggle_focused_layout_direction(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+    ) {
+        let Some(focused) = self.focused_child_in(ws_id) else {
             return;
         };
         let mut root_id = match focused {
@@ -161,7 +156,7 @@ impl PartitionTreeStrategy {
             .unwrap()
             .toggle_direction();
         self.maintain_direction_invariance(hub, Parent::Container(root_id));
-        self.compute_placement(hub, workspace_id);
+        self.compute_placement(hub, ws_id);
     }
 
     pub(super) fn convert_container_layout(
@@ -169,8 +164,8 @@ impl PartitionTreeStrategy {
         hub: &mut HubAccess,
         container_id: ContainerId,
     ) {
+        let ws = hub.containers.get(container_id).workspace;
         let container = self.tiling_containers.get_mut(&container_id).unwrap();
-        let ws = container.workspace;
         let direction = container.direction();
         let parent = container.parent;
         container.is_tabbed = !container.is_tabbed;
@@ -185,7 +180,7 @@ impl PartitionTreeStrategy {
             // container is not on its own ancestor path. None leaves the tab alone.
             let focused = self.workspaces.get(&ws).unwrap().focused_tiling;
             let active_tab = focused.and_then(|f| {
-                let target = self.focus_target_in(f);
+                let target = self.focus_target_in(hub, f);
                 self.ancestors_of(target)
                     .find(|(_, pid)| *pid == container_id)
                     .map(|(child, _)| child)
@@ -201,21 +196,14 @@ impl PartitionTreeStrategy {
         self.compute_placement(hub, ws);
     }
 
-    pub(in crate::core) fn toggle_spawn_mode(&mut self, hub: &mut HubAccess) {
-        let ws_id = hub.monitors.get(hub.focused_monitor).active_workspace;
+    pub(super) fn toggle_spawn_mode(&mut self, ws_id: WorkspaceId) {
         let Some(focused) = self.workspaces.get(&ws_id).and_then(|s| s.focused_tiling) else {
             return;
         };
 
         let current_direction = match focused {
             Child::Container(id) => self.tiling_containers.get(&id).unwrap().spawn_direction(),
-            Child::Window(id) => {
-                let w = hub.windows.get(id);
-                if w.is_float() || w.is_fullscreen() {
-                    return;
-                }
-                self.tiling_windows.get(&id).unwrap().spawn_direction
-            }
+            Child::Window(id) => self.tiling_windows.get(&id).unwrap().spawn_direction,
         };
         let new_direction = match current_direction {
             Direction::Horizontal => Direction::Vertical,
@@ -235,59 +223,63 @@ impl PartitionTreeStrategy {
         tracing::debug!(?focused, ?new_direction, "Toggled spawn direction");
     }
 
-    pub(super) fn toggle_focused_container_layout(&mut self, hub: &mut HubAccess) {
-        let ws_id = hub.monitors.get(hub.focused_monitor).active_workspace;
+    pub(super) fn toggle_focused_container_layout(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+    ) {
         let Some(focused) = self.workspaces.get(&ws_id).and_then(|s| s.focused_tiling) else {
             return;
         };
         let container_id = match focused {
             Child::Container(id) => id,
-            Child::Window(id) => {
-                let w = hub.windows.get(id);
-                if w.is_float() || w.is_fullscreen() {
-                    return;
-                }
-                match self.parent(Child::Window(id)) {
-                    Parent::Container(cid) => cid,
-                    Parent::Workspace(_) => return,
-                }
-            }
+            Child::Window(id) => match self.parent(Child::Window(id)) {
+                Parent::Container(cid) => cid,
+                Parent::Workspace(_) => return,
+            },
         };
         self.convert_container_layout(hub, container_id);
     }
 
-    pub(super) fn focus_tab_in_direction(&mut self, hub: &mut HubAccess, forward: bool) {
-        let Some(focused) = self.focused_child(hub) else {
+    pub(super) fn focus_tab_in_direction(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        forward: bool,
+    ) {
+        let Some(focused) = self.focused_child_in(ws_id) else {
             return;
         };
         let Some(container_id) = self.find_tabbed_self_or_ancestor(focused) else {
             return;
         };
         let new_child = self.switch_tab(hub, container_id, forward).unwrap();
-        let focus_target = self.focus_target_in(new_child);
+        let focus_target = self.focus_target_in(hub, new_child);
         tracing::debug!(forward, %container_id, ?focus_target, "Focusing tab");
         self.set_focus(hub, focus_target);
     }
 
+    /// Activates tab `index` of `container_id` and focuses it, taking focus from a float.
     pub(super) fn focus_tab_index(
         &mut self,
         hub: &mut HubAccess,
+        ws_id: WorkspaceId,
         container_id: ContainerId,
         index: usize,
     ) {
         let Some(new_child) = self.set_active_tab_by_index(hub, container_id, index) else {
             return;
         };
-        let focus_target = self.focus_target_in(new_child);
-        self.set_focus(hub, focus_target);
+        let focus_target = self.focus_target_in(hub, new_child);
+        self.focus_tiling(hub, ws_id, focus_target);
     }
 
     /// Move tiling focus from the current child to its parent container. Sets
     /// `focused_tiling` to `Child::Container`, entering container-highlight mode.
     /// No managed windows should receive keyboard focus in this mode.
     /// Move-to-workspace operates on the whole container.
-    pub(in crate::core) fn focus_parent(&mut self, hub: &mut HubAccess) {
-        let Some(focused) = self.focused_child(hub) else {
+    pub(super) fn focus_parent(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
+        let Some(focused) = self.focused_child_in(ws_id) else {
             return;
         };
         let Parent::Container(container_id) = self.parent(focused) else {

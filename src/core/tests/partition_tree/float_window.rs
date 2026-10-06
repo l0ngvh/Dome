@@ -1,22 +1,12 @@
 use crate::core::ContainerId;
-use crate::core::TilingConfig;
 use crate::core::allocator::NodeId;
 use crate::core::node::{Length, LimitObservation, LimitUpdate, PixelRect, WindowRestrictions};
-use crate::core::tests::{
-    TilingConfigBuilder, default_rect, setup, setup_with_tiling, snapshot, titled, titled_matcher,
-};
+use crate::core::tests::{default_rect, setup, setup_with_modes, snapshot, titled};
 use insta::assert_snapshot;
-
-/// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn tiling_floating(titles: &[&str]) -> TilingConfig {
-    TilingConfigBuilder::new()
-        .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
-        .build()
-}
 
 #[test]
 fn focus_falls_back_to_last_focused_window_after_float_delete() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w3"]));
+    let mut hub = setup_with_modes("0", &["w3"], &[]);
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
@@ -79,7 +69,7 @@ fn focus_falls_back_to_last_focused_window_after_float_delete() {
 
 #[test]
 fn toggle_float_to_tiling_with_nested_containers() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w7"]));
+    let mut hub = setup_with_modes("0", &["w7"], &[]);
     hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
     hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
@@ -143,8 +133,6 @@ fn toggle_float_with_container_focused() {
     hub.insert_window(titled("w8"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w9"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
-    // After focus_parent, focused_tiling_window() returns None (container highlighted).
-    // toggle_float is a no-op: both windows stay tiling, container stays highlighted.
     hub.toggle_float();
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -347,7 +335,7 @@ fn toggle_float_to_tiling_with_scrolled_viewport() {
 
 #[test]
 fn focus_direction_keeps_float_focus() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w2"]));
+    let mut hub = setup_with_modes("0", &["w2"], &[]);
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     let float_id = hub
@@ -359,7 +347,6 @@ fn focus_direction_keeps_float_focus() {
         .unwrap();
     let ws = hub.current_workspace();
 
-    // The tiling focus moves underneath, but nothing renders under a float.
     let before = snapshot(&hub);
     hub.focus_left();
     assert_eq!(before, snapshot(&hub));
@@ -374,7 +361,7 @@ fn focus_direction_keeps_float_focus() {
 
 #[test]
 fn focus_parent_keeps_float_focus() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w2"]));
+    let mut hub = setup_with_modes("0", &["w2"], &[]);
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     let float_id = hub
@@ -386,7 +373,6 @@ fn focus_parent_keeps_float_focus() {
         .unwrap();
     let ws = hub.current_workspace();
 
-    // Focus moves up to the container underneath, but nothing renders under a float.
     let before = snapshot(&hub);
     hub.focus_parent();
     assert_eq!(before, snapshot(&hub));
@@ -395,7 +381,7 @@ fn focus_parent_keeps_float_focus() {
 
 #[test]
 fn move_direction_keeps_float_focus() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w2"]));
+    let mut hub = setup_with_modes("0", &["w2"], &[]);
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     let float_id = hub
@@ -407,58 +393,23 @@ fn move_direction_keeps_float_focus() {
         .unwrap();
     let ws = hub.current_workspace();
 
-    // Vertical out of a horizontal root, which is the branch that re-focuses the
-    // moved window. W1 is the tiling focus under the float, so it is the one that
-    // relocates.
+    let before = snapshot(&hub);
     hub.move_up();
 
     assert_eq!(hub.focused_window(ws), Some(float_id));
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(2))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=15.00, w=150.00, h=15.00)
-        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=15.00)
-        Window(id=WindowId(2), x=50.00, y=5.00, w=40.00, h=15.00, float, highlighted)
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w1, w0])
-      )
-
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                 ****************************************                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                  F2                  *                                                           |
-    +-------------------------------------------------*                                      *-----------------------------------------------------------+
-    +-------------------------------------------------*                                      *-----------------------------------------------------------+
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 ****************************************                                                           |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                         W0                                                                         |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    ");
+    assert_eq!(
+        snapshot(&hub),
+        before,
+        "a move while the float has focus leaves the tiling layout as it was"
+    );
 }
 
 #[test]
-fn tab_switch_keeps_float_focus() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w2"]));
-    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+fn focus_next_tab_keeps_float_focus_and_a_tab_click_takes_it() {
+    let mut hub = setup_with_modes("0", &["w2"], &[]);
+    let w0 = hub
+        .insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
+        .unwrap();
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
     let float_id = hub
@@ -513,47 +464,47 @@ fn tab_switch_keeps_float_focus() {
 
     hub.focus_next_tab();
     assert_eq!(hub.focused_window(ws), Some(float_id));
+    assert_eq!(snapshot(&hub), w1_front_snapshot);
+
+    hub.focus_tab_index(ContainerId::new(0), 0);
+    assert_eq!(hub.focused_window(ws), Some(w0));
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(2))
+    Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-        Window(id=WindowId(2), x=50.00, y=5.00, w=40.00, h=15.00, float, highlighted)
+        Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Window(id=WindowId(2), x=50.00, y=5.00, w=40.00, h=15.00, float)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=0, titles=[w0, w1])
       )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                  [w0]                                    |                                  w1                                     |
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                 ****************************************                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                  F2                  *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 *                                      *                                                           |
-    |                                                 ****************************************                                                           |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                 +--------------------------------------+                                                           *
+    *                                                 |                                      |                                                           *
+    *                                                 |                                      |                                                           *
+    *                                                 |                                      |                                                           *
+    *                                                 |                                      |                                                           *
+    *                                                 |                                      |                                                           *
+    *                                                 |                                      |                                                           *
+    *                                                 |                                      |                                                           *
+    *                                                 |                  F2                  |                                                           *
+    *                                                 |                                      |                                                           *
+    *                                                 |                                      |                                                           *
+    *                                                 |                                      |                                                           *
+    *                                                 |                                      |                                                           *
+    *                                                 |                                      |                                                           *
+    *                                                 +--------------------------------------+                                                           *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
     ");
-
-    hub.focus_tab_index(ContainerId::new(0), 1);
-    assert_eq!(hub.focused_window(ws), Some(float_id));
-    assert_eq!(snapshot(&hub), w1_front_snapshot);
 }

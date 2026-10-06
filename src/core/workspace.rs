@@ -1,10 +1,9 @@
 use crate::core::{
-    Hub,
+    Hub, PreferredWorkspace,
     allocator::Node,
     hub::RestrictedAction,
-    matcher::FloatFullscreenEntry,
-    node::{DisplayMode, MonitorId, WindowId, WorkspaceId},
-    partition_tree::Child,
+    node::{Child, DisplayMode, MonitorId, WorkspaceId},
+    slot::{Slot, find_free_slot},
 };
 
 /// Lifecycle state of a workspace relative to its origin monitor. The enum
@@ -27,19 +26,6 @@ pub(super) struct Workspace {
     pub(super) name: String,
     pub(super) monitor: MonitorId,
     pub(super) attachment: Attachment,
-    /// When true, the focused window is `float_windows.last()`.
-    /// A present fullscreen window overrides this. The flag is set false in that
-    /// case for consistency.
-    pub(super) is_float_focused: bool,
-    /// Float ids in this workspace, ordered by z-index (last is topmost).
-    /// Each id's screen-absolute rect lives on the window itself, in
-    /// `DisplayMode::Float`. Focusing a float moves it to the end.
-    pub(super) float_windows: Vec<WindowId>,
-    /// All fullscreen windows in this workspace, ordered by z-index. The last is
-    /// the topmost. Only the topmost fullscreen window is displayed.
-    pub(super) fullscreen_windows: Vec<WindowId>,
-    pub(super) float_entries: Vec<FloatFullscreenEntry>,
-    pub(super) fullscreen_entries: Vec<FloatFullscreenEntry>,
 }
 
 impl Node for Workspace {
@@ -49,14 +35,9 @@ impl Node for Workspace {
 impl Workspace {
     pub(super) fn new(name: String, monitor: MonitorId) -> Self {
         Self {
-            is_float_focused: false,
             name,
             monitor,
             attachment: Attachment::Attached,
-            float_windows: Vec::new(),
-            fullscreen_windows: Vec::new(),
-            float_entries: Vec::new(),
-            fullscreen_entries: Vec::new(),
         }
     }
 
@@ -135,11 +116,7 @@ impl Hub {
         let Some(target_ws) = target_ws else {
             return;
         };
-        if let Some(window_id) = self.focused_window(current_ws) {
-            self.move_child_to_workspace_with_id(window_id, target_ws);
-        } else {
-            self.move_focused_across_workspaces(current_ws, target_ws);
-        }
+        self.move_focused_across_workspaces(current_ws, target_ws);
     }
 
     // A parked workspace keeps its origin monitor's name frozen in its origin
@@ -151,37 +128,20 @@ impl Hub {
             .find(|w| w.name == name && w.origin() == Some(origin))
     }
 
-    #[tracing::instrument(skip(self))]
-    pub(super) fn move_child_to_workspace_with_id(
-        &mut self,
-        window_id: WindowId,
-        target_ws: WorkspaceId,
-    ) {
-        let current_ws = self.current_workspace();
-        if current_ws == target_ws {
-            return;
+    /// Creates each workspace that the layout file names under a connected monitor.
+    pub(super) fn create_named_workspaces(&mut self) {
+        let named: Vec<(MonitorId, String)> = self
+            .access
+            .preferred_layouts
+            .entries()
+            .filter_map(|(monitor, name, _)| {
+                let monitor_id = self.monitor_id_by_disambiguated_name(monitor)?;
+                Some((monitor_id, name.to_string()))
+            })
+            .collect();
+        for (monitor_id, name) in named {
+            self.get_or_create_workspace_on(&name, Some(monitor_id));
         }
-
-        let window = self.access.windows.get(window_id);
-        if window.is_minimized() {
-            panic!("Minimized window can't be moved");
-        }
-        match window.mode {
-            DisplayMode::Fullscreen => {
-                self.detach_fullscreen_from_workspace(window_id);
-                self.attach_fullscreen_to_workspace(target_ws, window_id, None);
-                self.access.workspaces.get_mut(target_ws).is_float_focused = false;
-            }
-            DisplayMode::Float { .. } => {
-                let dim = self.detach_float_from_workspace(window_id);
-                self.attach_float_to_workspace(target_ws, window_id, dim, None);
-            }
-            DisplayMode::Tiling => {
-                self.move_focused_across_workspaces(current_ws, target_ws);
-            }
-        }
-
-        tracing::debug!("Moved to workspace");
     }
 
     // A move destination is always an attached workspace on the target monitor,
@@ -203,32 +163,113 @@ impl Hub {
         {
             return id;
         }
+        self.create_workspace(name.to_string(), target)
+    }
+
+    /// Allocates a workspace on `monitor` and loads its layout entry, so no workspace exists
+    /// without one.
+    pub(super) fn create_workspace(&mut self, name: String, monitor: MonitorId) -> WorkspaceId {
         let ws_id = self
             .access
             .workspaces
-            .allocate(Workspace::new(name.to_string(), target));
-        self.strategies.register(&mut self.access, ws_id);
-        self.load_entries(ws_id);
+            .allocate(Workspace::new(name, monitor));
+        self.load_layout_entry(ws_id);
         ws_id
     }
 
-    pub(super) fn move_focused_across_workspaces(&mut self, from: WorkspaceId, to: WorkspaceId) {
-        let strategy = self.strategies.for_workspace_mut(from);
-        let child = strategy.detach_focused_child(&mut self.access, from);
-        let Some(child) = child else {
-            return;
-        };
-        if strategy.tiling_window_count(&self.access, from) == 0 {
-            let ws = self.access.workspaces.get_mut(from);
-            if ws.fullscreen_windows.is_empty() {
-                ws.is_float_focused = !ws.float_windows.is_empty();
+    /// Rebuilds the workspace from its current layout entry, which can name another strategy,
+    /// and attaches its windows again in every mode.
+    pub(super) fn reset_workspace(&mut self, ws_id: WorkspaceId) {
+        let windows = self
+            .strategies
+            .for_workspace_mut(ws_id)
+            .clear_workspace(&mut self.access, ws_id);
+        self.remove_slots(ws_id);
+        self.load_layout_entry(ws_id);
+        for (window_id, mode) in windows {
+            let slot = if matches!(mode, DisplayMode::Tiling) {
+                // A window that moved here can still hold a slot on the workspace it came from,
+                // so the hold below would give it two slots.
+                self.release_slot(window_id);
+                let metadata = self.access.windows.get(window_id).metadata.as_ref();
+                find_free_slot(
+                    &self.access.slots,
+                    metadata,
+                    Some(&|slot: &Slot| slot.is_tiling_on(ws_id)),
+                )
+            } else {
+                None
+            };
+            self.strategies.for_workspace_mut(ws_id).attach_window(
+                &mut self.access,
+                window_id,
+                ws_id,
+                mode,
+                slot,
+            );
+            if let Some(id) = slot {
+                self.access.slots.get_mut(id).hold(window_id);
             }
         }
         self.strategies
-            .for_workspace_mut(to)
-            .reattach_child(&mut self.access, child, to);
-        if let Child::Window(window_id) = child {
-            self.set_workspace_focus(window_id);
+            .for_workspace_mut(ws_id)
+            .reset_focus(&mut self.access, ws_id);
+    }
+
+    /// Loads the workspace's entry in the layout file, or an empty entry for the default
+    /// strategy when the file does not name the workspace. Expects a workspace with no
+    /// strategy state and no slots, either new or just cleared.
+    fn load_layout_entry(&mut self, ws_id: WorkspaceId) {
+        let monitor = self.access.origin_monitor_name(ws_id);
+        let name = &self.access.workspaces.get(ws_id).name;
+        let entry = self
+            .access
+            .preferred_layouts
+            .workspace(&monitor, name)
+            .cloned()
+            .unwrap_or_else(|| PreferredWorkspace::empty(self.access.tiling.layout));
+        self.strategies
+            .prepare_workspace(&mut self.access, ws_id, &entry);
+    }
+
+    /// Moves the focused child of `from` to `to`, a window in its display mode. A child already on
+    /// `to` stays where it is.
+    #[tracing::instrument(skip(self))]
+    pub(super) fn move_focused_across_workspaces(&mut self, from: WorkspaceId, to: WorkspaceId) {
+        if from == to {
+            return;
+        }
+        let Some(child) = self.strategies.for_workspace(from).focused_child(from) else {
+            return;
+        };
+        match child {
+            Child::Window(window_id) => {
+                let mode = self
+                    .strategies
+                    .for_workspace_mut(from)
+                    .detach_window(&mut self.access, window_id);
+                self.strategies.for_workspace_mut(to).attach_window(
+                    &mut self.access,
+                    window_id,
+                    to,
+                    mode,
+                    None,
+                );
+                self.set_workspace_focus(window_id);
+                tracing::debug!("Moved to workspace");
+            }
+            Child::Container(container_id) => {
+                self.strategies.for_workspace_mut(from).detach_container(
+                    &mut self.access,
+                    container_id,
+                    from,
+                );
+                self.strategies.for_workspace_mut(to).attach_container(
+                    &mut self.access,
+                    container_id,
+                    to,
+                );
+            }
         }
     }
 }

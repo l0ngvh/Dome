@@ -1,82 +1,139 @@
 use crate::core::{
     Hub, WindowId,
-    hub::RestrictedAction,
-    node::{Child, DisplayMode, MonitorId, PixelRect, WorkspaceId},
+    hub::{FloatWindowPlacement, HubAccess},
+    matcher::{WindowMatcher, WindowMode},
+    node::{MonitorId, PixelRect, WorkspaceId},
+    slot::Slot,
 };
 
-impl Hub {
-    /// Move the given float to the end of float_windows (making it topmost)
-    /// and mark float as focused.
-    pub(super) fn focus_float(&mut self, ws: WorkspaceId, window_id: WindowId) {
-        let workspace = self.access.workspaces.get_mut(ws);
-        if let Some(pos) = workspace
-            .float_windows
-            .iter()
-            .position(|&id| id == window_id)
-        {
-            workspace.float_windows.remove(pos);
-            workspace.float_windows.push(window_id);
-        }
-        workspace.is_float_focused = true;
-    }
+/// The float windows of one workspace, each with its border box.
+#[derive(Debug, Default)]
+pub(super) struct FloatWindows {
+    /// Bottom to top.
+    windows: Vec<(WindowId, PixelRect)>,
+    /// When true, the topmost float takes keyboard focus over the tiling windows.
+    pub(super) is_float_focused: bool,
+}
 
-    pub(super) fn attach_float_to_workspace(
-        &mut self,
-        workspace_id: WorkspaceId,
-        id: WindowId,
-        border_box: PixelRect,
-        entry_index: Option<usize>,
+impl FloatWindows {
+    /// Allocates one free float slot per matcher in the hub's arena, in matcher order.
+    pub(super) fn allocate_slots(
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        matchers: &[WindowMatcher],
     ) {
-        let window = self.access.windows.get_mut(id);
-        window.mode = DisplayMode::Float { border_box };
-        window.set_workspace(Some(workspace_id));
-        let workspace = self.access.workspaces.get_mut(workspace_id);
-        workspace.float_windows.push(id);
-        if let Some(idx) = entry_index {
-            workspace.float_entries[idx].window = Some(id);
+        for matcher in matchers {
+            hub.slots
+                .allocate(Slot::new(matcher.clone(), ws_id, WindowMode::Float));
         }
-        self.focus_float(workspace_id, id);
     }
 
-    pub(super) fn detach_float_from_workspace(&mut self, id: WindowId) -> PixelRect {
-        let window = self.access.windows.get(id);
-        let DisplayMode::Float { border_box, .. } = window.mode else {
-            panic!("detach_float_from_workspace: {id} is not Float");
+    /// Pushes the window on top without selecting float focus.
+    pub(super) fn attach(&mut self, window_id: WindowId, border_box: PixelRect) {
+        self.windows.push((window_id, border_box));
+    }
+
+    /// Returns the border box of the removed window, or `None` when the window is not a
+    /// member. Clears the float selection when the last float leaves.
+    pub(super) fn detach(&mut self, window_id: WindowId) -> Option<PixelRect> {
+        let pos = self.position(window_id)?;
+        let (_, border_box) = self.windows.remove(pos);
+        if self.windows.is_empty() {
+            self.is_float_focused = false;
+        }
+        Some(border_box)
+    }
+
+    /// Raises a member and selects float focus. Returns whether the window is a member, which
+    /// says nothing about whether it gets keyboard focus.
+    pub(super) fn focus(&mut self, window_id: WindowId) -> bool {
+        let Some(pos) = self.position(window_id) else {
+            return false;
         };
-        let ws_id = window
-            .workspace()
-            .expect("detaching float window must have a workspace");
-        let workspace = self.access.workspaces.get_mut(ws_id);
-
-        let was_focused =
-            workspace.is_float_focused && workspace.float_windows.last().copied() == Some(id);
-
-        let pos = workspace
-            .float_windows
-            .iter()
-            .position(|&fid| fid == id)
-            .expect("detach_float_from_workspace: window not in float_windows");
-        workspace.float_windows.remove(pos);
-        for entry in workspace.float_entries.iter_mut() {
-            if entry.window == Some(id) {
-                entry.window = None;
-            }
-        }
-
-        if was_focused && workspace.float_windows.is_empty() {
-            workspace.is_float_focused = false;
-        }
-
-        border_box
+        let entry = self.windows.remove(pos);
+        self.windows.push(entry);
+        self.is_float_focused = true;
+        true
     }
 
-    /// Write back the observed screen-absolute content box for a floating window,
-    /// storing it as a border box.
-    /// Called by platform shells after a user drag/resize settles.
-    /// Clients must make sure that the content box and the monitor_id are consistent. If the
-    /// `monitor_id` is not what the operating system agreed with, the window will be assigned to a
-    /// wrong workspace and toggling workspace on this monitor will hide/show this window, causing
-    /// confusion. It's not the end of the world though.
+    pub(super) fn topmost(&self) -> Option<WindowId> {
+        self.windows.last().map(|&(id, _)| id)
+    }
+
+    /// Stores the border box of a member. Returns `false` and changes nothing for any other
+    /// window.
+    pub(super) fn update_float_rect(&mut self, window_id: WindowId, border_box: PixelRect) -> bool {
+        let Some(pos) = self.position(window_id) else {
+            return false;
+        };
+        self.windows[pos].1 = border_box;
+        true
+    }
+
+    /// `highlighted` marks the topmost float as the focused window. A float gets no placement when
+    /// it lies wholly outside the monitor's work area, or when its border leaves no room for
+    /// content.
+    pub(super) fn collect_placements(
+        &self,
+        hub: &HubAccess,
+        ws_id: WorkspaceId,
+        highlighted: bool,
+    ) -> Vec<FloatWindowPlacement> {
+        let monitor = hub.workspaces.get(ws_id).monitor;
+        let screen = hub.monitors.get(monitor).work_area;
+        let border = hub.border(monitor);
+        let topmost = self.topmost();
+        self.windows
+            .iter()
+            .filter_map(|&(id, border_box)| {
+                let visible_border_box = border_box.clip(screen)?;
+                let content_box = border_box.inset_by(border);
+                if content_box.is_empty() {
+                    return None;
+                }
+                Some(FloatWindowPlacement {
+                    id,
+                    border_box,
+                    visible_border_box,
+                    content_box,
+                    is_highlighted: highlighted && topmost == Some(id),
+                })
+            })
+            .collect()
+    }
+
+    /// One matcher per float from its live metadata, bottom to top. A general matcher in the
+    /// layout file therefore comes back as one exact matcher per window it placed.
+    pub(super) fn export(&self, hub: &HubAccess) -> Vec<WindowMatcher> {
+        self.windows
+            .iter()
+            .map(|&(id, _)| hub.windows.get(id).metadata.to_window_matcher())
+            .collect()
+    }
+
+    /// Returns the floats bottom to top, which is the order to attach them again, and clears
+    /// the float selection.
+    pub(super) fn clear(&mut self) -> Vec<(WindowId, PixelRect)> {
+        self.is_float_focused = false;
+        std::mem::take(&mut self.windows)
+    }
+
+    #[cfg(test)]
+    pub(super) fn windows(&self) -> impl Iterator<Item = WindowId> + '_ {
+        self.windows.iter().map(|&(id, _)| id)
+    }
+
+    fn position(&self, window_id: WindowId) -> Option<usize> {
+        self.windows.iter().position(|&(id, _)| id == window_id)
+    }
+}
+
+impl Hub {
+    /// Stores the observed screen-absolute content box of a float as its border box. A float
+    /// reported on another monitor moves to that monitor's active workspace. The caller must
+    /// pass the monitor that holds the content box, or the window joins a workspace it does not
+    /// sit on, and switching workspaces on that monitor hides and shows it. A report for a window
+    /// that is minimized or no longer floats arrived too late, so it changes nothing.
     #[tracing::instrument(skip(self))]
     pub(crate) fn update_float_rect(
         &mut self,
@@ -86,61 +143,36 @@ impl Hub {
     ) {
         let border = self.access.border(monitor_id);
         let border_box = content_box.outset_by(border);
-        let old_ws = {
-            let window = self.access.windows.get_mut(window_id);
-            assert!(
-                window.is_float(),
-                "update_float_rect: {window_id} is not Float"
-            );
-            let ws = window
-                .workspace()
-                .expect("non-minimized float window has a workspace");
-            window.mode = DisplayMode::Float { border_box };
-            ws
+        let Some(old_ws) = self.access.windows.get(window_id).workspace() else {
+            tracing::debug!("Ignoring a float rect update for a minimized window");
+            return;
         };
+        if !self.strategies.for_workspace_mut(old_ws).update_float_rect(
+            &mut self.access,
+            window_id,
+            border_box,
+        ) {
+            tracing::debug!("Ignoring a float rect update for a window that no longer floats");
+            return;
+        }
 
         let old_monitor = self.access.workspaces.get(old_ws).monitor;
         tracing::debug!(%old_monitor, %monitor_id, ?border_box, "Float rect updated");
         if monitor_id != old_monitor {
             let target_ws = self.access.monitors.get(monitor_id).active_workspace;
             if target_ws != old_ws {
-                let stored_dim = self.detach_float_from_workspace(window_id);
-                self.attach_float_to_workspace(target_ws, window_id, stored_dim, None);
-            }
-        }
-    }
-
-    /// Toggle the focused window between tiling and floating mode.
-    /// Does nothing if no window is focused or a container is focused.
-    #[tracing::instrument(skip(self))]
-    pub(crate) fn toggle_float(&mut self) {
-        if self.is_restricted(RestrictedAction::DisplayModeChange) {
-            return;
-        }
-        let current_ws = self.current_workspace();
-        let Some(window_id) = self.focused_window(current_ws) else {
-            return;
-        };
-
-        match self.access.windows.get(window_id).mode {
-            DisplayMode::Fullscreen => (),
-            DisplayMode::Float { .. } => {
-                self.detach_float_from_workspace(window_id);
-                self.access.windows.get_mut(window_id).mode = DisplayMode::Tiling;
-                self.strategies
-                    .for_workspace_mut(current_ws)
-                    .reattach_child(&mut self.access, Child::Window(window_id), current_ws);
-                self.set_workspace_focus(window_id);
-
-                tracing::debug!(%window_id, "Window is now tiling");
-            }
-            DisplayMode::Tiling => {
-                let border_box = self
+                let mode = self
                     .strategies
-                    .for_workspace_mut(current_ws)
+                    .for_workspace_mut(old_ws)
                     .detach_window(&mut self.access, window_id);
-                self.attach_float_to_workspace(current_ws, window_id, border_box, None);
-                tracing::debug!(%window_id, "Window is now floating");
+                self.strategies.for_workspace_mut(target_ws).attach_window(
+                    &mut self.access,
+                    window_id,
+                    target_ws,
+                    mode,
+                    None,
+                );
+                self.set_workspace_focus(window_id);
             }
         }
     }

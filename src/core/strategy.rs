@@ -4,40 +4,58 @@ use rustc_hash::FxHashSet;
 
 use crate::core::MonitorSelector;
 use crate::core::TilingConfig;
-use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
+#[cfg(test)]
+use crate::core::float::FloatWindows;
+#[cfg(test)]
+use crate::core::fullscreen::FullscreenWindows;
+use crate::core::hub::{HubAccess, MonitorLayout};
 use crate::core::master::MasterStrategy;
 use crate::core::node::{
-    Child, Constraints, ContainerId, Dimension, Direction, Length, PixelRect, Pixels, Unit,
-    WindowId, WindowMetadata, WorkspaceId,
+    Child, Constraints, ContainerId, Dimension, Direction, DisplayMode, Length, LimitObservation,
+    PixelRect, Pixels, Unit, WindowId, WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
-use crate::core::{PreferredMaster, PreferredTiling, SizeConstraints, Strategy};
+use crate::core::slot::SlotId;
+use crate::core::{PreferredWorkspace, SizeConstraints, Strategy};
 
+/// An action on the focused tiling child does nothing while a float or fullscreen window has
+/// focus, and an action on the workspace layout or a clicked container does nothing while a
+/// fullscreen window has focus.
 #[derive(Debug)]
 pub(crate) enum StrategyAction {
-    FocusDirection {
-        direction: Direction,
-        forward: bool,
-    },
-    MoveDirection {
-        direction: Direction,
-        forward: bool,
-    },
+    /// Moves focus from the focused tiling child to the nearest child in `direction`.
+    FocusDirection { direction: Direction, forward: bool },
+    /// Moves the focused tiling child one place in `direction`.
+    MoveDirection { direction: Direction, forward: bool },
+    /// Flips the direction in which the focused tiling child places the next window.
     ToggleSpawnMode,
+    /// Flips the split direction of the containers around the focused tiling child.
     ToggleDirection,
+    /// Switches the container around the focused tiling child between split and tabbed.
     ToggleContainerLayout,
+    /// Highlights the container around the focused tiling child, so that a move to another
+    /// workspace takes the whole container. Does nothing at the workspace root.
     FocusParent,
-    FocusTab {
-        forward: bool,
-    },
+    /// Activates the next or previous tab of the tabbed container around the focused tiling
+    /// child.
+    FocusTab { forward: bool },
+    /// Activates tab `index` of `container_id` and focuses it, taking focus from a float.
     TabClicked {
         container_id: ContainerId,
         index: usize,
     },
+    /// Grows the master ratio of the workspace, within its limits.
     GrowMaster,
+    /// Shrinks the master ratio of the workspace, within its limits.
     ShrinkMaster,
+    /// Raises the number of windows the master pane of the workspace holds.
     MoreMaster,
+    /// Lowers the number of windows the master pane of the workspace holds, down to its minimum.
     FewerMaster,
+    /// Floats the focused tiling window at its tile rectangle, or tiles the focused float.
+    ToggleFloat,
+    /// Makes the focused window fullscreen, or tiles the focused fullscreen window.
+    ToggleFullscreen,
 }
 
 #[derive(Debug)]
@@ -57,8 +75,6 @@ pub(crate) enum TilingAction {
     MoveToMonitor {
         selector: MonitorSelector,
     },
-    ToggleFloat,
-    ToggleFullscreen,
 }
 
 impl From<StrategyAction> for TilingAction {
@@ -124,8 +140,8 @@ impl From<&crate::action::ToggleTarget> for TilingAction {
             ToggleTarget::Spawn => StrategyAction::ToggleSpawnMode.into(),
             ToggleTarget::Direction => StrategyAction::ToggleDirection.into(),
             ToggleTarget::Layout => StrategyAction::ToggleContainerLayout.into(),
-            ToggleTarget::Float => Self::ToggleFloat,
-            ToggleTarget::Fullscreen => Self::ToggleFullscreen,
+            ToggleTarget::Float => StrategyAction::ToggleFloat.into(),
+            ToggleTarget::Fullscreen => StrategyAction::ToggleFullscreen.into(),
         }
     }
 }
@@ -143,95 +159,223 @@ impl From<&crate::action::MasterTarget> for TilingAction {
     }
 }
 
-/// Tiling window and container placements collected by the strategy for a
-/// single workspace.
-pub(crate) struct TilingPlacements {
-    pub(crate) windows: Vec<TilingWindowPlacement>,
-    pub(crate) containers: Vec<ContainerPlacement>,
+/// The focus a strategy selects on one workspace, with its display mode.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum FocusedChild {
+    Fullscreen(WindowId),
+    Float(WindowId),
+    Tiling(Child),
 }
 
-/// Abstraction over tiling behavior. Tiling-specific operations live here.
-/// Generic window management (monitors, workspaces, float, fullscreen, focus
-/// priority) does not.
+impl FocusedChild {
+    pub(super) fn child(self) -> Child {
+        match self {
+            Self::Fullscreen(id) | Self::Float(id) => Child::Window(id),
+            Self::Tiling(child) => child,
+        }
+    }
+}
+
+/// Owns all non-minimized windows on its workspaces, including their modes, stacking and focus.
+/// Float support and the fullscreen toggle are optional. App-controlled fullscreen is required.
+/// A method changing layout computes placement before returning. No method searches, holds
+/// or releases a slot.
 pub(crate) trait TilingStrategy: std::fmt::Debug {
-    /// The window takes a free slot that matches it, when one exists. Does not focus it: the
-    /// hub decides focus.
-    fn attach_window(&mut self, hub: &mut HubAccess, window_id: WindowId, ws_id: WorkspaceId);
+    /// Builds state and allocates free slots in the hub's arena, fullscreen slots first, then
+    /// float slots, then tiling slots, each in layout order. Initializes the layout work area and
+    /// scale from the workspace's host monitor. Allocates optional-mode slots only for supported
+    /// modes. Panics on another strategy's tiling variant.
+    fn prepare_workspace(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        entry: &PreferredWorkspace,
+    );
 
-    /// Remove a window from its workspace's tiling tree. Returns the window's
-    /// dimension in screen-absolute coordinates (translated before detach
-    /// because detach triggers layout, which can change viewport_offset).
-    fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> PixelRect;
+    /// Removes all windows and drops workspace state. Returns modes in reattachment order, each
+    /// float and fullscreen stack bottom to top. The hub deletes the slots.
+    fn clear_workspace(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+    ) -> Vec<(WindowId, DisplayMode)>;
 
-    fn focus_direction(&mut self, hub: &mut HubAccess, direction: Direction, forward: bool);
+    /// Exports live windows rather than slot matchers, with this strategy's tiling variant.
+    fn export_workspace(&self, hub: &HubAccess, ws_id: WorkspaceId) -> PreferredWorkspace;
 
-    fn move_direction(&mut self, hub: &mut HubAccess, direction: Direction, forward: bool);
+    /// Inserts and records the destination workspace. Unsupported float or Dome-controlled
+    /// fullscreen becomes tiling. App-controlled fullscreen remains fullscreen. The caller passes
+    /// a slot only for tiling and holds it after this call. `Some(slot)` supplies the layout
+    /// position, while `None` uses default placement. The first actual tiling attachment
+    /// initializes remembered tiling focus, including a conversion from an unsupported mode.
+    /// Each nonempty mode retains a remembered target. Makes no explicit focus request.
+    fn attach_window(
+        &mut self,
+        hub: &mut HubAccess,
+        window_id: WindowId,
+        ws_id: WorkspaceId,
+        mode: DisplayMode,
+        slot: Option<SlotId>,
+    );
 
-    fn toggle_container_layout(&mut self, hub: &mut HubAccess);
+    /// Inserts a detached group and gives it tiling focus, even when a float had focus. The
+    /// strategy chooses whether the group itself or one of its windows holds that focus.
+    fn attach_container(
+        &mut self,
+        hub: &mut HubAccess,
+        container_id: ContainerId,
+        ws_id: WorkspaceId,
+    ) {
+        let windows = hub.take_windows(Child::Container(container_id));
+        for &window_id in &windows {
+            self.attach_window(hub, window_id, ws_id, DisplayMode::Tiling, None);
+        }
+        if let Some(&first) = windows.first() {
+            self.set_focus(hub, first);
+        }
+    }
 
-    fn focus_tab(&mut self, hub: &mut HubAccess, forward: bool);
+    /// Removes a window in any mode, returning its mode and a float's border box. Does not alter
+    /// its held slot.
+    fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> DisplayMode;
 
-    fn tab_clicked(&mut self, hub: &mut HubAccess, container_id: ContainerId, index: usize);
+    /// Leaves the detached group and its windows in the hub arenas for attachment. Only a
+    /// strategy reporting a focused container receives this call and must override the panic.
+    fn detach_container(
+        &mut self,
+        _hub: &mut HubAccess,
+        _container_id: ContainerId,
+        _ws_id: WorkspaceId,
+    ) {
+        unreachable!("this strategy never reports a focused container");
+    }
 
-    /// Compute layout for all tiling windows in the workspace.
-    fn compute_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId);
+    /// Accepts app-controlled fullscreen even without toggle support. A window entering
+    /// fullscreen becomes topmost and focused. An already-fullscreen window is unchanged.
+    fn set_fullscreen(&mut self, hub: &mut HubAccess, window_id: WindowId);
 
-    /// Move tiling focus to the given window. Never touches
-    /// `Workspace::is_float_focused`, so a focused float keeps keyboard focus.
+    /// Ends app-controlled fullscreen and tiles with default placement. The other fullscreen
+    /// windows keep their stack order, so the topmost of them keeps focus, and the window leaving
+    /// fullscreen takes focus once no fullscreen window remains. A non-fullscreen window is
+    /// unchanged. Required without toggle support.
+    fn unset_fullscreen(&mut self, hub: &mut HubAccess, window_id: WindowId);
+
+    /// Accepts the rectangle only for a current float.
+    fn update_float_rect(
+        &mut self,
+        _hub: &mut HubAccess,
+        _window_id: WindowId,
+        _border_box: PixelRect,
+    ) -> bool {
+        false
+    }
+
+    /// Unsupported actions do nothing, and so does an action whose target does not have focus,
+    /// as `StrategyAction` describes. For a tab click, `ws_id` is the workspace of the clicked
+    /// container, which can be on a monitor without focus.
+    fn handle_action(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId, action: StrategyAction);
+
+    /// Requests focus in any mode. Raises a float or fullscreen target in its own stack, or
+    /// updates remembered tiling focus. A target that fullscreen covers does not take keyboard
+    /// focus from the topmost fullscreen window.
     fn set_focus(&mut self, hub: &mut HubAccess, window_id: WindowId);
 
-    /// Collect tiling placements for rendering.
-    fn collect_tiling_placements(
+    /// Called once a reset has attached every window. Focuses the topmost fullscreen window,
+    /// otherwise the topmost float, otherwise the tiling focus that attachment initialized, then
+    /// recomputes placement.
+    fn reset_focus(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId);
+
+    /// Returns effective focus in any mode, including a container representing a group. `None`
+    /// means exactly that the workspace has no window.
+    fn focused_child(&self, ws_id: WorkspaceId) -> Option<Child>;
+
+    /// Updates this workspace's layout work area and scale, then recomputes placement
+    /// internally before returning. The caller has already recorded the monitor report
+    /// or reassigned the workspace to its new host.
+    fn update_work_area(
+        &mut self,
+        hub: &HubAccess,
+        ws_id: WorkspaceId,
+        work_area: PixelRect,
+        scale: f32,
+    );
+
+    /// Applies an observation to the window's existing limits, then recomputes its
+    /// workspace's placement before returning. The window can be in any display mode, but is
+    /// never minimized.
+    fn update_window_size_limits(
+        &mut self,
+        hub: &mut HubAccess,
+        window_id: WindowId,
+        observed: LimitObservation,
+    );
+
+    /// Reads computed placements. Fullscreen shows only its topmost window. `highlighted`
+    /// enables focus indicators and is true only for the current workspace.
+    fn collect_placements(
         &self,
         hub: &HubAccess,
         ws_id: WorkspaceId,
         highlighted: bool,
-    ) -> TilingPlacements;
+    ) -> MonitorLayout;
 
-    /// Return the focused tiling window for a workspace. Returns `None` if
-    /// `focused_tiling` is a `Child::Container` (container-highlight mode) or
-    /// if the workspace is empty.
-    fn focused_tiling_window(&self, ws_id: WorkspaceId) -> Option<WindowId>;
-
-    fn detach_focused_child(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Option<Child>;
-
-    /// Returns the number of tiling windows in the workspace.
-    fn tiling_window_count(&self, hub: &HubAccess, ws_id: WorkspaceId) -> usize;
-
-    /// Return true if this workspace's tiling layout has a free slot that matches
-    /// the given window. Read-only routing query used by resolve_matcher on
-    /// window insert.
-    fn matches_tiling(&self, ws_id: WorkspaceId, metadata: &dyn WindowMetadata) -> bool;
-
-    /// Re-attach a previously-detached `Child` into `ws_id` and set focus within the
-    /// workspace.
-    fn reattach_child(&mut self, hub: &mut HubAccess, child: Child, ws_id: WorkspaceId);
-
-    /// Takes every tiling window off a workspace being reset, then removes all
-    /// per-workspace state. Returns the windows in the order to re-attach them.
-    fn migrate(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Vec<WindowId>;
-
-    /// Refresh config-derived internal state and relayout every workspace this
-    /// strategy owns.
-    fn apply_config(&mut self, hub: &mut HubAccess, tiling: TilingConfig);
+    /// Reads this strategy's config and recomputes placement for all its workspaces.
+    fn apply_config(&mut self, hub: &mut HubAccess, tiling: &TilingConfig);
 }
 
-fn preferred_tiling(hub: &HubAccess, ws_id: WorkspaceId) -> Option<&PreferredTiling> {
-    let monitor = hub.origin_monitor_name(ws_id);
-    hub.preferred_layouts
-        .workspace(&monitor, &hub.workspaces.get(ws_id).name)
-        .map(|entry| &entry.tiling)
+/// What one strategy's validator reached.
+#[cfg(test)]
+pub(super) struct Reachable {
+    pub(super) containers: FxHashSet<ContainerId>,
+    /// The windows of each workspace the strategy holds, in every mode. A workspace with no
+    /// window has an empty entry.
+    pub(super) windows: FxHashMap<WorkspaceId, Vec<WindowId>>,
 }
 
 #[cfg(test)]
 pub(super) trait ValidateStrategy {
-    /// Returns the container ids this strategy reaches from its workspace roots.
-    fn validate(&self, hub: &HubAccess) -> FxHashSet<ContainerId>;
+    /// Returns the container ids this strategy reaches from its workspace roots, with the windows
+    /// of each of its workspaces.
+    fn validate(&self, hub: &HubAccess) -> Reachable;
 }
 
 /// Absorbs the f32 error a constraint accumulates while being distributed.
 #[cfg(test)]
 pub(super) const VALIDATION_TOLERANCE: Length = Length::new(0.01);
+
+/// Panics when float focus is selected with no float to give it to, when a fullscreen window no
+/// longer exists, or when a tiling window or a float has restrictions, which only a fullscreen
+/// window can carry.
+#[cfg(test)]
+pub(super) fn validate_display_modes(
+    hub: &HubAccess,
+    ws_id: WorkspaceId,
+    tiling_windows: &[WindowId],
+    float_windows: &FloatWindows,
+    fullscreen_windows: &FullscreenWindows,
+) {
+    assert!(
+        !float_windows.is_float_focused || float_windows.topmost().is_some(),
+        "{ws_id}: float focus is selected but the workspace has no float"
+    );
+    for id in tiling_windows
+        .iter()
+        .copied()
+        .chain(float_windows.windows())
+    {
+        assert_eq!(
+            hub.windows.get(id).restrictions,
+            crate::core::WindowRestrictions::None,
+            "{ws_id}: {id} has restrictions but is not fullscreen"
+        );
+    }
+    for id in fullscreen_windows.windows() {
+        assert!(
+            hub.windows.contains(id),
+            "{ws_id}: fullscreen window {id} no longer exists"
+        );
+    }
+}
 
 /// Resolve one tiling window's effective constraints, in border-box space.
 ///
@@ -246,13 +390,10 @@ pub(crate) fn window_constraints(
     hub: &HubAccess,
     size_constraints: &SizeConstraints,
     wid: WindowId,
+    work_area: PixelRect,
+    scale: f32,
 ) -> Constraints {
     let window = hub.windows.get(wid);
-    let ws_id = window.workspace().expect("tiling window has a workspace");
-    let monitor_id = hub.workspaces.get(ws_id).monitor;
-    let monitor = hub.monitors.get(monitor_id);
-    let scale = monitor.scale;
-    let work_area = monitor.work_area;
     let screen_width = Length::from_pixels(work_area.width());
     let screen_height = Length::from_pixels(work_area.height());
 
@@ -454,56 +595,24 @@ pub(super) struct StrategySet {
 
 impl StrategySet {
     pub(super) fn new(tiling: &TilingConfig) -> Self {
-        let partition_tree = PartitionTreeStrategy::new(
-            tiling.partition_tree.tab_bar_height,
-            tiling.partition_tree.automatic_tiling,
-            tiling.size_constraints,
-        );
-        let master = MasterStrategy::new(
-            tiling.master.master_count,
-            tiling.master.master_ratio,
-            tiling.size_constraints,
-            tiling.partition_tree.tab_bar_height,
-        );
         Self {
-            partition_tree,
-            master,
+            partition_tree: PartitionTreeStrategy::new(tiling),
+            master: MasterStrategy::new(tiling),
             kinds: FxHashMap::default(),
         }
     }
 
-    pub(super) fn register(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
-        // Clone so the `&mut hub` below does not alias a borrow into `hub.preferred_layouts`.
-        let tiling = preferred_tiling(hub, ws_id).cloned();
-        let default = hub.tiling.layout;
-        self.kinds.insert(
-            ws_id,
-            tiling.as_ref().map_or(default, PreferredTiling::strategy),
-        );
-        match &tiling {
-            Some(PreferredTiling::PartitionTree { tree }) => {
-                self.partition_tree.prepare_workspace(ws_id, tree.as_ref())
-            }
-            Some(PreferredTiling::Master(layout)) => {
-                self.master.prepare_workspace(hub, ws_id, layout)
-            }
-            None => match default {
-                Strategy::PartitionTree => self.partition_tree.prepare_workspace(ws_id, None),
-                Strategy::Master => {
-                    self.master
-                        .prepare_workspace(hub, ws_id, &PreferredMaster::default())
-                }
-            },
-        }
-    }
-
-    pub(super) fn export_workspace(&self, hub: &HubAccess, ws_id: WorkspaceId) -> PreferredTiling {
-        match self.kind_of(ws_id) {
-            Strategy::PartitionTree => PreferredTiling::PartitionTree {
-                tree: self.partition_tree.export_workspace(hub, ws_id),
-            },
-            Strategy::Master => PreferredTiling::Master(self.master.export_workspace(hub, ws_id)),
-        }
+    /// Assigns the workspace to the strategy that its entry names, replacing any earlier
+    /// assignment, and has that strategy prepare the workspace.
+    pub(super) fn prepare_workspace(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        entry: &PreferredWorkspace,
+    ) {
+        let kind = entry.tiling.strategy();
+        self.kinds.insert(ws_id, kind);
+        self.get_mut(kind).prepare_workspace(hub, ws_id, entry);
     }
 
     pub(super) fn kind_of(&self, ws_id: WorkspaceId) -> Strategy {
@@ -513,14 +622,14 @@ impl StrategySet {
             .unwrap_or_else(|| panic!("workspace {ws_id:?} not registered with StrategySet"))
     }
 
-    pub(super) fn get(&self, kind: Strategy) -> &dyn TilingStrategy {
+    fn get(&self, kind: Strategy) -> &dyn TilingStrategy {
         match kind {
             Strategy::PartitionTree => &self.partition_tree,
             Strategy::Master => &self.master,
         }
     }
 
-    pub(super) fn get_mut(&mut self, kind: Strategy) -> &mut dyn TilingStrategy {
+    fn get_mut(&mut self, kind: Strategy) -> &mut dyn TilingStrategy {
         match kind {
             Strategy::PartitionTree => &mut self.partition_tree,
             Strategy::Master => &mut self.master,
@@ -539,91 +648,21 @@ impl StrategySet {
     /// A strategy that owns no workspace still takes the config, so a workspace
     /// that later moves to it starts from the current values.
     pub(super) fn apply_config(&mut self, hub: &mut HubAccess, tiling: &TilingConfig) {
-        self.partition_tree.apply_config(hub, tiling.clone());
-        self.master.apply_config(hub, tiling.clone());
+        self.partition_tree.apply_config(hub, tiling);
+        self.master.apply_config(hub, tiling);
     }
 
-    pub(super) fn handle_action(
-        &mut self,
-        hub: &mut HubAccess,
-        ws_id: WorkspaceId,
-        action: StrategyAction,
-    ) {
-        let kind = self.kind_of(ws_id);
-        match action {
-            StrategyAction::FocusDirection { direction, forward } => {
-                self.get_mut(kind).focus_direction(hub, direction, forward)
-            }
-            StrategyAction::MoveDirection { direction, forward } => {
-                self.get_mut(kind).move_direction(hub, direction, forward)
-            }
-            StrategyAction::ToggleContainerLayout => {
-                self.get_mut(kind).toggle_container_layout(hub)
-            }
-            StrategyAction::FocusTab { forward } => self.get_mut(kind).focus_tab(hub, forward),
-            StrategyAction::TabClicked {
-                container_id,
-                index,
-            } => self.get_mut(kind).tab_clicked(hub, container_id, index),
-            StrategyAction::GrowMaster => {
-                if let Some(master) = self.master_for(kind) {
-                    master.grow(hub)
-                }
-            }
-            StrategyAction::ShrinkMaster => {
-                if let Some(master) = self.master_for(kind) {
-                    master.shrink(hub)
-                }
-            }
-            StrategyAction::MoreMaster => {
-                if let Some(master) = self.master_for(kind) {
-                    master.more(hub)
-                }
-            }
-            StrategyAction::FewerMaster => {
-                if let Some(master) = self.master_for(kind) {
-                    master.fewer(hub)
-                }
-            }
-            StrategyAction::ToggleSpawnMode => {
-                if let Some(tree) = self.tree_for(kind) {
-                    tree.toggle_spawn_mode(hub)
-                }
-            }
-            StrategyAction::ToggleDirection => {
-                if let Some(tree) = self.tree_for(kind) {
-                    tree.toggle_focused_layout_direction(hub)
-                }
-            }
-            StrategyAction::FocusParent => {
-                if let Some(tree) = self.tree_for(kind) {
-                    tree.focus_parent(hub)
-                }
-            }
-        }
-    }
-
-    /// Rebuilds the tiling state of `ws_id` from the preferred layouts and attaches its
-    /// tiling windows again.
-    pub(super) fn reset_workspace(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
-        let old = self.kind_of(ws_id);
-        let migrated = self.get_mut(old).migrate(hub, ws_id);
-        self.register(hub, ws_id);
-        let new = self.kind_of(ws_id);
-        for &wid in &migrated {
-            self.get_mut(new).attach_window(hub, wid, ws_id);
-        }
-        if let Some(&last) = migrated.last() {
-            self.get_mut(new).set_focus(hub, last);
-        }
-    }
-
+    /// Returns the workspace that holds each open window, after checking that every workspace
+    /// sits in the strategy it is assigned to and that no window sits in two places.
     #[cfg(test)]
-    pub(super) fn validate(&self, hub: &HubAccess) {
+    pub(super) fn validate(&self, hub: &HubAccess) -> FxHashMap<WindowId, WorkspaceId> {
+        let tree = self.partition_tree.validate(hub);
+        let master = self.master.validate(hub);
+
         // The container arena is shared across strategies, so union every strategy's reachable
         // set before the leak sweep, or one strategy's containers look leaked to another.
-        let mut reachable = self.partition_tree.validate(hub);
-        reachable.extend(self.master.validate(hub));
+        let mut reachable = tree.containers;
+        reachable.extend(master.containers);
         let allocated: FxHashSet<ContainerId> = hub.containers.sorted_ids().into_iter().collect();
 
         let mut leaked: Vec<ContainerId> = allocated.difference(&reachable).copied().collect();
@@ -638,26 +677,34 @@ impl StrategySet {
             dangling.is_empty(),
             "Containers reachable from a workspace root but not allocated: {dangling:?}"
         );
-    }
 
-    fn master_for(&mut self, kind: Strategy) -> Option<&mut MasterStrategy> {
-        match kind {
-            Strategy::Master => Some(&mut self.master),
-            Strategy::PartitionTree => {
-                tracing::debug!("Master action on a partition-tree workspace");
-                None
+        let mut owners: FxHashMap<WindowId, WorkspaceId> = FxHashMap::default();
+        let mut held_workspaces: FxHashSet<WorkspaceId> = FxHashSet::default();
+        for (kind, windows) in [
+            (Strategy::PartitionTree, tree.windows),
+            (Strategy::Master, master.windows),
+        ] {
+            for (ws_id, ids) in windows {
+                assert_eq!(
+                    self.kind_of(ws_id),
+                    kind,
+                    "{ws_id} has state in the {kind:?} strategy but is assigned to another"
+                );
+                held_workspaces.insert(ws_id);
+                for id in ids {
+                    if let Some(other) = owners.insert(id, ws_id) {
+                        panic!("{id} is listed twice, in {other} and in {ws_id}");
+                    }
+                }
             }
         }
-    }
-
-    fn tree_for(&mut self, kind: Strategy) -> Option<&mut PartitionTreeStrategy> {
-        match kind {
-            Strategy::PartitionTree => Some(&mut self.partition_tree),
-            Strategy::Master => {
-                tracing::debug!("Partition-tree action on a master workspace");
-                None
-            }
+        for ws_id in hub.workspaces.sorted_ids() {
+            assert!(
+                held_workspaces.contains(&ws_id),
+                "{ws_id} has no state in the strategy it is assigned to"
+            );
         }
+        owners
     }
 }
 

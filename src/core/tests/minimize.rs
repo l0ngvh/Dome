@@ -1,21 +1,11 @@
 use crate::core::allocator::NodeId;
 
-use super::{
-    PixelRect, TilingConfigBuilder, default_rect, setup, setup_with_tiling, snapshot, titled,
-    titled_matcher,
-};
-use crate::core::TilingConfig;
+use super::{PixelRect, default_rect, setup, setup_with_modes, snapshot, titled};
+use crate::core::hub::RestrictedAction;
 use crate::core::node::{
     Length, LimitObservation, LimitUpdate, MinimizedWindowEntry, MonitorId, WindowRestrictions,
 };
 use insta::assert_snapshot;
-
-/// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn tiling_floating(titles: &[&str]) -> TilingConfig {
-    TilingConfigBuilder::new()
-        .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
-        .build()
-}
 
 #[test]
 fn minimize_tiling_window() {
@@ -69,7 +59,7 @@ fn minimize_tiling_window() {
 
 #[test]
 fn minimize_float_window() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w3"]));
+    let mut hub = setup_with_modes("0", &["w3"], &[]);
     let _w0 = hub
         .insert_window(titled("w2"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -375,7 +365,7 @@ fn minimize_last_window_on_workspace() {
 
 #[test]
 fn minimize_last_tiling_with_floats_present() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w18"]));
+    let mut hub = setup_with_modes("0", &["w18"], &[]);
     let w0 = hub
         .insert_window(titled("w17"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -414,6 +404,43 @@ fn minimize_last_tiling_with_floats_present() {
 }
 
 #[test]
+fn minimizing_the_focused_last_tiling_window_focuses_the_float() {
+    let mut hub = setup_with_modes("0", &["w1"], &[]);
+    hub.insert_window(
+        titled("w1"),
+        PixelRect::new(10, 5, 40, 10),
+        WindowRestrictions::None,
+    );
+    let w0 = hub
+        .insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
+        .unwrap();
+    hub.minimize_window(w0);
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=10.00, y=5.00, w=40.00, h=10.00, float, highlighted)
+      )
+      Minimized: [WindowId(1)]
+
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+              ****************************************                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              *                  F0                  *                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              ****************************************
+    ");
+}
+
+#[test]
 fn set_window_constraint_on_minimized_no_panic() {
     let mut hub = setup();
     let w0 = hub
@@ -432,15 +459,102 @@ fn set_window_constraint_on_minimized_no_panic() {
 }
 
 #[test]
-#[should_panic(expected = "non-minimized float window has a workspace")]
-fn update_float_rect_on_minimized_panics() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w20"]));
+fn size_limits_observed_while_minimized_hold_after_restore() {
+    let mut hub = setup();
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None)
+        .unwrap();
+    let w1 = hub
+        .insert_window(titled("w1"), default_rect(), WindowRestrictions::None)
+        .unwrap();
+    hub.set_window_constraint(
+        w1,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::new(50.0)),
+            ..Default::default()
+        },
+    );
+    hub.minimize_window(w1);
+    hub.set_window_constraint(
+        w1,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
+    hub.unminimize_window(w1);
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=48.00, y=0.00, w=102.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=48.00, h=30.00)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, w1])
+      )
+
+    +----------------------------------------------+******************************************************************************************************
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                      W0                      |*                                                 W1                                                 *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    |                                              |*                                                                                                    *
+    +----------------------------------------------+******************************************************************************************************
+    ");
+}
+
+#[test]
+fn update_float_rect_ignores_a_minimized_window() {
+    let mut hub = setup_with_modes("0", &["w20"], &[]);
     let dim = PixelRect::new(10, 5, 40, 10);
     let w0 = hub
         .insert_window(titled("w20"), dim, WindowRestrictions::None)
         .unwrap();
     hub.minimize_window(w0);
     hub.update_float_rect(w0, PixelRect::new(20, 10, 50, 20), MonitorId::new(0));
+    hub.unminimize_window(w0);
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=10.00, y=5.00, w=40.00, h=10.00, float, highlighted)
+      )
+
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+              ****************************************                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              *                  F0                  *                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              *                                      *                                                                                                    
+              ****************************************
+    ");
 }
 
 #[test]
@@ -519,7 +633,7 @@ fn unminimize_deleted_window_is_noop() {
 
 #[test]
 fn unminimize_float_window_restores_mode_and_dimension() {
-    let mut hub = setup_with_tiling(tiling_floating(&["w28"]));
+    let mut hub = setup_with_modes("0", &["w28"], &[]);
     let _w0 = hub
         .insert_window(titled("w27"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -626,4 +740,8 @@ fn unminimize_fullscreen_window_restores_mode_and_restrictions() {
     |                                                                                                                                                    |
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
+    assert!(
+        hub.is_restricted(RestrictedAction::TilingNavigation),
+        "the restored window keeps BlockAll, which alone blocks tiling navigation"
+    );
 }

@@ -1,16 +1,6 @@
-use crate::core::TilingConfig;
 use crate::core::node::{PixelRect, WindowRestrictions};
-use crate::core::tests::{
-    TilingConfigBuilder, default_rect, setup, setup_with_tiling, snapshot, titled, titled_matcher,
-};
+use crate::core::tests::{default_rect, setup, setup_with_modes, snapshot, titled};
 use insta::assert_snapshot;
-
-/// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
-fn tiling_floating(titles: &[&str]) -> TilingConfig {
-    TilingConfigBuilder::new()
-        .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
-        .build()
-}
 
 #[test]
 fn focus_parent_twice_nested_containers() {
@@ -176,7 +166,7 @@ fn focus_parent_noop() {
     hub.focus_parent();
     assert_eq!(before, snapshot(&hub));
 
-    let mut hub = setup_with_tiling(tiling_floating(&["w7"]));
+    let mut hub = setup_with_modes("0", &["w7"], &[]);
     hub.insert_window(
         titled("w7"),
         PixelRect::new(10, 5, 30, 20),

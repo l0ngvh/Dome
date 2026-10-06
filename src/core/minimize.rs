@@ -1,13 +1,8 @@
-use crate::core::{
-    Hub, WindowId,
-    node::{Child, DisplayMode, MinimizedWindowEntry},
-};
+use crate::core::{Hub, WindowId, node::MinimizedWindowEntry};
 
 impl Hub {
-    /// Detach a window from its current layout and mark it minimized.
-    /// The window's `mode` field (including the float dim payload) is
-    /// preserved through the round trip. The window is removed from its
-    /// workspace and tracked in `minimized_windows` until restored.
+    /// Detaches a window from its workspace and keeps it, with the display mode it had and a
+    /// float's border box, in `minimized_windows` until it is restored.
     #[tracing::instrument(skip(self))]
     pub(crate) fn minimize_window(&mut self, window_id: WindowId) {
         let window = self.access.windows.get(window_id);
@@ -17,64 +12,47 @@ impl Hub {
         let prior_workspace = window
             .workspace()
             .expect("non-minimized window has a workspace");
-        let prior_mode = window.mode;
 
-        match prior_mode {
-            DisplayMode::Tiling => {
-                let strategy = self.strategies.for_workspace_mut(prior_workspace);
-                strategy.detach_window(&mut self.access, window_id);
-                if strategy.tiling_window_count(&self.access, prior_workspace) == 0 {
-                    let ws = self.access.workspaces.get_mut(prior_workspace);
-                    if ws.fullscreen_windows.is_empty() {
-                        ws.is_float_focused = !ws.float_windows.is_empty();
-                    }
-                }
-            }
-            DisplayMode::Float { .. } => {
-                self.detach_float_from_workspace(window_id);
-            }
-            DisplayMode::Fullscreen => {
-                self.detach_fullscreen_from_workspace(window_id);
-            }
-        }
+        let prior_mode = self
+            .strategies
+            .for_workspace_mut(prior_workspace)
+            .detach_window(&mut self.access, window_id);
 
         let w = self.access.windows.get_mut(window_id);
         w.set_minimized(true);
         w.set_workspace(None);
-        self.minimized_windows.push(window_id);
+        self.minimized_windows.push((window_id, prior_mode));
 
         tracing::info!(?prior_mode, "Window minimized");
     }
 
-    /// Restore a minimized window to the current workspace using its preserved
-    /// mode. No-op if the window is not in `minimized_windows` (guards against
-    /// stale entries where a window was deleted while minimized).
+    /// Restores a minimized window to the current workspace in the display mode it had, then
+    /// requests focus for it. Does nothing for a window that is not minimized, such as one
+    /// deleted while minimized.
     #[tracing::instrument(skip(self))]
     pub(crate) fn unminimize_window(&mut self, window_id: WindowId) {
-        if !self.minimized_windows.contains(&window_id) {
+        let Some(pos) = self
+            .minimized_windows
+            .iter()
+            .position(|&(id, _)| id == window_id)
+        else {
             return;
-        }
-        self.minimized_windows.retain(|&w| w != window_id);
+        };
+        let (_, prior_mode) = self.minimized_windows.remove(pos);
 
         let target_workspace = self.current_workspace();
-        let prior_mode = self.access.windows.get(window_id).mode;
 
         self.access.windows.get_mut(window_id).set_minimized(false);
-
-        match prior_mode {
-            DisplayMode::Tiling => {
-                self.strategies
-                    .for_workspace_mut(target_workspace)
-                    .reattach_child(&mut self.access, Child::Window(window_id), target_workspace);
-                self.set_workspace_focus(window_id);
-            }
-            DisplayMode::Float { border_box, .. } => {
-                self.attach_float_to_workspace(target_workspace, window_id, border_box, None);
-            }
-            DisplayMode::Fullscreen => {
-                self.attach_fullscreen_to_workspace(target_workspace, window_id, None);
-            }
-        }
+        self.strategies
+            .for_workspace_mut(target_workspace)
+            .attach_window(
+                &mut self.access,
+                window_id,
+                target_workspace,
+                prior_mode,
+                None,
+            );
+        self.set_workspace_focus(window_id);
         tracing::info!(?prior_mode, "Window unminimized");
     }
 
@@ -82,7 +60,7 @@ impl Hub {
     pub(crate) fn minimized_window_entries(&self) -> Vec<MinimizedWindowEntry> {
         self.minimized_windows
             .iter()
-            .map(|&id| {
+            .map(|&(id, _)| {
                 let w = self.access.windows.get(id);
                 MinimizedWindowEntry {
                     id,

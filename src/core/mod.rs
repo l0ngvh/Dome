@@ -10,6 +10,7 @@ mod monitor;
 mod node;
 mod partition_tree;
 mod preferred_layout;
+mod slot;
 mod strategy;
 #[cfg(test)]
 mod tests;

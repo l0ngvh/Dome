@@ -59,8 +59,10 @@ const NO_ARG: [(&str, Make); 28] = [
     ("toggle_tabbed", || {
         StrategyAction::ToggleContainerLayout.into()
     }),
-    ("toggle_float", || TilingAction::ToggleFloat),
-    ("toggle_fullscreen", || TilingAction::ToggleFullscreen),
+    ("toggle_float", || StrategyAction::ToggleFloat.into()),
+    ("toggle_fullscreen", || {
+        StrategyAction::ToggleFullscreen.into()
+    }),
     ("increase_master_ratio", || {
         StrategyAction::GrowMaster.into()
     }),

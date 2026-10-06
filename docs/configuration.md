@@ -23,11 +23,9 @@ config.keymaps.main[Meta + Return] = function(actions)
   actions.execute(terminal)
 end
 
--- Ignore, float, or fullscreen windows that match a rule.
--- All keys must match, and the first matching rule wins.
-config.ignore = { { app = "Finder", title = "Trash" } }
-config.float = { { app = "System Settings" } }
-config.fullscreen = { { app = "/IINA|VLC/" } }  -- wrap a value in /.../ for a regex match
+-- Ignore windows that match a rule.
+-- All keys must match, and the first matching rule wins. Wrap a value in /.../ for a regex match.
+config.ignore = { { app = "Finder", title = "Trash" }, { app = "/IINA|VLC/" } }
 
 return config
 ```

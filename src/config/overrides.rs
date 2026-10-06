@@ -30,8 +30,6 @@ pub(super) fn read_config(
             partition_tree: read_group(cx, user, defaults, "partition_tree", read_partition_tree)?,
             master: read_group(cx, user, defaults, "master", read_master)?,
             size_constraints: read_size_constraints(cx, user, defaults)?,
-            float: user_or_default(cx, user, defaults, "float")?,
-            fullscreen: user_or_default(cx, user, defaults, "fullscreen")?,
             ignore: user_or_default(cx, user, defaults, "ignore")?,
         },
         appearance: Appearance {

@@ -101,8 +101,8 @@ fn initial_tiling(strategy: SmokeStrategy) -> TilingConfig {
 }
 
 /// Titles are drawn only from what the harness actually inserts, since a matcher
-/// on anything else is inert. A title can land in both lists, which is what
-/// reaches fullscreen-beats-float in `resolve_matcher`.
+/// on anything else is inert. A title can land in both lists, so one window can
+/// match a fullscreen slot and a float slot of the same workspace.
 fn generate_matcher_titles(
     rng: &mut ChaCha8Rng,
     preferred_titles: &[String],
@@ -719,7 +719,7 @@ fn build_op(
         }
         OpKind::ConfigReload => {
             let mut tiling = current_tiling.clone();
-            match rng.random_range(0..8u8) {
+            match rng.random_range(0..6u8) {
                 0 => {
                     tiling.partition_tree.automatic_tiling =
                         !tiling.partition_tree.automatic_tiling;
@@ -738,19 +738,11 @@ fn build_op(
                     let v = rng.random_range(10..200);
                     tiling.size_constraints.minimum_width = SizeConstraint::Pixels(Pixels::new(v));
                 }
-                5 => {
+                _ => {
                     tiling.layout = match tiling.layout {
                         Strategy::PartitionTree => Strategy::Master,
                         Strategy::Master => Strategy::PartitionTree,
                     };
-                }
-                6 => {
-                    let (float, _) = generate_matcher_titles(rng, &pref_title_pool());
-                    tiling.float = float.iter().map(|t| titled_matcher(t)).collect();
-                }
-                _ => {
-                    let (_, fullscreen) = generate_matcher_titles(rng, &pref_title_pool());
-                    tiling.fullscreen = fullscreen.iter().map(|t| titled_matcher(t)).collect();
                 }
             }
             Some(RecordedOp::ConfigReload { tiling })
