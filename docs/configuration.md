@@ -72,8 +72,8 @@ config.keymaps = {
     [Meta + "r"] = function(actions) actions.mode("resize") end,
   },
   resize = {
-    ["h"] = function(actions) actions.decrease_master_ratio() end,
-    ["l"] = function(actions) actions.increase_master_ratio() end,
+    ["h"] = function(actions) actions.shrink() end,
+    ["l"] = function(actions) actions.grow() end,
     ["escape"] = function(actions) actions.mode("main") end,
   },
 }
@@ -203,10 +203,10 @@ Toggle the focused window between tiling and floating.
 
 Toggle the focused window between normal and fullscreen.
 
-### `actions.increase_master_ratio()`, `decrease_master_ratio()`
+### `actions.grow()`, `shrink()`
 
-Change the master area by 5 percentage points, clamped to `0.1` through `0.9`
-of the workspace.
+In Master, change the master area by 5 percentage points, clamped to `0.1`
+through `0.9` of the workspace.
 
 ### `actions.increase_master_count()`, `decrease_master_count()`
 

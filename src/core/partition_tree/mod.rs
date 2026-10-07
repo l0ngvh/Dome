@@ -285,10 +285,10 @@ impl TilingStrategy for PartitionTreeStrategy {
             }
             StrategyAction::ToggleFloat => self.toggle_float(hub, ws_id, focused),
             StrategyAction::ToggleFullscreen => self.toggle_fullscreen(hub, focused),
-            StrategyAction::GrowMaster
-            | StrategyAction::ShrinkMaster
-            | StrategyAction::MoreMaster
-            | StrategyAction::FewerMaster => {
+            StrategyAction::Grow | StrategyAction::Shrink => {
+                tracing::debug!("Grow or shrink on a partition-tree workspace");
+            }
+            StrategyAction::MoreMaster | StrategyAction::FewerMaster => {
                 tracing::debug!("Master action on a partition-tree workspace");
             }
         }

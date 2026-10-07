@@ -87,8 +87,8 @@ fn master_layout_actions_run_while_a_float_has_focus_but_not_under_fullscreen() 
         (master.master_ratio, master.master_count)
     };
     let actions = [
-        StrategyAction::GrowMaster,
-        StrategyAction::ShrinkMaster,
+        StrategyAction::Grow,
+        StrategyAction::Shrink,
         StrategyAction::MoreMaster,
         StrategyAction::FewerMaster,
     ];
@@ -107,8 +107,8 @@ fn master_layout_actions_run_while_a_float_has_focus_but_not_under_fullscreen() 
     );
     let mut layouts = Vec::new();
     for action in [
-        StrategyAction::GrowMaster,
-        StrategyAction::ShrinkMaster,
+        StrategyAction::Grow,
+        StrategyAction::Shrink,
         StrategyAction::MoreMaster,
         StrategyAction::FewerMaster,
     ] {

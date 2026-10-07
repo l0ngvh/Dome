@@ -46,8 +46,8 @@ local config = {
       [Meta + Shift + "e"] = function(actions) actions.exit() end,
     },
     resize = {
-      ["h"] = function(actions) actions.decrease_master_ratio() end,
-      ["l"] = function(actions) actions.increase_master_ratio() end,
+      ["h"] = function(actions) actions.shrink() end,
+      ["l"] = function(actions) actions.grow() end,
       [Space] = function(actions) actions.toggle_float() end,
       [Up] = function(actions) actions.increase_master_count() end,
       [Esc] = function(actions) actions.mode("main") end,

@@ -56,8 +56,8 @@ keymaps.main[Meta + Shift + Enter] = function(actions)
   actions.mode("resize")
 end
 keymaps.resize = {
-  ["h"] = function(actions) actions.decrease_master_ratio() end,
-  ["l"] = function(actions) actions.increase_master_ratio() end,
+  ["h"] = function(actions) actions.shrink() end,
+  ["l"] = function(actions) actions.grow() end,
   ["j"] = function(actions) actions.decrease_master_count() end,
   ["k"] = function(actions) actions.increase_master_count() end,
   [Escape] = function(actions) actions.mode("main") end,

@@ -63,12 +63,8 @@ const NO_ARG: [(&str, Make); 28] = [
     ("toggle_fullscreen", || {
         StrategyAction::ToggleFullscreen.into()
     }),
-    ("increase_master_ratio", || {
-        StrategyAction::GrowMaster.into()
-    }),
-    ("decrease_master_ratio", || {
-        StrategyAction::ShrinkMaster.into()
-    }),
+    ("grow", || StrategyAction::Grow.into()),
+    ("shrink", || StrategyAction::Shrink.into()),
     ("increase_master_count", || {
         StrategyAction::MoreMaster.into()
     }),

@@ -66,8 +66,8 @@ enum CliCommand {
     ToggleTabbed,
     ToggleFloat,
     ToggleFullscreen,
-    IncreaseMasterRatio,
-    DecreaseMasterRatio,
+    Grow,
+    Shrink,
     IncreaseMasterCount,
     DecreaseMasterCount,
     Execute {
@@ -163,8 +163,8 @@ impl From<CliCommand> for Dispatch {
             CliCommand::ToggleTabbed => toggle(ToggleTarget::Layout),
             CliCommand::ToggleFloat => toggle(ToggleTarget::Float),
             CliCommand::ToggleFullscreen => toggle(ToggleTarget::Fullscreen),
-            CliCommand::IncreaseMasterRatio => master(MasterTarget::Grow),
-            CliCommand::DecreaseMasterRatio => master(MasterTarget::Shrink),
+            CliCommand::Grow => Dispatch::Action(Action::Grow),
+            CliCommand::Shrink => Dispatch::Action(Action::Shrink),
             CliCommand::IncreaseMasterCount => master(MasterTarget::More),
             CliCommand::DecreaseMasterCount => master(MasterTarget::Fewer),
             CliCommand::Execute { command } => Dispatch::Action(Action::Execute { command }),
@@ -424,6 +424,28 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn cli_rejects_the_old_master_ratio_commands() {
+        for command in ["increase-master-ratio", "decrease-master-ratio"] {
+            assert!(
+                Cli::try_parse_from(["dome", command]).is_err(),
+                "{command:?} still parses"
+            );
+        }
+    }
+
+    #[test]
+    fn cli_grow_and_shrink_dispatch_their_actions() {
+        match dispatch_from_argv(&["dome", "grow"]) {
+            Dispatch::Action(Action::Grow) => {}
+            other => panic!("expected Action(Grow), got {other:?}"),
+        }
+        match dispatch_from_argv(&["dome", "shrink"]) {
+            Dispatch::Action(Action::Shrink) => {}
+            other => panic!("expected Action(Shrink), got {other:?}"),
+        }
     }
 
     #[test]

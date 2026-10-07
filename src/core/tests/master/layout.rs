@@ -197,7 +197,7 @@ fn focus_direction_up_down() {
 }
 
 #[test]
-fn increase_decrease_master_ratio() {
+fn grow_shrink_master_ratio() {
     let mut hub = TestHubBuilder::new()
         .with_tiling(
             TilingConfigBuilder::new()
@@ -209,7 +209,7 @@ fn increase_decrease_master_ratio() {
     hub.insert_window(titled("w18"), default_rect(), WindowRestrictions::None);
 
     // Increase ratio: master gets wider
-    hub.handle_tiling_action(StrategyAction::GrowMaster);
+    hub.handle_tiling_action(StrategyAction::Grow);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -250,8 +250,8 @@ fn increase_decrease_master_ratio() {
     ");
 
     // Decrease twice to go below default
-    hub.handle_tiling_action(StrategyAction::ShrinkMaster);
-    hub.handle_tiling_action(StrategyAction::ShrinkMaster);
+    hub.handle_tiling_action(StrategyAction::Shrink);
+    hub.handle_tiling_action(StrategyAction::Shrink);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -293,7 +293,7 @@ fn increase_decrease_master_ratio() {
 
     // Clamp at 0.1: decrease many times
     for _ in 0..20 {
-        hub.handle_tiling_action(StrategyAction::ShrinkMaster);
+        hub.handle_tiling_action(StrategyAction::Shrink);
     }
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -336,7 +336,7 @@ fn increase_decrease_master_ratio() {
 
     // Clamp at 0.9: increase many times
     for _ in 0..20 {
-        hub.handle_tiling_action(StrategyAction::GrowMaster);
+        hub.handle_tiling_action(StrategyAction::Grow);
     }
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -506,8 +506,8 @@ fn layout_actions_do_nothing_on_an_empty_workspace() {
     let untouched = snapshot_after(None);
 
     for action in [
-        StrategyAction::GrowMaster,
-        StrategyAction::ShrinkMaster,
+        StrategyAction::Grow,
+        StrategyAction::Shrink,
         StrategyAction::MoreMaster,
         StrategyAction::FewerMaster,
     ] {

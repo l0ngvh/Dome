@@ -20,7 +20,7 @@ use crate::core::{PreferredWorkspace, SizeConstraints, Strategy};
 
 /// An action on the focused tiling child does nothing while a float or fullscreen window has
 /// focus, and an action on the workspace layout or a clicked container does nothing while a
-/// fullscreen window has focus.
+/// fullscreen window has focus. Each strategy puts `Grow` and `Shrink` in one of the two groups.
 #[derive(Debug)]
 pub(crate) enum StrategyAction {
     /// Moves focus from the focused tiling child to the nearest child in `direction`.
@@ -44,10 +44,10 @@ pub(crate) enum StrategyAction {
         container_id: ContainerId,
         index: usize,
     },
-    /// Grows the master ratio of the workspace, within its limits.
-    GrowMaster,
-    /// Shrinks the master ratio of the workspace, within its limits.
-    ShrinkMaster,
+    /// Grows what the strategy resizes, within its limits.
+    Grow,
+    /// Shrinks what the strategy resizes, within its limits.
+    Shrink,
     /// Raises the number of windows the master pane of the workspace holds.
     MoreMaster,
     /// Lowers the number of windows the master pane of the workspace holds, down to its minimum.
@@ -151,8 +151,6 @@ impl From<&crate::action::MasterTarget> for TilingAction {
         use crate::action::MasterTarget;
 
         match target {
-            MasterTarget::Grow => StrategyAction::GrowMaster.into(),
-            MasterTarget::Shrink => StrategyAction::ShrinkMaster.into(),
             MasterTarget::More => StrategyAction::MoreMaster.into(),
             MasterTarget::Fewer => StrategyAction::FewerMaster.into(),
         }

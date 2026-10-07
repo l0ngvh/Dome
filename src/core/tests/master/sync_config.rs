@@ -149,8 +149,6 @@ fn sync_config_drop_masters() {
 
 #[test]
 fn sync_config_preserves_runtime_tuned_master_ratio() {
-    // Runtime GrowMaster tuning persists across config reload. A hot-reload
-    // does NOT reset the ratio back to the file value (preserve semantics).
     let mut hub = TestHubBuilder::new()
         .with_tiling(
             TilingConfigBuilder::new()
@@ -161,10 +159,9 @@ fn sync_config_preserves_runtime_tuned_master_ratio() {
     hub.insert_window(titled("w49"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w50"), default_rect(), WindowRestrictions::None);
 
-    // GrowMaster 3 times: 0.5 -> 0.55 -> 0.60 -> 0.65
-    hub.handle_tiling_action(StrategyAction::GrowMaster);
-    hub.handle_tiling_action(StrategyAction::GrowMaster);
-    hub.handle_tiling_action(StrategyAction::GrowMaster);
+    hub.handle_tiling_action(StrategyAction::Grow);
+    hub.handle_tiling_action(StrategyAction::Grow);
+    hub.handle_tiling_action(StrategyAction::Grow);
 
     // Hot-reload with a different file value does NOT override runtime tuning.
     let l = TilingConfigBuilder::new()

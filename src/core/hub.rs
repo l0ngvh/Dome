@@ -114,8 +114,8 @@ fn restriction_of(action: &StrategyAction) -> RestrictedAction {
         | StrategyAction::FocusParent
         | StrategyAction::FocusTab { .. }
         | StrategyAction::TabClicked { .. }
-        | StrategyAction::GrowMaster
-        | StrategyAction::ShrinkMaster
+        | StrategyAction::Grow
+        | StrategyAction::Shrink
         | StrategyAction::MoreMaster
         | StrategyAction::FewerMaster => RestrictedAction::TilingNavigation,
     }
@@ -313,6 +313,8 @@ impl Hub {
                 Action::Move { target } => self.handle_tiling_action(target),
                 Action::Toggle { target } => self.handle_tiling_action(target),
                 Action::Master { target } => self.handle_tiling_action(target),
+                Action::Grow => self.handle_tiling_action(StrategyAction::Grow),
+                Action::Shrink => self.handle_tiling_action(StrategyAction::Shrink),
                 Action::Execute { command } => effects.execute(command),
                 Action::Exit => {
                     tracing::debug!("Exit action received");

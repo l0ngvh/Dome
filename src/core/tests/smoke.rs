@@ -222,8 +222,8 @@ enum OpKind {
     SetFocus,
     SetWindowConstraint,
     SetWindowTitle,
-    IncreaseMasterRatio,
-    DecreaseMasterRatio,
+    Grow,
+    Shrink,
     IncrementMasterCount,
     DecrementMasterCount,
     QueryWorkspaces,
@@ -265,8 +265,8 @@ const ALL_OP_KINDS: &[OpKind] = &[
     OpKind::SetFocus,
     OpKind::SetWindowConstraint,
     OpKind::SetWindowTitle,
-    OpKind::IncreaseMasterRatio,
-    OpKind::DecreaseMasterRatio,
+    OpKind::Grow,
+    OpKind::Shrink,
     OpKind::IncrementMasterCount,
     OpKind::DecrementMasterCount,
     OpKind::QueryWorkspaces,
@@ -354,8 +354,8 @@ enum RecordedOp {
     FocusPrevTab,
     ToggleFloat,
     ToggleFullscreen,
-    IncreaseMasterRatio,
-    DecreaseMasterRatio,
+    Grow,
+    Shrink,
     IncrementMasterCount,
     DecrementMasterCount,
     QueryWorkspaces,
@@ -694,8 +694,8 @@ fn build_op(
                 title,
             })
         }
-        OpKind::IncreaseMasterRatio => Some(RecordedOp::IncreaseMasterRatio),
-        OpKind::DecreaseMasterRatio => Some(RecordedOp::DecreaseMasterRatio),
+        OpKind::Grow => Some(RecordedOp::Grow),
+        OpKind::Shrink => Some(RecordedOp::Shrink),
         OpKind::IncrementMasterCount => Some(RecordedOp::IncrementMasterCount),
         OpKind::DecrementMasterCount => Some(RecordedOp::DecrementMasterCount),
         OpKind::QueryWorkspaces => Some(RecordedOp::QueryWorkspaces),
@@ -951,11 +951,11 @@ fn apply_op(
         RecordedOp::FocusPrevTab => hub.focus_prev_tab(),
         RecordedOp::ToggleFloat => hub.toggle_float(),
         RecordedOp::ToggleFullscreen => hub.toggle_fullscreen(),
-        RecordedOp::IncreaseMasterRatio => {
-            hub.handle_tiling_action(StrategyAction::GrowMaster);
+        RecordedOp::Grow => {
+            hub.handle_tiling_action(StrategyAction::Grow);
         }
-        RecordedOp::DecreaseMasterRatio => {
-            hub.handle_tiling_action(StrategyAction::ShrinkMaster);
+        RecordedOp::Shrink => {
+            hub.handle_tiling_action(StrategyAction::Shrink);
         }
         RecordedOp::IncrementMasterCount => {
             hub.handle_tiling_action(StrategyAction::MoreMaster);
@@ -1327,11 +1327,11 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
             RecordedOp::FocusPrevTab => hub.focus_prev_tab(),
             RecordedOp::ToggleFloat => hub.toggle_float(),
             RecordedOp::ToggleFullscreen => hub.toggle_fullscreen(),
-            RecordedOp::IncreaseMasterRatio => {
-                hub.handle_tiling_action(StrategyAction::GrowMaster);
+            RecordedOp::Grow => {
+                hub.handle_tiling_action(StrategyAction::Grow);
             }
-            RecordedOp::DecreaseMasterRatio => {
-                hub.handle_tiling_action(StrategyAction::ShrinkMaster);
+            RecordedOp::Shrink => {
+                hub.handle_tiling_action(StrategyAction::Shrink);
             }
             RecordedOp::IncrementMasterCount => {
                 hub.handle_tiling_action(StrategyAction::MoreMaster);

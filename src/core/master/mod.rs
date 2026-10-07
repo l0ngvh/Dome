@@ -259,13 +259,13 @@ impl TilingStrategy for MasterStrategy {
                 container_id,
                 index,
             } if layout_is_visible => self.tab_clicked(hub, ws_id, container_id, index),
-            StrategyAction::GrowMaster if layout_is_visible => self.grow(hub, ws_id),
-            StrategyAction::ShrinkMaster if layout_is_visible => self.shrink(hub, ws_id),
+            StrategyAction::Grow if layout_is_visible => self.grow(hub, ws_id),
+            StrategyAction::Shrink if layout_is_visible => self.shrink(hub, ws_id),
             StrategyAction::MoreMaster if layout_is_visible => self.more(hub, ws_id),
             StrategyAction::FewerMaster if layout_is_visible => self.fewer(hub, ws_id),
             StrategyAction::TabClicked { .. }
-            | StrategyAction::GrowMaster
-            | StrategyAction::ShrinkMaster
+            | StrategyAction::Grow
+            | StrategyAction::Shrink
             | StrategyAction::MoreMaster
             | StrategyAction::FewerMaster => {
                 tracing::debug!("Layout action while fullscreen hides the layout");
