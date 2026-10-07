@@ -1,0 +1,37 @@
+# Throwaway spike. Detached from the parent workspace on purpose, so it builds
+# and runs on its own and can be deleted without touching the main crate.
+[workspace]
+
+[package]
+name = "border-occlusion-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "spike"
+path = "src/lib.rs"
+
+[[bin]]
+name = "border-occlusion-spike"
+path = "src/main.rs"
+
+[[bin]]
+name = "fixture"
+path = "src/bin/fixture.rs"
+
+[[bin]]
+name = "driver"
+path = "src/bin/driver.rs"
+
+[dependencies]
+objc2 = "0.6.3"
+block2 = "0.6.2"
+libc = "0.2"
+png = "0.18.1"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSDate", "NSTimer", "NSGeometry", "NSNotification", "NSOperation", "NSString", "NSObject", "NSDictionary", "NSArray", "NSRunLoop", "NSObjCRuntime", "NSEnumerator"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "libc", "NSApplication", "NSRunningApplication", "NSWorkspace", "NSResponder", "NSWindow", "NSView", "NSColor", "NSScreen", "NSGraphics", "NSMenu", "NSMenuItem", "objc2-quartz-core", "objc2-core-foundation"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFArray", "CFDictionary", "CFNumber", "CFString", "CFCGTypes", "CFRunLoop", "CFDate"] }
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGWindow", "CGPath", "CGColor", "CGColorSpace", "CGGeometry", "CGEvent", "CGEventTypes", "CGEventSource", "CGRemoteOperation", "CGDirectDisplay"] }
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std", "CALayer", "CAShapeLayer", "CATransaction", "objc2-core-foundation", "objc2-core-graphics"] }
+objc2-application-services = { version = "0.3.2", default-features = false, features = ["std", "libc", "HIServices", "AXUIElement", "AXError", "AXValue"] }
