@@ -4,8 +4,8 @@
 use super::lua::deserializer::{FromLuaValue, LoadContext, as_table};
 use super::{Appearance, Config};
 use crate::core::{
-    Logical, MasterConfig, PartitionTreeConfig, Pixels, SizeConstraint, SizeConstraints,
-    TilingConfig, read_master_count_override, read_master_ratio_override,
+    Logical, MasterConfig, PartitionTreeConfig, Pixels, ScrollingConfig, SizeConstraint,
+    SizeConstraints, TilingConfig, read_master_count_override, read_master_ratio_override,
 };
 use crate::font::{FontConfig, MAX_FONT_SIZE, MIN_FONT_SIZE};
 use std::collections::HashMap;
@@ -29,6 +29,7 @@ pub(super) fn read_config(
             border_size: user_or_default(cx, user, defaults, "border_size")?,
             partition_tree: read_group(cx, user, defaults, "partition_tree", read_partition_tree)?,
             master: read_group(cx, user, defaults, "master", read_master)?,
+            scrolling: read_group(cx, user, defaults, "scrolling", read_scrolling)?,
             size_constraints: read_size_constraints(cx, user, defaults)?,
             ignore: user_or_default(cx, user, defaults, "ignore")?,
         },
@@ -144,6 +145,16 @@ fn read_master(
             "master_count",
             read_master_count_override,
         )?,
+    })
+}
+
+fn read_scrolling(
+    cx: &mut LoadContext,
+    user: &mlua::Table,
+    defaults: &mlua::Table,
+) -> mlua::Result<ScrollingConfig> {
+    Ok(ScrollingConfig {
+        column_width: user_or_default(cx, user, defaults, "column_width")?,
     })
 }
 

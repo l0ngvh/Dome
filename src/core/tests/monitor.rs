@@ -1669,7 +1669,11 @@ fn a_monitor_with_an_empty_work_area_places_no_window() {
     use crate::core::Strategy;
     use crate::core::hub::MonitorLayout;
 
-    for strategy in [Strategy::PartitionTree, Strategy::Master] {
+    for strategy in [
+        Strategy::PartitionTree,
+        Strategy::Master,
+        Strategy::Scrolling,
+    ] {
         for rect in [
             PixelRect::new(150, 0, 0, 30),
             PixelRect::new(150, 0, 150, 0),

@@ -249,23 +249,25 @@ impl TilingStrategy for MasterStrategy {
             StrategyAction::FocusTab { forward } if tiling_has_focus => {
                 self.focus_tab(hub, ws_id, forward)
             }
+            StrategyAction::Grow if tiling_has_focus => self.resize_focused_pane(hub, ws_id, true),
+            StrategyAction::Shrink if tiling_has_focus => {
+                self.resize_focused_pane(hub, ws_id, false)
+            }
             StrategyAction::FocusDirection { .. }
             | StrategyAction::MoveDirection { .. }
             | StrategyAction::ToggleContainerLayout
-            | StrategyAction::FocusTab { .. } => {
+            | StrategyAction::FocusTab { .. }
+            | StrategyAction::Grow
+            | StrategyAction::Shrink => {
                 tracing::debug!("Tiling action while a float or fullscreen window has focus");
             }
             StrategyAction::TabClicked {
                 container_id,
                 index,
             } if layout_is_visible => self.tab_clicked(hub, ws_id, container_id, index),
-            StrategyAction::Grow if layout_is_visible => self.grow(hub, ws_id),
-            StrategyAction::Shrink if layout_is_visible => self.shrink(hub, ws_id),
             StrategyAction::MoreMaster if layout_is_visible => self.more(hub, ws_id),
             StrategyAction::FewerMaster if layout_is_visible => self.fewer(hub, ws_id),
             StrategyAction::TabClicked { .. }
-            | StrategyAction::Grow
-            | StrategyAction::Shrink
             | StrategyAction::MoreMaster
             | StrategyAction::FewerMaster => {
                 tracing::debug!("Layout action while fullscreen hides the layout");

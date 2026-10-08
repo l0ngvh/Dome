@@ -32,8 +32,8 @@
 ---@field toggle_tabbed fun() Switch the parent container between tiled and tabbed.
 ---@field toggle_float fun()
 ---@field toggle_fullscreen fun()
----@field grow fun() In Master, widen the master area by 5 percentage points, up to the whole work area.
----@field shrink fun() In Master, narrow the master area by 5 percentage points, down to zero width.
+---@field grow fun() Widen the column of the focused window by 5% of the work area width, up to the work area width.
+---@field shrink fun() Narrow the column of the focused window by 5% of the work area width.
 ---@field increase_master_count fun()
 ---@field decrease_master_count fun() Clamped to a minimum of 1.
 ---@field execute fun(command: string) Through /bin/sh -c on macOS and cmd.exe /C on Windows.
@@ -63,6 +63,9 @@
 ---@field master_ratio? number
 ---@field master_count? number
 
+---@class dome.ScrollingConfig
+---@field column_width? number | string Logical pixels, or "<number>%" of the work area. A config reload applies it to every column of a workspace that layout.lua does not name.
+
 -- The monitor Dome passes to reserved_area.
 ---@class dome.Monitor
 ---@field name string The unique_name that dome query monitors lists.
@@ -79,13 +82,14 @@
 ---@field theme? "latte" | "frappe" | "macchiato" | "mocha" Catppuccin flavor.
 ---@field log_level? "trace" | "debug" | "info" | "warn" | "error"
 ---@field start_at_login? boolean
----@field layout? "partition_tree" | "master"
+---@field layout? "partition_tree" | "master" | "scrolling"
 ---@field minimum_width? number | string Logical pixels, or "<number>%" of the work area. 0 means unconstrained.
 ---@field minimum_height? number | string Logical pixels, or "<number>%" of the work area. 0 means unconstrained.
 ---@field maximum_width? number | string Logical pixels, or "<number>%" of the work area. 0 means unconstrained.
 ---@field maximum_height? number | string Logical pixels, or "<number>%" of the work area. 0 means unconstrained.
 ---@field partition_tree? dome.PartitionTree
 ---@field master? dome.MasterConfig
+---@field scrolling? dome.ScrollingConfig
 ---@field font_size? number Widget text size, in logical pixels.
 ---@field font_family? string
 ---@field ignore? WindowMatcher[]
@@ -100,12 +104,14 @@
 ---@alias dome.MonitorLayout table<string, dome.LayoutWorkspace>
 
 ---@class dome.LayoutWorkspace
----@field layout "partition_tree" | "master"
+---@field layout "partition_tree" | "master" | "scrolling"
 ---@field tree? dome.TreeNode partition_tree only.
 ---@field master_ratio? number master only.
 ---@field master_count? number master only.
+---@field column_width? number | string scrolling only. Overrides scrolling.column_width.
 ---@field master? dome.Pane master only.
 ---@field secondary? dome.Pane master only.
+---@field columns? dome.Column[] scrolling only.
 ---@field float? WindowMatcher[]
 ---@field fullscreen? WindowMatcher[]
 
@@ -120,6 +126,12 @@
 ---@class dome.PaneContainer
 ---@field display? "tiled" | "tabbed"
 ---@field children WindowMatcher[]
+
+---@alias dome.Column WindowMatcher | dome.ColumnContainer
+
+---@class dome.ColumnContainer
+---@field width? number | string Logical pixels, or "<number>%" of the work area.
+---@field children WindowMatcher[] Top to bottom.
 
 -- Built by adding a key to a modifier, for example Meta + "h", or named on its own as Space, Enter, or Escape.
 ---@class Keystroke

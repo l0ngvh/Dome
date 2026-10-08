@@ -13,6 +13,7 @@ mod partition_tree;
 mod pixel_rect;
 mod preferred_layout;
 mod query;
+mod scrolling;
 mod set_focus;
 mod smoke;
 mod strategy_switch;
@@ -30,12 +31,13 @@ use crate::core::node::{Direction, Logical, Pixels, WindowId};
 use crate::core::slot::held_slot;
 use crate::core::strategy::StrategyAction;
 use crate::core::{
-    ContainerPlacement, FloatWindowPlacement, PixelRect, ReportedMonitor, TilingWindowPlacement,
-    WindowMetadata,
+    ColumnConfig, MasterConfig, PartitionTreeConfig, PreferredLayouts, PreferredMaster,
+    PreferredScrolling, PreferredTiling, PreferredWorkspace, ScrollingConfig, SizeConstraint,
+    SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
 };
 use crate::core::{
-    MasterConfig, PartitionTreeConfig, PreferredLayouts, PreferredMaster, PreferredTiling,
-    PreferredWorkspace, SizeConstraint, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
+    ContainerPlacement, FloatWindowPlacement, PixelRect, ReportedMonitor, TilingWindowPlacement,
+    WindowMetadata,
 };
 
 const ASCII_WIDTH: usize = 150;
@@ -653,6 +655,14 @@ impl Hub {
         self.handle_tiling_action(StrategyAction::ToggleSpawnMode);
     }
 
+    pub(crate) fn grow(&mut self) {
+        self.handle_tiling_action(StrategyAction::Grow);
+    }
+
+    pub(crate) fn shrink(&mut self) {
+        self.handle_tiling_action(StrategyAction::Shrink);
+    }
+
     pub(crate) fn toggle_direction(&mut self) {
         self.handle_tiling_action(StrategyAction::ToggleDirection);
     }
@@ -751,6 +761,7 @@ struct TilingConfigBuilder {
     strategy: Strategy,
     border_size: Pixels<Logical>,
     master: MasterConfig,
+    scrolling: ScrollingConfig,
     partition_tree: PartitionTreeConfig,
     size_constraints: SizeConstraints,
 }
@@ -763,6 +774,9 @@ impl TilingConfigBuilder {
             master: MasterConfig {
                 master_ratio: 0.5,
                 master_count: 1,
+            },
+            scrolling: ScrollingConfig {
+                column_width: SizeConstraint::Percent(50.0),
             },
             partition_tree: PartitionTreeConfig {
                 tab_bar_height: Pixels::new(TAB_BAR_HEIGHT),
@@ -782,6 +796,10 @@ impl TilingConfigBuilder {
 
     fn with_master_config(self, master: MasterConfig) -> Self {
         Self { master, ..self }
+    }
+
+    fn with_scrolling_config(self, scrolling: ScrollingConfig) -> Self {
+        Self { scrolling, ..self }
     }
 
     fn with_border_size(self, border_size: Pixels<Logical>) -> Self {
@@ -814,6 +832,7 @@ impl TilingConfigBuilder {
             border_size: self.border_size,
             partition_tree: self.partition_tree,
             master: self.master,
+            scrolling: self.scrolling,
             size_constraints: self.size_constraints,
             ignore: Vec::new(),
         }
@@ -865,6 +884,8 @@ struct LayoutWorkspaceConfigBuilder {
     master_display: PaneDisplay,
     secondary_display: PaneDisplay,
     tree: Option<TreeLayoutNode>,
+    columns: Vec<ColumnConfig>,
+    column_width: Option<SizeConstraint>,
     float: Vec<WindowMatcher>,
     fullscreen: Vec<WindowMatcher>,
 }
@@ -881,6 +902,8 @@ impl LayoutWorkspaceConfigBuilder {
             master_display: PaneDisplay::Tiled,
             secondary_display: PaneDisplay::Tiled,
             tree: None,
+            columns: vec![],
+            column_width: None,
             float: vec![],
             fullscreen: vec![],
         }
@@ -941,6 +964,17 @@ impl LayoutWorkspaceConfigBuilder {
         }
     }
 
+    fn with_columns(self, columns: Vec<ColumnConfig>) -> Self {
+        Self { columns, ..self }
+    }
+
+    fn with_column_width(self, column_width: SizeConstraint) -> Self {
+        Self {
+            column_width: Some(column_width),
+            ..self
+        }
+    }
+
     fn build(self) -> (String, PreferredWorkspace) {
         let tiling = match self.strategy {
             Strategy::Master => PreferredTiling::Master(PreferredMaster {
@@ -956,6 +990,10 @@ impl LayoutWorkspaceConfigBuilder {
                 },
             }),
             Strategy::PartitionTree => PreferredTiling::PartitionTree { tree: self.tree },
+            Strategy::Scrolling => PreferredTiling::Scrolling(PreferredScrolling {
+                column_width: self.column_width,
+                columns: self.columns,
+            }),
         };
         let entry = PreferredWorkspace {
             tiling,

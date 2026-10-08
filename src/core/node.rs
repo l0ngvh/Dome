@@ -323,7 +323,6 @@ impl Length<Logical> {
 /// `Length::ZERO` on a `max_*` field means "unbounded" on that axis.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Constraints {
-    #[expect(dead_code, reason = "no strategy honors a minimum width")]
     pub(crate) min_width: Length,
     pub(crate) min_height: Length,
     pub(crate) max_width: Length,

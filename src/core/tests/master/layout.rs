@@ -197,7 +197,7 @@ fn focus_direction_up_down() {
 }
 
 #[test]
-fn grow_shrink_master_ratio() {
+fn grow_and_shrink_from_the_secondary_pane_resize_the_secondary_pane() {
     let mut hub = TestHubBuilder::new()
         .with_tiling(
             TilingConfigBuilder::new()
@@ -208,50 +208,7 @@ fn grow_shrink_master_ratio() {
     hub.insert_window(titled("w17"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w18"), default_rect(), WindowRestrictions::None);
 
-    // Increase ratio: master gets wider
     hub.handle_tiling_action(StrategyAction::Grow);
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=82.00, h=30.00)
-        Window(id=WindowId(1), x=82.00, y=0.00, w=68.00, h=30.00, highlighted)
-      )
-
-    +--------------------------------------------------------------------------------+********************************************************************
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                       W0                                       |*                                W1                                *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    |                                                                                |*                                                                  *
-    +--------------------------------------------------------------------------------+********************************************************************
-    ");
-
-    // Decrease twice to go below default
-    hub.handle_tiling_action(StrategyAction::Shrink);
-    hub.handle_tiling_action(StrategyAction::Shrink);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -291,51 +248,49 @@ fn grow_shrink_master_ratio() {
     +-----------------------------------------------------------------+***********************************************************************************
     ");
 
-    for _ in 0..20 {
-        hub.handle_tiling_action(StrategyAction::Shrink);
-    }
+    hub.handle_tiling_action(StrategyAction::Shrink);
+    hub.handle_tiling_action(StrategyAction::Shrink);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00, highlighted)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=82.00, h=30.00)
+        Window(id=WindowId(1), x=82.00, y=0.00, w=68.00, h=30.00, highlighted)
       )
 
-    ******************************************************************************************************************************************************
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                         W1                                                                         *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    ******************************************************************************************************************************************************
+    +--------------------------------------------------------------------------------+********************************************************************
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                       W0                                       |*                                W1                                *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    |                                                                                |*                                                                  *
+    +--------------------------------------------------------------------------------+********************************************************************
     ");
 
-    // In f32, 20 steps of 0.05 from a ratio of 0 reach 1.0000002, which lays out the same as the
-    // upper bound of 1. Thirty steps overshoot the bound by 0.5, so the snapshot shows the clamp.
-    for _ in 0..30 {
-        hub.handle_tiling_action(StrategyAction::Grow);
+    for _ in 0..20 {
+        hub.handle_tiling_action(StrategyAction::Shrink);
     }
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
@@ -373,6 +328,50 @@ fn grow_shrink_master_ratio() {
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    ");
+
+    // In f32, 20 steps of 0.05 down from a ratio of 1 reach -0.00000016, which lays out the same
+    // as the lower bound of 0. Thirty steps overshoot the bound by 0.5, so the snapshot shows the
+    // clamp.
+    for _ in 0..30 {
+        hub.handle_tiling_action(StrategyAction::Grow);
+    }
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00, highlighted)
+      )
+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W1                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
     ");
 }
 

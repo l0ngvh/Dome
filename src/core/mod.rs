@@ -10,6 +10,7 @@ mod monitor;
 mod node;
 mod partition_tree;
 mod preferred_layout;
+mod scrolling;
 mod slot;
 mod strategy;
 #[cfg(test)]
@@ -39,8 +40,9 @@ pub(crate) use node::{
 };
 pub(crate) use partition_tree::{PartitionTreeConfig, SplitMode, TreeLayoutNode};
 pub(crate) use preferred_layout::{
-    PreferredLayouts, PreferredMaster, PreferredTiling, PreferredWorkspace,
+    PreferredLayouts, PreferredMaster, PreferredScrolling, PreferredTiling, PreferredWorkspace,
 };
+pub(crate) use scrolling::{ColumnConfig, ScrollingConfig};
 pub(crate) use strategy::{StrategyAction, TilingAction};
 pub(crate) use tiling::{SizeConstraint, SizeConstraints, Strategy, TilingConfig};
 

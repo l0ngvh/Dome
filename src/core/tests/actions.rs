@@ -69,7 +69,7 @@ fn tiling_verbs_drive_the_hub() {
 }
 
 #[test]
-fn grow_and_shrink_resize_the_master_area() {
+fn grow_and_shrink_resize_the_pane_of_the_focused_window() {
     let mut hub = TestHubBuilder::new()
         .with_tiling(
             TilingConfigBuilder::new()
@@ -87,9 +87,15 @@ fn grow_and_shrink_resize_the_master_area() {
         master.master_ratio
     };
 
+    // w1 has focus and sits in the secondary pane.
+    run(&mut hub, &["grow"]);
+    assert_eq!(master_ratio(&hub), Some(0.45));
+    run(&mut hub, &["shrink"]);
+    assert_eq!(master_ratio(&hub), Some(0.5));
+
+    run(&mut hub, &["focus left"]);
     run(&mut hub, &["grow"]);
     assert_eq!(master_ratio(&hub), Some(0.55));
-
     run(&mut hub, &["shrink"]);
     assert_eq!(master_ratio(&hub), Some(0.5));
 }

@@ -15,12 +15,13 @@ use crate::core::node::{
     PixelRect, Pixels, Unit, WindowId, WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
+use crate::core::scrolling::ScrollingStrategy;
 use crate::core::slot::SlotId;
 use crate::core::{PreferredWorkspace, SizeConstraints, Strategy};
 
 /// An action on the focused tiling child does nothing while a float or fullscreen window has
 /// focus, and an action on the workspace layout or a clicked container does nothing while a
-/// fullscreen window has focus. Each strategy puts `Grow` and `Shrink` in one of the two groups.
+/// fullscreen window has focus.
 #[derive(Debug)]
 pub(crate) enum StrategyAction {
     /// Moves focus from the focused tiling child to the nearest child in `direction`.
@@ -44,9 +45,9 @@ pub(crate) enum StrategyAction {
         container_id: ContainerId,
         index: usize,
     },
-    /// Grows what the strategy resizes, within its limits.
+    /// Widens the column of the focused tiling child, within the strategy's limits.
     Grow,
-    /// Shrinks what the strategy resizes, within its limits.
+    /// Narrows the column of the focused tiling child, within the strategy's limits.
     Shrink,
     /// Raises the number of windows the master pane of the workspace holds.
     MoreMaster,
@@ -417,14 +418,6 @@ pub(crate) fn window_constraints(
     let win_max_w = outset_limit(limits.max_width);
     let win_max_h = outset_limit(limits.max_height);
 
-    // Length::ZERO means "no cap", so it cannot take part in a plain `min`.
-    let tighter_max = |win: Length, global: Length| {
-        if win > Length::ZERO && global > Length::ZERO {
-            win.min(global)
-        } else {
-            win.max(global)
-        }
-    };
     let max_w = tighter_max(win_max_w, global_max_w);
     let max_h = tighter_max(win_max_h, global_max_h);
 
@@ -445,6 +438,26 @@ pub(crate) fn window_constraints(
         max_width: max_w,
         max_height: max_h,
     }
+}
+
+/// `Length::ZERO` means no cap, so it cannot take part in a plain `min`.
+pub(crate) fn tighter_max(a: Length, b: Length) -> Length {
+    if a > Length::ZERO && b > Length::ZERO {
+        a.min(b)
+    } else {
+        a.max(b)
+    }
+}
+
+/// The size a capped child takes in `slot_extent`, with the offset that centers it there.
+pub(crate) fn apply_max_constraint(max: Length, slot_extent: Length) -> (Length, Length) {
+    let size = if max > Length::ZERO && max < slot_extent {
+        max
+    } else {
+        slot_extent
+    };
+    let offset = (slot_extent - size) / 2.0;
+    (size, offset.max(Length::ZERO))
 }
 
 /// Converts layout-space coordinates to screen-absolute. Layout positions are relative to
@@ -582,6 +595,7 @@ pub(crate) fn distribute_space(
 pub(super) struct StrategySet {
     partition_tree: PartitionTreeStrategy,
     master: MasterStrategy,
+    scrolling: ScrollingStrategy,
     kinds: FxHashMap<WorkspaceId, Strategy>,
 }
 
@@ -590,6 +604,7 @@ impl StrategySet {
         Self {
             partition_tree: PartitionTreeStrategy::new(tiling),
             master: MasterStrategy::new(tiling),
+            scrolling: ScrollingStrategy::new(tiling),
             kinds: FxHashMap::default(),
         }
     }
@@ -618,6 +633,7 @@ impl StrategySet {
         match kind {
             Strategy::PartitionTree => &self.partition_tree,
             Strategy::Master => &self.master,
+            Strategy::Scrolling => &self.scrolling,
         }
     }
 
@@ -625,6 +641,7 @@ impl StrategySet {
         match kind {
             Strategy::PartitionTree => &mut self.partition_tree,
             Strategy::Master => &mut self.master,
+            Strategy::Scrolling => &mut self.scrolling,
         }
     }
 
@@ -642,6 +659,7 @@ impl StrategySet {
     pub(super) fn apply_config(&mut self, hub: &mut HubAccess, tiling: &TilingConfig) {
         self.partition_tree.apply_config(hub, tiling);
         self.master.apply_config(hub, tiling);
+        self.scrolling.apply_config(hub, tiling);
     }
 
     /// Returns the workspace that holds each open window, after checking that every workspace
@@ -650,11 +668,13 @@ impl StrategySet {
     pub(super) fn validate(&self, hub: &HubAccess) -> FxHashMap<WindowId, WorkspaceId> {
         let tree = self.partition_tree.validate(hub);
         let master = self.master.validate(hub);
+        let scrolling = self.scrolling.validate(hub);
 
         // The container arena is shared across strategies, so union every strategy's reachable
         // set before the leak sweep, or one strategy's containers look leaked to another.
         let mut reachable = tree.containers;
         reachable.extend(master.containers);
+        reachable.extend(scrolling.containers);
         let allocated: FxHashSet<ContainerId> = hub.containers.sorted_ids().into_iter().collect();
 
         let mut leaked: Vec<ContainerId> = allocated.difference(&reachable).copied().collect();
@@ -675,6 +695,7 @@ impl StrategySet {
         for (kind, windows) in [
             (Strategy::PartitionTree, tree.windows),
             (Strategy::Master, master.windows),
+            (Strategy::Scrolling, scrolling.windows),
         ] {
             for (ws_id, ids) in windows {
                 assert_eq!(

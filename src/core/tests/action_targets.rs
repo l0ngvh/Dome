@@ -7,7 +7,12 @@ use super::{
     titled, titled_matcher, validate_hub,
 };
 
-const STRATEGIES: [Strategy; 2] = [Strategy::PartitionTree, Strategy::Master];
+const STRATEGIES: [Strategy; 3] = [
+    Strategy::PartitionTree,
+    Strategy::Master,
+    Strategy::Scrolling,
+];
+const STRATEGIES_WITH_TABS: [Strategy; 2] = [Strategy::PartitionTree, Strategy::Master];
 
 fn insert(hub: &mut Hub, title: &str) -> WindowId {
     hub.insert_window(titled(title), default_rect(), WindowRestrictions::None)
@@ -48,7 +53,7 @@ fn actions_on_the_focused_tiling_child_do_nothing_while_fullscreen_has_focus() {
 
 #[test]
 fn tab_actions_do_nothing_while_fullscreen_has_focus() {
-    for strategy in STRATEGIES {
+    for strategy in STRATEGIES_WITH_TABS {
         let mut hub = setup_modes_on(strategy, "0", &[], &["fs"]);
         insert(&mut hub, "t0");
         insert(&mut hub, "t1");
@@ -80,23 +85,17 @@ fn master_layout_actions_run_while_a_float_has_focus_but_not_under_fullscreen() 
     let ws = hub.current_workspace();
     insert(&mut hub, "t0");
     insert(&mut hub, "t1");
-    let master_layout = |hub: &Hub| {
+    let master_count = |hub: &Hub| {
         let PreferredTiling::Master(master) = hub.export_workspace(ws).tiling else {
             panic!("workspace 0 runs master");
         };
-        (master.master_ratio, master.master_count)
+        master.master_count
     };
-    let actions = [
-        StrategyAction::Grow,
-        StrategyAction::Shrink,
-        StrategyAction::MoreMaster,
-        StrategyAction::FewerMaster,
-    ];
 
     let fs = insert(&mut hub, "fs");
-    for action in actions {
+    for action in [StrategyAction::MoreMaster, StrategyAction::FewerMaster] {
         hub.handle_tiling_action(action);
-        assert_eq!(master_layout(&hub), (None, Some(2)), "under fullscreen");
+        assert_eq!(master_count(&hub), Some(2), "under fullscreen");
     }
     hub.delete_window(fs);
 
@@ -105,24 +104,49 @@ fn master_layout_actions_run_while_a_float_has_focus_but_not_under_fullscreen() 
         PixelRect::new(10, 5, 40, 10),
         WindowRestrictions::None,
     );
-    let mut layouts = Vec::new();
-    for action in [
-        StrategyAction::Grow,
-        StrategyAction::Shrink,
-        StrategyAction::MoreMaster,
-        StrategyAction::FewerMaster,
-    ] {
+    let mut counts = Vec::new();
+    for action in [StrategyAction::MoreMaster, StrategyAction::FewerMaster] {
         hub.handle_tiling_action(action);
-        layouts.push(master_layout(&hub));
+        counts.push(master_count(&hub));
     }
     validate_hub(&hub);
-    assert_eq!(
-        layouts,
-        [
-            (Some(0.55), Some(2)),
-            (Some(0.5), Some(2)),
-            (Some(0.5), Some(3)),
-            (Some(0.5), Some(2)),
-        ]
+    assert_eq!(counts, [Some(3), Some(2)]);
+}
+
+#[test]
+fn master_grow_and_shrink_do_nothing_while_a_float_or_fullscreen_window_has_focus() {
+    let mut hub = TestHubBuilder::new()
+        .with_preferred_layout([LayoutWorkspaceConfigBuilder::new("0")
+            .with_strategy(Strategy::Master)
+            .with_float(vec![titled_matcher("f")])
+            .with_fullscreen(vec![titled_matcher("fs")])
+            .build()])
+        .build();
+    let ws = hub.current_workspace();
+    insert(&mut hub, "t0");
+    insert(&mut hub, "t1");
+    let master_ratio = |hub: &Hub| {
+        let PreferredTiling::Master(master) = hub.export_workspace(ws).tiling else {
+            panic!("workspace 0 runs master");
+        };
+        master.master_ratio
+    };
+
+    let fs = insert(&mut hub, "fs");
+    for action in [StrategyAction::Grow, StrategyAction::Shrink] {
+        hub.handle_tiling_action(action);
+        assert_eq!(master_ratio(&hub), None, "under fullscreen");
+    }
+    hub.delete_window(fs);
+
+    hub.insert_window(
+        titled("f"),
+        PixelRect::new(10, 5, 40, 10),
+        WindowRestrictions::None,
     );
+    for action in [StrategyAction::Grow, StrategyAction::Shrink] {
+        hub.handle_tiling_action(action);
+        assert_eq!(master_ratio(&hub), None, "while the float has focus");
+    }
+    validate_hub(&hub);
 }

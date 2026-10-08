@@ -276,6 +276,21 @@ fn tiling_parses_master_params() {
 }
 
 #[test]
+fn layout_parses_scrolling_strategy() {
+    let config = config_from(r#"return { layout = "scrolling" }"#);
+    assert_eq!(config.tiling.layout, Strategy::Scrolling);
+}
+
+#[test]
+fn scrolling_config_parses_column_width() {
+    let config = config_from(r#"return { scrolling = { column_width = "60%" } }"#);
+    assert_eq!(
+        config.tiling.scrolling.column_width,
+        SizeConstraint::Percent(60.0)
+    );
+}
+
+#[test]
 fn a_config_without_keymaps_keeps_the_bundled_bindings() {
     let bundled = config_from("return dome.defaults()").keymaps.modes["main"].len();
     assert!(bundled > 0, "the bundled config should bind something");

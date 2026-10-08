@@ -6,7 +6,8 @@ use super::node::WorkspaceId;
 use crate::core::PaneDisplay;
 use crate::core::master::PaneConfig;
 use crate::core::{
-    PreferredLayouts, PreferredTiling, PreferredWorkspace, SplitMode, TreeLayoutNode, WindowMatcher,
+    ColumnConfig, PreferredLayouts, PreferredTiling, PreferredWorkspace, SizeConstraint, SplitMode,
+    TreeLayoutNode, WindowMatcher,
 };
 
 impl Hub {
@@ -164,6 +165,37 @@ fn emit_pane(pane: &PaneConfig, level: usize) -> String {
     }
 }
 
+fn emit_column_list(columns: &[ColumnConfig], level: usize) -> String {
+    let child_pad = indent(level + 1);
+    let close_pad = indent(level);
+    let mut items = String::new();
+    for column in columns {
+        items.push_str(&child_pad);
+        items.push_str(&emit_column(column, level + 1));
+        items.push_str(",\n");
+    }
+    format!("{{\n{items}{close_pad}}}")
+}
+
+fn emit_column(column: &ColumnConfig, level: usize) -> String {
+    if let (None, [matcher]) = (column.width, column.children.as_slice()) {
+        return matcher_inline(matcher);
+    }
+    let children = emit_matcher_list(&column.children, level);
+    match column.width {
+        Some(width) => format!("{{ width = {}, children = {children} }}", emit_width(width)),
+        None => format!("{{ children = {children} }}"),
+    }
+}
+
+/// The text `SizeConstraint::from_lua_value` reads back.
+fn emit_width(width: SizeConstraint) -> String {
+    match width {
+        SizeConstraint::Pixels(_) => width.describe(),
+        SizeConstraint::Percent(_) => lua_str(&width.describe()),
+    }
+}
+
 fn split_str(split: SplitMode) -> &'static str {
     match split {
         SplitMode::Horizontal => "horizontal",
@@ -205,6 +237,18 @@ fn emit_workspace(out: &mut String, name: &str, ws: &PreferredWorkspace, level: 
                 out.push_str(&format!(
                     "{field}secondary = {},\n",
                     emit_pane(&master.secondary, nested)
+                ));
+            }
+        }
+        PreferredTiling::Scrolling(scrolling) => {
+            out.push_str(&format!("{field}layout = \"scrolling\",\n"));
+            if let Some(width) = scrolling.column_width {
+                out.push_str(&format!("{field}column_width = {},\n", emit_width(width)));
+            }
+            if !scrolling.columns.is_empty() {
+                out.push_str(&format!(
+                    "{field}columns = {},\n",
+                    emit_column_list(&scrolling.columns, nested)
                 ));
             }
         }

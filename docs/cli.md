@@ -78,11 +78,12 @@ Fullscreen the focused window, or restore it.
 
 ## `dome grow`
 
-In Master, grow the master area by 5 percentage points, up to the whole work area.
+Widen the column of the focused window by 5% of the work area width, up to the
+work area width.
 
 ## `dome shrink`
 
-In Master, shrink the master area by the same step, down to zero width.
+Narrow the column of the focused window by the same step.
 
 ## `dome increase-master-count`
 

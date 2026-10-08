@@ -7,6 +7,7 @@ use crate::core::{Length, Logical, Pixels, Unit};
 use super::master::MasterConfig;
 use super::matcher::WindowMatcher;
 use super::partition_tree::PartitionTreeConfig;
+use super::scrolling::ScrollingConfig;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TilingConfig {
@@ -14,6 +15,7 @@ pub(crate) struct TilingConfig {
     pub(crate) border_size: Pixels<Logical>,
     pub(crate) partition_tree: PartitionTreeConfig,
     pub(crate) master: MasterConfig,
+    pub(crate) scrolling: ScrollingConfig,
     pub(crate) size_constraints: SizeConstraints,
     pub(crate) ignore: Vec<WindowMatcher>,
 }
@@ -22,13 +24,15 @@ pub(crate) struct TilingConfig {
 pub(crate) enum Strategy {
     PartitionTree,
     Master,
+    Scrolling,
 }
 
 string_enum!(
     Strategy,
-    "\"partition_tree\" or \"master\"",
+    "\"partition_tree\", \"master\" or \"scrolling\"",
     "partition_tree" => Strategy::PartitionTree,
     "master" => Strategy::Master,
+    "scrolling" => Strategy::Scrolling,
 );
 
 #[derive(Debug, Clone, Copy, PartialEq)]

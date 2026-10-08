@@ -4,8 +4,8 @@ use crate::core::{
     master::{MasterStrategy, PaneDisplay, PaneKind},
     node::{Constraints, WorkspaceId},
     strategy::{
-        container_titles, distribute_space, tab_bar_band, translate, visible_tab_bar_band,
-        window_constraints,
+        apply_max_constraint, container_titles, distribute_space, tab_bar_band, translate,
+        visible_tab_bar_band, window_constraints,
     },
 };
 
@@ -297,16 +297,6 @@ impl MasterStrategy {
             state.scale,
         )
     }
-}
-
-fn apply_max_constraint(max: Length, slot_extent: Length) -> (Length, Length) {
-    let size = if max > Length::ZERO && max < slot_extent {
-        max
-    } else {
-        slot_extent
-    };
-    let offset = (slot_extent - size) / 2.0;
-    (size, offset.max(Length::ZERO))
 }
 
 #[derive(Debug)]

@@ -426,6 +426,7 @@ fn a_container_moved_onto_a_workspace_whose_float_has_focus_takes_focus() {
                 );
             }
             Strategy::Master => assert_eq!(highlighted_windows(&hub), [b], "{strategy:?}"),
+            Strategy::Scrolling => unreachable!("STRATEGIES lists no scrolling workspace"),
         }
         assert!(
             !highlighted_windows(&hub).contains(&f),
@@ -474,6 +475,7 @@ fn a_container_moved_under_a_fullscreen_window_takes_focus_once_it_closes() {
                 );
             }
             Strategy::Master => assert_eq!(highlighted_windows(&hub), [b], "{strategy:?}"),
+            Strategy::Scrolling => unreachable!("STRATEGIES lists no scrolling workspace"),
         }
     }
 }

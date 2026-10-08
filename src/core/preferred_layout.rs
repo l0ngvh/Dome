@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 
 use crate::config::lua::deserializer::{FromLuaValue, LoadContext, as_table};
-use crate::core::Strategy;
 use crate::core::master::{PaneConfig, read_master_count_override, read_master_ratio_override};
 use crate::core::matcher::WindowMatcher;
 use crate::core::partition_tree::TreeLayoutNode;
+use crate::core::scrolling::ColumnConfig;
+use crate::core::{SizeConstraint, Strategy};
 
 /// The `layout.lua` file root. Every workspace entry sits under a monitor key,
 /// which is that monitor's `unique_name`. Both levels are sorted maps, so
@@ -89,6 +90,7 @@ pub(crate) struct PreferredWorkspace {
 pub(crate) enum PreferredTiling {
     PartitionTree { tree: Option<TreeLayoutNode> },
     Master(PreferredMaster),
+    Scrolling(PreferredScrolling),
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -99,11 +101,19 @@ pub(crate) struct PreferredMaster {
     pub(crate) secondary: PaneConfig,
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct PreferredScrolling {
+    /// Width of a column that sets none. `None` takes `scrolling.column_width`.
+    pub(crate) column_width: Option<SizeConstraint>,
+    pub(crate) columns: Vec<ColumnConfig>,
+}
+
 impl PreferredTiling {
     pub(crate) fn strategy(&self) -> Strategy {
         match self {
             PreferredTiling::PartitionTree { .. } => Strategy::PartitionTree,
             PreferredTiling::Master(_) => Strategy::Master,
+            PreferredTiling::Scrolling(_) => Strategy::Scrolling,
         }
     }
 }
@@ -113,6 +123,7 @@ impl PreferredWorkspace {
         let tiling = match strategy {
             Strategy::PartitionTree => PreferredTiling::PartitionTree { tree: None },
             Strategy::Master => PreferredTiling::Master(PreferredMaster::default()),
+            Strategy::Scrolling => PreferredTiling::Scrolling(PreferredScrolling::default()),
         };
         Self {
             tiling,
@@ -129,7 +140,7 @@ impl FromLuaValue for PreferredWorkspace {
         let tiling = match layout.as_str() {
             "" => {
                 return Err(mlua::Error::runtime(
-                    "layout is required, and must be \"partition_tree\" or \"master\"",
+                    "layout is required, and must be \"partition_tree\", \"master\" or \"scrolling\"",
                 ));
             }
             "partition_tree" => PreferredTiling::PartitionTree {
@@ -141,9 +152,13 @@ impl FromLuaValue for PreferredWorkspace {
                 master: cx.field(table, "master"),
                 secondary: cx.field(table, "secondary"),
             }),
+            "scrolling" => PreferredTiling::Scrolling(PreferredScrolling {
+                column_width: cx.field(table, "column_width"),
+                columns: cx.field(table, "columns"),
+            }),
             other => {
                 return Err(mlua::Error::runtime(format!(
-                    "layout must be \"partition_tree\" or \"master\", got \"{other}\""
+                    "layout must be \"partition_tree\", \"master\" or \"scrolling\", got \"{other}\""
                 )));
             }
         };
