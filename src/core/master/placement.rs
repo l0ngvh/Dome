@@ -232,8 +232,7 @@ impl MasterStrategy {
         // the tab bar is taller than the screen, so each window keeps its min height.
         for &wid in ids {
             let c = self.effective_constraints(hub, wid);
-            let adjusted_w = c.min_width.max(pane_width);
-            let (w, x_off) = apply_max_constraint(c.max_width, adjusted_w);
+            let (w, x_off) = apply_max_constraint(c.max_width, pane_width);
             let adjusted_h = c.min_height.max(content_h);
             let (slot_h, y_off) = apply_max_constraint(c.max_height, adjusted_h);
             let dim = Dimension::new(x_start + x_off, band + y_off, w, slot_h);

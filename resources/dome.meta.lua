@@ -32,8 +32,8 @@
 ---@field toggle_tabbed fun() Switch the parent container between tiled and tabbed.
 ---@field toggle_float fun()
 ---@field toggle_fullscreen fun()
----@field grow fun() In Master, widen the master area by 5 percentage points, up to 0.9 of the work area.
----@field shrink fun() In Master, narrow the master area by 5 percentage points, down to 0.1 of the work area.
+---@field grow fun() In Master, widen the master area by 5 percentage points, up to the whole work area.
+---@field shrink fun() In Master, narrow the master area by 5 percentage points, down to zero width.
 ---@field increase_master_count fun()
 ---@field decrease_master_count fun() Clamped to a minimum of 1.
 ---@field execute fun(command: string) Through /bin/sh -c on macOS and cmd.exe /C on Windows.

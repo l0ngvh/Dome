@@ -78,11 +78,11 @@ Fullscreen the focused window, or restore it.
 
 ## `dome grow`
 
-In Master, grow the master area by 5 percentage points, up to 0.9 of the work area.
+In Master, grow the master area by 5 percentage points, up to the whole work area.
 
 ## `dome shrink`
 
-In Master, shrink the master area by the same step, down to 0.1 of the work area.
+In Master, shrink the master area by the same step, down to zero width.
 
 ## `dome increase-master-count`
 

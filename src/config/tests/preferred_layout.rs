@@ -161,6 +161,19 @@ return {
 }
 
 #[test]
+fn master_ratio_override_accepts_zero_and_one() {
+    for (src, expected) in [
+        (r#"{ layout = "master", master_ratio = 0 }"#, 0.0),
+        (r#"{ layout = "master", master_ratio = 1 }"#, 1.0),
+    ] {
+        let PreferredTiling::Master(master) = workspace_from(src).tiling else {
+            panic!("expected Master");
+        };
+        assert_eq!(master.master_ratio, Some(expected), "{src}");
+    }
+}
+
+#[test]
 fn layout_shared_table_applies_to_both_monitor_keys() {
     // One table assigned to several keys is how one file serves several
     // workstations, so both keys must resolve to it.

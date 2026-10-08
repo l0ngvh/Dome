@@ -191,6 +191,14 @@ fn master_ratio_out_of_range_falls_back_to_default() {
 }
 
 #[test]
+fn master_ratio_accepts_zero_and_one() {
+    let config = config_from("return { master = { master_ratio = 0 } }");
+    assert_eq!(config.tiling.master.master_ratio, 0.0);
+    let config = config_from("return { master = { master_ratio = 1 } }");
+    assert_eq!(config.tiling.master.master_ratio, 1.0);
+}
+
+#[test]
 fn master_count_beyond_exact_f64_range_falls_back_to_default() {
     let config = config_from("return { master = { master_count = 1e18 } }");
     assert_eq!(

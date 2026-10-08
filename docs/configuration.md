@@ -205,8 +205,8 @@ Toggle the focused window between normal and fullscreen.
 
 ### `actions.grow()`, `shrink()`
 
-In Master, change the master area by 5 percentage points, clamped to `0.1`
-through `0.9` of the workspace.
+In Master, change the master area by 5 percentage points, from `0` through `1`
+of the workspace.
 
 ### `actions.increase_master_count()`, `decrease_master_count()`
 
