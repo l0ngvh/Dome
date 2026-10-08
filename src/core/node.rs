@@ -320,10 +320,10 @@ impl Length<Logical> {
 /// Effective per-child layout constraints in the `Length` unit, in border-box
 /// space.
 ///
-/// `Length::ZERO` on a `max_*` field means "unbounded" on that axis. Containers
-/// always set both maxes to `Length::ZERO`.
+/// `Length::ZERO` on a `max_*` field means "unbounded" on that axis.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Constraints {
+    #[expect(dead_code, reason = "no strategy honors a minimum width")]
     pub(crate) min_width: Length,
     pub(crate) min_height: Length,
     pub(crate) max_width: Length,
@@ -797,9 +797,7 @@ impl<U> PixelRect<U> {
         Pixels::new(self.y.v + self.height.v)
     }
 
-    /// Mirrors `strategy::clip`, including returning `None` on an empty intersection,
-    /// so the two cannot drift apart in meaning. Exact on integers: an intersection of
-    /// two grid-aligned rectangles is grid-aligned, so nothing needs rounding after.
+    /// The intersection with `bounds`, or `None` when the intersection has no area.
     pub(crate) fn clip(self, bounds: Self) -> Option<Self> {
         let x1 = self.x.max(bounds.x);
         let y1 = self.y.max(bounds.y);
@@ -811,8 +809,7 @@ impl<U> PixelRect<U> {
         Some(Self::from_pixels(x1, y1, x2 - x1, y2 - y1))
     }
 
-    /// `<=` rather than `==` so an inverted extent counts as empty, matching what
-    /// `strategy::clip` rejects.
+    /// An inverted extent also counts as empty.
     pub(crate) const fn is_empty(self) -> bool {
         self.width.v <= 0 || self.height.v <= 0
     }

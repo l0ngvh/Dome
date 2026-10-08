@@ -791,26 +791,6 @@ impl TilingConfigBuilder {
         }
     }
 
-    fn with_min_width(self, min_width: SizeConstraint) -> Self {
-        Self {
-            size_constraints: SizeConstraints {
-                minimum_width: min_width,
-                ..self.size_constraints
-            },
-            ..self
-        }
-    }
-
-    fn with_min_height(self, min_height: SizeConstraint) -> Self {
-        Self {
-            size_constraints: SizeConstraints {
-                minimum_height: min_height,
-                ..self.size_constraints
-            },
-            ..self
-        }
-    }
-
     fn with_partition_tree_config(self, partition_tree: PartitionTreeConfig) -> Self {
         Self {
             partition_tree,
@@ -822,16 +802,6 @@ impl TilingConfigBuilder {
         Self {
             size_constraints: SizeConstraints {
                 maximum_width: max_width,
-                ..self.size_constraints
-            },
-            ..self
-        }
-    }
-
-    fn with_max_height(self, max_height: SizeConstraint) -> Self {
-        Self {
-            size_constraints: SizeConstraints {
-                maximum_height: max_height,
                 ..self.size_constraints
             },
             ..self

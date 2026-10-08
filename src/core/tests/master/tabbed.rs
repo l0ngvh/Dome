@@ -3,7 +3,8 @@ use crate::core::PaneDisplay;
 use crate::core::Strategy;
 use crate::core::WindowRestrictions;
 use crate::core::allocator::NodeId;
-use crate::core::node::{Length, LimitObservation, LimitUpdate, Pixels};
+use crate::core::hub::MonitorLayout;
+use crate::core::node::{Length, LimitObservation, LimitUpdate, PixelRect, Pixels};
 use crate::core::tests::{
     LayoutWorkspaceConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder, TilingConfigBuilder,
     default_rect, snapshot, titled,
@@ -44,6 +45,41 @@ fn tabbed_pane_keeps_min_height_when_tab_bar_exceeds_screen() {
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                   W0                                     |                                 [W1]                                    |
     ");
+}
+
+#[test]
+fn a_tabbed_pane_cuts_its_tab_bar_to_the_screen() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .with_partition_tree_config(
+                    PartitionTreeConfigBuilder::new()
+                        .with_tab_bar_height(Pixels::new(46))
+                        .build(),
+                )
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(2)
+                .with_master_display(PaneDisplay::Tabbed)
+                .build(),
+        ])
+        .build();
+    hub.insert_window(titled("W0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_rect(), WindowRestrictions::None);
+
+    let placements = hub.get_visible_placements();
+    let MonitorLayout::Normal { containers, .. } = &placements.monitors[0].layout else {
+        panic!("expected a normally tiled monitor");
+    };
+    let [pane] = containers.as_slice() else {
+        panic!("expected only the tabbed master pane, got {containers:?}");
+    };
+    assert_eq!(pane.tab_bar_band, PixelRect::new(0, 0, 150, 46));
+    assert_eq!(pane.visible_tab_bar_band, PixelRect::new(0, 0, 150, 30));
 }
 
 #[test]

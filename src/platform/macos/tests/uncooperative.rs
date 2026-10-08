@@ -128,21 +128,25 @@ fn hide_retries_reset_on_fresh_hide() {
 
 #[test]
 fn constraint_changes_over_time() {
-    let (macos, mut dome, _cg1, cg2) = two_windows();
+    let (macos, mut dome, _cg1, cg2) = two_master_windows();
 
-    // First constraint: cg2 reports min width 1000 (right-edge aligned)
     let (x2, y2, _, h2) = macos.window_frame(cg2);
-    macos.simulate_external_move(&mut dome, cg2, x2, y2, 1000, h2);
+    macos.simulate_external_move(&mut dome, cg2, x2, y2, 700, h2);
     macos.settle(&mut dome, 10);
-    let (_, _, w2, _) = macos.window_frame(cg2);
-    assert!(w2 >= 1000, "First constraint: expected >= 1000, got {w2}");
+    assert_eq!(
+        macos.window_frame(cg2),
+        (1090, 4, 700, 1072),
+        "the first maximum width centers cg2 in its pane"
+    );
 
-    // Second constraint: cg2 now reports even larger min width
     let (x2, y2, _, h2) = macos.window_frame(cg2);
-    macos.simulate_external_move(&mut dome, cg2, x2, y2, 1200, h2);
+    macos.simulate_external_move(&mut dome, cg2, x2, y2, 500, h2);
     macos.settle(&mut dome, 10);
-    let (_, _, w2, _) = macos.window_frame(cg2);
-    assert!(w2 >= 1200, "Updated constraint: expected >= 1200, got {w2}");
+    assert_eq!(
+        macos.window_frame(cg2),
+        (1190, 4, 500, 1072),
+        "the narrower maximum replaces the first"
+    );
 }
 
 #[test]
@@ -187,7 +191,7 @@ fn window_min_size_constraint() {
 #[test]
 fn window_max_size_constraint() {
     let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut dome = master_dome(&mut macos);
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Finder", "Home");
@@ -203,30 +207,28 @@ fn window_max_size_constraint() {
     );
     macos.settle(&mut dome, 10);
 
-    let (_, _, w2_width, _) = macos.window_frame(cg2);
-    assert!(
-        w2_width <= 500,
-        "Finder should be at most 500px wide, got {w2_width}"
+    assert_eq!(
+        macos.window_frame(cg2),
+        (1190, 4, 500, 1072),
+        "Finder is at most 500px wide, centered in its pane"
     );
-
-    let (_, _, w1_width, _) = macos.window_frame(cg1);
-    assert!(
-        w1_width > 960,
-        "Safari should get more than half the screen, got {w1_width}"
+    assert_eq!(
+        macos.window_frame(cg1),
+        (4, 4, 952, 1072),
+        "Safari keeps the master pane"
     );
 }
 
 #[test]
 fn size_constraint_from_external_move() {
-    let (macos, mut dome, _cg1, cg2) = two_windows();
+    let (macos, mut dome, _cg1, cg2) = two_master_windows();
 
-    // App reports larger size than Dome requested (min width constraint)
+    // App reports a narrower size than Dome requested (max width constraint)
     let (x2, y2, _, h2) = macos.window_frame(cg2);
-    macos.simulate_external_move(&mut dome, cg2, x2, y2, 1000, h2);
+    macos.simulate_external_move(&mut dome, cg2, x2, y2, 600, h2);
     macos.settle(&mut dome, 10);
 
-    let (_, _, w2_width, _) = macos.window_frame(cg2);
-    assert!(w2_width >= 1000);
+    assert_eq!(macos.window_frame(cg2), (1140, 4, 600, 1072));
 }
 
 #[test]
@@ -394,19 +396,14 @@ fn late_event_consumes_retry_budget() {
 
 #[test]
 fn mixed_freshness_burst_runs_constraint_detection() {
-    let (macos, mut dome, cg1, cg2) = two_windows();
+    let (macos, mut dome, _cg1, cg2) = two_master_windows();
 
-    // Report cg2 at a larger width than its target, with observed_at.first just
-    // before placed_at and observed_at.last after. Under the new predicate,
-    // observed_at.first <= placed_at + 1s holds, so constraint detection runs.
-    // The larger reported width becomes a constraint, so cg1 shrinks.
     let (x2, y2, _, h2) = macos.window_frame(cg2);
-    let (_, _, w1_before, _) = macos.window_frame(cg1);
     let before_placed = Instant::now() - Duration::from_secs(5);
     let now = Instant::now();
     dome.windows_moved(vec![WindowMove {
         cg_id: cg2,
-        rect: PixelRect::new(x2, y2, 1200, h2),
+        rect: PixelRect::new(x2, y2, 600, h2),
         observed_at: DebounceBurst {
             first: before_placed,
             last: now,
@@ -414,15 +411,10 @@ fn mixed_freshness_burst_runs_constraint_detection() {
     }]);
     macos.settle(&mut dome, 10);
 
-    let (_, _, w2_after, _) = macos.window_frame(cg2);
-    assert!(
-        w2_after >= 1200,
-        "constraint should have been recorded, got {w2_after}"
-    );
-    let (_, _, w1_after, _) = macos.window_frame(cg1);
-    assert!(
-        w1_after < w1_before,
-        "cg1 should shrink after cg2's constraint is recorded: before {w1_before}, after {w1_after}"
+    assert_eq!(
+        macos.window_frame(cg2),
+        (1140, 4, 600, 1072),
+        "the narrower width should be recorded as a maximum, which centers cg2 in its pane"
     );
 }
 
@@ -541,68 +533,68 @@ fn borderless_minimized_retries_reset_on_workspace_return() {
 
 #[test]
 fn genuine_limit_survives_display_change() {
-    let (macos, mut dome, _cg1, cg2) = two_windows();
+    let (macos, mut dome, _cg1, cg2) = two_master_windows();
 
     let (x2, y2, _, h2) = macos.window_frame(cg2);
-    macos.simulate_external_move(&mut dome, cg2, x2, y2, 1200, h2);
+    macos.simulate_external_move(&mut dome, cg2, x2, y2, 600, h2);
     macos.settle(&mut dome, 10);
-    let (_, _, w2, _) = macos.window_frame(cg2);
-    assert!(w2 >= 1200, "precondition: min-width recorded, got {w2}");
+    assert_eq!(
+        macos.window_frame(cg2),
+        (1140, 4, 600, 1072),
+        "precondition: max-width recorded, which centers cg2 in its pane"
+    );
 
     dome.monitors_changed(vec![default_monitor(), taller_right_monitor()]);
     dome.finish_monitor_settle();
     macos.settle(&mut dome, 10);
 
-    let (_, _, w2_after, _) = macos.window_frame(cg2);
-    assert!(
-        w2_after >= 1200,
-        "genuine min-width must survive the display change, got {w2_after}"
+    assert_eq!(
+        macos.window_frame(cg2),
+        (1140, 4, 600, 1072),
+        "genuine max-width must survive the display change"
     );
 }
 
 #[test]
 fn monitor_resolution_change_does_not_record_constraint() {
-    let (macos, mut dome, cg1, cg2) = two_windows();
+    let (macos, mut dome, _cg1, cg2) = two_master_windows();
+    let (_, _, old_width, _) = macos.window_frame(cg2);
 
-    // Shrinking the primary re-tiles both windows onto the smaller monitor and
-    // arms the settle.
-    let shrunk = MonitorInfo {
+    let grown = MonitorInfo {
         bounds: Dimension::new(
             Length::ZERO,
             Length::ZERO,
-            Length::new(1400.0),
-            Length::new(900.0),
+            Length::new(2560.0),
+            Length::new(1440.0),
         ),
         work_area: PixelRect::from_dimension_inward(Dimension::new(
             Length::ZERO,
             Length::ZERO,
-            Length::new(1400.0),
-            Length::new(900.0),
+            Length::new(2560.0),
+            Length::new(1440.0),
         )),
-        full_height: 900.0,
+        full_height: 1440.0,
         ..default_monitor()
     };
-    dome.monitors_changed(vec![shrunk]);
+    dome.monitors_changed(vec![grown]);
     macos.settle(&mut dome, 10);
-    let (_, _, w1_before, _) = macos.window_frame(cg1);
-
-    // While macOS finishes the relayout, cg2 lingers wider than its new target.
-    // The armed settle must not read that transient as a min-width and starve cg1.
     let (x2, y2, _, h2) = macos.window_frame(cg2);
-    macos.simulate_external_move(&mut dome, cg2, x2, y2, 1300, h2);
+
+    // cg2 reports its new origin at its old width while macOS finishes the relayout.
+    macos.simulate_external_move(&mut dome, cg2, x2, y2, old_width, h2);
     macos.settle(&mut dome, 10);
 
-    let (_, _, w1_after, _) = macos.window_frame(cg1);
     assert_eq!(
-        w1_before, w1_after,
-        "a relayout's transient width must not become a min-width"
+        macos.window_frame(cg2),
+        (x2, y2, old_width, h2),
+        "a relayout's transient width must not become a max-width, which re-centers cg2"
     );
 }
 
 #[test]
 fn cross_monitor_move_does_not_record_clamp() {
     let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut dome = master_dome(&mut macos);
     dome.monitors_changed(vec![default_monitor(), taller_right_monitor()]);
     dome.finish_monitor_settle();
 
@@ -638,7 +630,7 @@ fn cross_monitor_move_does_not_record_clamp() {
 #[test]
 fn cross_monitor_move_settle_is_per_window() {
     let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut dome = master_dome(&mut macos);
     dome.monitors_changed(vec![default_monitor(), taller_right_monitor()]);
     dome.finish_monitor_settle();
 
@@ -674,7 +666,7 @@ fn cross_monitor_move_settle_is_per_window() {
 #[test]
 fn cross_monitor_move_relearns_on_destination() {
     let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut dome = master_dome(&mut macos);
     dome.monitors_changed(vec![default_monitor(), taller_right_monitor()]);
     dome.finish_monitor_settle();
 
@@ -711,7 +703,7 @@ fn cross_monitor_move_relearns_on_destination() {
 #[test]
 fn genuine_limit_survives_cross_monitor_move() {
     let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut dome = master_dome(&mut macos);
     dome.monitors_changed(vec![default_monitor(), taller_right_monitor()]);
     dome.finish_monitor_settle();
 
@@ -751,18 +743,38 @@ fn one_window() -> (MacOS, Dome, CGWindowID) {
 fn two_windows() -> (MacOS, Dome, CGWindowID, CGWindowID) {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
+    let (cg1, cg2) = spawn_two_windows(&mut macos, &mut dome);
+    (macos, dome, cg1, cg2)
+}
+
+/// Safari in the master pane and Finder in the secondary pane, both placed and settled.
+fn two_master_windows() -> (MacOS, Dome, CGWindowID, CGWindowID) {
+    let mut macos = MacOS::new();
+    let mut dome = master_dome(&mut macos);
+    let (cg1, cg2) = spawn_two_windows(&mut macos, &mut dome);
+    (macos, dome, cg1, cg2)
+}
+
+fn master_dome(macos: &mut MacOS) -> Dome {
+    macos
+        .dome_builder()
+        .tiling(|tiling| tiling.layout = crate::core::Strategy::Master)
+        .build()
+}
+
+fn spawn_two_windows(macos: &mut MacOS, dome: &mut Dome) -> (CGWindowID, CGWindowID) {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Finder", "Home");
     dome.reconcile_windows(
         &[],
         &[],
         &[],
-        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+        vec![new_window(macos, cg1), new_window(macos, cg2)],
         &[],
         &[],
     );
-    macos.settle(&mut dome, 10);
-    (macos, dome, cg1, cg2)
+    macos.settle(dome, 10);
+    (cg1, cg2)
 }
 
 /// Taller than the primary (1440 vs 1080) so a window moved onto it has room to

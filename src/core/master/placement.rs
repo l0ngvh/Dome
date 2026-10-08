@@ -3,7 +3,10 @@ use crate::core::{
     hub::HubAccess,
     master::{MasterStrategy, PaneDisplay, PaneKind},
     node::{Constraints, WorkspaceId},
-    strategy::{container_titles, distribute_space, tab_bar_band, translate, window_constraints},
+    strategy::{
+        container_titles, distribute_space, tab_bar_band, translate, visible_tab_bar_band,
+        window_constraints,
+    },
 };
 
 impl MasterStrategy {
@@ -111,18 +114,19 @@ impl MasterStrategy {
                 let border_box =
                     translate(pane_dim, Length::ZERO, Length::ZERO, screen.x(), screen.y());
                 if let Some(visible_border_box) = border_box.clip(screen) {
+                    let band = tab_bar_band(
+                        border_box,
+                        pane_dim,
+                        screen,
+                        self.tab_bar_length(scale),
+                        true,
+                    );
                     containers.push(ContainerPlacement {
                         id: pane.container,
                         border_box,
                         visible_border_box,
-                        tab_bar_band: tab_bar_band(
-                            border_box,
-                            pane_dim,
-                            Length::ZERO,
-                            screen,
-                            self.tab_bar_length(scale),
-                            true,
-                        ),
+                        tab_bar_band: band,
+                        visible_tab_bar_band: visible_tab_bar_band(band, visible_border_box),
                         is_highlighted: false,
                         spawn_direction: None,
                         is_tabbed: true,

@@ -6,7 +6,6 @@ mod focus;
 mod fullscreen;
 mod placement;
 mod preferred_layout;
-mod scroll;
 mod tree;
 #[cfg(test)]
 mod validate;
@@ -27,12 +26,11 @@ use crate::core::float::FloatWindows;
 use crate::core::fullscreen::FullscreenWindows;
 use crate::core::hub::{HubAccess, MonitorLayout};
 use crate::core::node::{
-    ContainerId, DisplayMode, Length, LimitObservation, Logical, PixelRect, Pixels, WindowId,
-    WorkspaceId,
+    ContainerId, DisplayMode, LimitObservation, Logical, PixelRect, Pixels, WindowId, WorkspaceId,
 };
 use crate::core::slot::SlotId;
 use crate::core::strategy::{FocusedChild, StrategyAction, TilingStrategy};
-use crate::core::{PreferredTiling, PreferredWorkspace, SizeConstraints};
+use crate::core::{PreferredTiling, PreferredWorkspace};
 
 /// i3-style manual tiling strategy. Manages a container tree where windows are
 /// leaves and containers define split direction (horizontal/vertical) or tabbed
@@ -46,7 +44,6 @@ pub(crate) struct PartitionTreeStrategy {
     container_slots: Allocator<PreferredContainerSlot>,
     tab_bar_height: Pixels<Logical>,
     automatic_tiling: bool,
-    size_constraints: SizeConstraints,
 }
 
 impl TilingStrategy for PartitionTreeStrategy {
@@ -72,7 +69,6 @@ impl TilingStrategy for PartitionTreeStrategy {
                 focused_tiling: None,
                 focus_history: Vec::new(),
                 preferred_root,
-                viewport_offset: (Length::ZERO, Length::ZERO),
                 work_area: host.work_area,
                 scale: host.scale,
                 float_windows: FloatWindows::default(),
@@ -312,7 +308,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         let state = self.workspaces.get_mut(&ws_id).unwrap();
         state.float_windows.is_float_focused = state.float_windows.topmost().is_some();
         if let Some(&first) = state.focus_history.first() {
-            self.set_focus_pointer(hub, Child::Window(first));
+            self.set_focus(hub, Child::Window(first));
         }
         self.compute_placement(hub, ws_id);
     }
@@ -378,7 +374,6 @@ impl TilingStrategy for PartitionTreeStrategy {
     fn apply_config(&mut self, hub: &mut HubAccess, tiling: &TilingConfig) {
         self.tab_bar_height = tiling.partition_tree.tab_bar_height;
         self.automatic_tiling = tiling.partition_tree.automatic_tiling;
-        self.size_constraints = tiling.size_constraints;
         for ws_id in self.workspaces.keys().copied().collect::<Vec<_>>() {
             self.compute_placement(hub, ws_id);
         }
@@ -395,7 +390,6 @@ impl PartitionTreeStrategy {
             container_slots: Allocator::new(),
             tab_bar_height: tiling.partition_tree.tab_bar_height,
             automatic_tiling: tiling.partition_tree.automatic_tiling,
-            size_constraints: tiling.size_constraints,
         }
     }
 }
@@ -413,7 +407,6 @@ struct WorkspaceTilingState {
     focus_history: Vec<WindowId>,
     /// Root of the static preferred layout tree. `None` when no layout is configured.
     preferred_root: Option<PreferredSlot>,
-    viewport_offset: (Length, Length),
     /// The layout bounds, a copy of the host monitor's work area.
     work_area: PixelRect,
     /// A copy of the host monitor's scale.

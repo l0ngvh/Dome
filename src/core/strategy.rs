@@ -472,31 +472,16 @@ pub(crate) fn translate<U>(
     )
 }
 
-/// Clip a dimension to screen bounds. Returns None if entirely outside.
-pub(crate) fn clip<U>(dim: Dimension<U>, bounds: Dimension<U>) -> Option<Dimension<U>> {
-    let x1 = dim.x.max(bounds.x);
-    let y1 = dim.y.max(bounds.y);
-    let x2 = (dim.x + dim.width).min(bounds.x + bounds.width);
-    let y2 = (dim.y + dim.height).min(bounds.y + bounds.height);
-    if x1 >= x2 || y1 >= y2 {
-        return None;
-    }
-    Some(Dimension::new(x1, y1, x2 - x1, y2 - y1))
-}
-
-/// Zero-height when the container is not tabbed. The band top comes from the container's own
-/// dimension, not a separately rounded height, so round(y) + round(band) cannot drift a unit from
-/// the round(y + band) the content box uses.
+/// Zero height when the container is not tabbed.
 pub(crate) fn tab_bar_band(
     border_box: PixelRect,
     dim: Dimension,
-    offset_y: Length,
     screen: PixelRect,
     tab_bar_length: Length,
     is_tabbed: bool,
 ) -> PixelRect {
     let band_height = if is_tabbed {
-        let content_top = Pixels::round(dim.y + tab_bar_length - offset_y) + screen.y();
+        let content_top = Pixels::round(dim.y + tab_bar_length) + screen.y();
         content_top - border_box.y()
     } else {
         Pixels::ZERO
@@ -507,6 +492,15 @@ pub(crate) fn tab_bar_band(
         border_box.width(),
         band_height,
     )
+}
+
+pub(crate) fn visible_tab_bar_band(
+    tab_bar_band: PixelRect,
+    visible_border_box: PixelRect,
+) -> PixelRect {
+    tab_bar_band
+        .clip(visible_border_box)
+        .unwrap_or(PixelRect::ZERO)
 }
 
 pub(crate) fn container_titles(hub: &HubAccess, id: ContainerId) -> Vec<String> {

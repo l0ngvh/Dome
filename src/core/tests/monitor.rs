@@ -832,44 +832,6 @@ fn update_monitor_dimension_adjusts_workspaces() {
 }
 
 #[test]
-fn percentage_max_width_follows_the_work_area_of_a_partition_tree_workspace() {
-    let mut hub = TestHubBuilder::new()
-        .with_tiling(
-            TilingConfigBuilder::new()
-                .with_max_width(SizeConstraint::Percent(50.0))
-                .build(),
-        )
-        .build();
-    let external = hub.add_monitor(reported_monitor(
-        "external".to_string(),
-        work_area_at(150, 0),
-        1.0,
-    ));
-    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
-    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
-    assert_snapshot!(snapshot(&hub), @r#"
-    Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-      Monitor(id=MonitorId(1), name="external", screen=(x=150.00 y=0.00 w=100.00 h=30.00),
-        Window(id=WindowId(0), x=175.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
-      )
-    "#);
-
-    hub.update_monitor(
-        external,
-        reported_monitor("external".to_string(), PixelRect::new(150, 0, 200, 30), 1.0),
-        None,
-    );
-    assert_snapshot!(snapshot(&hub), @r#"
-    Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), name="primary", screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-      Monitor(id=MonitorId(1), name="external", screen=(x=150.00 y=0.00 w=200.00 h=30.00),
-        Window(id=WindowId(0), x=200.00, y=0.00, w=100.00, h=30.00, highlighted, spawn=right)
-      )
-    "#);
-}
-
-#[test]
 fn percentage_max_width_follows_the_work_area_of_a_master_workspace() {
     let mut hub = TestHubBuilder::new()
         .with_tiling(
@@ -1303,65 +1265,8 @@ fn monitor_scale_multiplies_tab_bar_height() {
     ");
 }
 
-#[cfg(target_os = "windows")]
-#[test]
-fn monitor_scale_multiplies_size_constraints() {
-    use crate::core::node::Pixels;
-
-    let mut hub = TestHubBuilder::new()
-        .with_scale(2.0)
-        .with_tiling(
-            TilingConfigBuilder::new()
-                .with_partition_tree_config(
-                    PartitionTreeConfigBuilder::new()
-                        .with_tab_bar_height(Pixels::new(10))
-                        .with_automatic_tiling(false)
-                        .build(),
-                )
-                .with_min_width(SizeConstraint::Pixels(Pixels::new(40)))
-                .build(),
-        )
-        .build();
-    for i in 0..6 {
-        hub.insert_window(
-            titled(format!("w{i}").as_str()),
-            default_rect(),
-            WindowRestrictions::None,
-        );
-    }
-    assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WindowId(5))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(5), x=70.00, y=0.00, w=80.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(4), x=0.00, y=0.00, w=70.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, w1, w2, w3, w4, w5])
-      )
-    ");
-
-    let monitor_id = hub.primary_monitor();
-    hub.update_monitor(
-        monitor_id,
-        reported_monitor("primary".to_string(), PixelRect::new(0, 0, 500, 1000), 3.0),
-        None,
-    );
-
-    assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WindowId(5))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=500.00 h=1000.00),
-        Window(id=WindowId(5), x=380.00, y=0.00, w=120.00, h=1000.00, highlighted, spawn=right)
-        Window(id=WindowId(4), x=260.00, y=0.00, w=120.00, h=1000.00)
-        Window(id=WindowId(3), x=140.00, y=0.00, w=120.00, h=1000.00)
-        Window(id=WindowId(2), x=20.00, y=0.00, w=120.00, h=1000.00)
-        Window(id=WindowId(1), x=0.00, y=0.00, w=20.00, h=1000.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=500.00, h=1000.00, titles=[w0, w1, w2, w3, w4, w5])
-      )
-    ");
-}
-
-/// Only `Unit = Physical` scales the tab bar height, so Windows is the one target where an
-/// integral configured height still yields a fractional band. The scale and odd work area put
-/// the origin and the band height on half units, where `round(y) + round(h)` diverges from the
-/// `round(y + h)` the content box uses.
+/// The band's origin and height fall on half units, where `round(y) + round(h)` and
+/// `round(y + h)` differ by one unit.
 #[cfg(target_os = "windows")]
 #[test]
 fn tabbed_band_bottom_lands_on_the_content_top() {
