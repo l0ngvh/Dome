@@ -15,7 +15,7 @@ use objc2_foundation::NSRect;
 use objc2_io_surface::IOSurface;
 use objc2_quartz_core::{CAAutoresizingMask, CALayer, CATransaction, kCAGravityResize};
 
-use super::super::dome::{ContainerShow, FloatShow, HubEvent, TilingWindowShow};
+use super::super::dome::{ContainerShow, FloatShow, HubEvent, MirrorShow, TilingWindowShow};
 use super::compositor::{MacOsCompositor, physical_size};
 use crate::config::Appearance;
 use crate::core::{ContainerId, Dimension, FloatWindowPlacement, Length, Logical};
@@ -36,12 +36,12 @@ fn frame_attrs(frame: NSRect) -> (Point<NativeUnit>, Size<NativeUnit>) {
     )
 }
 
-struct FloatHandler {
+struct MirrorHandler {
     hub_sender: CalloopSender<HubEvent>,
     cg_id: CGWindowID,
 }
 
-impl AuxiliaryWindowHandler for FloatHandler {
+impl AuxiliaryWindowHandler for MirrorHandler {
     fn on_mouse_down(&mut self, _at: Point<NativeUnit>, _button: MouseButton) {
         self.hub_sender
             .send(HubEvent::MirrorClicked(self.cg_id))
@@ -106,7 +106,7 @@ impl FloatOverlay {
                 click_through: true,
                 focusable: false,
             },
-            Box::new(FloatHandler { hub_sender, cg_id }),
+            Box::new(MirrorHandler { hub_sender, cg_id }),
         )
         .expect("auxiliary window on main thread");
         window.set_level(WindowLevel::Floating);
@@ -194,14 +194,85 @@ impl FloatOverlay {
         if self.is_focused {
             return;
         }
-        // Core Animation applies a 0.25s implicit crossfade when contents changes.
-        without_implicit_animation(|| {
-            // Explicit typed binding avoids deref-coercion ambiguity through the
-            // IOSurface -> NSObject -> AnyObject chain in argument position.
-            let obj: &AnyObject = surface;
-            unsafe { self.mirror_layer.setContents(Some(obj)) };
-        });
+        set_mirror_contents(&self.mirror_layer, surface);
     }
+}
+
+/// The on-screen part of a parked tiling window, drawn from a capture of the window.
+pub(super) struct MirrorOverlay {
+    window: AuxiliaryWindow,
+    mirror_layer: Retained<CALayer>,
+    source: Dimension,
+    scale: f64,
+}
+
+impl MirrorOverlay {
+    pub(super) fn new(
+        _mtm: MainThreadMarker,
+        show: &MirrorShow,
+        hub_sender: CalloopSender<HubEvent>,
+    ) -> Self {
+        let mirror_layer = CALayer::layer();
+        unsafe { mirror_layer.setContentsGravity(kCAGravityResize) };
+        let (position, size) = frame_attrs(show.cocoa_frame);
+        let window = AuxiliaryWindow::new(
+            &WindowAttributes {
+                position,
+                size,
+                click_through: false,
+                focusable: false,
+            },
+            Box::new(MirrorHandler {
+                hub_sender,
+                cg_id: show.cg_id,
+            }),
+        )
+        .expect("auxiliary window on main thread");
+        // Below the normal level, so a focused float, which is a real window, covers the
+        // mirror as it would cover the tile.
+        window.set_level(WindowLevel::Bottom);
+        window.set_content_layer(&mirror_layer);
+        let mut overlay = Self {
+            window,
+            mirror_layer,
+            source: show.source,
+            scale: show.scale,
+        };
+        overlay.render(show);
+        overlay
+    }
+
+    pub(super) fn render(&mut self, show: &MirrorShow) {
+        let (position, size) = frame_attrs(show.cocoa_frame);
+        self.window.set_frame(position, size);
+        self.mirror_layer.setContentsScale(show.scale);
+        self.source = show.source;
+        self.scale = show.scale;
+        self.window.set_visible(true);
+    }
+
+    /// The part of the window the capture must cover, as of the last `render`.
+    pub(super) fn source(&self) -> Dimension {
+        self.source
+    }
+
+    pub(super) fn scale(&self) -> f64 {
+        self.scale
+    }
+
+    pub(super) fn apply_frame(&self, surface: &IOSurface) {
+        set_mirror_contents(&self.mirror_layer, surface);
+    }
+}
+
+fn set_mirror_contents(layer: &CALayer, surface: &IOSurface) {
+    // Core Animation applies a 0.25s implicit crossfade when contents changes.
+    without_implicit_animation(|| {
+        // Explicit typed binding avoids deref-coercion ambiguity through the
+        // IOSurface -> NSObject -> AnyObject chain in argument position.
+        let obj: &AnyObject = surface;
+        unsafe { layer.setContents(Some(obj)) };
+    });
 }
 
 fn without_implicit_animation(change: impl FnOnce()) {

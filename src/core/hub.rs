@@ -27,18 +27,26 @@ pub(crate) struct TilingWindowPlacement {
     pub(crate) border_box: PixelRect,
     pub(crate) visible_border_box: PixelRect,
     pub(crate) content_box: PixelRect,
-    /// `content_box` trimmed to the monitor. Zero-area when nothing remains.
-    #[cfg_attr(
-        target_os = "windows",
-        expect(
-            dead_code,
-            reason = "macOS trims tiling placements to the work area, Windows places them unclipped"
-        )
-    )]
+    /// `content_box` trimmed to the work area. Zero-area when nothing remains.
     pub(crate) visible_content_box: PixelRect,
     /// Highlighting does not require keyboard focus.
     pub(crate) is_highlighted: bool,
     pub(crate) spawn_direction: Option<Direction>,
+}
+
+impl TilingWindowPlacement {
+    /// Part of `content_box` lies outside the work area. Also true when `content_box` has no
+    /// area, because its visible part is then `PixelRect::ZERO`.
+    #[cfg_attr(
+        target_os = "windows",
+        expect(
+            dead_code,
+            reason = "only the macOS platform shows a tile that is partly off screen through a capture"
+        )
+    )]
+    pub(crate) fn is_partially_off_screen(&self) -> bool {
+        self.visible_content_box != self.content_box
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

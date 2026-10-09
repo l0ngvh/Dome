@@ -6,7 +6,9 @@ mod recovery;
 mod registry;
 mod window;
 
-pub(super) use events::{ContainerShow, FloatShow, HubEvent, HubMessage, TilingWindowShow};
+pub(super) use events::{
+    ContainerShow, FloatShow, HubEvent, HubMessage, MirrorShow, TilingWindowShow,
+};
 pub(super) use inspect::{
     ExitNativeFullscreen, ExtRefresh, compute_reconcile_all, compute_reconciliation,
     compute_window_positions,

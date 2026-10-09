@@ -1,11 +1,14 @@
 use std::collections::HashSet;
 
-use crate::core::{Length, MonitorLayout, MonitorPlacements, WindowId};
+use crate::core::{
+    Dimension, Length, MonitorLayout, MonitorPlacements, PixelRect, TilingWindowPlacement, WindowId,
+};
 use crate::platform::macos::objc2_wrapper::dimension_to_ns_rect_cocoa;
 
 use super::Dome;
 use super::events::{
-    ContainerShow, FloatShow, HubMessage, MonitorTilingData, RenderScene, TilingWindowShow,
+    ContainerShow, FloatShow, HubMessage, MirrorShow, MonitorTilingData, RenderScene,
+    TilingWindowShow,
 };
 
 impl Dome {
@@ -14,6 +17,7 @@ impl Dome {
     pub(in crate::platform::macos) fn flush_layout(&mut self) {
         let mut tiling = Vec::new();
         let mut float_shows = Vec::new();
+        let mut mirror_shows = Vec::new();
         let result = self.hub.get_visible_placements();
         let visible_windows: HashSet<WindowId> = result
             .monitors
@@ -43,9 +47,10 @@ impl Dome {
         let focused_window = result.focused_window;
         let focused_monitor = result.focused_monitor;
         for mp in result.monitors {
-            let (t, f) = self.apply_monitor_placements(&mp, focused_window);
+            let (t, f, m) = self.apply_monitor_placements(&mp, focused_window);
             tiling.push(t);
             float_shows.extend(f);
+            mirror_shows.extend(m);
         }
 
         if focused_window != self.last_focused {
@@ -79,6 +84,7 @@ impl Dome {
         self.sender.send(HubMessage::Scene(RenderScene {
             tiling,
             float_shows,
+            mirror_shows,
             focused_window,
             focused_monitor_id: focused_monitor,
             workspaces: self.hub.query_workspaces(),
@@ -89,7 +95,7 @@ impl Dome {
         &mut self,
         mp: &MonitorPlacements,
         focused_window: Option<WindowId>,
-    ) -> (MonitorTilingData, Vec<FloatShow>) {
+    ) -> (MonitorTilingData, Vec<FloatShow>, Vec<MirrorShow>) {
         match &mp.layout {
             MonitorLayout::Fullscreen(window_id) => {
                 self.place_fullscreen_window(*window_id, mp.work_area);
@@ -109,6 +115,7 @@ impl Dome {
                         containers: Vec::new(),
                     },
                     Vec::new(),
+                    Vec::new(),
                 )
             }
             MonitorLayout::Normal {
@@ -121,10 +128,9 @@ impl Dome {
 
                 let mut placed_tiling = Vec::new();
                 let mut float_shows = Vec::new();
+                let mut mirror_shows = Vec::new();
 
                 for wp in tiling_windows {
-                    // macOS doesn't reliably allow placing windows partially off-screen
-                    // (especially above the menu bar), so place the trimmed rect.
                     // Tiling placements are always Positioned, so parking is legal here.
                     if wp.visible_content_box.is_empty() {
                         tracing::debug!(
@@ -136,10 +142,28 @@ impl Dome {
                         self.move_window_offscreen(wp.id);
                         continue;
                     }
-                    self.show_tiling(wp.id, wp.visible_content_box);
+                    let mirrored = shows_through_mirror(wp);
+                    if mirrored {
+                        self.park_mirrored_window(wp.id, wp.content_box);
+                    } else {
+                        // macOS doesn't reliably allow placing windows partially off-screen
+                        // (especially above the menu bar), so place the trimmed rect.
+                        self.show_tiling(wp.id, wp.visible_content_box);
+                    }
                     let Some(entry) = self.registry.by_id(wp.id) else {
                         continue;
                     };
+                    if mirrored {
+                        mirror_shows.push(MirrorShow {
+                            cg_id: entry.cg_id,
+                            cocoa_frame: dimension_to_ns_rect_cocoa(
+                                Length::new(self.primary_full_height),
+                                wp.visible_content_box.to_dimension(),
+                            ),
+                            source: on_screen_part(wp),
+                            scale,
+                        });
+                    }
                     placed_tiling.push(TilingWindowShow {
                         placement: *wp,
                         corner_radius: entry.corner_radius,
@@ -204,8 +228,30 @@ impl Dome {
                         containers: container_data,
                     },
                     float_shows,
+                    mirror_shows,
                 )
             }
         }
     }
+}
+
+/// Whether a tile shows through a mirror instead of as the window itself, which holds for a
+/// tile that is partly off screen and not highlighted. A highlighted tile has the tiling focus,
+/// where typing goes, and a mirror passes no input to its window, so that tile stays real.
+fn shows_through_mirror(wp: &TilingWindowPlacement) -> bool {
+    !wp.is_highlighted && wp.is_partially_off_screen()
+}
+
+/// The part of the window that `visible_content_box` shows, relative to the window's top-left
+/// corner.
+fn on_screen_part(wp: &TilingWindowPlacement) -> Dimension {
+    let visible = wp.visible_content_box;
+    let content = wp.content_box;
+    PixelRect::from_pixels(
+        visible.x() - content.x(),
+        visible.y() - content.y(),
+        visible.width(),
+        visible.height(),
+    )
+    .to_dimension()
 }
