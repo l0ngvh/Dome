@@ -837,7 +837,7 @@ fn export_writes_a_stacked_column() {
 }
 
 #[test]
-fn export_writes_the_fullscreen_windows_of_a_scrolling_workspace() {
+fn export_writes_the_float_and_fullscreen_windows_of_a_scrolling_workspace() {
     let mut hub = TestHubBuilder::new()
         .with_tiling(
             TilingConfigBuilder::new()
@@ -847,6 +847,8 @@ fn export_writes_the_fullscreen_windows_of_a_scrolling_workspace() {
         .build();
     let ws = hub.current_workspace();
     hub.insert_window(titled("t"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("f"), default_rect(), WindowRestrictions::None);
+    hub.toggle_float();
     let fs = hub
         .insert_window(titled("fs"), default_rect(), WindowRestrictions::None)
         .unwrap();
@@ -855,6 +857,7 @@ fn export_writes_the_fullscreen_windows_of_a_scrolling_workspace() {
 
     let export = hub.export_workspace(ws);
 
+    assert_eq!(export.float, vec![titled_matcher("f")]);
     assert_eq!(export.fullscreen, vec![titled_matcher("fs")]);
     assert!(
         matches!(&export.tiling, PreferredTiling::Scrolling(s) if s.columns.len() == 1),

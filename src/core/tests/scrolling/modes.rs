@@ -2,10 +2,11 @@ use super::{border_boxes_by_window, scrolling_hub_with};
 use crate::core::hub::{Hub, MonitorLayout};
 use crate::core::node::{PixelRect, WindowId, WindowRestrictions};
 use crate::core::tests::{
-    LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, preferred_layout, setup_modes_on,
-    titled, titled_matcher, validate_hub,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder, default_rect,
+    float_border_box, preferred_layout, reported_monitor, setup_modes_on, titled, titled_matcher,
+    validate_hub,
 };
-use crate::core::{ScrollingConfig, SizeConstraint, Strategy};
+use crate::core::{ColumnConfig, MonitorSelector, ScrollingConfig, SizeConstraint, Strategy};
 
 fn narrow_hub() -> Hub {
     scrolling_hub_with(ScrollingConfig {
@@ -198,4 +199,101 @@ fn a_reset_keeps_a_fullscreen_window_fullscreen_over_its_tiling_windows() {
     hub.delete_window(fs);
     validate_hub(&hub);
     assert_eq!(hub.focused_window(ws), Some(t));
+}
+
+#[test]
+fn a_float_matcher_wins_over_a_column_matcher() {
+    let mut hub = TestHubBuilder::new()
+        .with_preferred_layout([LayoutWorkspaceConfigBuilder::new("0")
+            .with_strategy(Strategy::Scrolling)
+            .with_columns(vec![ColumnConfig::bare(titled_matcher("f"))])
+            .with_float(vec![titled_matcher("f")])
+            .build()])
+        .build();
+    let ws = hub.current_workspace();
+
+    let f = hub
+        .insert_window(
+            titled("f"),
+            PixelRect::new(10, 5, 40, 10),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    validate_hub(&hub);
+    assert_eq!(hub.focused_window(ws), Some(f));
+    assert_eq!(
+        float_border_box(&hub, f),
+        Some(PixelRect::new(10, 5, 40, 10))
+    );
+    assert_eq!(border_boxes_by_window(&hub), Vec::new());
+}
+
+#[test]
+fn a_window_on_another_monitor_floats_at_the_rectangle_its_tile_showed() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
+                .with_strategy(Strategy::Scrolling)
+                .build(),
+        )
+        .build();
+    hub.add_monitor(reported_monitor(
+        "external".to_string(),
+        PixelRect::new(150, 0, 100, 30),
+        1.0,
+    ));
+    hub.focus_monitor(&MonitorSelector::Name("external".to_string()));
+    insert(&mut hub, "w0");
+    let w1 = insert(&mut hub, "w1");
+
+    hub.toggle_float();
+    validate_hub(&hub);
+    assert_eq!(
+        float_border_box(&hub, w1),
+        Some(PixelRect::new(200, 0, 50, 30))
+    );
+}
+
+#[test]
+fn a_float_dragged_onto_another_monitor_moves_to_its_active_workspace() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
+                .with_strategy(Strategy::Scrolling)
+                .build(),
+        )
+        .with_preferred_layout([LayoutWorkspaceConfigBuilder::new("0")
+            .with_strategy(Strategy::Scrolling)
+            .with_float(vec![titled_matcher("chat")])
+            .build()])
+        .build();
+    let external = hub.add_monitor(reported_monitor(
+        "external".to_string(),
+        PixelRect::new(150, 0, 100, 30),
+        1.0,
+    ));
+    let w0 = insert(&mut hub, "w0");
+    let chat = hub
+        .insert_window(
+            titled("chat"),
+            PixelRect::new(10, 5, 30, 20),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+
+    hub.update_float_rect(chat, PixelRect::new(160, 5, 30, 20), external);
+    validate_hub(&hub);
+    assert_eq!(
+        hub.get_visible_placements().focused_window,
+        Some(w0),
+        "the drag leaves keyboard focus on the primary monitor"
+    );
+    assert_eq!(
+        hub.access.windows.get(chat).workspace(),
+        Some(hub.access.monitors.get(external).active_workspace)
+    );
+    assert_eq!(
+        float_border_box(&hub, chat),
+        Some(PixelRect::new(159, 4, 32, 22))
+    );
 }

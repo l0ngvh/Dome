@@ -1187,6 +1187,19 @@ pub(super) fn save_then_apply(hub: &mut Hub) {
     hub.apply_preferred_layouts(layouts);
 }
 
+fn float_border_box(hub: &Hub, window_id: WindowId) -> Option<PixelRect> {
+    hub.get_visible_placements()
+        .monitors
+        .iter()
+        .find_map(|m| match &m.layout {
+            MonitorLayout::Normal { float_windows, .. } => float_windows
+                .iter()
+                .find(|p| p.id == window_id)
+                .map(|p| p.border_box),
+            MonitorLayout::Fullscreen(_) => None,
+        })
+}
+
 /// Rect for test inserts where geometry is not under assertion. Tiling ignores it.
 pub(crate) fn default_rect() -> PixelRect {
     PixelRect::new(0, 0, 100, 100)

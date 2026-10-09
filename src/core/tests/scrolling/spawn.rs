@@ -1,8 +1,10 @@
 use super::{border_boxes_by_window, dev_hub, insert, process_matcher, scrolling_hub_with};
 use crate::core::hub::{Hub, MonitorLayout};
 use crate::core::node::{Direction, WindowId};
-use crate::core::tests::validate_hub;
-use crate::core::{ColumnConfig, PixelRect, ScrollingConfig, SizeConstraint};
+use crate::core::tests::{setup_modes_on, titled, validate_hub};
+use crate::core::{
+    ColumnConfig, PixelRect, ScrollingConfig, SizeConstraint, Strategy, WindowRestrictions,
+};
 
 fn narrow_hub() -> Hub {
     scrolling_hub_with(ScrollingConfig {
@@ -192,6 +194,31 @@ fn a_free_matcher_wins_over_the_spawn_direction() {
             (u, PixelRect::new(90, 0, 30, 30)),
         ],
         "a window that opens in a layout column starts horizontal"
+    );
+    validate_hub(&hub);
+}
+
+#[test]
+fn a_window_opened_while_a_float_has_focus_spawns_below_the_tiling_focus() {
+    let mut hub = setup_modes_on(Strategy::Scrolling, "0", &["f"], &[]);
+    let w0 = insert(&mut hub, "w0.exe");
+    hub.toggle_spawn_mode();
+    let f = hub
+        .insert_window(
+            titled("f"),
+            PixelRect::new(10, 5, 40, 10),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    assert_eq!(hub.focused_window(hub.current_workspace()), Some(f));
+
+    let w1 = insert(&mut hub, "w1.exe");
+    assert_eq!(
+        border_boxes_by_window(&hub),
+        vec![
+            (w0, PixelRect::new(38, 0, 75, 15)),
+            (w1, PixelRect::new(38, 15, 75, 15)),
+        ]
     );
     validate_hub(&hub);
 }

@@ -343,6 +343,47 @@ fn float_and_fullscreen_skip_a_selected_column() {
 }
 
 #[test]
+fn a_float_that_takes_focus_keeps_the_column_selection() {
+    let (mut hub, a, b, c) = stack_beside_one();
+    let ws = hub.current_workspace();
+    hub.toggle_float();
+    hub.set_focus(b);
+    hub.focus_parent();
+
+    hub.set_focus(c);
+    assert_eq!(hub.focused_window(ws), Some(c));
+    assert_eq!(selected_column(&hub), None);
+
+    hub.delete_window(c);
+    assert_eq!(selected_column(&hub), selected(&[a, b]));
+    assert_eq!(hub.focused_window(ws), None);
+    validate_hub(&hub);
+}
+
+#[test]
+fn a_float_that_tiles_again_opens_at_the_bottom_of_the_selected_column() {
+    let (mut hub, a, b, c) = stack_beside_one();
+    let ws = hub.current_workspace();
+    hub.toggle_float();
+    hub.set_focus(a);
+    hub.focus_parent();
+    hub.set_focus(c);
+
+    hub.toggle_float();
+    assert_eq!(
+        border_boxes_by_window(&hub),
+        vec![
+            (a, PixelRect::new(60, 0, 30, 10)),
+            (b, PixelRect::new(60, 10, 30, 10)),
+            (c, PixelRect::new(60, 20, 30, 10)),
+        ]
+    );
+    assert_eq!(hub.focused_window(ws), Some(c));
+    assert_eq!(selected_column(&hub), None);
+    validate_hub(&hub);
+}
+
+#[test]
 fn closing_a_window_of_the_selected_column_keeps_the_selection() {
     let (mut hub, a, b, _) = stack_beside_one();
     hub.set_focus(b);

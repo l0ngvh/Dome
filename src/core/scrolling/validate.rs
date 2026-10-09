@@ -1,6 +1,5 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::core::float::FloatWindows;
 use crate::core::hub::HubAccess;
 use crate::core::node::{Child, Length, WindowId};
 use crate::core::slot::{SlotId, tiling_slots_by_workspace};
@@ -151,10 +150,11 @@ impl ValidateStrategy for ScrollingStrategy {
                 hub,
                 ws_id,
                 &tiling,
-                &FloatWindows::default(),
+                &state.float_windows,
                 &state.fullscreen_windows,
             );
             let mut all = tiling;
+            all.extend(state.float_windows.windows());
             all.extend(state.fullscreen_windows.windows());
             windows.insert(ws_id, all);
         }

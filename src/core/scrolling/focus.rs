@@ -5,12 +5,18 @@ use crate::core::strategy::FocusedChild;
 use super::{ScrollingStrategy, WorkspaceState};
 
 impl ScrollingStrategy {
-    /// The topmost fullscreen window, otherwise the selected column, otherwise the most recently
-    /// focused tiling window.
+    /// The topmost fullscreen window, otherwise the topmost float when float focus is selected or
+    /// no column remains, otherwise the selected column, otherwise the most recently focused
+    /// tiling window.
     pub(super) fn focused(&self, ws_id: WorkspaceId) -> Option<FocusedChild> {
         let state = self.workspaces.get(&ws_id)?;
         if let Some(id) = state.fullscreen_windows.topmost() {
             return Some(FocusedChild::Fullscreen(id));
+        }
+        if let Some(id) = state.float_windows.topmost()
+            && (state.float_windows.is_float_focused || state.columns.is_empty())
+        {
+            return Some(FocusedChild::Float(id));
         }
         if let Some(container) = state.selected_column {
             return Some(FocusedChild::Tiling(Child::Container(container)));
@@ -20,10 +26,11 @@ impl ScrollingStrategy {
             .map(|id| FocusedChild::Tiling(Child::Window(id)))
     }
 
-    /// Makes the window the tiling focus, ends a column selection, and scrolls the window into
-    /// view.
+    /// Makes the window the tiling focus, which takes focus from a float, ends a column selection,
+    /// and scrolls the window into view.
     pub(super) fn focus_tiling(&mut self, hub: &HubAccess, ws_id: WorkspaceId, id: WindowId) {
         let state = self.workspaces.get_mut(&ws_id).unwrap();
+        state.float_windows.is_float_focused = false;
         state.record_focus(id);
         state.selected_column = None;
         self.scroll_into_view(hub, ws_id);

@@ -1,6 +1,7 @@
 mod actions;
 mod column;
 mod config;
+mod float;
 mod focus;
 mod fullscreen;
 mod placement;
@@ -16,6 +17,7 @@ pub(crate) use config::ScrollingConfig;
 pub(crate) use preferred_layout::ColumnConfig;
 use preferred_layout::PreferredColumnSlot;
 
+use crate::core::float::FloatWindows;
 use crate::core::fullscreen::FullscreenWindows;
 use crate::core::hub::{HubAccess, MonitorLayout};
 use crate::core::node::{
@@ -50,8 +52,8 @@ impl TilingStrategy for ScrollingStrategy {
         let PreferredTiling::Scrolling(layout) = &entry.tiling else {
             unreachable!("scrolling got a {:?} entry", entry.tiling.strategy());
         };
-        // The strategy has no float support, so the entry's float matchers take no slot.
         FullscreenWindows::allocate_slots(hub, ws_id, &entry.fullscreen);
+        FloatWindows::allocate_slots(hub, ws_id, &entry.float);
         let column_slots = Self::allocate_column_slots(hub, ws_id, &layout.columns);
         let host = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
         self.workspaces.insert(
@@ -65,6 +67,7 @@ impl TilingStrategy for ScrollingStrategy {
                 x_offset: Length::ZERO,
                 work_area: host.work_area,
                 scale: host.scale,
+                float_windows: FloatWindows::default(),
                 fullscreen_windows: FullscreenWindows::default(),
             },
         );
@@ -86,10 +89,12 @@ impl TilingStrategy for ScrollingStrategy {
         for window_id in &tiling {
             self.window_states.remove(window_id);
         }
+        let floats = state.float_windows.clear().into_iter();
         let fullscreen = state.fullscreen_windows.clear().into_iter();
         tiling
             .into_iter()
             .map(|id| (id, DisplayMode::Tiling))
+            .chain(floats.map(|(id, border_box)| (id, DisplayMode::Float { border_box })))
             .chain(fullscreen.map(|id| (id, DisplayMode::Fullscreen)))
             .collect()
     }
@@ -98,7 +103,7 @@ impl TilingStrategy for ScrollingStrategy {
         let state = self.workspaces.get(&ws_id).unwrap();
         PreferredWorkspace {
             tiling: PreferredTiling::Scrolling(self.export_columns(hub, ws_id)),
-            float: Vec::new(),
+            float: state.float_windows.export(hub),
             fullscreen: state.fullscreen_windows.export(hub),
         }
     }
@@ -113,8 +118,11 @@ impl TilingStrategy for ScrollingStrategy {
     ) {
         match mode {
             DisplayMode::Tiling => self.attach_tiling_window(hub, ws_id, id, slot),
-            // The strategy has no float support, so a float tiles by the spawn rules.
-            DisplayMode::Float { .. } => self.attach_tiling_window(hub, ws_id, id, None),
+            DisplayMode::Float { border_box } => {
+                hub.windows.get_mut(id).set_workspace(Some(ws_id));
+                let state = self.workspaces.get_mut(&ws_id).unwrap();
+                state.float_windows.attach(id, border_box);
+            }
             DisplayMode::Fullscreen => {
                 hub.windows.get_mut(id).set_workspace(Some(ws_id));
                 let state = self.workspaces.get_mut(&ws_id).unwrap();
@@ -139,6 +147,9 @@ impl TilingStrategy for ScrollingStrategy {
             .workspace()
             .expect("detaching window has a workspace");
         let state = self.workspaces.get_mut(&ws_id).unwrap();
+        if let Some(border_box) = state.float_windows.detach(id) {
+            return DisplayMode::Float { border_box };
+        }
         if state.fullscreen_windows.detach(id) {
             return DisplayMode::Fullscreen;
         }
@@ -161,6 +172,21 @@ impl TilingStrategy for ScrollingStrategy {
 
     fn unset_fullscreen(&mut self, hub: &mut HubAccess, window_id: WindowId) {
         self.exit_fullscreen(hub, window_id);
+    }
+
+    fn update_float_rect(
+        &mut self,
+        hub: &mut HubAccess,
+        window_id: WindowId,
+        border_box: PixelRect,
+    ) -> bool {
+        let ws_id = hub
+            .windows
+            .get(window_id)
+            .workspace()
+            .expect("non-minimized window has a workspace");
+        let state = self.workspaces.get_mut(&ws_id).unwrap();
+        state.float_windows.update_float_rect(window_id, border_box)
     }
 
     fn handle_action(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId, action: StrategyAction) {
@@ -189,12 +215,10 @@ impl TilingStrategy for ScrollingStrategy {
             | StrategyAction::FocusParent
             | StrategyAction::Grow
             | StrategyAction::Shrink => {
-                tracing::debug!("Tiling action while a fullscreen window has focus");
+                tracing::debug!("Tiling action while a float or fullscreen window has focus");
             }
+            StrategyAction::ToggleFloat => self.toggle_float(hub, ws_id, focused),
             StrategyAction::ToggleFullscreen => self.toggle_fullscreen(hub, focused),
-            StrategyAction::ToggleFloat => {
-                tracing::debug!("Scrolling has no float support");
-            }
             StrategyAction::ToggleDirection
             | StrategyAction::ToggleContainerLayout
             | StrategyAction::FocusTab { .. }
@@ -213,12 +237,16 @@ impl TilingStrategy for ScrollingStrategy {
             .workspace()
             .expect("non-minimized window has a workspace");
         let state = self.workspaces.get_mut(&ws_id).unwrap();
-        if !state.fullscreen_windows.focus(window_id) {
+        if state.fullscreen_windows.focus(window_id) {
+            state.float_windows.is_float_focused = false;
+        } else if !state.float_windows.focus(window_id) {
             self.focus_tiling(hub, ws_id, window_id);
         }
     }
 
     fn reset_focus(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
+        let state = self.workspaces.get_mut(&ws_id).unwrap();
+        state.float_windows.is_float_focused = state.float_windows.topmost().is_some();
         self.compute_placement(hub, ws_id);
     }
 
@@ -268,9 +296,14 @@ impl TilingStrategy for ScrollingStrategy {
             ws_id,
             highlighted && matches!(focused, Some(FocusedChild::Tiling(_))),
         );
+        let float_windows = self.workspaces[&ws_id].float_windows.collect_placements(
+            hub,
+            ws_id,
+            highlighted && matches!(focused, Some(FocusedChild::Float(_))),
+        );
         MonitorLayout::Normal {
             tiling_windows,
-            float_windows: Vec::new(),
+            float_windows,
             containers,
         }
     }
@@ -310,7 +343,8 @@ fn has_preferred_layout(hub: &HubAccess, ws_id: WorkspaceId) -> bool {
         .is_some()
 }
 
-/// The columns and fullscreen windows of one scrolling workspace, with its layout state.
+/// The columns, float windows and fullscreen windows of one scrolling workspace, with its layout
+/// state.
 #[derive(Debug)]
 struct WorkspaceState {
     /// The `columns` list of this workspace's `layout.lua` entry, left to right.
@@ -324,7 +358,9 @@ struct WorkspaceState {
     /// `columns`.
     focus_history: Vec<WindowId>,
     /// The container of the column selected as a whole rather than one of its windows. That
-    /// column holds the focused window, and the workspace reports it as its focused container.
+    /// column holds the tiling focus, and the workspace reports it as its focused container while
+    /// no float or fullscreen window has focus. A float or fullscreen window that takes focus
+    /// leaves the selection in place.
     selected_column: Option<ContainerId>,
     /// Left edge of the viewport, in unscrolled workspace space.
     x_offset: Length,
@@ -332,6 +368,7 @@ struct WorkspaceState {
     work_area: PixelRect,
     /// A copy of the host monitor's scale.
     scale: f32,
+    float_windows: FloatWindows,
     fullscreen_windows: FullscreenWindows,
 }
 

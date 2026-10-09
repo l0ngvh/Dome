@@ -283,15 +283,37 @@ fn a_reload_after_the_layout_entry_is_dropped_applies_column_width() {
 }
 
 #[test]
-fn grow_and_shrink_do_nothing_while_fullscreen_has_focus() {
-    let mut hub = setup_modes_on(Strategy::Scrolling, "0", &[], &["fs"]);
+fn grow_and_shrink_do_nothing_while_a_float_or_fullscreen_window_has_focus() {
+    let mut hub = setup_modes_on(Strategy::Scrolling, "0", &["f"], &["fs"]);
     hub.insert_window(titled("t"), default_rect(), WindowRestrictions::None);
-    hub.insert_window(titled("fs"), default_rect(), WindowRestrictions::None);
+    let unchanged = [Some(SizeConstraint::Percent(50.0))];
 
+    let fs = hub
+        .insert_window(titled("fs"), default_rect(), WindowRestrictions::None)
+        .unwrap();
     hub.grow();
-    assert_eq!(column_widths(&hub), [Some(SizeConstraint::Percent(50.0))]);
+    assert_eq!(column_widths(&hub), unchanged, "grow under fullscreen");
     hub.shrink();
-    assert_eq!(column_widths(&hub), [Some(SizeConstraint::Percent(50.0))]);
+    assert_eq!(column_widths(&hub), unchanged, "shrink under fullscreen");
+    hub.delete_window(fs);
+
+    hub.insert_window(
+        titled("f"),
+        PixelRect::new(10, 5, 40, 10),
+        WindowRestrictions::None,
+    );
+    hub.grow();
+    assert_eq!(
+        column_widths(&hub),
+        unchanged,
+        "grow while the float has focus"
+    );
+    hub.shrink();
+    assert_eq!(
+        column_widths(&hub),
+        unchanged,
+        "shrink while the float has focus"
+    );
     validate_hub(&hub);
 }
 

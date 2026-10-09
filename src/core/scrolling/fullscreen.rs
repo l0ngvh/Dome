@@ -8,26 +8,31 @@ impl ScrollingStrategy {
     pub(super) fn toggle_fullscreen(&mut self, hub: &mut HubAccess, focused: FocusedChild) {
         match focused {
             FocusedChild::Fullscreen(id) => self.exit_fullscreen(hub, id),
-            FocusedChild::Tiling(Child::Window(id)) => self.enter_fullscreen(hub, id),
-            FocusedChild::Tiling(Child::Container(_)) | FocusedChild::Float(_) => {
-                tracing::debug!("No focused tiling or fullscreen window to toggle");
+            FocusedChild::Float(id) | FocusedChild::Tiling(Child::Window(id)) => {
+                self.enter_fullscreen(hub, id)
+            }
+            FocusedChild::Tiling(Child::Container(_)) => {
+                tracing::debug!("A selected column cannot go fullscreen");
             }
         }
     }
 
-    /// Makes the tiling window the topmost fullscreen window, which gives it focus. Does nothing
-    /// to a window that is already fullscreen, which keeps its place in the stack.
+    /// Makes the tiling window or float the topmost fullscreen window, which gives it focus. Does
+    /// nothing to a window that is already fullscreen, which keeps its place in the stack.
     pub(super) fn enter_fullscreen(&mut self, hub: &mut HubAccess, id: WindowId) {
         let ws_id = hub
             .windows
             .get(id)
             .workspace()
             .expect("non-minimized window has a workspace");
-        if self.workspaces[&ws_id].fullscreen_windows.contains(id) {
+        let state = self.workspaces.get_mut(&ws_id).unwrap();
+        if state.fullscreen_windows.contains(id) {
             tracing::debug!("Window is already fullscreen");
             return;
         }
-        self.detach_tiling_window(hub, ws_id, id);
+        if state.float_windows.detach(id).is_none() {
+            self.detach_tiling_window(hub, ws_id, id);
+        }
         self.workspaces
             .get_mut(&ws_id)
             .unwrap()

@@ -855,6 +855,8 @@ fn update_float_rect_ignores_a_window_that_no_longer_floats() {
         (Strategy::PartitionTree, true),
         (Strategy::Master, false),
         (Strategy::Master, true),
+        (Strategy::Scrolling, false),
+        (Strategy::Scrolling, true),
     ] {
         let mut hub = setup_modes_on(strategy, "0", &["chat"], &[]);
         hub.add_monitor(reported_monitor(

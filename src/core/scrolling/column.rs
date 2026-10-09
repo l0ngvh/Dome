@@ -46,8 +46,8 @@ impl ScrollingStrategy {
         self.compute_placement(hub, ws_id);
     }
 
-    /// Puts the window at the bottom of a selected column, below the focused window when that
-    /// window spawns vertically, and otherwise in a new column right of the focused column.
+    /// Puts the window at the bottom of a selected column, below the tiling focus when that window
+    /// spawns vertically, and otherwise in a new column right of the column of the tiling focus.
     /// Returns the spawn direction the window starts with, which a window placed below another
     /// takes from that window.
     fn place_by_spawn_rules(
@@ -172,7 +172,7 @@ impl ScrollingStrategy {
     }
 
     /// Opens the group as one selected column right of the focused column, at the workspace's
-    /// column width.
+    /// column width. The column takes focus from a float.
     pub(super) fn attach_column(
         &mut self,
         hub: &mut HubAccess,
@@ -210,6 +210,7 @@ impl ScrollingStrategy {
         let top = *windows.first().expect("an arriving group holds a window");
         state.record_focus(top);
         state.selected_column = Some(root);
+        state.float_windows.is_float_focused = false;
         self.compute_placement(hub, ws_id);
     }
 

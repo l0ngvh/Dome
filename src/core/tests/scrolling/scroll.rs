@@ -1,7 +1,7 @@
 use super::{border_boxes_by_window, scrolling_hub, scrolling_hub_with};
 use crate::core::hub::Hub;
 use crate::core::node::{Length, LimitObservation, LimitUpdate, WindowId};
-use crate::core::tests::{default_rect, titled, validate_hub};
+use crate::core::tests::{default_rect, float_border_box, titled, validate_hub};
 use crate::core::{PixelRect, ScrollingConfig, SizeConstraint, WindowRestrictions};
 
 fn sixty_wide() -> ScrollingConfig {
@@ -210,6 +210,21 @@ fn detaching_the_last_column_clamps_the_horizontal_offset() {
 }
 
 #[test]
+fn toggling_float_keeps_the_scrolled_on_screen_rect() {
+    let mut hub = scrolling_hub();
+    insert(&mut hub, "w0");
+    insert(&mut hub, "w1");
+    let w2 = insert(&mut hub, "w2");
+
+    hub.toggle_float();
+    assert_eq!(
+        float_border_box(&hub, w2),
+        Some(PixelRect::new(75, 0, 75, 30))
+    );
+    validate_hub(&hub);
+}
+
+#[test]
 fn tall_window_reveals_its_hidden_bottom_then_stops() {
     let mut hub = scrolling_hub();
     let w0 = insert(&mut hub, "w0");
@@ -373,6 +388,27 @@ fn shorter_window_clamps_the_vertical_offset() {
     assert_eq!(
         border_boxes_by_window(&hub),
         vec![(w0, PixelRect::new(38, 0, 75, 30))]
+    );
+    validate_hub(&hub);
+}
+
+#[test]
+fn toggling_float_keeps_the_vertically_scrolled_rect() {
+    let mut hub = scrolling_hub();
+    let w0 = insert(&mut hub, "w0");
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_height: LimitUpdate::Set(Length::new(40.0)),
+            ..Default::default()
+        },
+    );
+    hub.focus_down();
+
+    hub.toggle_float();
+    assert_eq!(
+        float_border_box(&hub, w0),
+        Some(PixelRect::new(38, -12, 75, 42))
     );
     validate_hub(&hub);
 }

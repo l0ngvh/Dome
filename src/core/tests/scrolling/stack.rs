@@ -1,6 +1,6 @@
 use super::{border_boxes_by_window, dev_hub, insert, process_matcher, stack};
 use crate::core::node::{Length, LimitObservation, LimitUpdate};
-use crate::core::tests::validate_hub;
+use crate::core::tests::{float_border_box, validate_hub};
 use crate::core::{ColumnConfig, PixelRect, SizeConstraint};
 
 #[test]
@@ -118,6 +118,34 @@ fn stacked_minimums_past_the_work_area_scroll_the_focused_window_into_view() {
             (a, PixelRect::new(60, 0, 30, 22)),
             (b, PixelRect::new(60, 22, 30, 22)),
         ]
+    );
+    validate_hub(&hub);
+}
+
+#[test]
+fn toggling_float_in_a_scrolled_stack_keeps_the_on_screen_rect() {
+    let mut hub = dev_hub(vec![stack(&["a.exe", "b.exe"])]);
+    let a = insert(&mut hub, "a.exe");
+    let b = insert(&mut hub, "b.exe");
+    hub.set_window_constraint(
+        a,
+        LimitObservation {
+            min_height: LimitUpdate::Set(Length::new(20.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        b,
+        LimitObservation {
+            min_height: LimitUpdate::Set(Length::new(20.0)),
+            ..Default::default()
+        },
+    );
+
+    hub.toggle_float();
+    assert_eq!(
+        float_border_box(&hub, b),
+        Some(PixelRect::new(60, 8, 30, 22))
     );
     validate_hub(&hub);
 }
