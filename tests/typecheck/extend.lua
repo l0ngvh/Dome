@@ -16,6 +16,7 @@ config.maximum_width = 0
 config.maximum_height = "50%"
 config.partition_tree = { tab_bar_height = 24, automatic_tiling = true }
 config.master = { master_ratio = 0.5, master_count = 1 }
+config.scrolling = { column_width = "60%" }
 config.font_size = 14.0
 config.font_family = dome.env.DOME_FONT or "PingFang SC"
 config.env = { EDITOR = "nvim" }
@@ -56,8 +57,8 @@ keymaps.main[Meta + Shift + Enter] = function(actions)
   actions.mode("resize")
 end
 keymaps.resize = {
-  ["h"] = function(actions) actions.decrease_master_ratio() end,
-  ["l"] = function(actions) actions.increase_master_ratio() end,
+  ["h"] = function(actions) actions.shrink() end,
+  ["l"] = function(actions) actions.grow() end,
   ["j"] = function(actions) actions.decrease_master_count() end,
   ["k"] = function(actions) actions.increase_master_count() end,
   [Escape] = function(actions) actions.mode("main") end,

@@ -112,6 +112,8 @@ pub enum Action {
     Master {
         target: MasterTarget,
     },
+    Grow,
+    Shrink,
     /// Lacks `FromStr` and is not bindable in a keymap because a `WindowId` is not stable
     /// across daemon restarts, so a bound id would mean nothing after a reload.
     UnminimizeWindow {
@@ -160,6 +162,8 @@ impl fmt::Display for Action {
             Action::Move { target } => write!(f, "move {target}"),
             Action::Toggle { target } => write!(f, "toggle {target}"),
             Action::Master { target } => write!(f, "master {target}"),
+            Action::Grow => write!(f, "grow"),
+            Action::Shrink => write!(f, "shrink"),
             Action::UnminimizeWindow { id } => write!(f, "unminimize window {id}"),
             Action::Execute { command } => write!(f, "execute {command}"),
             Action::Exit => write!(f, "exit"),
@@ -329,8 +333,6 @@ impl fmt::Display for ToggleTarget {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MasterTarget {
-    Grow,
-    Shrink,
     More,
     Fewer,
 }
@@ -338,8 +340,6 @@ pub enum MasterTarget {
 impl fmt::Display for MasterTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MasterTarget::Grow => write!(f, "grow"),
-            MasterTarget::Shrink => write!(f, "shrink"),
             MasterTarget::More => write!(f, "more"),
             MasterTarget::Fewer => write!(f, "fewer"),
         }
@@ -446,12 +446,8 @@ impl FromStr for Action {
             ["toggle", "fullscreen"] => Ok(Action::Toggle {
                 target: ToggleTarget::Fullscreen,
             }),
-            ["master", "grow"] => Ok(Action::Master {
-                target: MasterTarget::Grow,
-            }),
-            ["master", "shrink"] => Ok(Action::Master {
-                target: MasterTarget::Shrink,
-            }),
+            ["grow"] => Ok(Action::Grow),
+            ["shrink"] => Ok(Action::Shrink),
             ["master", "more"] => Ok(Action::Master {
                 target: MasterTarget::More,
             }),
@@ -516,10 +512,12 @@ mod tests {
             ),
             (
                 Action::Master {
-                    target: MasterTarget::Grow,
+                    target: MasterTarget::More,
                 },
-                r#"{"type":"master","target":"grow"}"#,
+                r#"{"type":"master","target":"more"}"#,
             ),
+            (Action::Grow, r#"{"type":"grow"}"#),
+            (Action::Shrink, r#"{"type":"shrink"}"#),
             (
                 Action::Execute {
                     command: "open -a Terminal".into(),
@@ -637,8 +635,8 @@ mod tests {
             "toggle layout",
             "toggle float",
             "toggle fullscreen",
-            "master grow",
-            "master shrink",
+            "grow",
+            "shrink",
             "master more",
             "master fewer",
             "exit",
@@ -653,6 +651,22 @@ mod tests {
             assert_eq!(
                 formatted, input,
                 "round-trip mismatch: from_str({input:?}).to_string() = {formatted:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn old_master_ratio_strings_are_rejected() {
+        for input in ["master grow", "master shrink"] {
+            assert!(Action::from_str(input).is_err(), "{input:?} still parses");
+        }
+        for json in [
+            r#"{"type":"master","target":"grow"}"#,
+            r#"{"type":"master","target":"shrink"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<Action>(json).is_err(),
+                "{json} still deserializes"
             );
         }
     }

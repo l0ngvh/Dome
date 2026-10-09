@@ -1,6 +1,6 @@
 use crate::core::TilingConfig;
 use crate::core::hub::Hub;
-use crate::core::node::WindowRestrictions;
+use crate::core::node::{Length, LimitObservation, LimitUpdate, WindowRestrictions};
 use crate::core::tests::{master_entry, preferred_layout};
 use crate::core::{MasterConfig, PreferredMaster, SplitMode, Strategy, TreeLayoutNode};
 
@@ -282,6 +282,65 @@ fn switch_into_preferred_tree_layout_focuses_every_migrated_window_in_turn() {
     assert!(recovered.contains(&w30));
     assert!(recovered.contains(&w31));
     assert!(recovered.contains(&w32));
+}
+
+#[test]
+fn a_size_limit_observed_on_a_partition_tree_workspace_holds_after_a_switch_to_master() {
+    let mut hub = setup_hub();
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    let w1 = hub
+        .insert_window(titled("w1"), default_rect(), WindowRestrictions::None)
+        .unwrap();
+    hub.set_window_constraint(
+        w1,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::new(40.0)),
+            ..Default::default()
+        },
+    );
+
+    hub.apply_preferred_layouts(preferred_layout([LayoutWorkspaceConfigBuilder::new("0")
+        .with_strategy(Strategy::Master)
+        .build()]));
+
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00, highlighted)
+        Window(id=WindowId(1), x=92.00, y=0.00, w=42.00, h=30.00)
+      )
+
+    ***************************************************************************                 +----------------------------------------+                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                    W0                                   *                 |                   W1                   |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    *                                                                         *                 |                                        |                
+    ***************************************************************************                 +----------------------------------------+
+    ");
 }
 
 #[test]

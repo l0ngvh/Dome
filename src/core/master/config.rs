@@ -2,7 +2,7 @@ use std::ops::RangeInclusive;
 
 use crate::config::lua::deserializer::LoadContext;
 
-const MASTER_RATIO_RANGE: RangeInclusive<f32> = 0.1..=0.9;
+const MASTER_RATIO_RANGE: RangeInclusive<f32> = 0.0..=1.0;
 pub(crate) const MIN_MASTER_COUNT: usize = 1;
 
 #[derive(Debug, Clone, PartialEq)]

@@ -4,7 +4,7 @@ use crate::core::node::WindowRestrictions;
 use crate::core::tests::{
     TestHubBuilder, TilingConfigBuilder, default_rect, setup, snapshot, titled,
 };
-use crate::core::{Hub, Strategy};
+use crate::core::{Hub, PreferredTiling, Strategy};
 
 fn run(hub: &mut Hub, actions: &[&str]) -> (RecordingEffects, RecordingKeymap) {
     let actions = Actions::new(actions.iter().map(|s| s.parse().unwrap()).collect());
@@ -69,18 +69,58 @@ fn tiling_verbs_drive_the_hub() {
 }
 
 #[test]
+fn grow_and_shrink_resize_the_pane_of_the_focused_window() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    let ws = hub.current_workspace();
+    let master_ratio = |hub: &Hub| {
+        let PreferredTiling::Master(master) = hub.export_workspace(ws).tiling else {
+            panic!("the workspace runs master");
+        };
+        master.master_ratio
+    };
+
+    // w1 has focus and sits in the secondary pane.
+    run(&mut hub, &["grow"]);
+    assert_eq!(master_ratio(&hub), Some(0.45));
+    run(&mut hub, &["shrink"]);
+    assert_eq!(master_ratio(&hub), Some(0.5));
+
+    run(&mut hub, &["focus left"]);
+    run(&mut hub, &["grow"]);
+    assert_eq!(master_ratio(&hub), Some(0.55));
+    run(&mut hub, &["shrink"]);
+    assert_eq!(master_ratio(&hub), Some(0.5));
+}
+
+#[test]
+fn grow_and_shrink_do_nothing_on_a_partition_tree_workspace() {
+    let mut hub = setup();
+    hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
+    let before = snapshot(&hub);
+
+    for verb in ["grow", "shrink"] {
+        run(&mut hub, &[verb]);
+        assert_eq!(snapshot(&hub), before, "{verb}");
+    }
+}
+
+#[test]
 fn master_verbs_do_nothing_on_a_partition_tree_workspace() {
     let mut hub = setup();
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
     let before = snapshot(&hub);
 
-    for verb in [
-        "master grow",
-        "master shrink",
-        "master more",
-        "master fewer",
-    ] {
+    for verb in ["master more", "master fewer"] {
         run(&mut hub, &[verb]);
         assert_eq!(snapshot(&hub), before, "{verb}");
     }

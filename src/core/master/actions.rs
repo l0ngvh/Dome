@@ -199,25 +199,24 @@ impl MasterStrategy {
         self.compute_placement(hub, ws_id);
     }
 
-    pub(super) fn grow(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
-        if self.focused_position(hub, ws_id).is_none() {
+    /// Widens or narrows the pane of the focused window by 0.05 of the work area width. The two
+    /// panes split the width, so a step on the secondary pane moves the master ratio the other way.
+    pub(super) fn resize_focused_pane(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        grow: bool,
+    ) {
+        let Some((kind, _)) = self.focused_position(hub, ws_id) else {
             return;
-        }
+        };
+        let step = match (kind, grow) {
+            (PaneKind::Master, true) | (PaneKind::Secondary, false) => 0.05,
+            (PaneKind::Master, false) | (PaneKind::Secondary, true) => -0.05,
+        };
         let state = self.workspaces.get_mut(&ws_id).unwrap();
-        let global_ratio = self.master_ratio;
-        let current = state.master_ratio.unwrap_or(global_ratio);
-        state.master_ratio = Some(clamp_master_ratio(current + 0.05));
-        self.compute_placement(hub, ws_id);
-    }
-
-    pub(super) fn shrink(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
-        if self.focused_position(hub, ws_id).is_none() {
-            return;
-        }
-        let state = self.workspaces.get_mut(&ws_id).unwrap();
-        let global_ratio = self.master_ratio;
-        let current = state.master_ratio.unwrap_or(global_ratio);
-        state.master_ratio = Some(clamp_master_ratio(current - 0.05));
+        let current = state.master_ratio.unwrap_or(self.master_ratio);
+        state.master_ratio = Some(clamp_master_ratio(current + step));
         self.compute_placement(hub, ws_id);
     }
 

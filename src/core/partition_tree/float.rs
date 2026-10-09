@@ -1,5 +1,5 @@
 use crate::core::hub::HubAccess;
-use crate::core::node::{Child, PixelRect, WindowId, WorkspaceId};
+use crate::core::node::{Child, Length, PixelRect, WindowId, WorkspaceId};
 use crate::core::strategy::{FocusedChild, translate};
 
 use super::PartitionTreeStrategy;
@@ -7,15 +7,14 @@ use super::PartitionTreeStrategy;
 impl PartitionTreeStrategy {
     /// The border box of the window's tile in screen coordinates.
     fn tile_border_box(&self, ws_id: WorkspaceId, window_id: WindowId) -> PixelRect {
-        let state = self.workspaces.get(&ws_id).unwrap();
-        let (offset_x, offset_y) = state.viewport_offset;
+        let work_area = self.workspaces.get(&ws_id).unwrap().work_area;
         let dimension = self.tiling_windows.get(&window_id).unwrap().dimension;
         translate(
             dimension,
-            offset_x,
-            offset_y,
-            state.work_area.x(),
-            state.work_area.y(),
+            Length::ZERO,
+            Length::ZERO,
+            work_area.x(),
+            work_area.y(),
         )
     }
 
@@ -27,7 +26,7 @@ impl PartitionTreeStrategy {
     ) {
         match focused {
             FocusedChild::Tiling(Child::Window(window_id)) => {
-                // Read before the detach, whose layout pass can move the viewport.
+                // Read before the detach, which drops the tile's dimension.
                 let border_box = self.tile_border_box(ws_id, window_id);
                 self.detach_tiling_window(hub, window_id);
                 let floats = &mut self.workspaces.get_mut(&ws_id).unwrap().float_windows;

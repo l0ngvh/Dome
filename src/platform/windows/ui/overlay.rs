@@ -8,11 +8,15 @@ use dome_auxiliary_window::{
 
 use crate::config::Appearance;
 use crate::platform::render::{Compositor, Renderer, WgpuContext};
-use crate::platform::tab_bar::{TabBarMessage, TabBarWidget};
+use crate::platform::tab_bar::{TabBarContent, TabBarMessage, TabBarWidget};
 use crate::platform::windows::{HubEvent, HubSender};
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice2, IDCompositionDevice, IDCompositionVisual,
+};
+use windows::Win32::Graphics::Dwm::{
+    DWM_THUMBNAIL_PROPERTIES, DWM_TNP_RECTDESTINATION, DWM_TNP_RECTSOURCE, DWM_TNP_VISIBLE,
+    DwmRegisterThumbnail, DwmUnregisterThumbnail, DwmUpdateThumbnailProperties,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOREDRAW, SWP_NOZORDER, SetWindowPos, ShowWindow,
@@ -21,12 +25,12 @@ use windows::core::Interface;
 
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, Physical,
-    PixelRect, Pixels,
+    PixelRect, Pixels, WindowId,
 };
 use crate::overlay;
-use crate::platform::windows::dome::events::TilingWindowShow;
+use crate::platform::windows::dome::events::{ThumbnailShow, TilingWindowShow};
 use crate::platform::windows::external::{ManageOverlay, ZOrder};
-use crate::platform::windows::handle::OverlayHwnd;
+use crate::platform::windows::handle::{OverlayHwnd, get_invisible_border};
 
 /// The DirectComposition device and visual that wgpu renders into. Neither needs an HWND,
 /// so the renderer and its overlay state are built before the window exists.
@@ -175,7 +179,8 @@ impl TilingOverlay {
                 id: cp.id,
                 frame: cp.border_box.to_logical(scale),
                 visible_frame: cp.visible_border_box.to_logical(scale),
-                tab_bar_height: Length::from_pixels(cp.tab_bar_band.height()).to_logical(scale),
+                tab_bar_height: Length::from_pixels(cp.visible_tab_bar_band.height())
+                    .to_logical(scale),
                 is_highlighted: cp.is_highlighted,
                 spawn_direction: cp.spawn_direction,
                 is_tabbed: cp.is_tabbed,
@@ -365,6 +370,98 @@ impl FloatOverlay {
     }
 }
 
+/// Reports a press of any mouse button on the thumbnail as a click on the window it shows.
+struct ThumbnailHandler {
+    hub_sender: HubSender,
+    window_id: WindowId,
+}
+
+impl AuxiliaryWindowHandler for ThumbnailHandler {
+    fn on_mouse_down(&mut self, _at: Point<NativeUnit>, _button: MouseButton) {
+        self.hub_sender
+            .send(HubEvent::ThumbnailClicked(self.window_id));
+    }
+}
+
+/// An overlay over a parked tiling window's on-screen part, where DWM draws that part from the
+/// window itself. DWM keeps the thumbnail live, so a frame never passes through Dome.
+pub(in crate::platform::windows) struct ThumbnailOverlay {
+    thumbnail: isize,
+    source: HWND,
+    aux: AuxiliaryWindow,
+}
+
+impl ThumbnailOverlay {
+    fn new(show: &ThumbnailShow, hub_sender: HubSender) -> anyhow::Result<Box<Self>> {
+        let (x, y, width, height) = show.frame.to_surface_size();
+        // Not focusable, so a click leaves the foreground to the window the click focuses.
+        let attributes = WindowAttributes {
+            position: Point::new(x, y),
+            size: Size::new(width, height),
+            click_through: false,
+            focusable: false,
+        };
+        let aux = AuxiliaryWindow::new(
+            &attributes,
+            Box::new(ThumbnailHandler {
+                hub_sender,
+                window_id: show.window_id,
+            }),
+        )?;
+        let source = HWND::from(show.source);
+        let thumbnail = unsafe { DwmRegisterThumbnail(aux.hwnd(), source)? };
+        let mut overlay = Box::new(Self {
+            thumbnail,
+            source,
+            aux,
+        });
+        overlay.update(show);
+        Ok(overlay)
+    }
+
+    pub(super) fn update(&mut self, show: &ThumbnailShow) {
+        let (x, y, width, height) = show.frame.to_surface_size();
+        self.aux
+            .set_frame(Point::new(x, y), Size::new(width, height));
+        self.aux.set_visible(true);
+
+        // `rcSource` starts at the corner `GetWindowRect` reports, which lies on the invisible
+        // resize border rather than on the visible frame `source_rect` is relative to.
+        let (border_left, border_top, _, _) = get_invisible_border(self.source);
+        let source = show.source_rect;
+        let left = source.x().value() + border_left;
+        let top = source.y().value() + border_top;
+        let properties = DWM_THUMBNAIL_PROPERTIES {
+            dwFlags: DWM_TNP_RECTDESTINATION | DWM_TNP_RECTSOURCE | DWM_TNP_VISIBLE,
+            rcDestination: RECT {
+                left: 0,
+                top: 0,
+                right: width as i32,
+                bottom: height as i32,
+            },
+            rcSource: RECT {
+                left,
+                top,
+                right: left + source.width().value(),
+                bottom: top + source.height().value(),
+            },
+            fVisible: true.into(),
+            ..Default::default()
+        };
+        if let Err(e) = unsafe { DwmUpdateThumbnailProperties(self.thumbnail, &properties) } {
+            tracing::debug!(source = ?self.source, "DwmUpdateThumbnailProperties failed: {e}");
+        }
+    }
+}
+
+impl Drop for ThumbnailOverlay {
+    fn drop(&mut self) {
+        if let Err(e) = unsafe { DwmUnregisterThumbnail(self.thumbnail) } {
+            tracing::debug!(source = ?self.source, "DwmUnregisterThumbnail failed: {e}");
+        }
+    }
+}
+
 pub(in crate::platform::windows) struct WgpuOverlayFactory {
     gpu: WgpuContext,
     hub_sender: HubSender,
@@ -422,6 +519,12 @@ impl WgpuOverlayFactory {
         )?;
         let handle = Arc::new(OverlayHwnd::new(overlay.hwnd()));
         Ok((overlay, handle))
+    }
+    pub(super) fn create_thumbnail(
+        &self,
+        show: &ThumbnailShow,
+    ) -> anyhow::Result<Box<ThumbnailOverlay>> {
+        ThumbnailOverlay::new(show, self.hub_sender.clone())
     }
     pub(super) fn create_tab_bar(
         &self,
@@ -531,16 +634,8 @@ impl AuxiliaryWindowHandler for TabBarHandler {
             .downcast::<TabBarMessage>()
             .expect("tab bar window received a non-TabBarMessage payload");
         match *msg {
-            TabBarMessage::Content {
-                scale,
-                size,
-                border,
-                titles,
-                active_index,
-                is_highlighted,
-            } => {
-                self.widget
-                    .set_content(scale, size, border, titles, active_index, is_highlighted);
+            TabBarMessage::Content(content) => {
+                self.widget.set_content(content);
                 let _ = self.widget.render();
             }
             TabBarMessage::Style { theme, font } => {
@@ -595,18 +690,13 @@ impl TabBarOverlay {
 impl TabBarOverlay {
     pub(super) fn update(
         &mut self,
-        rect: PixelRect,
-        titles: Vec<String>,
-        active_index: usize,
-        is_highlighted: bool,
+        placement: &ContainerPlacement,
         scale: f32,
         border_thickness: Pixels<Physical>,
     ) {
-        let (x_phys, y_phys, w_phys, h_phys) = rect.to_surface_size();
-        let bar_size = (
-            Length::new(w_phys as f32 / scale),
-            Length::new(h_phys as f32 / scale),
-        );
+        let (x_phys, y_phys, w_phys, h_phys) = placement.visible_tab_bar_band.to_surface_size();
+        let visible_band = placement.visible_tab_bar_band.to_logical(scale);
+        let band = placement.tab_bar_band.to_logical(scale);
         let border = Length::from_pixels(border_thickness).to_logical(scale);
         // No z-order lift needed. The tab bar is created above the bottom-parked
         // border overlay, the only window it shares pixels with, and set_frame
@@ -614,14 +704,16 @@ impl TabBarOverlay {
         self.aux
             .set_frame(Point::new(x_phys, y_phys), Size::new(w_phys, h_phys));
         self.aux.set_visible(true);
-        self.aux.deliver(Box::new(TabBarMessage::Content {
-            scale,
-            size: bar_size,
-            border,
-            titles,
-            active_index,
-            is_highlighted,
-        }));
+        self.aux
+            .deliver(Box::new(TabBarMessage::Content(TabBarContent {
+                scale,
+                surface_size: (visible_band.width, visible_band.height),
+                canvas_size: (band.width, band.height),
+                border,
+                titles: placement.titles.clone(),
+                active_index: placement.active_tab_index,
+                is_highlighted: placement.is_highlighted,
+            })));
     }
 
     #[expect(

@@ -1,4 +1,4 @@
-# Configuration
+mi# Configuration
 
 On first launch, Dome writes its own configuration file to these locations:
 
@@ -72,8 +72,8 @@ config.keymaps = {
     [Meta + "r"] = function(actions) actions.mode("resize") end,
   },
   resize = {
-    ["h"] = function(actions) actions.decrease_master_ratio() end,
-    ["l"] = function(actions) actions.increase_master_ratio() end,
+    ["h"] = function(actions) actions.shrink() end,
+    ["l"] = function(actions) actions.grow() end,
     ["escape"] = function(actions) actions.mode("main") end,
   },
 }
@@ -144,7 +144,7 @@ Dome passes an `actions` handle to each binding function.
 
 ### `actions.focus_left()`, `focus_right()`, `focus_up()`, `focus_down()`
 
-Focus the neighboring window in that direction in the tiling tree.
+Focus the neighboring window in that direction.
 
 ### `actions.focus_parent()`
 
@@ -168,7 +168,7 @@ Focus the next or previous tab in a tabbed container.
 
 ### `actions.move_left()`, `move_right()`, `move_up()`, `move_down()`
 
-Move the focused window one step in that direction in the tiling tree.
+Move the focused window one step in that direction.
 
 ### `actions.move_to_workspace(name)`
 
@@ -203,10 +203,9 @@ Toggle the focused window between tiling and floating.
 
 Toggle the focused window between normal and fullscreen.
 
-### `actions.increase_master_ratio()`, `decrease_master_ratio()`
+### `actions.grow()`, `shrink()`
 
-Change the master area by 5 percentage points, clamped to `0.1` through `0.9`
-of the workspace.
+Widen or narrow the column of the focused window by 5% of the work area width.
 
 ### `actions.increase_master_count()`, `decrease_master_count()`
 

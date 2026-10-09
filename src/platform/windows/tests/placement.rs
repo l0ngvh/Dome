@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::{Length, Logical, Pixels};
+use crate::core::{Length, Logical, Pixels, ScrollingConfig, SizeConstraint, Strategy};
 use crate::platform::windows::handle::{ROUND_RADIUS, SMALL_RADIUS};
 
 #[test]
@@ -29,28 +29,27 @@ fn three_windows_split_screen() {
 }
 
 #[test]
-fn reported_min_width_binds_while_zero_min_height_is_cleared() {
-    let mut env = TestEnv::new();
-    let w1 = env.window().min_size(1200.0, 0.0).open();
-    env.open();
-
-    // An even split would leave each window near 952, so the minimum binds. The
-    // shell forwards it untouched and core outsets it by the border, so the app
-    // gets back exactly the content width it asked for.
-    assert_eq!(env.dim(w1).width, Length::new(1200.0));
-    // The zero height component reads as Cleared, not a zero-height minimum.
-    assert_eq!(env.dim(w1).height, SCREEN_HEIGHT - env.border() * 2.0);
-}
-
-#[test]
-fn dropping_all_limits_restores_the_even_split() {
+fn reported_min_width_does_not_bind_the_even_split() {
     let mut env = TestEnv::new();
     let w1 = env.window().min_size(1200.0, 0.0).open();
     let w2 = env.open();
-    assert_eq!(env.dim(w1).width, Length::new(1200.0));
 
-    // Mirrors dispatch_constraint_read re-reading an app that no longer reports a
-    // minimum. Discarding an all-clear observation would strand the 1200 forever.
+    assert_eq!(
+        env.dim(w1).width,
+        Length::new(952.0),
+        "the reported minimum does not bind; w1 keeps its even half"
+    );
+    assert_eq!(env.dim(w2).width, Length::new(952.0));
+    env.assert_horizontally_tiled(&[env.dim(w1), env.dim(w2)]);
+}
+
+#[test]
+fn dropping_all_limits_keeps_the_even_split() {
+    let mut env = TestEnv::new();
+    let w1 = env.window().min_size(1200.0, 0.0).open();
+    let w2 = env.open();
+    assert_eq!(env.dim(w1).width, Length::new(952.0));
+
     env.dome.set_constraints_for(
         w1,
         LimitObservation {
@@ -62,7 +61,11 @@ fn dropping_all_limits_restores_the_even_split() {
     );
     env.layout();
 
-    assert_eq!(env.dim(w1).width, Length::new(952.0));
+    assert_eq!(
+        env.dim(w1).width,
+        Length::new(952.0),
+        "the Cleared merge runs without panicking and leaves the even split"
+    );
     assert_eq!(env.dim(w2).width, Length::new(952.0));
     env.assert_horizontally_tiled(&[env.dim(w1), env.dim(w2)]);
 }
@@ -851,4 +854,169 @@ fn float_border_takes_the_window_corner_radius() {
     env.run_actions("toggle float");
     env.settle(10);
     assert_eq!(env.painted_float_corner_radius(), Some(SMALL_RADIUS));
+}
+
+/// Where a tile with a content box of `width` by `height` parks while a thumbnail shows it.
+fn parked(width: i32, height: i32) -> Dimension {
+    Dimension::new(
+        OFFSCREEN_POS,
+        OFFSCREEN_POS,
+        Length::new(width as f32),
+        Length::new(height as f32),
+    )
+}
+
+#[test]
+fn a_cut_unfocused_scrolling_column_parks_at_full_size_behind_a_thumbnail() {
+    let (mut env, [_, w2, w3, w4]) = four_scrolling_columns();
+
+    assert_eq!(
+        env.painted_thumbnails(0),
+        vec![PaintedThumbnail {
+            source: w2,
+            frame: PixelRect::new(0, 0, 384, 1080),
+            source_rect: PixelRect::new(384, 0, 384, 1080),
+        }],
+        "the focused w4 sits against the right edge, which leaves the right half of w2 on screen"
+    );
+    assert_eq!(env.dim(w2), parked(768, 1080));
+    assert_eq!(env.dim(w3), dim(384, 0, 768, 1080));
+    assert_eq!(env.dim(w4), dim(1152, 0, 768, 1080));
+
+    env.click_thumbnail(w2);
+    env.settle(10);
+
+    assert_eq!(env.dim(w2), dim(0, 0, 768, 1080));
+    assert_eq!(env.focus_target(), FocusTarget::Window(w2));
+    assert_eq!(
+        env.painted_thumbnails(0),
+        vec![PaintedThumbnail {
+            source: w4,
+            frame: PixelRect::new(1536, 0, 384, 1080),
+            source_rect: PixelRect::new(0, 0, 384, 1080),
+        }]
+    );
+    assert_eq!(env.dim(w4), parked(768, 1080));
+}
+
+#[test]
+fn a_focused_scrolling_column_wider_than_the_work_area_is_not_parked() {
+    let mut env = TestEnv::builder()
+        .tiling(|tiling| {
+            tiling.border_size = Pixels::ZERO;
+            tiling.layout = Strategy::Scrolling;
+        })
+        .build();
+    env.open();
+    let wide = env.window().min_size(2400.0, 0.0).open();
+    env.settle(10);
+
+    assert!(env.painted_thumbnails(0).is_empty());
+    assert_eq!(
+        env.dim(wide),
+        dim(960, 0, 2400, 1080),
+        "the focused wide window shows unclipped"
+    );
+
+    env.run_actions("focus left");
+    env.settle(10);
+
+    assert_eq!(
+        env.painted_thumbnails(0),
+        vec![PaintedThumbnail {
+            source: wide,
+            frame: PixelRect::new(960, 0, 960, 1080),
+            source_rect: PixelRect::new(0, 0, 960, 1080),
+        }]
+    );
+    assert_eq!(env.dim(wide), parked(2400, 1080));
+}
+
+#[test]
+fn a_tile_cut_by_a_scrolled_master_pane_keeps_its_corner_radius_behind_a_thumbnail() {
+    let mut env = TestEnv::builder()
+        .tiling(|tiling| tiling.layout = Strategy::Master)
+        .build();
+    env.open();
+    let upper = env.window().min_size(0.0, 800.0).open();
+    env.set_corner_radius(upper, Length::new(26.0));
+    let lower = env.window().min_size(0.0, 800.0).open();
+    env.settle(10);
+
+    assert_eq!(
+        env.painted_thumbnails(0),
+        vec![PaintedThumbnail {
+            source: upper,
+            frame: PixelRect::new(964, 0, 952, 268),
+            source_rect: PixelRect::new(0, 532, 952, 268),
+        }],
+        "the pane scrolled the focused lower into view, which leaves the bottom of upper on screen"
+    );
+    assert_eq!(env.dim(upper), parked(952, 800));
+    assert_eq!(env.dim(lower), dim(964, 276, 952, 800));
+    assert_eq!(env.painted_corner_radius(0, upper), Some(Length::new(26.0)));
+}
+
+#[test]
+fn a_parked_tile_parks_again_at_its_new_size() {
+    let (mut env, [_, w2, _, _]) = four_scrolling_columns();
+
+    env.change_monitors(vec![MonitorInfo {
+        work_area: PixelRect::new(0, 0, 1920, 1000),
+        ..default_monitor()
+    }]);
+    env.settle(10);
+
+    assert_eq!(
+        env.painted_thumbnails(0),
+        vec![PaintedThumbnail {
+            source: w2,
+            frame: PixelRect::new(0, 0, 384, 1000),
+            source_rect: PixelRect::new(384, 0, 384, 1000),
+        }]
+    );
+    assert_eq!(env.dim(w2), parked(768, 1000));
+}
+
+#[test]
+fn a_tile_without_an_on_screen_part_parks_without_a_thumbnail() {
+    let mut env = TestEnv::builder()
+        .tiling(|tiling| {
+            tiling.border_size = Pixels::new(50);
+            tiling.layout = Strategy::Scrolling;
+            tiling.scrolling = ScrollingConfig {
+                column_width: SizeConstraint::Pixels(Pixels::new(950)),
+            };
+        })
+        .build();
+    let windows = env.open_many(3);
+    env.settle(10);
+    let first = windows[0];
+    let first_id = env.dome.window_id_for(first).unwrap();
+
+    let first_tile = env
+        .painted_windows(0)
+        .into_iter()
+        .find(|wp| wp.id == first_id)
+        .expect("the first column's border reaches the work area, so it keeps a tile");
+    assert_eq!(
+        first_tile.visible_border_box,
+        PixelRect::new(0, 0, 20, 1080),
+        "precondition: only a sliver of the first column's border is on screen"
+    );
+    assert!(env.painted_thumbnails(0).is_empty());
+    assert_eq!(env.dim(first), parked(850, 980));
+}
+
+#[test]
+fn a_click_on_the_thumbnail_of_a_minimized_window_restores_it() {
+    let (mut env, [_, w2, _, _]) = four_scrolling_columns();
+    env.minimize_window(w2);
+
+    env.click_thumbnail(w2);
+
+    assert!(
+        !env.is_minimized(w2),
+        "a click that trails the minimize restores the window"
+    );
 }

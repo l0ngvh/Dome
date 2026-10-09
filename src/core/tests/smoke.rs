@@ -23,8 +23,8 @@ use crate::core::node::{
 use crate::core::strategy::StrategyAction;
 use crate::core::tiling::TilingConfig;
 use crate::core::{
-    PreferredLayouts, PreferredWorkspace, SizeConstraint, SplitMode, Strategy, TreeLayoutNode,
-    WindowMatcher,
+    ColumnConfig, PreferredLayouts, PreferredWorkspace, SizeConstraint, SplitMode, Strategy,
+    TreeLayoutNode, WindowMatcher,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -49,17 +49,23 @@ const CONTAINER_BASE: usize = 1_000_000;
 enum SmokeStrategy {
     PartitionTree,
     Master,
+    Scrolling,
 }
 
 impl SmokeStrategy {
     fn all() -> &'static [SmokeStrategy] {
-        &[SmokeStrategy::PartitionTree, SmokeStrategy::Master]
+        &[
+            SmokeStrategy::PartitionTree,
+            SmokeStrategy::Master,
+            SmokeStrategy::Scrolling,
+        ]
     }
 
     fn test_name(self) -> &'static str {
         match self {
             SmokeStrategy::PartitionTree => "partition-tree",
             SmokeStrategy::Master => "master",
+            SmokeStrategy::Scrolling => "scrolling",
         }
     }
 
@@ -96,6 +102,9 @@ fn initial_tiling(strategy: SmokeStrategy) -> TilingConfig {
         SmokeStrategy::PartitionTree => TilingConfigBuilder::new().build(),
         SmokeStrategy::Master => TilingConfigBuilder::new()
             .with_strategy(Strategy::Master)
+            .build(),
+        SmokeStrategy::Scrolling => TilingConfigBuilder::new()
+            .with_strategy(Strategy::Scrolling)
             .build(),
     }
 }
@@ -222,8 +231,8 @@ enum OpKind {
     SetFocus,
     SetWindowConstraint,
     SetWindowTitle,
-    IncreaseMasterRatio,
-    DecreaseMasterRatio,
+    Grow,
+    Shrink,
     IncrementMasterCount,
     DecrementMasterCount,
     QueryWorkspaces,
@@ -265,8 +274,8 @@ const ALL_OP_KINDS: &[OpKind] = &[
     OpKind::SetFocus,
     OpKind::SetWindowConstraint,
     OpKind::SetWindowTitle,
-    OpKind::IncreaseMasterRatio,
-    OpKind::DecreaseMasterRatio,
+    OpKind::Grow,
+    OpKind::Shrink,
     OpKind::IncrementMasterCount,
     OpKind::DecrementMasterCount,
     OpKind::QueryWorkspaces,
@@ -354,8 +363,8 @@ enum RecordedOp {
     FocusPrevTab,
     ToggleFloat,
     ToggleFullscreen,
-    IncreaseMasterRatio,
-    DecreaseMasterRatio,
+    Grow,
+    Shrink,
     IncrementMasterCount,
     DecrementMasterCount,
     QueryWorkspaces,
@@ -368,6 +377,8 @@ enum RecordedOp {
         tree_ops: Vec<PrefTreeBuildOp>,
         master: Vec<String>,
         secondary: Vec<String>,
+        /// Each column lists the titles of its matchers, top to bottom.
+        columns: Vec<Vec<String>>,
         float: Vec<String>,
         fullscreen: Vec<String>,
     },
@@ -694,8 +705,8 @@ fn build_op(
                 title,
             })
         }
-        OpKind::IncreaseMasterRatio => Some(RecordedOp::IncreaseMasterRatio),
-        OpKind::DecreaseMasterRatio => Some(RecordedOp::DecreaseMasterRatio),
+        OpKind::Grow => Some(RecordedOp::Grow),
+        OpKind::Shrink => Some(RecordedOp::Shrink),
         OpKind::IncrementMasterCount => Some(RecordedOp::IncrementMasterCount),
         OpKind::DecrementMasterCount => Some(RecordedOp::DecrementMasterCount),
         OpKind::QueryWorkspaces => Some(RecordedOp::QueryWorkspaces),
@@ -741,7 +752,8 @@ fn build_op(
                 _ => {
                     tiling.layout = match tiling.layout {
                         Strategy::PartitionTree => Strategy::Master,
-                        Strategy::Master => Strategy::PartitionTree,
+                        Strategy::Master => Strategy::Scrolling,
+                        Strategy::Scrolling => Strategy::PartitionTree,
                     };
                 }
             }
@@ -753,11 +765,19 @@ fn build_op(
             }
             let workspace_name =
                 workspace_names[rng.random_range(0..workspace_names.len())].clone();
-            let strategy = current_tiling.layout;
+            // Drawn independently of `current_tiling.layout`, so the named workspace often runs
+            // another strategy than the rest, and a move to another workspace or monitor then
+            // crosses between strategies.
+            let strategy = match rng.random_range(0..3u8) {
+                0 => Strategy::PartitionTree,
+                1 => Strategy::Master,
+                _ => Strategy::Scrolling,
+            };
             let (float, fullscreen) = generate_matcher_titles(rng, &pref_title_pool());
             let mut tree_ops = Vec::new();
             let mut master = Vec::new();
             let mut secondary = Vec::new();
+            let mut columns: Vec<Vec<String>> = Vec::new();
             match strategy {
                 Strategy::PartitionTree => {
                     let max_leaves = sync_tree_max_leaves(rng);
@@ -777,6 +797,15 @@ fn build_op(
                         }
                     }
                 }
+                Strategy::Scrolling => {
+                    for title in pref_title_pool() {
+                        match (rng.random_range(0..4u8), columns.last_mut()) {
+                            (0, _) | (1, None) => columns.push(vec![title]),
+                            (1, Some(column)) => column.push(title),
+                            _ => {}
+                        }
+                    }
+                }
             }
             Some(RecordedOp::ApplyPreferredLayouts {
                 workspace_name,
@@ -784,6 +813,7 @@ fn build_op(
                 tree_ops,
                 master,
                 secondary,
+                columns,
                 float,
                 fullscreen,
             })
@@ -951,11 +981,11 @@ fn apply_op(
         RecordedOp::FocusPrevTab => hub.focus_prev_tab(),
         RecordedOp::ToggleFloat => hub.toggle_float(),
         RecordedOp::ToggleFullscreen => hub.toggle_fullscreen(),
-        RecordedOp::IncreaseMasterRatio => {
-            hub.handle_tiling_action(StrategyAction::GrowMaster);
+        RecordedOp::Grow => {
+            hub.handle_tiling_action(StrategyAction::Grow);
         }
-        RecordedOp::DecreaseMasterRatio => {
-            hub.handle_tiling_action(StrategyAction::ShrinkMaster);
+        RecordedOp::Shrink => {
+            hub.handle_tiling_action(StrategyAction::Shrink);
         }
         RecordedOp::IncrementMasterCount => {
             hub.handle_tiling_action(StrategyAction::MoreMaster);
@@ -969,27 +999,8 @@ fn apply_op(
         RecordedOp::ConfigReload { tiling } => {
             hub.sync_configuration(tiling.clone());
         }
-        RecordedOp::ApplyPreferredLayouts {
-            workspace_name,
-            strategy,
-            tree_ops,
-            master,
-            secondary,
-            float,
-            fullscreen,
-        } => {
-            let layouts = preferred_layout_everywhere(
-                hub,
-                preferred_workspace_config(
-                    workspace_name,
-                    *strategy,
-                    tree_ops,
-                    master,
-                    secondary,
-                    float,
-                    fullscreen,
-                ),
-            );
+        RecordedOp::ApplyPreferredLayouts { .. } => {
+            let layouts = preferred_layout_everywhere(hub, preferred_workspace_config(op));
             hub.apply_preferred_layouts(layouts);
         }
         RecordedOp::ExportLayout => {
@@ -1327,11 +1338,11 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
             RecordedOp::FocusPrevTab => hub.focus_prev_tab(),
             RecordedOp::ToggleFloat => hub.toggle_float(),
             RecordedOp::ToggleFullscreen => hub.toggle_fullscreen(),
-            RecordedOp::IncreaseMasterRatio => {
-                hub.handle_tiling_action(StrategyAction::GrowMaster);
+            RecordedOp::Grow => {
+                hub.handle_tiling_action(StrategyAction::Grow);
             }
-            RecordedOp::DecreaseMasterRatio => {
-                hub.handle_tiling_action(StrategyAction::ShrinkMaster);
+            RecordedOp::Shrink => {
+                hub.handle_tiling_action(StrategyAction::Shrink);
             }
             RecordedOp::IncrementMasterCount => {
                 hub.handle_tiling_action(StrategyAction::MoreMaster);
@@ -1345,27 +1356,8 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
             RecordedOp::ConfigReload { tiling } => {
                 hub.sync_configuration(tiling.clone());
             }
-            RecordedOp::ApplyPreferredLayouts {
-                workspace_name,
-                strategy,
-                tree_ops,
-                master,
-                secondary,
-                float,
-                fullscreen,
-            } => {
-                let layouts = preferred_layout_everywhere(
-                    &hub,
-                    preferred_workspace_config(
-                        workspace_name,
-                        *strategy,
-                        tree_ops,
-                        master,
-                        secondary,
-                        float,
-                        fullscreen,
-                    ),
-                );
+            RecordedOp::ApplyPreferredLayouts { .. } => {
+                let layouts = preferred_layout_everywhere(&hub, preferred_workspace_config(op));
                 hub.apply_preferred_layouts(layouts);
             }
             RecordedOp::ExportLayout => {
@@ -1609,15 +1601,21 @@ fn preferred_layout_everywhere(hub: &Hub, entry: (String, PreferredWorkspace)) -
 /// Only the fields the chosen strategy actually consumes are set, because
 /// `LayoutWorkspaceConfigBuilder::build` silently discards a tree under
 /// `Strategy::Master`, and generated input a builder throws away is fake coverage.
-fn preferred_workspace_config(
-    workspace_name: &str,
-    strategy: Strategy,
-    tree_ops: &[PrefTreeBuildOp],
-    master: &[String],
-    secondary: &[String],
-    float: &[String],
-    fullscreen: &[String],
-) -> (String, PreferredWorkspace) {
+fn preferred_workspace_config(op: &RecordedOp) -> (String, PreferredWorkspace) {
+    let RecordedOp::ApplyPreferredLayouts {
+        workspace_name,
+        strategy,
+        tree_ops,
+        master,
+        secondary,
+        columns,
+        float,
+        fullscreen,
+    } = op
+    else {
+        panic!("preferred_workspace_config takes an ApplyPreferredLayouts op, got {op:?}");
+    };
+    let strategy = *strategy;
     let mut builder = LayoutWorkspaceConfigBuilder::new(workspace_name)
         .with_strategy(strategy)
         .with_float(float.iter().map(|t| titled_matcher(t)).collect())
@@ -1632,6 +1630,17 @@ fn preferred_workspace_config(
             builder = builder
                 .with_master(master.iter().map(|t| titled_matcher(t)).collect())
                 .with_secondary(secondary.iter().map(|t| titled_matcher(t)).collect());
+        }
+        Strategy::Scrolling => {
+            builder = builder.with_columns(
+                columns
+                    .iter()
+                    .map(|titles| ColumnConfig {
+                        width: None,
+                        children: titles.iter().map(|t| titled_matcher(t)).collect(),
+                    })
+                    .collect(),
+            );
         }
     }
     builder.build()
@@ -1843,6 +1852,7 @@ mod tests {
             ],
             master: Vec::new(),
             secondary: Vec::new(),
+            columns: Vec::new(),
             float: Vec::new(),
             fullscreen: Vec::new(),
         }];

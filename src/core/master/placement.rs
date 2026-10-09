@@ -3,7 +3,10 @@ use crate::core::{
     hub::HubAccess,
     master::{MasterStrategy, PaneDisplay, PaneKind},
     node::{Constraints, WorkspaceId},
-    strategy::{container_titles, distribute_space, tab_bar_band, translate, window_constraints},
+    strategy::{
+        apply_max_constraint, container_titles, distribute_space, tab_bar_band, translate,
+        visible_tab_bar_band, window_constraints,
+    },
 };
 
 impl MasterStrategy {
@@ -111,18 +114,19 @@ impl MasterStrategy {
                 let border_box =
                     translate(pane_dim, Length::ZERO, Length::ZERO, screen.x(), screen.y());
                 if let Some(visible_border_box) = border_box.clip(screen) {
+                    let band = tab_bar_band(
+                        border_box,
+                        pane_dim,
+                        screen,
+                        self.tab_bar_length(scale),
+                        true,
+                    );
                     containers.push(ContainerPlacement {
                         id: pane.container,
                         border_box,
                         visible_border_box,
-                        tab_bar_band: tab_bar_band(
-                            border_box,
-                            pane_dim,
-                            Length::ZERO,
-                            screen,
-                            self.tab_bar_length(scale),
-                            true,
-                        ),
+                        tab_bar_band: band,
+                        visible_tab_bar_band: visible_tab_bar_band(band, visible_border_box),
                         is_highlighted: false,
                         spawn_direction: None,
                         is_tabbed: true,
@@ -232,8 +236,7 @@ impl MasterStrategy {
         // the tab bar is taller than the screen, so each window keeps its min height.
         for &wid in ids {
             let c = self.effective_constraints(hub, wid);
-            let adjusted_w = c.min_width.max(pane_width);
-            let (w, x_off) = apply_max_constraint(c.max_width, adjusted_w);
+            let (w, x_off) = apply_max_constraint(c.max_width, pane_width);
             let adjusted_h = c.min_height.max(content_h);
             let (slot_h, y_off) = apply_max_constraint(c.max_height, adjusted_h);
             let dim = Dimension::new(x_start + x_off, band + y_off, w, slot_h);
@@ -294,16 +297,6 @@ impl MasterStrategy {
             state.scale,
         )
     }
-}
-
-fn apply_max_constraint(max: Length, slot_extent: Length) -> (Length, Length) {
-    let size = if max > Length::ZERO && max < slot_extent {
-        max
-    } else {
-        slot_extent
-    };
-    let offset = (slot_extent - size) / 2.0;
-    (size, offset.max(Length::ZERO))
 }
 
 #[derive(Debug)]

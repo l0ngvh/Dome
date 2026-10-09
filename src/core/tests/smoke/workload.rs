@@ -155,8 +155,8 @@ impl Category {
             | OpKind::ToggleSpawnMode
             | OpKind::ToggleDirection
             | OpKind::ToggleContainerLayout
-            | OpKind::IncreaseMasterRatio
-            | OpKind::DecreaseMasterRatio
+            | OpKind::Grow
+            | OpKind::Shrink
             | OpKind::IncrementMasterCount
             | OpKind::DecrementMasterCount
             | OpKind::ToggleFloat

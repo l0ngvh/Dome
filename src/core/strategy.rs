@@ -15,6 +15,7 @@ use crate::core::node::{
     PixelRect, Pixels, Unit, WindowId, WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
+use crate::core::scrolling::ScrollingStrategy;
 use crate::core::slot::SlotId;
 use crate::core::{PreferredWorkspace, SizeConstraints, Strategy};
 
@@ -44,10 +45,10 @@ pub(crate) enum StrategyAction {
         container_id: ContainerId,
         index: usize,
     },
-    /// Grows the master ratio of the workspace, within its limits.
-    GrowMaster,
-    /// Shrinks the master ratio of the workspace, within its limits.
-    ShrinkMaster,
+    /// Widens the column of the focused tiling child, within the strategy's limits.
+    Grow,
+    /// Narrows the column of the focused tiling child, within the strategy's limits.
+    Shrink,
     /// Raises the number of windows the master pane of the workspace holds.
     MoreMaster,
     /// Lowers the number of windows the master pane of the workspace holds, down to its minimum.
@@ -151,8 +152,6 @@ impl From<&crate::action::MasterTarget> for TilingAction {
         use crate::action::MasterTarget;
 
         match target {
-            MasterTarget::Grow => StrategyAction::GrowMaster.into(),
-            MasterTarget::Shrink => StrategyAction::ShrinkMaster.into(),
             MasterTarget::More => StrategyAction::MoreMaster.into(),
             MasterTarget::Fewer => StrategyAction::FewerMaster.into(),
         }
@@ -419,14 +418,6 @@ pub(crate) fn window_constraints(
     let win_max_w = outset_limit(limits.max_width);
     let win_max_h = outset_limit(limits.max_height);
 
-    // Length::ZERO means "no cap", so it cannot take part in a plain `min`.
-    let tighter_max = |win: Length, global: Length| {
-        if win > Length::ZERO && global > Length::ZERO {
-            win.min(global)
-        } else {
-            win.max(global)
-        }
-    };
     let max_w = tighter_max(win_max_w, global_max_w);
     let max_h = tighter_max(win_max_h, global_max_h);
 
@@ -447,6 +438,26 @@ pub(crate) fn window_constraints(
         max_width: max_w,
         max_height: max_h,
     }
+}
+
+/// `Length::ZERO` means no cap, so it cannot take part in a plain `min`.
+pub(crate) fn tighter_max(a: Length, b: Length) -> Length {
+    if a > Length::ZERO && b > Length::ZERO {
+        a.min(b)
+    } else {
+        a.max(b)
+    }
+}
+
+/// The size a capped child takes in `slot_extent`, with the offset that centers it there.
+pub(crate) fn apply_max_constraint(max: Length, slot_extent: Length) -> (Length, Length) {
+    let size = if max > Length::ZERO && max < slot_extent {
+        max
+    } else {
+        slot_extent
+    };
+    let offset = (slot_extent - size) / 2.0;
+    (size, offset.max(Length::ZERO))
 }
 
 /// Converts layout-space coordinates to screen-absolute. Layout positions are relative to
@@ -474,31 +485,16 @@ pub(crate) fn translate<U>(
     )
 }
 
-/// Clip a dimension to screen bounds. Returns None if entirely outside.
-pub(crate) fn clip<U>(dim: Dimension<U>, bounds: Dimension<U>) -> Option<Dimension<U>> {
-    let x1 = dim.x.max(bounds.x);
-    let y1 = dim.y.max(bounds.y);
-    let x2 = (dim.x + dim.width).min(bounds.x + bounds.width);
-    let y2 = (dim.y + dim.height).min(bounds.y + bounds.height);
-    if x1 >= x2 || y1 >= y2 {
-        return None;
-    }
-    Some(Dimension::new(x1, y1, x2 - x1, y2 - y1))
-}
-
-/// Zero-height when the container is not tabbed. The band top comes from the container's own
-/// dimension, not a separately rounded height, so round(y) + round(band) cannot drift a unit from
-/// the round(y + band) the content box uses.
+/// Zero height when the container is not tabbed.
 pub(crate) fn tab_bar_band(
     border_box: PixelRect,
     dim: Dimension,
-    offset_y: Length,
     screen: PixelRect,
     tab_bar_length: Length,
     is_tabbed: bool,
 ) -> PixelRect {
     let band_height = if is_tabbed {
-        let content_top = Pixels::round(dim.y + tab_bar_length - offset_y) + screen.y();
+        let content_top = Pixels::round(dim.y + tab_bar_length) + screen.y();
         content_top - border_box.y()
     } else {
         Pixels::ZERO
@@ -509,6 +505,15 @@ pub(crate) fn tab_bar_band(
         border_box.width(),
         band_height,
     )
+}
+
+pub(crate) fn visible_tab_bar_band(
+    tab_bar_band: PixelRect,
+    visible_border_box: PixelRect,
+) -> PixelRect {
+    tab_bar_band
+        .clip(visible_border_box)
+        .unwrap_or(PixelRect::ZERO)
 }
 
 pub(crate) fn container_titles(hub: &HubAccess, id: ContainerId) -> Vec<String> {
@@ -590,6 +595,7 @@ pub(crate) fn distribute_space(
 pub(super) struct StrategySet {
     partition_tree: PartitionTreeStrategy,
     master: MasterStrategy,
+    scrolling: ScrollingStrategy,
     kinds: FxHashMap<WorkspaceId, Strategy>,
 }
 
@@ -598,6 +604,7 @@ impl StrategySet {
         Self {
             partition_tree: PartitionTreeStrategy::new(tiling),
             master: MasterStrategy::new(tiling),
+            scrolling: ScrollingStrategy::new(tiling),
             kinds: FxHashMap::default(),
         }
     }
@@ -626,6 +633,7 @@ impl StrategySet {
         match kind {
             Strategy::PartitionTree => &self.partition_tree,
             Strategy::Master => &self.master,
+            Strategy::Scrolling => &self.scrolling,
         }
     }
 
@@ -633,6 +641,7 @@ impl StrategySet {
         match kind {
             Strategy::PartitionTree => &mut self.partition_tree,
             Strategy::Master => &mut self.master,
+            Strategy::Scrolling => &mut self.scrolling,
         }
     }
 
@@ -650,6 +659,7 @@ impl StrategySet {
     pub(super) fn apply_config(&mut self, hub: &mut HubAccess, tiling: &TilingConfig) {
         self.partition_tree.apply_config(hub, tiling);
         self.master.apply_config(hub, tiling);
+        self.scrolling.apply_config(hub, tiling);
     }
 
     /// Returns the workspace that holds each open window, after checking that every workspace
@@ -658,11 +668,13 @@ impl StrategySet {
     pub(super) fn validate(&self, hub: &HubAccess) -> FxHashMap<WindowId, WorkspaceId> {
         let tree = self.partition_tree.validate(hub);
         let master = self.master.validate(hub);
+        let scrolling = self.scrolling.validate(hub);
 
         // The container arena is shared across strategies, so union every strategy's reachable
         // set before the leak sweep, or one strategy's containers look leaked to another.
         let mut reachable = tree.containers;
         reachable.extend(master.containers);
+        reachable.extend(scrolling.containers);
         let allocated: FxHashSet<ContainerId> = hub.containers.sorted_ids().into_iter().collect();
 
         let mut leaked: Vec<ContainerId> = allocated.difference(&reachable).copied().collect();
@@ -683,6 +695,7 @@ impl StrategySet {
         for (kind, windows) in [
             (Strategy::PartitionTree, tree.windows),
             (Strategy::Master, master.windows),
+            (Strategy::Scrolling, scrolling.windows),
         ] {
             for (ws_id, ids) in windows {
                 assert_eq!(

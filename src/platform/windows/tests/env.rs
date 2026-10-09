@@ -31,6 +31,14 @@ pub(crate) enum FocusTarget {
     Window(HwndId),
 }
 
+/// A painted `ThumbnailShow` without its `window_id`, because a test names windows by `HwndId`.
+#[derive(Debug, PartialEq)]
+pub(super) struct PaintedThumbnail {
+    pub(super) source: HwndId,
+    pub(super) frame: PixelRect,
+    pub(super) source_rect: PixelRect,
+}
+
 pub(super) struct TestEnv {
     pub(super) dome: Dome,
     moves: MoveLog,
@@ -335,6 +343,16 @@ impl TestEnv {
         self.layout();
     }
 
+    /// Must make the calls the runner makes for `HubEvent::ThumbnailClicked`.
+    pub(super) fn click_thumbnail(&mut self, hwnd: HwndId) {
+        let id = self
+            .dome
+            .window_id_for(hwnd)
+            .expect("a thumbnail shows a managed window");
+        self.dome.thumbnail_clicked(id);
+        self.deliver_overlay_reports();
+    }
+
     pub(super) fn dim(&self, hwnd: HwndId) -> Dimension {
         self.mock(hwnd).get_dim()
     }
@@ -453,6 +471,32 @@ impl TestEnv {
             .tiling_windows
             .iter()
             .map(|show| show.corner_radius)
+            .collect()
+    }
+
+    /// `None` when the newest scene paints no tile for `hwnd` on monitor `index`.
+    pub(super) fn painted_corner_radius(
+        &self,
+        index: usize,
+        hwnd: HwndId,
+    ) -> Option<Length<Logical>> {
+        let id = self.dome.window_id_for(hwnd)?;
+        self.painted_scene().monitors[index]
+            .tiling_windows
+            .iter()
+            .find(|show| show.placement.id == id)
+            .map(|show| show.corner_radius)
+    }
+
+    pub(super) fn painted_thumbnails(&self, index: usize) -> Vec<PaintedThumbnail> {
+        self.painted_scene().monitors[index]
+            .thumbnails
+            .iter()
+            .map(|show| PaintedThumbnail {
+                source: show.source,
+                frame: show.frame,
+                source_rect: show.source_rect,
+            })
             .collect()
     }
 

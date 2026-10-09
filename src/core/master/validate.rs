@@ -108,9 +108,10 @@ impl ValidateStrategy for MasterStrategy {
                 let dim = self.window_states[&wid].dimension;
                 // On an empty work area a window is legitimately zero-size.
                 if !host.work_area.is_empty() {
+                    // A ratio of 0 or 1 leaves one pane, and each window in it, zero width.
                     assert!(
-                        dim.width > Length::ZERO,
-                        "master-stack workspace {ws_id}: window {wid:?} has non-positive width {}",
+                        dim.width >= Length::ZERO,
+                        "master-stack workspace {ws_id}: window {wid:?} has negative width {}",
                         dim.width
                     );
                     assert!(
@@ -154,8 +155,8 @@ impl ValidateStrategy for MasterStrategy {
                 let dim = self.window_states[&wid].dimension;
                 if !host.work_area.is_empty() {
                     assert!(
-                        dim.width > Length::ZERO,
-                        "master-stack workspace {ws_id}: window {wid:?} has non-positive width {}",
+                        dim.width >= Length::ZERO,
+                        "master-stack workspace {ws_id}: window {wid:?} has negative width {}",
                         dim.width
                     );
                     assert!(

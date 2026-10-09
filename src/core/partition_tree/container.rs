@@ -1,6 +1,6 @@
 use crate::config::lua::deserializer::string_enum;
 use crate::core::hub::HubAccess;
-use crate::core::node::{ContainerId, Dimension, Direction, Length};
+use crate::core::node::{ContainerId, Dimension, Direction};
 use crate::core::partition_tree::{Child, Parent, PartitionTreeStrategy};
 
 use super::preferred_layout::PreferredContainerSlotId;
@@ -26,7 +26,7 @@ impl PartitionTreeStrategy {
 
         if self.workspaces.get(&ws).unwrap().focused_tiling == Some(Child::Container(container_id))
         {
-            self.set_focus_pointer(hub, last_child);
+            self.set_focus(hub, last_child);
         }
 
         self.release_container_slot(container_id);
@@ -197,8 +197,6 @@ pub(super) struct TilingContainerData {
     spawn_direction: Direction,
     pub(super) is_tabbed: bool,
     pub(super) active_tab_index: usize,
-    pub(super) min_width: Length,
-    pub(super) min_height: Length,
     /// Preferred container slot this live container materializes, if any.
     pub(super) held_slot: Option<PreferredContainerSlotId>,
 }
@@ -217,8 +215,6 @@ impl TilingContainerData {
             spawn_direction: direction,
             is_tabbed,
             active_tab_index: 0,
-            min_width: Length::ZERO,
-            min_height: Length::ZERO,
             held_slot: None,
         }
     }
@@ -229,10 +225,6 @@ impl TilingContainerData {
 
     pub(super) fn active_tab_index(&self) -> usize {
         self.active_tab_index
-    }
-
-    pub(super) fn min_size(&self) -> (Length, Length) {
-        (self.min_width, self.min_height)
     }
 
     pub(super) fn direction(&self) -> Option<Direction> {

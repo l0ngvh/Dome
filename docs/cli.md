@@ -76,13 +76,14 @@ Float or re-tile the focused window.
 
 Fullscreen the focused window, or restore it.
 
-## `dome increase-master-ratio`
+## `dome grow`
 
-Grow the master area by 5 percentage points, clamped to 0.1 through 0.9.
+Widen the column of the focused window by 5% of the work area width, up to the
+work area width.
 
-## `dome decrease-master-ratio`
+## `dome shrink`
 
-Shrink the master area by the same step.
+Narrow the column of the focused window by the same step.
 
 ## `dome increase-master-count`
 

@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use objc2_core_graphics::CGWindowID;
+use objc2_foundation::NSRect;
 
 use crate::action::{Action, Actions};
 use crate::config::lua::test_support::{TempFile, loaded_runtime};
@@ -326,6 +327,7 @@ impl MacOS {
                 focused_window: None,
                 focused_monitor_id: None,
                 floats: HashMap::new(),
+                mirrors: HashMap::new(),
                 tiling_corner_radii: HashMap::new(),
                 monitor_dims: Vec::new(),
             })),
@@ -605,11 +607,20 @@ struct FloatSnapshot {
     corner_radius: Length<Logical>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct MirrorSnapshot {
+    cocoa_frame: NSRect,
+    /// The captured part of the window, relative to the window's top-left corner.
+    source: Dimension,
+    scale: f64,
+}
+
 #[derive(Clone)]
 struct SceneState {
     focused_window: Option<WindowId>,
     focused_monitor_id: Option<MonitorId>,
     floats: HashMap<CGWindowID, FloatSnapshot>,
+    mirrors: HashMap<CGWindowID, MirrorSnapshot>,
     tiling_corner_radii: HashMap<WindowId, Length<Logical>>,
     /// Each tiling overlay's `monitor_dim`, in scene order.
     monitor_dims: Vec<Dimension>,
@@ -641,6 +652,20 @@ impl SceneSender for TestSender {
                             outer_frame: show.placement.border_box.to_dimension(),
                             content_dim: show.content_dim,
                             corner_radius: show.corner_radius,
+                        },
+                    )
+                })
+                .collect();
+            state.mirrors = scene
+                .mirror_shows
+                .iter()
+                .map(|show| {
+                    (
+                        show.cg_id,
+                        MirrorSnapshot {
+                            cocoa_frame: show.cocoa_frame,
+                            source: show.source,
+                            scale: show.scale,
                         },
                     )
                 })

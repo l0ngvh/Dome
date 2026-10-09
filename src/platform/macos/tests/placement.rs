@@ -1,5 +1,7 @@
+use objc2_foundation::{NSPoint, NSSize};
+
 use super::*;
-use crate::core::Pixels;
+use crate::core::{Pixels, ScrollingConfig, SizeConstraint, Strategy};
 
 #[test]
 fn single_window_placed_in_view() {
@@ -83,7 +85,7 @@ fn two_windows_split_horizontally() {
 }
 
 #[test]
-fn tile_past_work_area_is_trimmed() {
+fn drag_drop_tiles_on_screen_even_split() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
 
@@ -102,12 +104,42 @@ fn tile_past_work_area_is_trimmed() {
     end_drag(&mut dome, &macos, 100, cg1, 500, 300, 400, 400);
     macos.settle(&mut dome, 10);
 
-    // The drop leaves the tree wider than the work area, so cg1 is scrolled off the
-    // left edge and core's content_box for it starts at -92 with width 1912. macOS
-    // must place the trimmed rect rather than that.
-    let (x, _, w, _) = macos.window_frame(cg1);
-    assert_eq!(x, 0, "left edge clamped to the work area");
-    assert_eq!(w, 1820, "width trimmed down from the untrimmed 1912");
+    let (x1, _, w1, _) = macos.window_frame(cg1);
+    let (x2, _, w2, _) = macos.window_frame(cg2);
+    assert!(!macos.is_offscreen(cg1));
+    assert!(!macos.is_offscreen(cg2));
+    assert_eq!((x1, w1), (4, 952), "cg1 fills its on-screen even half");
+    assert_eq!((x2, w2), (964, 952), "cg2 fills its on-screen even half");
+}
+
+#[test]
+fn tile_past_work_area_is_trimmed() {
+    let mut macos = MacOS::new();
+    let mut dome = macos
+        .dome_builder()
+        .tiling(|tiling| tiling.layout = crate::core::Strategy::Master)
+        .build();
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+        &[],
+        &[],
+    );
+    macos.settle(&mut dome, 10);
+
+    let (x2, y2, w2, _) = macos.window_frame(cg2);
+    macos.simulate_external_move(&mut dome, cg2, x2, y2, w2, 1500);
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(
+        macos.window_frame(cg2),
+        (964, 4, 952, 1076),
+        "the reported 1500 height runs past the bottom of the work area, so cg2 is trimmed to it"
+    );
 }
 
 #[test]
@@ -627,4 +659,231 @@ fn a_window_first_seen_in_native_fullscreen_takes_its_corner_radius_on_exit() {
         macos.last_scene_state().tiling_corner_radii[&id],
         Length::new(26.0)
     );
+}
+
+/// A mirror over `on_screen`, in the top-left coordinates of the primary monitor, that
+/// captures the part `source` of its window at the primary monitor's scale.
+fn mirror(on_screen: PixelRect, source: PixelRect) -> MirrorSnapshot {
+    let flipped_y = SCREEN_HEIGHT.value() - (on_screen.y() + on_screen.height()).value() as f32;
+    MirrorSnapshot {
+        cocoa_frame: NSRect::new(
+            NSPoint::new(on_screen.x().value() as f64, flipped_y as f64),
+            NSSize::new(
+                on_screen.width().value() as f64,
+                on_screen.height().value() as f64,
+            ),
+        ),
+        source: source.to_dimension(),
+        scale: default_monitor().backing_scale,
+    }
+}
+
+/// Four borderless scrolling columns, each 40% of the screen wide, opened in turn. The newest
+/// has focus.
+fn four_scrolling_columns(macos: &mut MacOS) -> (Dome, [CGWindowID; 4]) {
+    let mut dome = macos
+        .dome_builder()
+        .tiling(|tiling| {
+            tiling.border_size = Pixels::ZERO;
+            tiling.layout = Strategy::Scrolling;
+            tiling.scrolling = ScrollingConfig {
+                column_width: SizeConstraint::Percent(40.0),
+            };
+        })
+        .build();
+    let windows = [0, 1, 2, 3].map(|i| {
+        let cg_id = macos.spawn_window(100 + i, "App", "w");
+        dome.reconcile_windows(&[], &[], &[], vec![new_window(macos, cg_id)], &[], &[]);
+        macos.settle(&mut dome, 10);
+        cg_id
+    });
+    (dome, windows)
+}
+
+#[test]
+fn a_cut_unfocused_scrolling_column_parks_at_full_size_behind_a_mirror() {
+    let mut macos = MacOS::new();
+    let (mut dome, [_, cg2, cg3, cg4]) = four_scrolling_columns(&mut macos);
+
+    assert_eq!(
+        macos.last_scene_state().mirrors,
+        HashMap::from([(
+            cg2,
+            mirror(
+                PixelRect::new(0, 0, 384, 1080),
+                PixelRect::new(384, 0, 384, 1080)
+            )
+        )]),
+        "the focused cg4 sits against the right edge, which leaves the right half of cg2 on screen"
+    );
+    assert_eq!(macos.window_frame(cg2), (1919, 1079, 768, 1080));
+    assert_eq!(macos.window_frame(cg3), (384, 0, 768, 1080));
+    assert_eq!(macos.window_frame(cg4), (1152, 0, 768, 1080));
+
+    dome.mirror_clicked(cg2);
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(macos.window_frame(cg2), (0, 0, 768, 1080));
+    assert_eq!(
+        macos.last_scene_state().mirrors,
+        HashMap::from([(
+            cg4,
+            mirror(
+                PixelRect::new(1536, 0, 384, 1080),
+                PixelRect::new(0, 0, 384, 1080)
+            )
+        )])
+    );
+    assert_eq!(macos.window_frame(cg4), (1919, 1079, 768, 1080));
+}
+
+#[test]
+fn a_focused_scrolling_column_wider_than_the_work_area_is_not_mirrored() {
+    let mut macos = MacOS::new();
+    let mut dome = macos
+        .dome_builder()
+        .tiling(|tiling| {
+            tiling.border_size = Pixels::ZERO;
+            tiling.layout = Strategy::Scrolling;
+        })
+        .build();
+    let other = macos.spawn_window(100, "App", "other");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, other)], &[], &[]);
+    macos.settle(&mut dome, 10);
+    let wide = macos.spawn_window(101, "App", "wide");
+    macos.set_min_size(wide, 2400, 0);
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, wide)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    assert!(macos.last_scene_state().mirrors.is_empty());
+    assert!(!macos.is_offscreen(wide));
+
+    send(&mut dome, "focus left");
+    macos.settle(&mut dome, 10);
+
+    assert!(macos.last_scene_state().mirrors.contains_key(&wide));
+}
+
+#[test]
+fn a_tile_cut_by_a_scrolled_master_pane_keeps_its_corner_radius_behind_a_mirror() {
+    let mut macos = MacOS::new();
+    let mut dome = macos
+        .dome_builder()
+        .tiling(|tiling| tiling.layout = Strategy::Master)
+        .build();
+    let master = macos.spawn_window(100, "Safari", "Google");
+    let upper = macos.spawn_window(101, "Terminal", "zsh");
+    let lower = macos.spawn_window(102, "Finder", "Home");
+    macos.window(upper).corner_radius.set(Length::new(26.0));
+    macos.set_min_size(upper, 0, 800);
+    macos.set_min_size(lower, 0, 800);
+    for cg_id in [master, upper, lower] {
+        dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg_id)], &[], &[]);
+        macos.settle(&mut dome, 10);
+    }
+
+    assert_eq!(
+        macos.last_scene_state().mirrors,
+        HashMap::from([(
+            upper,
+            mirror(
+                PixelRect::new(964, 0, 952, 268),
+                PixelRect::new(0, 532, 952, 268)
+            )
+        )]),
+        "the pane scrolled the focused lower into view, which leaves the bottom of upper on screen"
+    );
+    assert_eq!(macos.window_frame(upper), (1919, 1079, 952, 800));
+    assert_eq!(macos.window_frame(lower), (964, 276, 952, 800));
+    let id = dome.tracked_window(upper).unwrap().window_id;
+    assert_eq!(
+        macos.last_scene_state().tiling_corner_radii[&id],
+        Length::new(26.0)
+    );
+}
+
+#[test]
+fn a_trimmed_tile_that_loses_focus_parks_at_its_full_content_size() {
+    let mut macos = MacOS::new();
+    let mut dome = macos
+        .dome_builder()
+        .tiling(|tiling| tiling.layout = Strategy::Master)
+        .build();
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+        &[],
+        &[],
+    );
+    macos.settle(&mut dome, 10);
+    let (x2, y2, w2, _) = macos.window_frame(cg2);
+    macos.simulate_external_move(&mut dome, cg2, x2, y2, w2, 1500);
+    macos.settle(&mut dome, 10);
+    assert_eq!(
+        macos.window_frame(cg2),
+        (964, 4, 952, 1076),
+        "precondition: the focused cg2 shows trimmed to the work area"
+    );
+
+    send(&mut dome, "focus left");
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(macos.window_frame(cg2), (1919, 1079, 952, 1500));
+    assert_eq!(
+        macos.last_scene_state().mirrors,
+        HashMap::from([(
+            cg2,
+            mirror(
+                PixelRect::new(964, 4, 952, 1076),
+                PixelRect::new(0, 0, 952, 1076)
+            )
+        )])
+    );
+}
+
+#[test]
+fn a_mirrored_tile_parks_again_at_its_new_size() {
+    let mut macos = MacOS::new();
+    let (mut dome, [_, cg2, _, _]) = four_scrolling_columns(&mut macos);
+
+    dome.monitors_changed(vec![MonitorInfo {
+        work_area: PixelRect::new(0, 0, 1920, 1000),
+        ..default_monitor()
+    }]);
+    macos.settle(&mut dome, 10);
+    dome.finish_monitor_settle();
+
+    assert_eq!(
+        macos.last_scene_state().mirrors[&cg2].source,
+        PixelRect::new(384, 0, 384, 1000).to_dimension()
+    );
+    assert_eq!(macos.window_frame(cg2), (1919, 999, 768, 1000));
+}
+
+#[test]
+fn a_tile_without_a_visible_content_box_parks_at_its_own_size() {
+    let mut macos = MacOS::new();
+    // Each edge exceeds half of SCREEN_HEIGHT, so no content height remains.
+    let mut dome = macos
+        .dome_builder()
+        .tiling(|tiling| tiling.border_size = Pixels::new(600))
+        .build();
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+        &[],
+        &[],
+    );
+    macos.settle(&mut dome, 10);
+
+    assert!(macos.last_scene_state().mirrors.is_empty());
+    assert_eq!(macos.window_frame(cg1), (1919, 1079, 800, 600));
 }

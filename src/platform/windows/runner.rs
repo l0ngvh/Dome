@@ -158,6 +158,9 @@ impl Runner {
             HubEvent::TabClicked(id, idx) => {
                 self.dome.tab_clicked(id, idx);
             }
+            HubEvent::ThumbnailClicked(id) => {
+                self.dome.thumbnail_clicked(id);
+            }
             HubEvent::SaveLayout(path) => {
                 self.dome.save_layout_file(std::path::Path::new(&path));
             }

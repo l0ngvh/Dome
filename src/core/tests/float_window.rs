@@ -684,59 +684,6 @@ fn delete_float_keeps_workspace_alive() {
 }
 
 #[test]
-fn insert_float_offscreen_does_not_scroll_viewport() {
-    let mut hub = setup_with_modes("0", &["w25"], &[]);
-    let _w0 = hub
-        .insert_window(titled("w24"), default_rect(), WindowRestrictions::None)
-        .unwrap();
-    hub.insert_window(
-        titled("w25"),
-        PixelRect::new(200, 5, 30, 20),
-        WindowRestrictions::None,
-    )
-    .unwrap();
-
-    let _ws_id = hub.current_workspace();
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=None)
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-      )
-
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                         W0                                                                         |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    ");
-}
-
-#[test]
 fn update_float_rect_writes_new_dim() {
     let mut hub = setup_with_modes("0", &["w26"], &[]);
     hub.insert_window(
@@ -908,6 +855,8 @@ fn update_float_rect_ignores_a_window_that_no_longer_floats() {
         (Strategy::PartitionTree, true),
         (Strategy::Master, false),
         (Strategy::Master, true),
+        (Strategy::Scrolling, false),
+        (Strategy::Scrolling, true),
     ] {
         let mut hub = setup_modes_on(strategy, "0", &["chat"], &[]);
         hub.add_monitor(reported_monitor(

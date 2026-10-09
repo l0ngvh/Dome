@@ -13,6 +13,7 @@ mod partition_tree;
 mod pixel_rect;
 mod preferred_layout;
 mod query;
+mod scrolling;
 mod set_focus;
 mod smoke;
 mod strategy_switch;
@@ -30,12 +31,13 @@ use crate::core::node::{Direction, Logical, Pixels, WindowId};
 use crate::core::slot::held_slot;
 use crate::core::strategy::StrategyAction;
 use crate::core::{
-    ContainerPlacement, FloatWindowPlacement, PixelRect, ReportedMonitor, TilingWindowPlacement,
-    WindowMetadata,
+    ColumnConfig, MasterConfig, PartitionTreeConfig, PreferredLayouts, PreferredMaster,
+    PreferredScrolling, PreferredTiling, PreferredWorkspace, ScrollingConfig, SizeConstraint,
+    SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
 };
 use crate::core::{
-    MasterConfig, PartitionTreeConfig, PreferredLayouts, PreferredMaster, PreferredTiling,
-    PreferredWorkspace, SizeConstraint, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
+    ContainerPlacement, FloatWindowPlacement, PixelRect, ReportedMonitor, TilingWindowPlacement,
+    WindowMetadata,
 };
 
 const ASCII_WIDTH: usize = 150;
@@ -653,6 +655,14 @@ impl Hub {
         self.handle_tiling_action(StrategyAction::ToggleSpawnMode);
     }
 
+    pub(crate) fn grow(&mut self) {
+        self.handle_tiling_action(StrategyAction::Grow);
+    }
+
+    pub(crate) fn shrink(&mut self) {
+        self.handle_tiling_action(StrategyAction::Shrink);
+    }
+
     pub(crate) fn toggle_direction(&mut self) {
         self.handle_tiling_action(StrategyAction::ToggleDirection);
     }
@@ -751,6 +761,7 @@ struct TilingConfigBuilder {
     strategy: Strategy,
     border_size: Pixels<Logical>,
     master: MasterConfig,
+    scrolling: ScrollingConfig,
     partition_tree: PartitionTreeConfig,
     size_constraints: SizeConstraints,
 }
@@ -763,6 +774,9 @@ impl TilingConfigBuilder {
             master: MasterConfig {
                 master_ratio: 0.5,
                 master_count: 1,
+            },
+            scrolling: ScrollingConfig {
+                column_width: SizeConstraint::Percent(50.0),
             },
             partition_tree: PartitionTreeConfig {
                 tab_bar_height: Pixels::new(TAB_BAR_HEIGHT),
@@ -784,29 +798,13 @@ impl TilingConfigBuilder {
         Self { master, ..self }
     }
 
+    fn with_scrolling_config(self, scrolling: ScrollingConfig) -> Self {
+        Self { scrolling, ..self }
+    }
+
     fn with_border_size(self, border_size: Pixels<Logical>) -> Self {
         Self {
             border_size,
-            ..self
-        }
-    }
-
-    fn with_min_width(self, min_width: SizeConstraint) -> Self {
-        Self {
-            size_constraints: SizeConstraints {
-                minimum_width: min_width,
-                ..self.size_constraints
-            },
-            ..self
-        }
-    }
-
-    fn with_min_height(self, min_height: SizeConstraint) -> Self {
-        Self {
-            size_constraints: SizeConstraints {
-                minimum_height: min_height,
-                ..self.size_constraints
-            },
             ..self
         }
     }
@@ -828,22 +826,13 @@ impl TilingConfigBuilder {
         }
     }
 
-    fn with_max_height(self, max_height: SizeConstraint) -> Self {
-        Self {
-            size_constraints: SizeConstraints {
-                maximum_height: max_height,
-                ..self.size_constraints
-            },
-            ..self
-        }
-    }
-
     fn build(self) -> TilingConfig {
         TilingConfig {
             layout: self.strategy,
             border_size: self.border_size,
             partition_tree: self.partition_tree,
             master: self.master,
+            scrolling: self.scrolling,
             size_constraints: self.size_constraints,
             ignore: Vec::new(),
         }
@@ -895,6 +884,8 @@ struct LayoutWorkspaceConfigBuilder {
     master_display: PaneDisplay,
     secondary_display: PaneDisplay,
     tree: Option<TreeLayoutNode>,
+    columns: Vec<ColumnConfig>,
+    column_width: Option<SizeConstraint>,
     float: Vec<WindowMatcher>,
     fullscreen: Vec<WindowMatcher>,
 }
@@ -911,6 +902,8 @@ impl LayoutWorkspaceConfigBuilder {
             master_display: PaneDisplay::Tiled,
             secondary_display: PaneDisplay::Tiled,
             tree: None,
+            columns: vec![],
+            column_width: None,
             float: vec![],
             fullscreen: vec![],
         }
@@ -971,6 +964,17 @@ impl LayoutWorkspaceConfigBuilder {
         }
     }
 
+    fn with_columns(self, columns: Vec<ColumnConfig>) -> Self {
+        Self { columns, ..self }
+    }
+
+    fn with_column_width(self, column_width: SizeConstraint) -> Self {
+        Self {
+            column_width: Some(column_width),
+            ..self
+        }
+    }
+
     fn build(self) -> (String, PreferredWorkspace) {
         let tiling = match self.strategy {
             Strategy::Master => PreferredTiling::Master(PreferredMaster {
@@ -986,6 +990,10 @@ impl LayoutWorkspaceConfigBuilder {
                 },
             }),
             Strategy::PartitionTree => PreferredTiling::PartitionTree { tree: self.tree },
+            Strategy::Scrolling => PreferredTiling::Scrolling(PreferredScrolling {
+                column_width: self.column_width,
+                columns: self.columns,
+            }),
         };
         let entry = PreferredWorkspace {
             tiling,
@@ -1177,6 +1185,19 @@ pub(super) fn save_then_apply(hub: &mut Hub) {
     let text = crate::core::export::render_layout(&hub.capture_live_layouts());
     let layouts = PreferredLayouts::from_lua("layout.lua", &text).expect("saved layout loads back");
     hub.apply_preferred_layouts(layouts);
+}
+
+fn float_border_box(hub: &Hub, window_id: WindowId) -> Option<PixelRect> {
+    hub.get_visible_placements()
+        .monitors
+        .iter()
+        .find_map(|m| match &m.layout {
+            MonitorLayout::Normal { float_windows, .. } => float_windows
+                .iter()
+                .find(|p| p.id == window_id)
+                .map(|p| p.border_box),
+            MonitorLayout::Fullscreen(_) => None,
+        })
 }
 
 /// Rect for test inserts where geometry is not under assertion. Tiling ignores it.

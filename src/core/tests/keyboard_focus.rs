@@ -3,11 +3,15 @@ use crate::core::node::{PixelRect, WindowId, WindowRestrictions};
 use crate::core::{PreferredTiling, Strategy};
 
 use super::{
-    LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, preferred_layout, setup_modes_on,
-    snapshot, titled, titled_matcher, validate_hub,
+    LayoutWorkspaceConfigBuilder, TestHubBuilder, default_rect, float_border_box, preferred_layout,
+    setup_modes_on, snapshot, titled, titled_matcher, validate_hub,
 };
 
-const STRATEGIES: [Strategy; 2] = [Strategy::PartitionTree, Strategy::Master];
+const STRATEGIES: [Strategy; 3] = [
+    Strategy::PartitionTree,
+    Strategy::Master,
+    Strategy::Scrolling,
+];
 
 fn float_rect() -> PixelRect {
     PixelRect::new(10, 5, 40, 10)
@@ -67,19 +71,6 @@ fn fullscreen_window(hub: &Hub) -> Option<WindowId> {
         MonitorLayout::Fullscreen(id) => Some(id),
         MonitorLayout::Normal { .. } => None,
     }
-}
-
-fn float_border_box(hub: &Hub, window_id: WindowId) -> Option<PixelRect> {
-    hub.get_visible_placements()
-        .monitors
-        .iter()
-        .find_map(|m| match &m.layout {
-            MonitorLayout::Normal { float_windows, .. } => float_windows
-                .iter()
-                .find(|p| p.id == window_id)
-                .map(|p| p.border_box),
-            MonitorLayout::Fullscreen(_) => None,
-        })
 }
 
 #[test]
@@ -417,7 +408,7 @@ fn a_container_moved_onto_a_workspace_whose_float_has_focus_takes_focus() {
         validate_hub(&hub);
         hub.focus_workspace("1", None);
         match strategy {
-            Strategy::PartitionTree => {
+            Strategy::PartitionTree | Strategy::Scrolling => {
                 assert_eq!(hub.focused_window(target), None, "{strategy:?}");
                 assert_eq!(
                     highlighted_container_titles(&hub),
@@ -465,7 +456,7 @@ fn a_container_moved_under_a_fullscreen_window_takes_focus_once_it_closes() {
         validate_hub(&hub);
         hub.focus_workspace("1", None);
         match strategy {
-            Strategy::PartitionTree => {
+            Strategy::PartitionTree | Strategy::Scrolling => {
                 assert_eq!(hub.focused_window(target), None, "{strategy:?}");
                 assert_eq!(
                     highlighted_container_titles(&hub),
@@ -565,6 +556,8 @@ fn a_reset_into_another_strategy_keeps_each_window_in_its_display_mode() {
     for (from, to) in [
         (Strategy::PartitionTree, Strategy::Master),
         (Strategy::Master, Strategy::PartitionTree),
+        (Strategy::Master, Strategy::Scrolling),
+        (Strategy::Scrolling, Strategy::PartitionTree),
     ] {
         let mut hub = setup_modes_on(from, "0", &["f"], &["fs"]);
         let ws = hub.current_workspace();
@@ -583,7 +576,8 @@ fn a_reset_into_another_strategy_keeps_each_window_in_its_display_mode() {
             matches!(
                 export.tiling,
                 PreferredTiling::PartitionTree { tree: Some(_) }
-            ) || matches!(&export.tiling, PreferredTiling::Master(m) if m.master.children.len() == 1),
+            ) || matches!(&export.tiling, PreferredTiling::Master(m) if m.master.children.len() == 1)
+                || matches!(&export.tiling, PreferredTiling::Scrolling(s) if s.columns.len() == 1),
             "{from:?} to {to:?}: t tiles"
         );
         assert_eq!(hub.focused_window(ws), Some(fs), "{from:?} to {to:?}");

@@ -1,13 +1,18 @@
+use super::scrolling::{border_boxes_by_window, process_matcher, scrolling_layout_hub, stack};
+use crate::core::hub::Hub;
 use crate::core::master::PaneConfig;
-use crate::core::node::WindowRestrictions;
+use crate::core::node::{
+    Length, LimitObservation, LimitUpdate, PixelRect, Pixels, WindowRestrictions, WorkspaceId,
+};
 use crate::core::tests::{
     LayoutWorkspaceConfigBuilder, PRIMARY_MONITOR, TestHubBuilder, TilingConfigBuilder,
     default_rect, master_entry, parse_exported_layout, partition_tree_entry, process_meta,
-    reported_monitor, titled, work_area_at,
+    reported_monitor, save_then_apply, titled, titled_matcher, validate_hub, work_area_at,
 };
 use crate::core::{
-    MonitorSelector, PaneDisplay, PreferredLayouts, PreferredMaster, PreferredTiling,
-    PreferredWorkspace, SplitMode, Strategy, TreeLayoutNode, WindowMatcher,
+    ColumnConfig, MonitorSelector, PaneDisplay, PreferredLayouts, PreferredMaster,
+    PreferredScrolling, PreferredTiling, PreferredWorkspace, ScrollingConfig, SizeConstraint,
+    SplitMode, Strategy, TreeLayoutNode, WindowMatcher,
 };
 
 struct CleanupFile(std::path::PathBuf);
@@ -701,4 +706,334 @@ fn save_layout_puts_a_parked_workspace_under_its_origin_monitor() {
 
     assert!(parsed.workspace("monitor-1", "work").is_some());
     assert!(parsed.workspace(PRIMARY_MONITOR, "work").is_none());
+}
+
+fn exported_columns(hub: &Hub, ws_id: WorkspaceId) -> Vec<ColumnConfig> {
+    match hub.export_workspace(ws_id).tiling {
+        PreferredTiling::Scrolling(scrolling) => scrolling.columns,
+        other => panic!("workspace should be scrolling, got {other:?}"),
+    }
+}
+
+fn three_live_columns() -> (Hub, WorkspaceId, Vec<ColumnConfig>) {
+    let regex_a = WindowMatcher {
+        process: Some("/^a/".into()),
+        ..Default::default()
+    };
+    let mut hub = scrolling_layout_hub(vec![
+        ColumnConfig::bare(regex_a),
+        ColumnConfig {
+            width: Some(SizeConstraint::Percent(40.0)),
+            children: vec![process_matcher("b.exe")],
+        },
+    ]);
+    hub.focus_workspace("dev", None);
+    for process in ["a.exe", "b.exe", "u.exe"] {
+        hub.insert_window(
+            process_meta(process),
+            default_rect(),
+            WindowRestrictions::None,
+        )
+        .expect("tiling window inserted");
+    }
+    let dev = hub.current_workspace();
+    let expected = vec![
+        ColumnConfig {
+            width: Some(SizeConstraint::Percent(20.0)),
+            children: vec![process_matcher("a.exe")],
+        },
+        ColumnConfig {
+            width: Some(SizeConstraint::Percent(40.0)),
+            children: vec![process_matcher("b.exe")],
+        },
+        ColumnConfig {
+            width: Some(SizeConstraint::Percent(20.0)),
+            children: vec![process_matcher("u.exe")],
+        },
+    ];
+    (hub, dev, expected)
+}
+
+fn temp_layout_path(label: &str) -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("dome_export_{label}_{nanos}.lua"))
+}
+
+#[test]
+fn export_writes_the_live_scrolling_columns() {
+    let (hub, dev, expected) = three_live_columns();
+
+    assert_eq!(
+        hub.export_workspace(dev).tiling,
+        PreferredTiling::Scrolling(PreferredScrolling {
+            column_width: None,
+            columns: expected,
+        })
+    );
+    validate_hub(&hub);
+}
+
+#[test]
+fn export_writes_a_repeated_matcher_for_each_column() {
+    let mut hub = scrolling_layout_hub(vec![ColumnConfig::bare(process_matcher("a.exe"))]);
+    hub.focus_workspace("dev", None);
+    for _ in 0..2 {
+        hub.insert_window(
+            process_meta("a.exe"),
+            default_rect(),
+            WindowRestrictions::None,
+        )
+        .expect("tiling window inserted");
+    }
+    let dev = hub.current_workspace();
+
+    assert_eq!(
+        exported_columns(&hub, dev),
+        vec![
+            ColumnConfig {
+                width: Some(SizeConstraint::Percent(20.0)),
+                children: vec![process_matcher("a.exe")],
+            },
+            ColumnConfig {
+                width: Some(SizeConstraint::Percent(20.0)),
+                children: vec![process_matcher("a.exe")],
+            }
+        ]
+    );
+    validate_hub(&hub);
+}
+
+#[test]
+fn export_writes_a_stacked_column() {
+    let mut hub = scrolling_layout_hub(vec![stack(&["a.exe", "b.exe"])]);
+    hub.focus_workspace("dev", None);
+    for process in ["a.exe", "b.exe", "u.exe"] {
+        hub.insert_window(
+            process_meta(process),
+            default_rect(),
+            WindowRestrictions::None,
+        )
+        .expect("tiling window inserted");
+    }
+    let dev = hub.current_workspace();
+
+    assert_eq!(
+        exported_columns(&hub, dev),
+        vec![
+            ColumnConfig {
+                width: Some(SizeConstraint::Percent(20.0)),
+                children: vec![process_matcher("a.exe"), process_matcher("b.exe")],
+            },
+            ColumnConfig {
+                width: Some(SizeConstraint::Percent(20.0)),
+                children: vec![process_matcher("u.exe")],
+            },
+        ]
+    );
+    validate_hub(&hub);
+}
+
+#[test]
+fn export_writes_the_float_and_fullscreen_windows_of_a_scrolling_workspace() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
+                .with_strategy(Strategy::Scrolling)
+                .build(),
+        )
+        .build();
+    let ws = hub.current_workspace();
+    hub.insert_window(titled("t"), default_rect(), WindowRestrictions::None);
+    hub.insert_window(titled("f"), default_rect(), WindowRestrictions::None);
+    hub.toggle_float();
+    let fs = hub
+        .insert_window(titled("fs"), default_rect(), WindowRestrictions::None)
+        .unwrap();
+    hub.toggle_fullscreen();
+    assert_eq!(hub.focused_window(ws), Some(fs));
+
+    let export = hub.export_workspace(ws);
+
+    assert_eq!(export.float, vec![titled_matcher("f")]);
+    assert_eq!(export.fullscreen, vec![titled_matcher("fs")]);
+    assert!(
+        matches!(&export.tiling, PreferredTiling::Scrolling(s) if s.columns.len() == 1),
+        "t keeps its column"
+    );
+    validate_hub(&hub);
+}
+
+#[test]
+fn export_layout_round_trips_a_scrolling_workspace() {
+    let (hub, _, expected) = three_live_columns();
+    let path = temp_layout_path("scrolling_round_trip");
+    let _cleanup = CleanupFile(path.clone());
+
+    hub.save_layout(&path).unwrap();
+
+    let parsed = parse_exported_layout(path.to_str().unwrap());
+    assert_eq!(
+        parsed.workspace(PRIMARY_MONITOR, "dev"),
+        Some(&PreferredWorkspace {
+            tiling: PreferredTiling::Scrolling(PreferredScrolling {
+                column_width: None,
+                columns: expected,
+            }),
+            float: vec![],
+            fullscreen: vec![],
+        })
+    );
+    validate_hub(&hub);
+}
+
+#[test]
+fn export_layout_round_trips_the_workspace_column_width() {
+    let mut hub = TestHubBuilder::new()
+        .with_tiling(
+            TilingConfigBuilder::new()
+                .with_strategy(Strategy::Scrolling)
+                .with_scrolling_config(ScrollingConfig {
+                    column_width: SizeConstraint::Percent(20.0),
+                })
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("dev")
+                .with_strategy(Strategy::Scrolling)
+                .with_column_width(SizeConstraint::Percent(40.0))
+                .build(),
+        ])
+        .build();
+    hub.focus_workspace("dev", None);
+    hub.insert_window(
+        process_meta("u.exe"),
+        default_rect(),
+        WindowRestrictions::None,
+    )
+    .expect("tiling window inserted");
+    let path = temp_layout_path("scrolling_column_width");
+    let _cleanup = CleanupFile(path.clone());
+
+    hub.save_layout(&path).unwrap();
+
+    let parsed = parse_exported_layout(path.to_str().unwrap());
+    match parsed
+        .workspace(PRIMARY_MONITOR, "dev")
+        .map(|ws| &ws.tiling)
+    {
+        Some(PreferredTiling::Scrolling(scrolling)) => {
+            assert_eq!(scrolling.column_width, Some(SizeConstraint::Percent(40.0)))
+        }
+        other => panic!("workspace dev should be scrolling, got {other:?}"),
+    }
+    validate_hub(&hub);
+}
+
+#[test]
+fn render_layout_writes_bare_and_keyed_columns() {
+    let columns = vec![
+        ColumnConfig::bare(process_matcher("editor.exe")),
+        ColumnConfig {
+            width: Some(SizeConstraint::Percent(40.0)),
+            children: vec![process_matcher("terminal.exe")],
+        },
+        ColumnConfig {
+            width: Some(SizeConstraint::Pixels(Pixels::new(800))),
+            children: vec![process_matcher("logs.exe")],
+        },
+    ];
+    let mut layouts = PreferredLayouts::default();
+    layouts.insert(
+        PRIMARY_MONITOR,
+        "code",
+        PreferredWorkspace {
+            tiling: PreferredTiling::Scrolling(PreferredScrolling {
+                column_width: None,
+                columns: columns.clone(),
+            }),
+            float: vec![],
+            fullscreen: vec![],
+        },
+    );
+
+    let rendered = crate::core::export::render_layout(&layouts);
+
+    insta::assert_snapshot!(rendered, @r#"
+    ---@type dome.Layout
+    return {
+      ["primary"] = {
+        ["code"] = {
+          layout = "scrolling",
+          columns = {
+            { process = "editor.exe" },
+            { width = "40%", children = {
+              { process = "terminal.exe" },
+            } },
+            { width = 800, children = {
+              { process = "logs.exe" },
+            } },
+          },
+        },
+      },
+    }
+    "#);
+    let path = temp_layout_path("scrolling_render");
+    let _cleanup = CleanupFile(path.clone());
+    std::fs::write(&path, &rendered).unwrap();
+    let parsed = parse_exported_layout(path.to_str().unwrap());
+    match parsed
+        .workspace(PRIMARY_MONITOR, "code")
+        .map(|ws| &ws.tiling)
+    {
+        Some(PreferredTiling::Scrolling(scrolling)) => assert_eq!(scrolling.columns, columns),
+        other => panic!("workspace code should be scrolling, got {other:?}"),
+    }
+}
+
+#[test]
+fn reloading_an_exported_scrolling_layout_keeps_the_columns() {
+    let mut hub = scrolling_layout_hub(vec![ColumnConfig::bare(process_matcher("a.exe"))]);
+    hub.focus_workspace("dev", None);
+    let w0 = hub
+        .insert_window(
+            process_meta("a.exe"),
+            default_rect(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_height: LimitUpdate::Set(Length::new(40.0)),
+            ..Default::default()
+        },
+    );
+    hub.focus_down();
+    let w1 = hub
+        .insert_window(
+            process_meta("u.exe"),
+            default_rect(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let before = vec![
+        (w0, PixelRect::new(45, -12, 30, 42)),
+        (w1, PixelRect::new(75, 0, 30, 30)),
+    ];
+    assert_eq!(border_boxes_by_window(&hub), before);
+
+    save_then_apply(&mut hub);
+
+    assert_eq!(
+        border_boxes_by_window(&hub),
+        vec![
+            (w0, PixelRect::new(45, 0, 30, 42)),
+            (w1, PixelRect::new(75, 0, 30, 30)),
+        ],
+        "the columns keep their place, and the column of w0 scrolls back to the top"
+    );
+    validate_hub(&hub);
 }

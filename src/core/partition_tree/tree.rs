@@ -119,7 +119,7 @@ impl PartitionTreeStrategy {
                 .copied();
             match successor {
                 Some(wid) => {
-                    self.set_focus_pointer(hub, Child::Window(wid));
+                    self.set_focus(hub, Child::Window(wid));
                 }
                 None => {
                     self.workspaces
@@ -130,8 +130,6 @@ impl PartitionTreeStrategy {
             }
         }
 
-        // Ordered after recovery so the trailing scroll_into_view clamps against the
-        // surviving focus rather than the one that just left.
         self.compute_placement(hub, workspace_id);
 
         self.release_container_slots_in(hub, child);

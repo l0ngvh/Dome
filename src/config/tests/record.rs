@@ -191,6 +191,14 @@ fn master_ratio_out_of_range_falls_back_to_default() {
 }
 
 #[test]
+fn master_ratio_accepts_zero_and_one() {
+    let config = config_from("return { master = { master_ratio = 0 } }");
+    assert_eq!(config.tiling.master.master_ratio, 0.0);
+    let config = config_from("return { master = { master_ratio = 1 } }");
+    assert_eq!(config.tiling.master.master_ratio, 1.0);
+}
+
+#[test]
 fn master_count_beyond_exact_f64_range_falls_back_to_default() {
     let config = config_from("return { master = { master_count = 1e18 } }");
     assert_eq!(
@@ -265,6 +273,21 @@ fn tiling_parses_master_params() {
     let config = config_from("return { master = { master_ratio = 0.3, master_count = 2 } }");
     assert_eq!(config.tiling.master.master_ratio, 0.3);
     assert_eq!(config.tiling.master.master_count, 2);
+}
+
+#[test]
+fn layout_parses_scrolling_strategy() {
+    let config = config_from(r#"return { layout = "scrolling" }"#);
+    assert_eq!(config.tiling.layout, Strategy::Scrolling);
+}
+
+#[test]
+fn scrolling_config_parses_column_width() {
+    let config = config_from(r#"return { scrolling = { column_width = "60%" } }"#);
+    assert_eq!(
+        config.tiling.scrolling.column_width,
+        SizeConstraint::Percent(60.0)
+    );
 }
 
 #[test]

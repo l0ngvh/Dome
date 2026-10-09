@@ -27,18 +27,19 @@ pub(crate) struct TilingWindowPlacement {
     pub(crate) border_box: PixelRect,
     pub(crate) visible_border_box: PixelRect,
     pub(crate) content_box: PixelRect,
-    /// `content_box` trimmed to the monitor. Zero-area when nothing remains.
-    #[cfg_attr(
-        target_os = "windows",
-        expect(
-            dead_code,
-            reason = "macOS trims tiling placements to the work area, Windows places them unclipped"
-        )
-    )]
+    /// `content_box` trimmed to the work area. Zero-area when nothing remains.
     pub(crate) visible_content_box: PixelRect,
     /// Highlighting does not require keyboard focus.
     pub(crate) is_highlighted: bool,
     pub(crate) spawn_direction: Option<Direction>,
+}
+
+impl TilingWindowPlacement {
+    /// Part of `content_box` lies outside the work area. Also true when `content_box` has no
+    /// area, because its visible part is then `PixelRect::ZERO`.
+    pub(crate) fn is_partially_off_screen(&self) -> bool {
+        self.visible_content_box != self.content_box
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -55,9 +56,13 @@ pub(crate) struct ContainerPlacement {
     pub(crate) id: ContainerId,
     pub(crate) border_box: PixelRect,
     pub(crate) visible_border_box: PixelRect,
-    /// Top band of `border_box` reserved for the tab strip, zero-height when the container
-    /// is not tabbed.
+    /// The tab strip at its configured height from the top of `border_box`, zero-height when
+    /// the container is not tabbed. A container shorter than the configured height cuts the
+    /// strip off rather than squashing it, so the band can run past the bottom of `border_box`.
     pub(crate) tab_bar_band: PixelRect,
+    /// `tab_bar_band` cut to `visible_border_box`, or `PixelRect::ZERO` when no part of the
+    /// band is inside it.
+    pub(crate) visible_tab_bar_band: PixelRect,
     pub(crate) is_highlighted: bool,
     pub(crate) spawn_direction: Option<Direction>,
     pub(crate) is_tabbed: bool,
@@ -114,8 +119,8 @@ fn restriction_of(action: &StrategyAction) -> RestrictedAction {
         | StrategyAction::FocusParent
         | StrategyAction::FocusTab { .. }
         | StrategyAction::TabClicked { .. }
-        | StrategyAction::GrowMaster
-        | StrategyAction::ShrinkMaster
+        | StrategyAction::Grow
+        | StrategyAction::Shrink
         | StrategyAction::MoreMaster
         | StrategyAction::FewerMaster => RestrictedAction::TilingNavigation,
     }
@@ -313,6 +318,8 @@ impl Hub {
                 Action::Move { target } => self.handle_tiling_action(target),
                 Action::Toggle { target } => self.handle_tiling_action(target),
                 Action::Master { target } => self.handle_tiling_action(target),
+                Action::Grow => self.handle_tiling_action(StrategyAction::Grow),
+                Action::Shrink => self.handle_tiling_action(StrategyAction::Shrink),
                 Action::Execute { command } => effects.execute(command),
                 Action::Exit => {
                     tracing::debug!("Exit action received");
