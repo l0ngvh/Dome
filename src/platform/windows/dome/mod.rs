@@ -24,6 +24,7 @@ use crate::core::{
     TilingWindowPlacement, WindowId, WindowRestrictions,
 };
 use crate::platform::keymap::KeymapPublisher;
+use crate::platform::windows::handle::OFFSCREEN_POS;
 
 use self::placement_tracker::PlacementTracker;
 use self::recovery::Recovery;
@@ -63,7 +64,7 @@ pub(super) use self::window::WindowsMetadata;
 
 use self::events::{
     FloatOverlayAction, HubMessage, MonitorScene, MonitorSetChange, NewTilingOverlay, RenderScene,
-    SceneSender, TilingWindowShow,
+    SceneSender, ThumbnailShow, TilingWindowShow,
 };
 
 use self::monitor::MonitorRegistry;
@@ -102,6 +103,7 @@ pub(super) enum HubEvent {
     ApplyLayout(String),
     SaveLayout(String),
     TabClicked(ContainerId, usize),
+    ThumbnailClicked(WindowId),
     /// A monitor's effective DPI changed (WM_DPICHANGED).
     DpiChanged,
     /// The desktop work area changed (SPI_SETWORKAREA).
@@ -322,6 +324,20 @@ impl Dome {
 
     pub(super) fn tab_clicked(&mut self, container_id: ContainerId, tab_idx: usize) {
         self.hub.focus_tab_index(container_id, tab_idx);
+        self.apply_layout();
+    }
+
+    pub(super) fn thumbnail_clicked(&mut self, id: WindowId) {
+        let Some(entry) = self.registry.get(id) else {
+            return;
+        };
+        // A click can arrive for a window that was minimized after its thumbnail showed, so
+        // such a window is restored instead of focused.
+        if entry.is_minimized {
+            self.registry.unminimize_window(id);
+            return;
+        }
+        self.hub.set_focus(id);
         self.apply_layout();
     }
 
@@ -553,9 +569,8 @@ impl Dome {
                     let mut placed_tiling = Vec::new();
                     let mut placed_floats = Vec::new();
                     let mut container_data = Vec::new();
+                    let mut thumbnails = Vec::new();
 
-                    // Windows places tiles unclipped, so a tile extending past the work area stays where core put it.
-                    // That is a current choice, not an invariant. macOS trims instead.
                     for wp in tiling_windows {
                         window_ids.insert(wp.id);
                         let Some(entry) = self.registry.get(wp.id) else {
@@ -569,6 +584,16 @@ impl Dome {
                             );
                             float_actions.extend(self.hide_window(wp.id));
                             continue;
+                        }
+                        // A thumbnail overlay cannot have zero size, so a tile with no part of
+                        // its content box inside the work area gets no thumbnail.
+                        if shows_through_thumbnail(wp) && !wp.visible_content_box.is_empty() {
+                            thumbnails.push(ThumbnailShow {
+                                window_id: wp.id,
+                                source: entry.ext.id(),
+                                frame: wp.visible_content_box,
+                                source_rect: on_screen_part(wp),
+                            });
                         }
                         placed_tiling.push(TilingWindowShow {
                             placement: *wp,
@@ -606,6 +631,7 @@ impl Dome {
                         tiling_windows: placed_tiling,
                         float_windows: placed_floats,
                         containers: container_data,
+                        thumbnails,
                     });
                 }
             }
@@ -825,7 +851,14 @@ impl Dome {
         if self.placement_tracker.is_moving(entry.ext.id()) {
             return;
         }
-        self.show_tiling(wp.id, wp, monitor, z);
+        let target = if shows_through_thumbnail(wp) {
+            parked_at_full_size(wp.content_box)
+        } else {
+            // Unclipped, so a highlighted tile's part past the work area shows on a
+            // neighbouring monitor.
+            wp.content_box
+        };
+        self.show_tiling(wp.id, target, monitor, z);
     }
 
     fn update_monitors(&mut self, monitors: Vec<MonitorInfo>) -> Vec<HwndId> {
@@ -870,6 +903,37 @@ impl Dome {
 // FileDescription from version info when available.
 pub(super) fn display_from_process(process: &str) -> String {
     process.strip_suffix(".exe").unwrap_or(process).to_string()
+}
+
+/// Whether a tile shows through a DWM thumbnail instead of as the window itself, which holds for
+/// a tile that is partly off screen and not highlighted. A highlighted tile has the tiling focus,
+/// where typing goes, and a thumbnail passes no input to its window, so that tile stays real.
+fn shows_through_thumbnail(wp: &TilingWindowPlacement) -> bool {
+    !wp.is_highlighted && wp.is_partially_off_screen()
+}
+
+/// Off screen at the size of `content_box`, because a thumbnail draws the window at the
+/// window's own size.
+fn parked_at_full_size(content_box: PixelRect) -> PixelRect {
+    PixelRect::from_pixels(
+        OFFSCREEN_POS,
+        OFFSCREEN_POS,
+        content_box.width(),
+        content_box.height(),
+    )
+}
+
+/// The part of the window that `visible_content_box` shows, relative to the top-left corner of
+/// `content_box`.
+fn on_screen_part(wp: &TilingWindowPlacement) -> PixelRect {
+    let visible = wp.visible_content_box;
+    let content = wp.content_box;
+    PixelRect::from_pixels(
+        visible.x() - content.x(),
+        visible.y() - content.y(),
+        visible.width(),
+        visible.height(),
+    )
 }
 
 #[cfg(test)]

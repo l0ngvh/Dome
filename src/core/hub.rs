@@ -37,13 +37,6 @@ pub(crate) struct TilingWindowPlacement {
 impl TilingWindowPlacement {
     /// Part of `content_box` lies outside the work area. Also true when `content_box` has no
     /// area, because its visible part is then `PixelRect::ZERO`.
-    #[cfg_attr(
-        target_os = "windows",
-        expect(
-            dead_code,
-            reason = "only the macOS platform shows a tile that is partly off screen through a capture"
-        )
-    )]
     pub(crate) fn is_partially_off_screen(&self) -> bool {
         self.visible_content_box != self.content_box
     }

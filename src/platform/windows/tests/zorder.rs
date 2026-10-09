@@ -73,6 +73,15 @@ fn all_tiling_above_overlay() {
 }
 
 #[test]
+fn a_parked_tile_stays_above_the_tiling_overlay() {
+    let (env, [_, w2, w3, w4]) = four_scrolling_columns();
+
+    assert!(env.is_offscreen(w2), "precondition: w2 is parked");
+    let overlay = env.tiling_overlay_id();
+    assert_tiling_above_overlay(&env, &[w2, w3, w4], overlay);
+}
+
+#[test]
 fn focus_change_preserves_overlay_behind() {
     let mut env = TestEnv::new();
     let w1 = env.open();
