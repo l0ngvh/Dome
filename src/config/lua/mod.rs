@@ -162,6 +162,8 @@ fn log_initial_load_error(e: &anyhow::Error) {
 
 #[cfg(test)]
 pub(crate) mod test_support {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::{KeymapEffects, LuaRuntime, PlatformEffects};
     use crate::config::ModalKeymaps;
     use crate::core::{
@@ -190,11 +192,12 @@ pub(crate) mod test_support {
     }
 
     fn write_temp(tag: &str, src: &str) -> TempFile {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("dome_rt_{tag}_{nanos}.lua"));
+        // Concurrent callers may pass the same tag, and macOS reports the time in
+        // whole microseconds, so a counter names the file rather than a timestamp.
+        static NEXT_FILE: AtomicUsize = AtomicUsize::new(0);
+        let file = NEXT_FILE.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("dome_rt_{tag}_{}_{file}.lua", std::process::id()));
         std::fs::write(&path, src).unwrap();
         TempFile(path)
     }
