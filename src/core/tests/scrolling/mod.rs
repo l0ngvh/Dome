@@ -2,8 +2,8 @@ use crate::core::hub::{Hub, MonitorLayout};
 use crate::core::node::WindowId;
 use crate::core::tests::{default_rect, process_meta};
 use crate::core::{
-    ColumnConfig, PixelRect, ScrollingConfig, SizeConstraint, Strategy, WindowMatcher,
-    WindowRestrictions,
+    ColumnConfig, PixelRect, PreferredTiling, ScrollingConfig, SizeConstraint, Strategy,
+    WindowMatcher, WindowRestrictions,
 };
 
 use super::{LayoutWorkspaceConfigBuilder, TestHubBuilder, TilingConfigBuilder};
@@ -13,6 +13,7 @@ mod modes;
 mod placement;
 mod resize;
 mod scroll;
+mod select;
 mod slots;
 mod spawn;
 mod stack;
@@ -102,4 +103,16 @@ pub(in crate::core::tests) fn border_boxes_by_window(hub: &Hub) -> Vec<(WindowId
         .collect();
     boxes.sort_by_key(|(id, _)| id.get());
     boxes
+}
+
+/// The stored width of each column of the current workspace, left to right.
+pub(super) fn column_widths(hub: &Hub) -> Vec<Option<SizeConstraint>> {
+    match hub.export_workspace(hub.current_workspace()).tiling {
+        PreferredTiling::Scrolling(scrolling) => scrolling
+            .columns
+            .iter()
+            .map(|column| column.width)
+            .collect(),
+        other => panic!("workspace should be scrolling, got {other:?}"),
+    }
 }

@@ -6,7 +6,8 @@ use super::ScrollingStrategy;
 impl ScrollingStrategy {
     /// A vertical move swaps the focused window with its neighbor in the column. A horizontal
     /// move takes a stacked window out into a new column beside its own, and swaps a column of
-    /// one window with the neighboring column.
+    /// one window with the neighboring column. A selected column moves only sideways, swapping
+    /// with the neighboring column.
     pub(super) fn move_direction(
         &mut self,
         hub: &mut HubAccess,
@@ -17,15 +18,16 @@ impl ScrollingStrategy {
         let Some(column) = self.focused_column_index(hub, ws_id) else {
             return;
         };
+        let selected = self.workspaces[&ws_id].selected_column.is_some();
         match direction {
             Direction::Vertical => {
-                if self.reorder_in_column(hub, ws_id, column, forward) {
+                if !selected && self.reorder_in_column(hub, ws_id, column, forward) {
                     self.compute_placement(hub, ws_id);
                 }
             }
             Direction::Horizontal => {
                 let container = self.workspaces[&ws_id].columns[column].container;
-                if Self::column_windows(hub, container).len() > 1 {
+                if !selected && Self::column_windows(hub, container).len() > 1 {
                     self.move_window_out(hub, ws_id, column, forward);
                 } else {
                     let state = self.workspaces.get_mut(&ws_id).unwrap();
@@ -41,8 +43,14 @@ impl ScrollingStrategy {
         }
     }
 
+    /// Flips the spawn direction of the focused window. Does nothing while a column is selected,
+    /// because the column rather than a window has focus.
     pub(super) fn toggle_spawn_mode(&mut self, ws_id: WorkspaceId) {
-        let Some(focus) = self.workspaces[&ws_id].focused_window() else {
+        let state = &self.workspaces[&ws_id];
+        let Some(focus) = state
+            .focused_window()
+            .filter(|_| state.selected_column.is_none())
+        else {
             return;
         };
         let state = self.window_states.get_mut(&focus).unwrap();

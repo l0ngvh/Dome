@@ -5,25 +5,42 @@ use crate::core::strategy::FocusedChild;
 use super::{ScrollingStrategy, WorkspaceState};
 
 impl ScrollingStrategy {
-    /// The topmost fullscreen window, otherwise the most recently focused tiling window.
+    /// The topmost fullscreen window, otherwise the selected column, otherwise the most recently
+    /// focused tiling window.
     pub(super) fn focused(&self, ws_id: WorkspaceId) -> Option<FocusedChild> {
         let state = self.workspaces.get(&ws_id)?;
         if let Some(id) = state.fullscreen_windows.topmost() {
             return Some(FocusedChild::Fullscreen(id));
+        }
+        if let Some(container) = state.selected_column {
+            return Some(FocusedChild::Tiling(Child::Container(container)));
         }
         state
             .focused_window()
             .map(|id| FocusedChild::Tiling(Child::Window(id)))
     }
 
-    /// Makes the window the tiling focus and scrolls it into view.
+    /// Makes the window the tiling focus, ends a column selection, and scrolls the window into
+    /// view.
     pub(super) fn focus_tiling(&mut self, hub: &HubAccess, ws_id: WorkspaceId, id: WindowId) {
-        self.workspaces.get_mut(&ws_id).unwrap().record_focus(id);
+        let state = self.workspaces.get_mut(&ws_id).unwrap();
+        state.record_focus(id);
+        state.selected_column = None;
         self.scroll_into_view(hub, ws_id);
     }
 
-    /// A press first reveals the part of the focused window that lies past the work area edge in
-    /// that direction, and moves focus only once no such part is left.
+    /// Selects the column of the focused window. A selected column stays selected.
+    pub(super) fn focus_parent(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
+        let Some(column) = self.focused_column_index(hub, ws_id) else {
+            return;
+        };
+        let state = self.workspaces.get_mut(&ws_id).unwrap();
+        state.selected_column = Some(state.columns[column].container);
+    }
+
+    /// A press first reveals the part of the focused window, or of the selected column, that lies
+    /// past the work area edge in that direction, and moves focus only once no such part is left.
+    /// A vertical press does nothing while a column is selected.
     pub(super) fn focus_direction(
         &mut self,
         hub: &HubAccess,
@@ -31,6 +48,9 @@ impl ScrollingStrategy {
         direction: Direction,
         forward: bool,
     ) {
+        if direction == Direction::Vertical && self.workspaces[&ws_id].selected_column.is_some() {
+            return;
+        }
         if self.reveal_hidden_part(hub, ws_id, direction, forward) {
             return;
         }

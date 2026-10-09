@@ -765,7 +765,14 @@ fn build_op(
             }
             let workspace_name =
                 workspace_names[rng.random_range(0..workspace_names.len())].clone();
-            let strategy = current_tiling.layout;
+            // Drawn independently of `current_tiling.layout`, so the named workspace often runs
+            // another strategy than the rest, and a move to another workspace or monitor then
+            // crosses between strategies.
+            let strategy = match rng.random_range(0..3u8) {
+                0 => Strategy::PartitionTree,
+                1 => Strategy::Master,
+                _ => Strategy::Scrolling,
+            };
             let (float, fullscreen) = generate_matcher_titles(rng, &pref_title_pool());
             let mut tree_ops = Vec::new();
             let mut master = Vec::new();

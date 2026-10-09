@@ -1,5 +1,5 @@
 use crate::core::{
-    ContainerPlacement, Dimension, Length, PixelRect, TilingWindowPlacement,
+    ContainerPlacement, Dimension, Direction, Length, PixelRect, TilingWindowPlacement,
     hub::HubAccess,
     node::{Constraints, ContainerId, WindowId, WorkspaceId},
     strategy::{
@@ -126,9 +126,10 @@ impl ScrollingStrategy {
         }
     }
 
-    /// When `highlighted` is true, the placement of the workspace's tiling focus is highlighted
-    /// and carries its spawn direction. A window or a column that lies wholly outside the work
-    /// area gets no placement.
+    /// When `highlighted` is true, the placement of the selected column, or else of the
+    /// workspace's tiling focus, is highlighted and carries its spawn direction. A selected column
+    /// carries a vertical one, because a new window opens at its bottom. A window or a column that
+    /// lies wholly outside the work area gets no placement.
     pub(super) fn collect_tiling_placements(
         &self,
         hub: &HubAccess,
@@ -140,10 +141,10 @@ impl ScrollingStrategy {
         };
         let screen = state.work_area;
         let border = hub.border_for_scale(state.scale);
-        let focused_id = if highlighted {
-            state.focused_window()
-        } else {
-            None
+        let (focused_id, selected_column) = match (highlighted, state.selected_column) {
+            (false, _) => (None, None),
+            (true, Some(container)) => (None, Some(container)),
+            (true, None) => (state.focused_window(), None),
         };
 
         let mut windows = Vec::new();
@@ -183,14 +184,15 @@ impl ScrollingStrategy {
             let Some(visible_border_box) = border_box.clip(screen) else {
                 continue;
             };
+            let is_highlighted = selected_column == Some(column.container);
             containers.push(ContainerPlacement {
                 id: column.container,
                 border_box,
                 visible_border_box,
                 tab_bar_band: PixelRect::ZERO,
                 visible_tab_bar_band: PixelRect::ZERO,
-                is_highlighted: false,
-                spawn_direction: None,
+                is_highlighted,
+                spawn_direction: is_highlighted.then_some(Direction::Vertical),
                 is_tabbed: false,
                 active_tab_index: 0,
                 titles: container_titles(hub, column.container),

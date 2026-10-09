@@ -113,6 +113,24 @@ impl ValidateStrategy for ScrollingStrategy {
                 history, in_columns,
                 "scrolling {ws_id}: focus_history does not match the columns"
             );
+            if let Some(selected) = state.selected_column {
+                let holds_focus = state.focused_window().is_some_and(|focus| {
+                    state
+                        .columns
+                        .iter()
+                        .any(|column| column.container == selected)
+                        && hub
+                            .containers
+                            .get(selected)
+                            .children()
+                            .contains(&Child::Window(focus))
+                });
+                assert!(
+                    holds_focus,
+                    "scrolling {ws_id}: selected column {selected} is not the column of the \
+                     focused window"
+                );
+            }
 
             let (max_x, max_y) = max_offsets(&self.column_dimensions(hub, ws_id), state.work_area);
             assert!(

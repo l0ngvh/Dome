@@ -41,9 +41,9 @@ impl ScrollingStrategy {
         state.columns[column].y_offset = new_y;
     }
 
-    /// Pixels of the focused window past the work area edge on the `forward` side of
-    /// `direction`. The measure uses the rendered border box in whole pixels, so an f32
-    /// remainder in an offset never counts as a hidden part.
+    /// Pixels of the focused window, or of the whole column while it is selected, past the work
+    /// area edge on the `forward` side of `direction`. The measure uses the rendered border box
+    /// in whole pixels, so an f32 remainder in an offset never counts as a hidden part.
     fn hidden_extent(
         &self,
         hub: &HubAccess,
@@ -59,8 +59,13 @@ impl ScrollingStrategy {
             return Pixels::ZERO;
         };
         let screen = state.work_area;
+        let dimension = if state.selected_column.is_some() {
+            self.column_dimensions(hub, ws_id)[column]
+        } else {
+            self.window_states[&focus].dimension
+        };
         let rect = translate(
-            self.window_states[&focus].dimension,
+            dimension,
             state.x_offset,
             state.columns[column].y_offset,
             screen.x(),
@@ -75,9 +80,9 @@ impl ScrollingStrategy {
         hidden.max(Pixels::ZERO)
     }
 
-    /// Scrolls toward the part of the focused window that lies past the work area edge on the
-    /// `forward` side of `direction`, by at most one viewport length. Returns false, and changes
-    /// nothing, when no such part exists.
+    /// Scrolls toward the part of the focused window, or of the selected column, that lies past
+    /// the work area edge on the `forward` side of `direction`, by at most one viewport length.
+    /// Returns false, and changes nothing, when no such part exists.
     pub(super) fn reveal_hidden_part(
         &mut self,
         hub: &HubAccess,

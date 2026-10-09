@@ -146,6 +146,14 @@ impl TilingStrategy for PartitionTreeStrategy {
         container_id: ContainerId,
         ws_id: WorkspaceId,
     ) {
+        // A tree container holds at least two children, so the container of a group of one
+        // window is freed and its window attached directly.
+        if let [Child::Window(window_id)] = *hub.containers.get(container_id).children() {
+            hub.free_container(container_id);
+            self.attach_tiling_window(hub, window_id, ws_id, None);
+            self.focus_tiling(hub, ws_id, Child::Window(window_id));
+            return;
+        }
         // Reversed because a preorder walk yields parents first, and a container must
         // exist before its parent links to it. The root's parent is a placeholder,
         // overwritten by the attach below.

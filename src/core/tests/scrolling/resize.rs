@@ -1,6 +1,6 @@
 use super::{
-    border_boxes, border_boxes_by_window, dev_hub, insert, process_matcher, scrolling_hub,
-    scrolling_hub_with,
+    border_boxes, border_boxes_by_window, column_widths, dev_hub, insert, process_matcher,
+    scrolling_hub, scrolling_hub_with,
 };
 use crate::core::hub::Hub;
 use crate::core::node::{Length, LimitObservation, LimitUpdate, Pixels, WindowId};
@@ -68,18 +68,6 @@ fn limit(value: f32) -> LimitUpdate {
 fn press(hub: &mut Hub, action: fn(&mut Hub), times: usize) {
     for _ in 0..times {
         action(hub);
-    }
-}
-
-/// The stored width of each column of the current workspace, left to right.
-fn column_widths(hub: &Hub) -> Vec<Option<SizeConstraint>> {
-    match hub.export_workspace(hub.current_workspace()).tiling {
-        PreferredTiling::Scrolling(scrolling) => scrolling
-            .columns
-            .iter()
-            .map(|column| column.width)
-            .collect(),
-        other => panic!("workspace should be scrolling, got {other:?}"),
     }
 }
 

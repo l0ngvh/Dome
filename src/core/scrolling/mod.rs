@@ -61,6 +61,7 @@ impl TilingStrategy for ScrollingStrategy {
                 column_width: layout.column_width,
                 columns: Vec::new(),
                 focus_history: Vec::new(),
+                selected_column: None,
                 x_offset: Length::ZERO,
                 work_area: host.work_area,
                 scale: host.scale,
@@ -122,6 +123,15 @@ impl TilingStrategy for ScrollingStrategy {
         }
     }
 
+    fn attach_container(
+        &mut self,
+        hub: &mut HubAccess,
+        container_id: ContainerId,
+        ws_id: WorkspaceId,
+    ) {
+        self.attach_column(hub, ws_id, container_id);
+    }
+
     fn detach_window(&mut self, hub: &mut HubAccess, id: WindowId) -> DisplayMode {
         let ws_id = hub
             .windows
@@ -134,6 +144,15 @@ impl TilingStrategy for ScrollingStrategy {
         }
         self.detach_tiling_window(hub, ws_id, id);
         DisplayMode::Tiling
+    }
+
+    fn detach_container(
+        &mut self,
+        hub: &mut HubAccess,
+        container_id: ContainerId,
+        ws_id: WorkspaceId,
+    ) {
+        self.detach_column(hub, ws_id, container_id);
     }
 
     fn set_fullscreen(&mut self, hub: &mut HubAccess, window_id: WindowId) {
@@ -157,6 +176,7 @@ impl TilingStrategy for ScrollingStrategy {
                 self.move_direction(hub, ws_id, direction, forward)
             }
             StrategyAction::ToggleSpawnMode if tiling_has_focus => self.toggle_spawn_mode(ws_id),
+            StrategyAction::FocusParent if tiling_has_focus => self.focus_parent(hub, ws_id),
             StrategyAction::Grow if tiling_has_focus => {
                 self.resize_focused_column(hub, ws_id, true)
             }
@@ -166,6 +186,7 @@ impl TilingStrategy for ScrollingStrategy {
             StrategyAction::FocusDirection { .. }
             | StrategyAction::MoveDirection { .. }
             | StrategyAction::ToggleSpawnMode
+            | StrategyAction::FocusParent
             | StrategyAction::Grow
             | StrategyAction::Shrink => {
                 tracing::debug!("Tiling action while a fullscreen window has focus");
@@ -176,7 +197,6 @@ impl TilingStrategy for ScrollingStrategy {
             }
             StrategyAction::ToggleDirection
             | StrategyAction::ToggleContainerLayout
-            | StrategyAction::FocusParent
             | StrategyAction::FocusTab { .. }
             | StrategyAction::TabClicked { .. }
             | StrategyAction::MoreMaster
@@ -303,6 +323,9 @@ struct WorkspaceState {
     /// Tiling windows from most to least recently focused. Always set-equal to the windows of
     /// `columns`.
     focus_history: Vec<WindowId>,
+    /// The container of the column selected as a whole rather than one of its windows. That
+    /// column holds the focused window, and the workspace reports it as its focused container.
+    selected_column: Option<ContainerId>,
     /// Left edge of the viewport, in unscrolled workspace space.
     x_offset: Length,
     /// The layout bounds, a copy of the host monitor's work area.
