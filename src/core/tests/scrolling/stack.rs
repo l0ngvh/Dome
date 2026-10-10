@@ -61,7 +61,7 @@ fn a_larger_minimum_height_keeps_its_minimum_in_a_stack() {
 }
 
 #[test]
-fn a_capped_window_is_centered_in_its_share() {
+fn a_capped_window_keeps_the_stack_together_in_the_middle_of_the_column() {
     let mut hub = dev_hub(vec![stack(&["a.exe", "b.exe"])]);
     let a = insert(&mut hub, "a.exe");
     let b = insert(&mut hub, "b.exe");
@@ -77,7 +77,7 @@ fn a_capped_window_is_centered_in_its_share() {
         border_boxes_by_window(&hub),
         vec![
             (a, PixelRect::new(60, 2, 30, 11)),
-            (b, PixelRect::new(60, 15, 30, 15)),
+            (b, PixelRect::new(60, 13, 30, 15)),
         ]
     );
     validate_hub(&hub);

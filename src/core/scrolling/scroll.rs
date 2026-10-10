@@ -1,21 +1,25 @@
 use crate::core::hub::HubAccess;
-use crate::core::node::{Direction, Length, Pixels, WorkspaceId};
+use crate::core::node::{Dimension, Direction, Length, Pixels, WorkspaceId};
 use crate::core::strategy::translate;
 
 use super::ScrollingStrategy;
 use super::placement::max_offsets;
 
 impl ScrollingStrategy {
-    /// Scrolls the least distance that shows the focused column across the row and the focused
-    /// window down its column.
-    pub(super) fn scroll_into_view(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
+    /// Scrolls the focused column into view across the row and the focused window down its
+    /// column. `columns` must be the workspace's `column_dimensions`.
+    pub(super) fn scroll_into_view(
+        &mut self,
+        hub: &HubAccess,
+        ws_id: WorkspaceId,
+        columns: &[Dimension],
+    ) {
         let Some(column) = self.focused_column_index(hub, ws_id) else {
             return;
         };
-        let columns = self.column_dimensions(hub, ws_id);
         let state = &self.workspaces[&ws_id];
         let screen = state.work_area;
-        let (max_x, max_y) = max_offsets(&columns, screen);
+        let (max_x, max_y) = max_offsets(columns, screen);
         let focus = state
             .focused_window()
             .expect("a focused column implies a focused window");
@@ -119,9 +123,9 @@ impl ScrollingStrategy {
     }
 }
 
-/// Least scroll that brings the span `[start, start + extent)` into a `viewport` starting at
+/// The offset that brings the span `[start, start + extent)` into a `viewport` starting at
 /// `offset`, clamped to `[0, max]`. A span longer than the viewport that already shows a part
-/// keeps `offset`, so a reveal in progress stays.
+/// keeps `offset`, so a partly revealed span is not snapped back to its start.
 fn scroll_axis(
     start: Length,
     extent: Length,
@@ -139,7 +143,8 @@ fn scroll_axis(
 }
 
 /// Least scroll that shows the whole span `[start, start + extent)`. A span longer than the
-/// viewport cannot show whole, so the function aligns the edge that faces the viewport.
+/// viewport cannot show whole. When it lies after the viewport, its start is aligned with the
+/// viewport's start, and otherwise its end is aligned with the viewport's end.
 fn nearest_edge(start: Length, extent: Length, offset: Length, viewport: Length) -> Length {
     let end = start + extent;
     if extent > viewport {

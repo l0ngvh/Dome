@@ -18,26 +18,36 @@ impl ScrollingStrategy {
         let usable_h = Length::from_pixels(state.work_area.height());
         let containers: Vec<ContainerId> = state.columns.iter().map(|c| c.container).collect();
         let rects = self.column_dimensions(hub, ws_id);
-        for (container, rect) in containers.into_iter().zip(rects) {
+        for (container, rect) in containers.into_iter().zip(&rects) {
             let windows = Self::column_windows(hub, container);
-            let heights = self.window_heights(hub, ws_id, &windows, usable_h);
-            let mut y = rect.y;
-            for (window_id, share) in windows.into_iter().zip(heights) {
-                let c = self.effective_constraints(hub, ws_id, window_id);
+            let constraints: Vec<Constraints> = windows
+                .iter()
+                .map(|&window_id| self.effective_constraints(hub, ws_id, window_id))
+                .collect();
+            let heights: Vec<Length> = self
+                .window_heights(hub, ws_id, &windows, usable_h)
+                .into_iter()
+                .zip(&constraints)
+                .map(|(share, c)| apply_max_constraint(c.max_height, share).0)
+                .collect();
+            // The windows stay together, so the height a capped window frees is split between
+            // the top and the bottom of the column.
+            let stack_h: Length = heights.iter().copied().sum();
+            let mut y = rect.y + ((rect.height - stack_h) / 2.0).max(Length::ZERO);
+            for ((window_id, c), height) in windows.into_iter().zip(&constraints).zip(heights) {
                 let (width, x_offset) = apply_max_constraint(c.max_width, rect.width);
-                let (height, y_offset) = apply_max_constraint(c.max_height, share);
                 self.window_states.get_mut(&window_id).unwrap().dimension =
-                    Dimension::new(rect.x + x_offset, y + y_offset, width, height);
-                y += share;
+                    Dimension::new(rect.x + x_offset, y, width, height);
+                y += height;
             }
         }
-        self.clamp_scroll(hub, ws_id);
-        self.scroll_into_view(hub, ws_id);
+        self.clamp_scroll(ws_id, &rects);
+        self.scroll_into_view(hub, ws_id, &rects);
     }
 
-    /// The share of the column height taken by each window, top to bottom. A zero maximum means
-    /// no cap, so every window gets an equal share and a window with a larger minimum keeps its
-    /// minimum.
+    /// Each window's share of the column height, top to bottom, with maximum heights ignored.
+    /// The windows share the height equally, except that a window with a larger minimum keeps
+    /// its minimum.
     pub(super) fn window_heights(
         &self,
         hub: &HubAccess,
@@ -114,11 +124,8 @@ impl ScrollingStrategy {
             })
     }
 
-    fn clamp_scroll(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
-        let (max_x, max_y) = max_offsets(
-            &self.column_dimensions(hub, ws_id),
-            self.workspaces[&ws_id].work_area,
-        );
+    fn clamp_scroll(&mut self, ws_id: WorkspaceId, columns: &[Dimension]) {
+        let (max_x, max_y) = max_offsets(columns, self.workspaces[&ws_id].work_area);
         let state = self.workspaces.get_mut(&ws_id).unwrap();
         state.x_offset = state.x_offset.clamp(Length::ZERO, max_x);
         for (column, max) in state.columns.iter_mut().zip(max_y) {

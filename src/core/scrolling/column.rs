@@ -106,15 +106,19 @@ impl ScrollingStrategy {
 
     /// Removes the window from its column, and removes the column and frees its container once
     /// it is empty. Tiling focus on the window moves by position, to the window that takes its
-    /// row, else to the window above it, else to the column that takes its column's place. A
-    /// selection stays while its column keeps a window.
+    /// row, else to the window above it, else to the column that takes its column's place. While
+    /// a float has focus and no column is selected, the tiling focus goes back to the window
+    /// focused before it instead. A selection stays while its column keeps a window.
     fn remove_window(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId, id: WindowId) {
         let column = self
             .column_index_of(hub, ws_id, id)
             .expect("a detached tiling window sits in a column");
         let state = self.workspaces.get_mut(&ws_id).unwrap();
         let container = state.columns[column].container;
-        let was_focused = state.focused_window() == Some(id);
+        // A selected column must hold the tiling focus, so a selection keeps the move by
+        // position.
+        let moves_focus = state.focused_window() == Some(id)
+            && (!state.float_windows.is_float_focused || state.selected_column.is_some());
         state.drop_from_history(id);
         let row = Self::row_of(hub, container, id);
         hub.containers.get_mut(container).children.remove(row);
@@ -122,10 +126,10 @@ impl ScrollingStrategy {
         if remaining.is_empty() {
             state.columns.remove(column);
             hub.free_container(container);
-            if was_focused {
+            if moves_focus {
                 self.focus_after_column_removal(hub, ws_id, column);
             }
-        } else if was_focused {
+        } else if moves_focus {
             state.record_focus(remaining[row.min(remaining.len() - 1)]);
         }
     }
@@ -239,7 +243,12 @@ impl ScrollingStrategy {
             .get(&ws_id)?
             .columns
             .iter()
-            .position(|column| Self::column_windows(hub, column.container).contains(&window_id))
+            .position(|column| {
+                hub.containers
+                    .get(column.container)
+                    .children()
+                    .contains(&Child::Window(window_id))
+            })
     }
 
     /// Panics when the column does not hold the window.

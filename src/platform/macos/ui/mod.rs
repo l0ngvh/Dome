@@ -313,7 +313,9 @@ impl AppHandler for WindowLoopHandler {
                         });
                         overlay.render(show, scene.focused_window == Some(show.placement.id));
 
-                        if is_new {
+                        // A window that was a mirror until this scene already has a running
+                        // capture, which the float takes over.
+                        if is_new && !state.captures.contains_key(&show.cg_id) {
                             capture_pairs.push(show.cg_id);
                         }
 
@@ -345,7 +347,11 @@ impl AppHandler for WindowLoopHandler {
                                     show.cg_id,
                                     MirrorOverlay::new(mtm, show, hub_sender.clone()),
                                 );
-                                capture_pairs.push(show.cg_id);
+                                // A window that was a float until this scene already has a
+                                // running capture, which the restart below points at the mirror.
+                                if !state.captures.contains_key(&show.cg_id) {
+                                    capture_pairs.push(show.cg_id);
+                                }
                                 true
                             }
                         };

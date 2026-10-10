@@ -33,7 +33,8 @@ impl ScrollingStrategy {
         state.float_windows.is_float_focused = false;
         state.record_focus(id);
         state.selected_column = None;
-        self.scroll_into_view(hub, ws_id);
+        let columns = self.column_dimensions(hub, ws_id);
+        self.scroll_into_view(hub, ws_id, &columns);
     }
 
     /// Selects the column of the focused window. A selected column stays selected.
