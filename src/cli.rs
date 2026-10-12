@@ -9,6 +9,15 @@ use crate::action::{
 };
 use crate::core::WindowId;
 
+pub fn run() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    execute(
+        dispatch_from(cli.command),
+        &crate::DomeClient,
+        &mut std::io::stdout(),
+    )
+}
+
 #[derive(Parser)]
 #[command(name = "dome", about = "A cross-platform tiling window manager")]
 struct Cli {
@@ -176,9 +185,8 @@ impl From<CliCommand> for Dispatch {
             CliCommand::Query { query } => Dispatch::Query(query),
             CliCommand::Generate { bar } => Dispatch::Generate(bar),
             CliCommand::UnminimizeWindow { id } => {
-                // WindowId's tuple-struct constructor is pub(crate) in core, so round-trip
-                // through serde instead. Its Deserialize impl accepts a bare integer, and
-                // every u64 fits in usize on the 64-bit targets Dome supports.
+                // WindowId's Deserialize impl accepts a bare integer, and every u64
+                // fits in usize on the 64-bit targets Dome supports.
                 let window_id: WindowId = serde_json::from_value(serde_json::json!(id))
                     .expect("WindowId round-trips from a bare integer");
                 Dispatch::Action(Action::UnminimizeWindow { id: window_id })
@@ -216,15 +224,6 @@ impl Client for crate::DomeClient {
     fn query<T: DeserializeOwned>(&self, query: &Query) -> anyhow::Result<T> {
         crate::DomeClient::query(self, query)
     }
-}
-
-pub fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
-    execute(
-        dispatch_from(cli.command),
-        &crate::DomeClient,
-        &mut std::io::stdout(),
-    )
 }
 
 fn execute(dispatch: Dispatch, client: &impl Client, out: &mut impl Write) -> anyhow::Result<()> {
@@ -327,7 +326,6 @@ fn master(target: MasterTarget) -> Dispatch {
     Dispatch::Action(Action::Master { target })
 }
 
-// Reordering these variants changes the sort order.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum GroupKey<'a> {
     /// Position of the row's monitor in the monitor list.
@@ -348,7 +346,7 @@ fn group_key<'a>(ws: &'a WorkspaceInfo, monitors: &[MonitorDetails]) -> GroupKey
     }
 }
 
-// Numeric names sort before text names. Swapping these variants reverses that.
+// Numeric names sort before text names.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum NameKey<'a> {
     /// The text breaks a tie between equal values such as `1` and `01`.
@@ -368,6 +366,7 @@ fn name_key(name: &str) -> NameKey<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::action::MonitorFrame;
     use clap::CommandFactory;
 
     fn dispatch_from_argv(argv: &[&str]) -> Dispatch {
@@ -809,5 +808,68 @@ mod tests {
                 .starts_with(r#"no connected monitor matches "Nope"."#),
             "{error}"
         );
+    }
+
+    #[test]
+    fn serialize_workspace_info_keeps_field_names() {
+        let info = WorkspaceInfo {
+            name: "main".to_string(),
+            monitor: "DELL #1".to_string(),
+            state: WorkspaceState::Attached,
+            is_focused: true,
+            is_visible: false,
+        };
+        let json: serde_json::Value = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["name"], "main");
+        assert_eq!(json["monitor"], "DELL #1");
+        assert_eq!(json["state"], "attached");
+        assert_eq!(json["is_focused"], true);
+        assert_eq!(json["is_visible"], false);
+        let back: WorkspaceInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(back, info);
+    }
+
+    #[test]
+    fn serialize_monitor_details_keeps_field_names_and_writes_none_as_null() {
+        let details = MonitorDetails {
+            device_name: "DELL SE2416H".to_string(),
+            unique_name: "DELL SE2416H #1".to_string(),
+            cg_display_id: Some(7),
+            gdi_device: Some("\\\\.\\DISPLAY1".to_string()),
+            work_area: MonitorFrame {
+                x: 100,
+                y: -50,
+                width: 1920,
+                height: 1080,
+            },
+        };
+        let json: serde_json::Value = serde_json::to_value(&details).unwrap();
+        assert_eq!(json["device_name"], "DELL SE2416H");
+        assert_eq!(json["unique_name"], "DELL SE2416H #1");
+        assert_eq!(json["cg_display_id"], 7);
+        assert_eq!(json["gdi_device"], "\\\\.\\DISPLAY1");
+        assert_eq!(json["work_area"]["x"], 100);
+        assert_eq!(json["work_area"]["y"], -50);
+        assert_eq!(json["work_area"]["width"], 1920);
+        assert_eq!(json["work_area"]["height"], 1080);
+        let back: MonitorDetails = serde_json::from_value(json).unwrap();
+        assert_eq!(back, details);
+
+        let missing = MonitorDetails {
+            cg_display_id: None,
+            gdi_device: None,
+            ..details
+        };
+        let missing_json = serde_json::to_value(&missing).unwrap();
+        assert_eq!(
+            missing_json.get("cg_display_id"),
+            Some(&serde_json::Value::Null)
+        );
+        assert_eq!(
+            missing_json.get("gdi_device"),
+            Some(&serde_json::Value::Null)
+        );
+        let back: MonitorDetails = serde_json::from_value(missing_json).unwrap();
+        assert_eq!(back, missing);
     }
 }

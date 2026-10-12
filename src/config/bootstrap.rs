@@ -6,7 +6,7 @@ use super::paths;
 
 pub(super) const STARTER_LUA: &str = include_str!("../../resources/config.starter.lua");
 
-pub(super) const META_LUA: &str = include_str!("../../resources/dome.meta.lua");
+pub(crate) const META_LUA: &str = include_str!("../../resources/dome.meta.lua");
 pub(super) const LUARC_JSON: &str = include_str!("../../resources/config.luarc.json");
 
 // An explicit `-c <path>` is used as given, even when it is missing.

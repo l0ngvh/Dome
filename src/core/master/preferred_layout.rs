@@ -14,16 +14,6 @@ pub(crate) struct PaneConfig {
     pub(crate) children: Vec<WindowMatcher>,
 }
 
-impl PaneConfig {
-    #[cfg(test)]
-    pub(crate) fn tiled(children: Vec<WindowMatcher>) -> Self {
-        Self {
-            display: PaneDisplay::Tiled,
-            children,
-        }
-    }
-}
-
 /// Accepts either a bare list of matchers or a table carrying `display` and
 /// `children`.
 impl FromLuaValue for PaneConfig {
@@ -85,42 +75,6 @@ impl MasterStrategy {
         self.insert_in_slot_order(hub, ws_id, PaneKind::Master, window_id, slot);
     }
 
-    fn insert_in_slot_order(
-        &self,
-        hub: &mut HubAccess,
-        ws_id: WorkspaceId,
-        kind: PaneKind,
-        window_id: WindowId,
-        slot: SlotId,
-    ) {
-        let pane = self.workspaces.get(&ws_id).unwrap().pane(kind);
-        let slot_position = pane.slots.iter().position(|&x| x == slot).unwrap();
-        // Insert in preferred-layout order. Moved windows break that order, so placing the
-        // window right before the first later slot is acceptable.
-        let insert_position = hub
-            .containers
-            .get(pane.container)
-            .children()
-            .iter()
-            .position(|c| {
-                let Child::Window(w) = c else {
-                    return false;
-                };
-                let Some(held) = held_tiling_slot(&hub.slots, *w, ws_id) else {
-                    return false;
-                };
-                pane.slots
-                    .iter()
-                    .position(|&s| s == held)
-                    .is_some_and(|s| s > slot_position)
-            })
-            .unwrap_or_else(|| hub.containers.get(pane.container).children().len());
-        hub.containers
-            .get_mut(pane.container)
-            .children
-            .insert(insert_position, Child::Window(window_id));
-    }
-
     pub(super) fn allocate_slots(
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
@@ -153,6 +107,41 @@ impl MasterStrategy {
                 children: Self::export_pane(hub, &secondary),
             },
         }
+    }
+
+    fn insert_in_slot_order(
+        &self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        kind: PaneKind,
+        window_id: WindowId,
+        slot: SlotId,
+    ) {
+        let pane = self.workspaces.get(&ws_id).unwrap().pane(kind);
+        let slot_position = pane.slots.iter().position(|&x| x == slot).unwrap();
+        // Moved windows may no longer follow preferred-layout order.
+        let insert_position = hub
+            .containers
+            .get(pane.container)
+            .children()
+            .iter()
+            .position(|c| {
+                let Child::Window(w) = c else {
+                    return false;
+                };
+                let Some(held) = held_tiling_slot(&hub.slots, *w, ws_id) else {
+                    return false;
+                };
+                pane.slots
+                    .iter()
+                    .position(|&s| s == held)
+                    .is_some_and(|s| s > slot_position)
+            })
+            .unwrap_or_else(|| hub.containers.get(pane.container).children().len());
+        hub.containers
+            .get_mut(pane.container)
+            .children
+            .insert(insert_position, Child::Window(window_id));
     }
 
     fn export_pane(hub: &HubAccess, pane: &[WindowId]) -> Vec<WindowMatcher> {

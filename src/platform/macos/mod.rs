@@ -16,7 +16,7 @@ mod throttle;
 mod ui;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod test_fixture;
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;

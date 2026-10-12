@@ -126,7 +126,7 @@ pub(super) enum HubEvent {
 /// may dispatch work to background threads -- by the time results arrive the window may
 /// have been removed, so resolution to `WindowId` happens here where the registry can be
 /// checked.
-pub(super) struct Dome {
+pub(crate) struct Dome {
     hub: Hub,
     registry: WindowRegistry,
     monitors: MonitorRegistry,
@@ -160,7 +160,7 @@ impl Dome {
         clippy::too_many_arguments,
         reason = "constructor wiring the platform collaborators, the runtime, and the keymap publisher"
     )]
-    pub(super) fn new(
+    pub(crate) fn new(
         tiling: TilingConfig,
         workspace_overrides: PreferredLayouts,
         taskbar: Rc<dyn ManageTaskbar>,
@@ -236,7 +236,7 @@ impl Dome {
         })
     }
 
-    pub(super) fn tiling_overlay_ready(
+    pub(crate) fn tiling_overlay_ready(
         &mut self,
         monitor: MonitorId,
         overlay: Arc<dyn ManageOverlay>,
@@ -246,7 +246,7 @@ impl Dome {
         }
     }
 
-    pub(super) fn float_overlay_ready(
+    pub(crate) fn float_overlay_ready(
         &mut self,
         window: WindowId,
         overlay: Arc<dyn ManageOverlay>,
@@ -271,7 +271,7 @@ impl Dome {
         skip(self, id_key),
         fields(hwnd = %id_key),
     )]
-    pub(super) fn window_destroyed(&mut self, id_key: HwndId) {
+    pub(crate) fn window_destroyed(&mut self, id_key: HwndId) {
         self.clear_move_state(id_key);
         self.taskbar.delete_tab(id_key);
         self.recovery.untrack(id_key);
@@ -287,7 +287,7 @@ impl Dome {
         skip(self, id_key),
         fields(hwnd = %id_key),
     )]
-    pub(super) fn window_minimized(&mut self, id_key: HwndId) {
+    pub(crate) fn window_minimized(&mut self, id_key: HwndId) {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
         };
@@ -305,15 +305,15 @@ impl Dome {
         self.apply_layout();
     }
 
-    pub(super) fn move_size_started(&mut self, id_key: HwndId) {
+    pub(crate) fn move_size_started(&mut self, id_key: HwndId) {
         self.placement_tracker.drag_started(id_key);
     }
 
-    pub(super) fn clear_move_state(&mut self, id_key: HwndId) {
+    pub(crate) fn clear_move_state(&mut self, id_key: HwndId) {
         self.placement_tracker.clear(id_key);
     }
 
-    pub(super) fn location_changed(&mut self, id_key: HwndId) -> bool {
+    pub(crate) fn location_changed(&mut self, id_key: HwndId) -> bool {
         self.placement_tracker.location_changed(id_key)
     }
 
@@ -322,12 +322,12 @@ impl Dome {
         self.update_monitors(monitors)
     }
 
-    pub(super) fn tab_clicked(&mut self, container_id: ContainerId, tab_idx: usize) {
+    pub(crate) fn tab_clicked(&mut self, container_id: ContainerId, tab_idx: usize) {
         self.hub.focus_tab_index(container_id, tab_idx);
         self.apply_layout();
     }
 
-    pub(super) fn thumbnail_clicked(&mut self, id: WindowId) {
+    pub(crate) fn thumbnail_clicked(&mut self, id: WindowId) {
         let Some(entry) = self.registry.get(id) else {
             return;
         };
@@ -347,7 +347,7 @@ impl Dome {
         }
     }
 
-    pub(super) fn handle_display_change(&mut self) -> Vec<HwndId> {
+    pub(crate) fn handle_display_change(&mut self) -> Vec<HwndId> {
         let to_refresh = match self.display.get_all_monitors() {
             Ok(monitors) => self.monitors_changed(monitors),
             Err(e) => {
@@ -377,7 +377,7 @@ impl Dome {
         }
     }
 
-    pub(super) fn handle_dpi_change(&mut self) -> Vec<HwndId> {
+    pub(crate) fn handle_dpi_change(&mut self) -> Vec<HwndId> {
         match self.display.get_all_monitors() {
             Ok(monitors) => {
                 tracing::info!("DPI changed, refreshing monitor scale");
@@ -391,7 +391,7 @@ impl Dome {
     }
 
     #[tracing::instrument(skip_all, fields(pid = ext.pid(), hwnd = %ext.id(), metadata = %metadata))]
-    pub(super) fn add_window(
+    pub(crate) fn add_window(
         &mut self,
         NewWindow {
             ext,
@@ -443,7 +443,7 @@ impl Dome {
         self.apply_layout();
     }
 
-    pub(super) fn set_constraints_for(&mut self, hwnd_id: HwndId, constraints: LimitObservation) {
+    pub(crate) fn set_constraints_for(&mut self, hwnd_id: HwndId, constraints: LimitObservation) {
         let Some(id) = self.registry.get_id(hwnd_id) else {
             return;
         };
@@ -454,7 +454,7 @@ impl Dome {
         skip(self, id_key),
         fields(hwnd = %id_key),
     )]
-    pub(super) fn handle_focus(&mut self, id_key: HwndId) {
+    pub(crate) fn handle_focus(&mut self, id_key: HwndId) {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
         };
@@ -478,17 +478,17 @@ impl Dome {
         self.hub.query_workspaces()
     }
 
-    pub(super) fn query_workspaces_json(&self) -> String {
+    pub(crate) fn query_workspaces_json(&self) -> String {
         serde_json::to_string(&self.hub.query_workspaces())
             .expect("WorkspaceInfo is infallibly serializable")
     }
 
-    pub(super) fn query_monitors_json(&self) -> String {
+    pub(crate) fn query_monitors_json(&self) -> String {
         serde_json::to_string(&self.hub.query_monitors())
             .expect("MonitorDetails is infallibly serializable")
     }
 
-    pub(super) fn query_minimized_windows_json(&self) -> String {
+    pub(crate) fn query_minimized_windows_json(&self) -> String {
         let entries: Vec<MinimizedWindow> = self
             .hub
             .minimized_window_entries()
@@ -518,7 +518,7 @@ impl Dome {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(super) fn handle_actions(&mut self, actions: &Actions, main_thread_id: u32) {
+    pub(crate) fn handle_actions(&mut self, actions: &Actions, main_thread_id: u32) {
         let mut effects = WinPlatformEffects {
             registry: &mut self.registry,
             main_thread_id,
@@ -529,7 +529,7 @@ impl Dome {
         self.apply_layout();
     }
 
-    pub(super) fn reload(&mut self) -> Option<Box<Config>> {
+    pub(crate) fn reload(&mut self) -> Option<Box<Config>> {
         let config = self.hub.reload_config(&mut self.keymap_publisher)?;
         self.env = config.env.clone();
         self.dispatch(HubMessage::AppearanceChanged(config.appearance.clone()));
@@ -539,7 +539,7 @@ impl Dome {
     }
 
     #[tracing::instrument(level = "trace", skip_all)]
-    pub(super) fn apply_layout(&mut self) {
+    pub(crate) fn apply_layout(&mut self) {
         let created = std::mem::take(&mut self.pending_created);
 
         let result = self.hub.get_visible_placements();
@@ -717,7 +717,7 @@ impl Dome {
 
     /// Returns `true` when the window settled on a different monitor than
     /// before, the signal to re-read its size constraints.
-    pub(super) fn handle_window_moved(
+    pub(crate) fn handle_window_moved(
         &mut self,
         id_key: HwndId,
         new_placement: PixelRect<Physical>,
@@ -737,7 +737,7 @@ impl Dome {
         monitor_changed
     }
 
-    pub(super) fn update_titles(&mut self, titles: Vec<(HwndId, Option<String>)>) {
+    pub(crate) fn update_titles(&mut self, titles: Vec<(HwndId, Option<String>)>) {
         for (hwnd_id, title) in &titles {
             if let (Some(window_id), Some(title)) = (self.registry.get_id(*hwnd_id), title)
                 && self.hub.set_window_title(window_id, title.clone())
@@ -750,7 +750,7 @@ impl Dome {
         self.apply_layout();
     }
 
-    pub(super) fn retry_drifted_windows(&mut self) {
+    pub(crate) fn retry_drifted_windows(&mut self) {
         let window_ids: Vec<(HwndId, WindowId)> = self.registry.iter().collect();
         for (_hwnd_id, window_id) in window_ids {
             self.retry_drift(window_id);
@@ -759,11 +759,6 @@ impl Dome {
 
     pub(super) fn is_managed(&self, id_key: HwndId) -> bool {
         self.registry.contains_hwnd(id_key)
-    }
-
-    #[cfg(test)]
-    pub(super) fn window_id_for(&self, hwnd: HwndId) -> Option<WindowId> {
-        self.registry.get_id(hwnd)
     }
 
     fn dispatch(&mut self, msg: HubMessage) {

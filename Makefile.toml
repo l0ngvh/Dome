@@ -25,9 +25,14 @@ dependencies = ["fmt", "clippy", "test", "deny"]
 
 [tasks.coverage]
 clear = true
+workspace = false
 script_runner = "@shell"
 script = '''
-cargo +nightly llvm-cov test --lib --branch --lcov --output-path lcov.info
+# --no-report keeps earlier profiles, so clean them before measuring a deleted test's effect.
+cargo +nightly llvm-cov clean --workspace
+cargo +nightly llvm-cov test --workspace --lib --bins --branch --no-report -- --skip tests::smoke
+cargo +nightly llvm-cov report --package '*' --ignore-filename-regex '/tests/' --lcov --output-path lcov.info
+cargo +nightly llvm-cov report --package '*' --ignore-filename-regex '/tests/'
 '''
 
 [tasks.coverage-html]

@@ -72,11 +72,6 @@ impl FullscreenWindows {
         std::mem::take(&mut self.windows)
     }
 
-    #[cfg(test)]
-    pub(super) fn windows(&self) -> impl Iterator<Item = WindowId> + '_ {
-        self.windows.iter().copied()
-    }
-
     fn position(&self, window_id: WindowId) -> Option<usize> {
         self.windows.iter().position(|&id| id == window_id)
     }
@@ -100,7 +95,6 @@ impl Hub {
 
     #[tracing::instrument(skip(self))]
     pub(crate) fn unset_fullscreen(&mut self, window_id: WindowId) {
-        // A minimized window sits in no workspace, so no fullscreen stack holds it.
         let Some(ws) = self.access.windows.get(window_id).workspace() else {
             return;
         };

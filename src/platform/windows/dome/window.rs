@@ -16,10 +16,10 @@ use crate::platform::windows::handle::OFFSCREEN_POS;
 /// together through `add_window` and the per-mode `insert_*_window`
 /// helpers. Exists to keep those signatures from accumulating ~five
 /// always-co-occurring scalars apiece.
-pub(in crate::platform::windows) struct NewWindow {
-    pub(in crate::platform::windows) ext: Arc<dyn ManageExternalWindow>,
-    pub(in crate::platform::windows) metadata: WindowsMetadata,
-    pub(in crate::platform::windows) constraints: LimitObservation,
+pub(crate) struct NewWindow {
+    pub(crate) ext: Arc<dyn ManageExternalWindow>,
+    pub(crate) metadata: WindowsMetadata,
+    pub(crate) constraints: LimitObservation,
 }
 
 impl std::fmt::Display for NewWindow {
@@ -30,7 +30,7 @@ impl std::fmt::Display for NewWindow {
 }
 
 #[derive(Debug, Clone)]
-pub(in crate::platform::windows) struct WindowsMetadata {
+pub(crate) struct WindowsMetadata {
     pub title: Option<String>,
     pub process: String,
     pub process_path: Option<String>,

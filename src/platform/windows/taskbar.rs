@@ -4,7 +4,7 @@ use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
 
 use crate::platform::windows::external::HwndId;
 
-pub(super) trait ManageTaskbar {
+pub(crate) trait ManageTaskbar {
     fn add_tab(&self, hwnd: HwndId);
     fn delete_tab(&self, hwnd: HwndId);
 }

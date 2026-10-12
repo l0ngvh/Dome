@@ -15,9 +15,6 @@ mod throttle;
 mod timer_registry;
 mod ui;
 
-#[cfg(test)]
-mod tests;
-
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -54,12 +51,22 @@ use crate::core::WindowId;
 use crate::ipc;
 use crate::platform::render::WgpuContext;
 use crate::platform::shell_menu::{build_menu, focused_tooltip, id_to_action};
-use dome::events::{HubMessage, SceneSender};
-use dome::{Dome, HubEvent};
+pub(crate) use dome::Dome;
+use dome::HubEvent;
+#[cfg(test)]
+pub(crate) use dome::events::{FloatOverlayAction, MonitorSetChange, RenderScene};
+pub(crate) use dome::events::{HubMessage, SceneSender};
+#[cfg(test)]
+pub(crate) use dome::monitor::{MonitorInfo, QueryDisplay};
+#[cfg(test)]
+pub(crate) use dome::window::{MAX_DRIFT_RETRIES, NewWindow, WindowsMetadata};
 use dome_auxiliary_window::{App, AppHandler, Icon, LoopWaker, MenuEntry, Shell};
 use event_listener::install_event_hooks;
-use external::HwndId;
-use external::ManageOverlay;
+pub(crate) use external::{HwndId, ManageOverlay};
+#[cfg(test)]
+pub(crate) use external::{ManageExternalWindow, ShowCmd, ZOrder};
+#[cfg(test)]
+pub(crate) use taskbar::ManageTaskbar;
 use ui::WindowThread;
 use ui::overlay::WgpuOverlayFactory;
 

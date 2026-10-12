@@ -1,9 +1,5 @@
-//! Dome's configuration surface.
-
 use std::collections::HashMap;
 
-#[cfg(test)]
-use anyhow::Result;
 use anyhow::anyhow;
 
 use crate::core::{TilingConfig, WindowMatcher};
@@ -19,9 +15,6 @@ mod overrides;
 pub(crate) mod paths;
 mod preferred_layout;
 pub(crate) mod watch;
-
-#[cfg(test)]
-pub(crate) mod tests;
 
 pub(crate) use crate::core::PreferredLayouts;
 pub(crate) use keybinding::{BASE_MODE, Keystroke, ModalKeymaps, Modifiers};
@@ -55,6 +48,9 @@ pub(crate) struct Appearance {
 }
 
 impl Config {
+    /// Invalid user fields recover through the field readers and bundled defaults.
+    /// File or Lua evaluation errors, a non-table result, or a missing required
+    /// bundled default fail the whole load instead.
     pub(crate) fn load(lua: &mlua::Lua, path: &str) -> anyhow::Result<Config> {
         let src = std::fs::read_to_string(path)?;
         let config = Self::from_lua(lua, path, &src).map_err(|e| anyhow!("{e}"))?;
@@ -67,11 +63,10 @@ impl Config {
         Ok(config)
     }
 
-    #[cfg(test)]
-    fn load_from_path(path: &str) -> Result<Self> {
-        let src = std::fs::read_to_string(path)?;
-        let config = Self::from_lua_src(path, &src).map_err(|e| anyhow!("{e}"))?;
-        Ok(config)
+    pub(crate) fn default_ignore() -> Vec<WindowMatcher> {
+        let vm = lua::new_vm().expect("the bundled Lua VM must build");
+        lua::evaluate(&vm, "bundled ignore", BUNDLED_IGNORE)
+            .expect("bundled ignore rules must be valid Lua window matchers")
     }
 
     fn from_lua(lua: &mlua::Lua, path: &str, src: &str) -> mlua::Result<Config> {
@@ -86,18 +81,6 @@ impl Config {
         tracing::debug!(rules = ?floor, "Built-in window-ignore floor");
         config.tiling.ignore.extend(floor);
         Ok(config)
-    }
-
-    #[cfg(test)]
-    fn from_lua_src(path: &str, src: &str) -> mlua::Result<Self> {
-        let lua = lua::new_vm()?;
-        Self::from_lua(&lua, path, src)
-    }
-
-    pub(crate) fn default_ignore() -> Vec<WindowMatcher> {
-        let vm = lua::new_vm().expect("the bundled Lua VM must build");
-        lua::evaluate(&vm, "bundled ignore", BUNDLED_IGNORE)
-            .expect("bundled ignore rules must be valid Lua window matchers")
     }
 }
 

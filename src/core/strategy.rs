@@ -1,13 +1,7 @@
 use rustc_hash::FxHashMap;
-#[cfg(test)]
-use rustc_hash::FxHashSet;
 
 use crate::core::MonitorSelector;
 use crate::core::TilingConfig;
-#[cfg(test)]
-use crate::core::float::FloatWindows;
-#[cfg(test)]
-use crate::core::fullscreen::FullscreenWindows;
 use crate::core::hub::{HubAccess, MonitorLayout};
 use crate::core::master::MasterStrategy;
 use crate::core::node::{
@@ -45,9 +39,9 @@ pub(crate) enum StrategyAction {
         container_id: ContainerId,
         index: usize,
     },
-    /// Widens the column of the focused tiling child, within the strategy's limits.
+    /// Widens the pane or column of the focused tiling child, within the strategy's limits.
     Grow,
-    /// Narrows the column of the focused tiling child, within the strategy's limits.
+    /// Narrows the pane or column of the focused tiling child, within the strategy's limits.
     Shrink,
     /// Raises the number of windows the master pane of the workspace holds.
     MoreMaster,
@@ -177,8 +171,8 @@ impl FocusedChild {
 
 /// Owns all non-minimized windows on its workspaces, including their modes, stacking and focus.
 /// Float support and the fullscreen toggle are optional. App-controlled fullscreen is required.
-/// A method changing layout computes placement before returning. No method searches, holds
-/// or releases a slot.
+/// A method changing layout computes placement before returning. No method selects a free
+/// matching window slot or holds or releases one. Held slots may be inspected for placement.
 pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Builds state and allocates free slots in the hub's arena, fullscreen slots first, then
     /// float slots, then tiling slots, each in layout order. Initializes the layout work area and
@@ -205,9 +199,9 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Inserts and records the destination workspace. Unsupported float or Dome-controlled
     /// fullscreen becomes tiling. App-controlled fullscreen remains fullscreen. The caller passes
     /// a slot only for tiling and holds it after this call. `Some(slot)` supplies the layout
-    /// position, while `None` uses default placement. The first actual tiling attachment
-    /// initializes remembered tiling focus, including a conversion from an unsupported mode.
-    /// Each nonempty mode retains a remembered target. Makes no explicit focus request.
+    /// position, while `None` uses default placement. Tiling focus can remain uninitialized
+    /// after attachment until a focus request or reset. Nonempty modes retain remembered
+    /// targets once initialized. Makes no explicit focus request.
     fn attach_window(
         &mut self,
         hub: &mut HubAccess,
@@ -280,12 +274,12 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     fn set_focus(&mut self, hub: &mut HubAccess, window_id: WindowId);
 
     /// Called once a reset has attached every window. Focuses the topmost fullscreen window,
-    /// otherwise the topmost float, otherwise the tiling focus that attachment initialized, then
-    /// recomputes placement.
+    /// otherwise the topmost float, otherwise selects tiling focus, then recomputes placement.
     fn reset_focus(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId);
 
     /// Returns effective focus in any mode, including a container representing a group. `None`
-    /// means exactly that the workspace has no window.
+    /// means the workspace is empty or its tiling focus has not yet been initialized and no
+    /// float or fullscreen window has focus.
     fn focused_child(&self, ws_id: WorkspaceId) -> Option<Child>;
 
     /// Updates this workspace's layout work area and scale, then recomputes placement
@@ -322,60 +316,6 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     fn apply_config(&mut self, hub: &mut HubAccess, tiling: &TilingConfig);
 }
 
-/// What one strategy's validator reached.
-#[cfg(test)]
-pub(super) struct Reachable {
-    pub(super) containers: FxHashSet<ContainerId>,
-    /// The windows of each workspace the strategy holds, in every mode. A workspace with no
-    /// window has an empty entry.
-    pub(super) windows: FxHashMap<WorkspaceId, Vec<WindowId>>,
-}
-
-#[cfg(test)]
-pub(super) trait ValidateStrategy {
-    /// Returns the container ids this strategy reaches from its workspace roots, with the windows
-    /// of each of its workspaces.
-    fn validate(&self, hub: &HubAccess) -> Reachable;
-}
-
-/// Absorbs the f32 error a constraint accumulates while being distributed.
-#[cfg(test)]
-pub(super) const VALIDATION_TOLERANCE: Length = Length::new(0.01);
-
-/// Panics when float focus is selected with no float to give it to, when a fullscreen window no
-/// longer exists, or when a tiling window or a float has restrictions, which only a fullscreen
-/// window can carry.
-#[cfg(test)]
-pub(super) fn validate_display_modes(
-    hub: &HubAccess,
-    ws_id: WorkspaceId,
-    tiling_windows: &[WindowId],
-    float_windows: &FloatWindows,
-    fullscreen_windows: &FullscreenWindows,
-) {
-    assert!(
-        !float_windows.is_float_focused || float_windows.topmost().is_some(),
-        "{ws_id}: float focus is selected but the workspace has no float"
-    );
-    for id in tiling_windows
-        .iter()
-        .copied()
-        .chain(float_windows.windows())
-    {
-        assert_eq!(
-            hub.windows.get(id).restrictions,
-            crate::core::WindowRestrictions::None,
-            "{ws_id}: {id} has restrictions but is not fullscreen"
-        );
-    }
-    for id in fullscreen_windows.windows() {
-        assert!(
-            hub.windows.contains(id),
-            "{ws_id}: fullscreen window {id} no longer exists"
-        );
-    }
-}
-
 /// Resolve one tiling window's effective constraints, in border-box space.
 ///
 /// `Window::limits` records what the app asked for, which describes its content
@@ -407,7 +347,7 @@ pub(crate) fn window_constraints(
 
     let outset = Length::from_pixels(hub.border_for_scale(scale) * 2);
     let limits = window.limits();
-    // Filter before the outset: a non-positive stored limit is not a limit at all, and outsetting
+    // Filter before the outset. A non-positive stored limit is not a limit at all, and outsetting
     // it first would turn it into a spurious `2 * border` cap that collapses the slot.
     let outset_limit = |v: Option<Length<Unit>>| {
         v.filter(|v| *v > Length::ZERO)
@@ -564,7 +504,7 @@ pub(crate) fn distribute_space(
     const EPSILON: f32 = 0.001;
 
     // Binary search converges in ~log2(container_size / EPSILON) iterations,
-    // typically ~24 for monitor-sized inputs. Cap at 64 per AGENTS.md no-unbounded-loop rule.
+    // typically ~24 for monitor-sized inputs.
     for _ in 0..64 {
         if uniform_high - uniform_low <= EPSILON {
             break;
@@ -629,22 +569,6 @@ impl StrategySet {
             .unwrap_or_else(|| panic!("workspace {ws_id:?} not registered with StrategySet"))
     }
 
-    fn get(&self, kind: Strategy) -> &dyn TilingStrategy {
-        match kind {
-            Strategy::PartitionTree => &self.partition_tree,
-            Strategy::Master => &self.master,
-            Strategy::Scrolling => &self.scrolling,
-        }
-    }
-
-    fn get_mut(&mut self, kind: Strategy) -> &mut dyn TilingStrategy {
-        match kind {
-            Strategy::PartitionTree => &mut self.partition_tree,
-            Strategy::Master => &mut self.master,
-            Strategy::Scrolling => &mut self.scrolling,
-        }
-    }
-
     pub(super) fn for_workspace(&self, ws_id: WorkspaceId) -> &dyn TilingStrategy {
         self.get(self.kind_of(ws_id))
     }
@@ -662,116 +586,19 @@ impl StrategySet {
         self.scrolling.apply_config(hub, tiling);
     }
 
-    /// Returns the workspace that holds each open window, after checking that every workspace
-    /// sits in the strategy it is assigned to and that no window sits in two places.
-    #[cfg(test)]
-    pub(super) fn validate(&self, hub: &HubAccess) -> FxHashMap<WindowId, WorkspaceId> {
-        let tree = self.partition_tree.validate(hub);
-        let master = self.master.validate(hub);
-        let scrolling = self.scrolling.validate(hub);
-
-        // The container arena is shared across strategies, so union every strategy's reachable
-        // set before the leak sweep, or one strategy's containers look leaked to another.
-        let mut reachable = tree.containers;
-        reachable.extend(master.containers);
-        reachable.extend(scrolling.containers);
-        let allocated: FxHashSet<ContainerId> = hub.containers.sorted_ids().into_iter().collect();
-
-        let mut leaked: Vec<ContainerId> = allocated.difference(&reachable).copied().collect();
-        leaked.sort_unstable();
-        assert!(
-            leaked.is_empty(),
-            "Containers allocated but reachable from no workspace root, so they leaked: {leaked:?}"
-        );
-        let mut dangling: Vec<ContainerId> = reachable.difference(&allocated).copied().collect();
-        dangling.sort_unstable();
-        assert!(
-            dangling.is_empty(),
-            "Containers reachable from a workspace root but not allocated: {dangling:?}"
-        );
-
-        let mut owners: FxHashMap<WindowId, WorkspaceId> = FxHashMap::default();
-        let mut held_workspaces: FxHashSet<WorkspaceId> = FxHashSet::default();
-        for (kind, windows) in [
-            (Strategy::PartitionTree, tree.windows),
-            (Strategy::Master, master.windows),
-            (Strategy::Scrolling, scrolling.windows),
-        ] {
-            for (ws_id, ids) in windows {
-                assert_eq!(
-                    self.kind_of(ws_id),
-                    kind,
-                    "{ws_id} has state in the {kind:?} strategy but is assigned to another"
-                );
-                held_workspaces.insert(ws_id);
-                for id in ids {
-                    if let Some(other) = owners.insert(id, ws_id) {
-                        panic!("{id} is listed twice, in {other} and in {ws_id}");
-                    }
-                }
-            }
+    fn get(&self, kind: Strategy) -> &dyn TilingStrategy {
+        match kind {
+            Strategy::PartitionTree => &self.partition_tree,
+            Strategy::Master => &self.master,
+            Strategy::Scrolling => &self.scrolling,
         }
-        for ws_id in hub.workspaces.sorted_ids() {
-            assert!(
-                held_workspaces.contains(&ws_id),
-                "{ws_id} has no state in the strategy it is assigned to"
-            );
+    }
+
+    fn get_mut(&mut self, kind: Strategy) -> &mut dyn TilingStrategy {
+        match kind {
+            Strategy::PartitionTree => &mut self.partition_tree,
+            Strategy::Master => &mut self.master,
+            Strategy::Scrolling => &mut self.scrolling,
         }
-        owners
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::node::Length;
-
-    #[test]
-    fn distribute_space_returns_mins_when_sum_exceeds_container() {
-        let constraints = vec![
-            (Length::new(60.0), Length::ZERO),
-            (Length::new(60.0), Length::ZERO),
-        ];
-        let result = distribute_space(&constraints, Length::new(100.0));
-        assert_eq!(result, vec![Length::new(60.0), Length::new(60.0)]);
-    }
-
-    #[test]
-    fn distribute_space_returns_maxes_when_all_fit() {
-        let constraints = vec![
-            (Length::new(10.0), Length::new(20.0)),
-            (Length::new(10.0), Length::new(20.0)),
-        ];
-        let result = distribute_space(&constraints, Length::new(100.0));
-        assert_eq!(result, vec![Length::new(20.0), Length::new(20.0)]);
-    }
-
-    #[test]
-    fn distribute_space_splits_uniformly_with_mixed_caps() {
-        // Child 0: uncapped (max=0 -> infinity), child 1: max=20, child 2: uncapped
-        let constraints = vec![
-            (Length::ZERO, Length::ZERO),
-            (Length::ZERO, Length::new(20.0)),
-            (Length::ZERO, Length::ZERO),
-        ];
-        let result = distribute_space(&constraints, Length::new(100.0));
-        // Child 1 pins at 20. Remaining 80 splits evenly between children 0 and 2.
-        assert!((result[1].value() - 20.0).abs() < 0.01);
-        assert!((result[0].value() - 40.0).abs() < 0.01);
-        assert!((result[2].value() - 40.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn distribute_space_pins_min_when_below_uniform() {
-        // Child 0 has min=50, so it stays at 50 when uniform target is ~35.
-        let constraints = vec![
-            (Length::new(50.0), Length::ZERO),
-            (Length::ZERO, Length::ZERO),
-            (Length::ZERO, Length::ZERO),
-        ];
-        let result = distribute_space(&constraints, Length::new(120.0));
-        assert!((result[0].value() - 50.0).abs() < 0.01);
-        assert!((result[1].value() - 35.0).abs() < 0.01);
-        assert!((result[2].value() - 35.0).abs() < 0.01);
     }
 }

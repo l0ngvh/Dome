@@ -1,0 +1,10 @@
+pub(crate) mod config_directory;
+pub(crate) mod configuration;
+mod key_bindings;
+mod layouts;
+mod platform;
+pub(crate) mod recording_keymap;
+mod smoke;
+mod snapshot;
+pub(crate) mod test_dome;
+mod window_management;

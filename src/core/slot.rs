@@ -86,22 +86,6 @@ pub(super) fn held_tiling_slot(
     held_slot(slots, window).filter(|&id| slots.get(id).is_tiling_on(ws_id))
 }
 
-/// The tiling slots of each workspace in arena id order.
-#[cfg(test)]
-pub(super) fn tiling_slots_by_workspace(
-    slots: &Allocator<Slot>,
-) -> rustc_hash::FxHashMap<WorkspaceId, Vec<SlotId>> {
-    let mut by_workspace: rustc_hash::FxHashMap<WorkspaceId, Vec<SlotId>> =
-        rustc_hash::FxHashMap::default();
-    for id in slots.sorted_ids() {
-        let slot = slots.get(id);
-        if matches!(slot.mode, WindowMode::Tiling) {
-            by_workspace.entry(slot.workspace).or_default().push(id);
-        }
-    }
-    by_workspace
-}
-
 impl Hub {
     /// Deletes every slot of the workspace, in all modes.
     pub(super) fn remove_slots(&mut self, ws_id: WorkspaceId) {
@@ -112,43 +96,6 @@ impl Hub {
     pub(super) fn release_slot(&mut self, window_id: WindowId) {
         if let Some(id) = held_slot(&self.access.slots, window_id) {
             self.access.slots.get_mut(id).release();
-        }
-    }
-
-    #[cfg(test)]
-    pub(super) fn validate_slots(&self) {
-        let rank = |mode: WindowMode| match mode {
-            WindowMode::Fullscreen => 0,
-            WindowMode::Float => 1,
-            WindowMode::Tiling => 2,
-        };
-        let mut holders = rustc_hash::FxHashSet::default();
-        let mut last_mode = rustc_hash::FxHashMap::default();
-        for id in self.access.slots.sorted_ids() {
-            let slot = self.access.slots.get(id);
-            assert!(
-                self.access.workspaces.contains(slot.workspace),
-                "{id:?} belongs to {}, which does not exist",
-                slot.workspace
-            );
-            if let Some(window_id) = slot.window {
-                assert!(
-                    self.access.windows.contains(window_id),
-                    "{id:?} holds window {window_id}, which is closed"
-                );
-                assert!(
-                    holders.insert(window_id),
-                    "window {window_id} holds more than one slot"
-                );
-            }
-            if let Some(previous) = last_mode.insert(slot.workspace, slot.mode) {
-                assert!(
-                    rank(previous) <= rank(slot.mode),
-                    "{}: {:?} slot {id:?} comes after a {previous:?} slot",
-                    slot.workspace,
-                    slot.mode
-                );
-            }
         }
     }
 }

@@ -7,8 +7,6 @@ mod fullscreen;
 mod placement;
 mod preferred_layout;
 mod tree;
-#[cfg(test)]
-mod validate;
 
 use self::preferred_layout::{PreferredContainerSlot, PreferredContainerSlotId, PreferredSlot};
 pub(crate) use crate::core::node::Child;

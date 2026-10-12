@@ -65,7 +65,8 @@ impl std::fmt::Display for DisplayMode {
 pub(crate) enum WindowRestrictions {
     #[default]
     None,
-    /// Blocks all user-initiated operations globally (Windows exclusive fullscreen).
+    /// Blocks restricted navigation, movement and display-mode actions while this window
+    /// has focus (Windows exclusive fullscreen).
     BlockAll,
     /// Protects platform-initiated fullscreen. Only the platform can undo it.
     ProtectFullscreen,
@@ -159,7 +160,6 @@ impl Window {
     }
 }
 
-/// Core-side twin of `MinimizedWindow` in `src/action.rs`.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MinimizedWindowEntry {
     pub(crate) id: WindowId,
@@ -245,7 +245,7 @@ impl<U> PartialOrd for Length<U> {
     }
 }
 
-// Intentionally no Add<f32>/Sub<f32>/From<f32>: raw scalars cross via Length::new / .value().
+// Intentionally no Add<f32>/Sub<f32>/From<f32>. Raw scalars cross via Length::new / .value().
 impl<U> Length<U> {
     pub(crate) const ZERO: Self = Self::new(0.0);
 
@@ -264,7 +264,7 @@ impl<U> Length<U> {
         Self::new(self.v.min(other.v))
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "windows"))]
     pub(crate) fn abs(self) -> Self {
         Self::new(self.v.abs())
     }
@@ -310,8 +310,8 @@ impl Length<Logical> {
     /// Raw `f32` accessor for callers that stay in logical space (config
     /// validation, platform shells bridging to egui's raw-f32 logical-point
     /// coordinate space). Not for core code that mixes with `Unit`-space
-    /// rectangles. Use `to_unit(scale).value()` instead. Greppable escape
-    /// hatch: should never appear in `src/core/**`.
+    /// rectangles. Use `to_unit(scale).value()` instead. This greppable escape
+    /// hatch should never appear in `src/core/**`.
     pub(crate) fn logical(self) -> f32 {
         self.v
     }
@@ -644,8 +644,6 @@ impl<U> Clone for Dimension<U> {
 }
 
 impl<U> Dimension<U> {
-    /// Does not catch positional swaps (e.g. x vs width) since all four args share
-    /// the same type. A builder would be needed for that, which is out of scope.
     pub(crate) const fn new(
         x: Length<U>,
         y: Length<U>,
@@ -670,7 +668,7 @@ impl<U> Default for Dimension<U> {
 
 /// A rectangle whose four edges lie on integer unit boundaries, so the on-grid
 /// invariant is carried by the representation rather than by a rounding call at
-/// each producer. The integer backing is load-bearing: placements are compared
+/// each producer. The integer backing matters because placements are compared
 /// for exact equality after an OS round-trip, which is not sound on `f32`.
 pub(crate) struct PixelRect<U = Unit> {
     x: Pixels<U>,
@@ -749,7 +747,7 @@ impl<U> PixelRect<U> {
         Self::new(left, top, right - left, bottom - top)
     }
 
-    /// The largest grid-aligned rectangle contained by `dim`: the origin moves up to
+    /// The largest grid-aligned rectangle contained by `dim`. The origin moves up to
     /// the next whole unit and the far edge back to the previous one, so the result can
     /// only shrink. Used for the monitor work area, which is a region a window must stay
     /// inside. Rounding to nearest would let a window cover a fraction of a pixel a
@@ -813,9 +811,7 @@ impl<U> PixelRect<U> {
         self.width.v <= 0 || self.height.v <= 0
     }
 
-    /// Clamps extent at zero rather than going negative. The origin is still pushed
-    /// inward, so a box narrower than `2 * border` ends up empty at an origin past
-    /// its own far edge.
+    /// Clamps extent at zero rather than going negative.
     pub(crate) fn inset_by(self, border: Pixels<U>) -> Self {
         Self::from_pixels(
             self.x + border,
