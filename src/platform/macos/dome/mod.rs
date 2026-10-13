@@ -1,21 +1,11 @@
-mod events;
-mod inspect;
+pub(super) mod events;
 mod layout;
 mod monitor;
-mod recovery;
-mod registry;
-mod window;
 
-pub(super) use events::{ContainerShow, FloatShow, HubEvent, HubMessage, TilingWindowShow};
-pub(super) use inspect::{
-    ExitNativeFullscreen, ExtRefresh, compute_reconcile_all, compute_reconciliation,
-    compute_window_positions,
-};
+pub(super) use events::{HubEvent, HubMessage};
 pub(super) use monitor::{MonitorInfo, get_all_monitors};
-use window::WindowState;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::time::Instant;
 
 use calloop::LoopSignal;
@@ -24,32 +14,32 @@ use objc2_core_graphics::CGWindowID;
 use crate::action::{Actions, MinimizedWindow};
 use crate::config::{Config, Keystroke, LuaRuntime, PlatformEffects, PreferredLayouts};
 use crate::core::{
-    ContainerId, Dimension, Hub, Length, Logical, PixelRect, WindowId, WindowMetadata,
-    WindowRestrictions,
+    ContainerId, Hub, LimitObservation, PixelRect, TilingConfig, WindowId, WindowRestrictions,
 };
-use crate::core::{TilingConfig, WindowMatcher, pattern_matches};
 use crate::platform::keymap::KeymapPublisher;
-use crate::platform::macos::accessibility::ExternalWindow;
 
+use events::{DiscoveredWindow, FocusTarget, FullscreenKind, WindowCommand};
 use monitor::MonitorRegistry;
-use recovery::Recovery;
-use registry::ManagedWindow;
-pub(in crate::platform::macos) use registry::WindowRegistry;
 
-struct MacPlatformEffects<'a> {
-    registry: &'a mut WindowRegistry,
+struct MacOsPlatformEffects<'a> {
+    native_keys: &'a HashMap<WindowId, CGWindowID>,
+    minimized: HashSet<WindowId>,
+    sender: &'a dyn SceneSender,
     signal: &'a LoopSignal,
     env: &'a HashMap<String, String>,
 }
 
-impl PlatformEffects for MacPlatformEffects<'_> {
+impl PlatformEffects for MacOsPlatformEffects<'_> {
     fn close(&mut self, id: WindowId) {
-        self.registry.close_window(id);
+        if let Some(&key) = self.native_keys.get(&id) {
+            self.sender
+                .send(HubMessage::Command(WindowCommand::Close(key)));
+        }
     }
 
     fn execute(&mut self, command: &str) {
-        if let Err(e) = crate::platform::macos::spawn::spawn_disclaimed_sh(command, self.env) {
-            tracing::warn!(%command, "Failed to execute: {e}");
+        if let Err(error) = crate::platform::macos::spawn::spawn_disclaimed_sh(command, self.env) {
+            tracing::warn!(%command, "Failed to execute: {error}");
         }
     }
 
@@ -58,156 +48,47 @@ impl PlatformEffects for MacPlatformEffects<'_> {
     }
 
     fn unminimize(&mut self, id: WindowId) {
-        self.registry.unminimize_window(id);
-    }
-}
-
-pub(in crate::platform::macos) struct NewWindow {
-    pub(in crate::platform::macos) ax: Arc<dyn ExternalWindow>,
-    pub(in crate::platform::macos) metadata: MacOSMetadata,
-}
-
-impl std::fmt::Display for NewWindow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[pid={}|cg={}] ", self.ax.pid(), self.ax.cg_id())?;
-        write!(f, "{}", self.metadata)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(in crate::platform::macos) struct MacOSMetadata {
-    pub title: Option<String>,
-    pub app_name: Option<String>,
-    pub bundle_id: Option<String>,
-}
-
-impl std::fmt::Display for MacOSMetadata {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.app_name.as_deref().unwrap_or("Unknown"))?;
-        if let Some(bid) = &self.bundle_id {
-            write!(f, " ({bid})")?;
-        }
-        if let Some(t) = &self.title {
-            write!(f, " - {t}")?;
-        }
-        Ok(())
-    }
-}
-
-impl WindowMetadata for MacOSMetadata {
-    fn app_name(&self) -> Option<String> {
-        self.app_name.clone()
-    }
-    fn title(&self) -> Option<&str> {
-        self.title.as_deref()
-    }
-    fn bundle_id(&self) -> Option<String> {
-        self.bundle_id.clone()
-    }
-    fn set_title(&mut self, title: String) {
-        self.title = Some(title);
-    }
-    fn clone_box(&self) -> Box<dyn WindowMetadata> {
-        Box::new(self.clone())
-    }
-
-    fn matches_window_matcher(&self, matcher: &WindowMatcher) -> bool {
-        let app = self.app_name.as_deref();
-        let bundle_id = self.bundle_id.as_deref();
-        let title = self.title.as_deref();
-
-        if let Some(p) = matcher.app.as_deref()
-            && !app.is_some_and(|a| pattern_matches(p, a))
+        if self.minimized.contains(&id)
+            && let Some(&key) = self.native_keys.get(&id)
         {
-            return false;
-        }
-        if let Some(p) = matcher.bundle_id.as_deref()
-            && !bundle_id.is_some_and(|b| pattern_matches(p, b))
-        {
-            return false;
-        }
-        if let Some(p) = matcher.title.as_deref()
-            && !title.is_some_and(|t| pattern_matches(p, t))
-        {
-            return false;
-        }
-        if app.is_none() && bundle_id.is_none() && title.is_none() {
-            return false;
-        }
-        matcher.app.is_some() || matcher.bundle_id.is_some() || matcher.title.is_some()
-    }
-
-    fn to_window_matcher(&self) -> WindowMatcher {
-        WindowMatcher {
-            app: self.app_name.clone(),
-            bundle_id: self.bundle_id.clone(),
-            title: self.title.clone(),
-            ..Default::default()
+            self.sender
+                .send(HubMessage::Command(WindowCommand::Unminimize(key)));
         }
     }
-}
-
-pub(in crate::platform::macos) enum PendingAdd {
-    Positioned {
-        new: NewWindow,
-        rect: PixelRect,
-        corner_radius: Length<Logical>,
-    },
-    /// Native fullscreen windows lives on their own space and thus has no dimension
-    NativeFullscreen { new: NewWindow },
-}
-
-/// Timestamps of the first and last AX move/resize notifications in a
-/// coalesced debounce burst (equal when only one fired). The first is
-/// compared against the post-placement debounce window (was this burst
-/// caused by our placement?), and the last against the latest placement
-/// time (is this burst stale?).
-#[derive(Debug, Copy, Clone)]
-pub(in crate::platform::macos) struct DebounceBurst {
-    pub(in crate::platform::macos) first: Instant,
-    pub(in crate::platform::macos) last: Instant,
-}
-
-pub(in crate::platform::macos) struct WindowMove {
-    pub(in crate::platform::macos) cg_id: CGWindowID,
-    pub(in crate::platform::macos) rect: PixelRect,
-    pub(in crate::platform::macos) observed_at: DebounceBurst,
 }
 
 pub(in crate::platform::macos) trait SceneSender: Send {
-    fn send(&self, msg: HubMessage);
+    fn send(&self, message: HubMessage);
 }
 
-/// Platform-specific state machine that bridges macOS accessibility events with the
-/// core tree model. Event-loop–facing methods accept `CGWindowID` rather than `WindowId`
-/// because callers dispatch work to background threads that capture registry snapshots —
-/// by the time results arrive the window may have been removed, so resolution to
-/// `WindowId` happens here where the registry can be checked.
+/// Domain policy retains identities and discovery metadata, never native handles.
 pub(in crate::platform::macos) struct Dome {
     hub: Hub,
-    registry: WindowRegistry,
+    window_ids: HashMap<CGWindowID, WindowId>,
+    native_keys: HashMap<WindowId, CGWindowID>,
+    // Ignored discoveries remain eligible for admission after a rule reload.
+    discoveries: HashMap<CGWindowID, DiscoveredWindow>,
     monitor_registry: MonitorRegistry,
-    /// The windows Dome currently has on screen. Owned here rather than per monitor entry
-    /// so it survives a monitor removal.
-    displayed_windows: HashSet<WindowId>,
-    /// Full height of the primary display (including menu bar/dock), used for Quartz→Cocoa
-    /// coordinate conversion in overlay rendering.
-    primary_full_height: f32,
-    observed_pids: HashSet<i32>,
     sender: Box<dyn SceneSender>,
-    last_focused: Option<WindowId>,
-    recovery: Recovery,
-    pending_created: Vec<WindowId>,
-    pending_deleted: Vec<WindowId>,
-    /// The last monitor enumeration, exactly as the OS reported it.
+    focus_request: Option<FocusTarget>,
+    last_focus_target: Option<FocusTarget>,
     monitors: Vec<MonitorInfo>,
-    /// Detection is suppressed while the display settles after a monitor change.
-    monitor_settling: bool,
+    displays_changed_at: Instant,
     keymap_publisher: KeymapPublisher,
     env: HashMap<String, String>,
 }
 
 impl Dome {
+    #[cfg(test)]
+    pub(in crate::platform::macos) fn with_hub<R>(
+        &mut self,
+        change: impl FnOnce(&mut Hub) -> R,
+    ) -> R {
+        let result = change(&mut self.hub);
+        self.flush_layout();
+        result
+    }
+
     pub(in crate::platform::macos) fn new(
         monitors: &[MonitorInfo],
         tiling: TilingConfig,
@@ -219,11 +100,10 @@ impl Dome {
     ) -> Self {
         let primary = monitors
             .iter()
-            .find(|s| s.is_primary)
+            .find(|monitor| monitor.is_primary)
             .unwrap_or(&monitors[0]);
-        let mut hub = Hub::new(primary.into(), tiling, workspace_overrides.clone(), runtime);
-        let primary_monitor_id = hub.primary_monitor();
-        let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
+        let mut hub = Hub::new(primary.into(), tiling, workspace_overrides, runtime);
+        let mut monitor_registry = MonitorRegistry::new(primary, hub.primary_monitor());
         for monitor in monitors {
             if monitor.display_id != primary.display_id {
                 let id = hub.add_monitor(monitor.into());
@@ -232,159 +112,243 @@ impl Dome {
         }
         Self {
             hub,
-            registry: WindowRegistry::new(),
+            window_ids: HashMap::new(),
+            native_keys: HashMap::new(),
+            discoveries: HashMap::new(),
             monitor_registry,
-            primary_full_height: primary.full_height,
-            observed_pids: HashSet::new(),
             sender,
-            last_focused: None,
-            recovery: Recovery::new(),
-            pending_created: Vec::new(),
-            pending_deleted: Vec::new(),
-            displayed_windows: HashSet::new(),
+            focus_request: None,
+            last_focus_target: None,
             monitors: monitors.to_vec(),
-            monitor_settling: false,
+            displays_changed_at: Instant::now(),
             keymap_publisher,
             env,
         }
     }
 
-    pub(in crate::platform::macos) fn refresh_ext_cache(&mut self, refresh: &[ExtRefresh]) {
-        for r in refresh {
-            if self
-                .registry
-                .replace_ext(r.cg_id, r.ext.clone(), r.corner_radius)
-            {
-                tracing::trace!(cg_id = %r.cg_id, pid = r.ext.pid(), "Replaced stale ext handle");
-            }
-        }
+    fn current_id(&self, key: CGWindowID) -> Option<WindowId> {
+        self.window_ids.get(&key).copied()
     }
 
-    #[tracing::instrument(skip_all)]
-    pub(in crate::platform::macos) fn reconcile_windows(
+    pub(in crate::platform::macos) fn windows_discovered(
         &mut self,
-        refresh: &[ExtRefresh],
-        removed: &[CGWindowID],
-        minimized: &[CGWindowID],
-        added: Vec<PendingAdd>,
-        to_enter_native_fullscreen: &[CGWindowID],
-        to_exit_native_fullscreen: &[ExitNativeFullscreen],
+        windows: Vec<DiscoveredWindow>,
     ) {
-        self.refresh_ext_cache(refresh);
-        for &cg_id in removed {
-            if let Some(entry) = self.registry.get(cg_id) {
-                self.remove_window(entry.window_id);
-            }
-        }
-        for &cg_id in minimized {
-            if let Some(entry) = self.registry.get(cg_id) {
-                self.minimize_window(entry.window_id);
-            }
-        }
-        for pending in added {
-            let new_ref = match &pending {
-                PendingAdd::Positioned { new, .. } | PendingAdd::NativeFullscreen { new } => new,
-            };
-            if self.registry.contains(new_ref.ax.cg_id()) {
-                continue;
-            }
-
-            match pending {
-                PendingAdd::NativeFullscreen { new } => {
-                    self.add_native_fullscreen_window(new);
-                }
-                PendingAdd::Positioned {
-                    new,
-                    rect,
-                    corner_radius,
-                } => {
-                    let ax_for_recovery = new.ax.clone();
-                    let borderless_fs = self.is_borderless_fullscreen_at(rect);
-                    let restrictions = if borderless_fs {
-                        WindowRestrictions::ProtectFullscreen
-                    } else {
-                        WindowRestrictions::None
-                    };
-                    let Some(id) =
-                        self.hub
-                            .insert_window(Box::new(new.metadata.clone()), rect, restrictions)
-                    else {
-                        let cg_id = new.ax.cg_id();
-                        let pid = new.ax.pid();
-                        crate::trace_once!(
-                            key: (cg_id, pid),
-                            %cg_id, %pid, %new, "Window ignored"
-                        );
-                        continue;
-                    };
-                    tracing::info!(%id, %new, "New window");
-                    let state = if borderless_fs {
-                        WindowState::BorderlessFullscreen
-                    } else {
-                        WindowState::Positioned(window::PositionedState::Offscreen(
-                            window::OffscreenPlacement::new(rect),
-                        ))
-                    };
-                    self.registry.insert(new, id, state, corner_radius);
-                    self.pending_created.push(id);
-                    self.recovery.track(
-                        ax_for_recovery,
-                        rect.width(),
-                        rect.height(),
-                        self.monitor_registry.primary_monitor().work_area,
-                    );
-                }
-            }
-        }
-        for &cg_id in to_enter_native_fullscreen {
-            if let Some(entry) = self.registry.get(cg_id) {
-                let window_id = entry.window_id;
-                self.window_entered_native_fullscreen(window_id);
-            }
-        }
-        for e in to_exit_native_fullscreen {
-            if let Some(entry) = self.registry.get_mut(e.cg_id)
-                && matches!(entry.state, WindowState::NativeFullscreen)
+        for mut discovery in windows {
+            if discovery.fullscreen.is_none()
+                && discovery
+                    .frame
+                    .is_some_and(|frame| self.monitor_registry.is_borderless_fullscreen_at(frame))
             {
-                entry.corner_radius = e.corner_radius;
-                let window_id = entry.window_id;
-                let now = Instant::now();
-                // NativeFullscreen doesn't emit any move/resize event, so we need to simulate one
-                self.window_moved(
-                    window_id,
-                    e.rect,
-                    DebounceBurst {
-                        first: now,
-                        last: now,
-                    },
-                );
+                discovery.fullscreen = Some(FullscreenKind::Borderless);
             }
+            let key = discovery.key;
+            if self
+                .discoveries
+                .get(&key)
+                .is_some_and(|old| old.process_id != discovery.process_id)
+            {
+                self.window_gone(key);
+            }
+            self.discoveries.insert(key, discovery);
+            self.admit_discovery(key);
         }
-        self.flush_layout();
     }
 
-    #[tracing::instrument(skip_all)]
-    pub(in crate::platform::macos) fn windows_moved(&mut self, moves: Vec<WindowMove>) {
-        for m in moves {
-            let Some(entry) = self.registry.get(m.cg_id) else {
-                continue;
-            };
-            let window_id = entry.window_id;
-            self.window_moved(window_id, m.rect, m.observed_at);
+    fn admit_discovery(&mut self, key: CGWindowID) {
+        if self.current_id(key).is_some() {
+            return;
         }
-        self.flush_layout();
+        let Some(discovery) = self.discoveries.get(&key) else {
+            return;
+        };
+        let restrictions = if discovery.fullscreen.is_some() {
+            WindowRestrictions::ProtectFullscreen
+        } else {
+            WindowRestrictions::None
+        };
+        let frame = match discovery.frame {
+            Some(frame) => frame,
+            None if discovery.minimized || discovery.fullscreen.is_some() => {
+                PixelRect::new(0, 0, 1, 1)
+            }
+            None => return,
+        };
+        let Some(id) =
+            self.hub
+                .insert_window(Box::new(discovery.metadata.clone()), frame, restrictions)
+        else {
+            return;
+        };
+        self.window_ids.insert(key, id);
+        self.native_keys.insert(id, key);
+        if discovery.minimized {
+            self.hub.minimize_window(id);
+        }
+        tracing::info!(%id, key, process_id = discovery.process_id, metadata = %discovery.metadata, "New window");
     }
 
-    pub(in crate::platform::macos) fn app_terminated(&mut self, pid: i32) {
-        self.remove_app_windows(pid);
-        self.flush_layout();
+    pub(in crate::platform::macos) fn window_gone(&mut self, key: CGWindowID) {
+        self.discoveries.remove(&key);
+        if let Some(id) = self.window_ids.remove(&key) {
+            self.native_keys.remove(&id);
+            self.hub.delete_window(id);
+        }
+    }
+
+    pub(in crate::platform::macos) fn window_minimized(&mut self, key: CGWindowID) {
+        if let Some(discovery) = self.discoveries.get_mut(&key) {
+            discovery.minimized = true;
+        }
+        if let Some(id) = self.current_id(key)
+            && !self.hub.window(id).is_minimized()
+        {
+            self.hub.minimize_window(id);
+        }
+    }
+
+    pub(in crate::platform::macos) fn window_restored(&mut self, key: CGWindowID) {
+        if let Some(discovery) = self.discoveries.get_mut(&key) {
+            discovery.minimized = false;
+        }
+        if let Some(id) = self.current_id(key)
+            && self.hub.window(id).is_minimized()
+        {
+            self.hub.unminimize_window(id);
+        }
+    }
+
+    pub(in crate::platform::macos) fn focus_reported(&mut self, key: CGWindowID) {
+        self.focus_request = None;
+        if let Some(id) = self.current_id(key)
+            && self.hub.window(id).workspace().is_some()
+            && !self.hub.window(id).is_minimized()
+        {
+            self.hub.set_focus(id);
+        }
+        // An unresolved foreground must not reassert the Hub's previous focus.
+        self.last_focus_target = Some(self.current_focus_target());
+    }
+
+    pub(in crate::platform::macos) fn title_changed(&mut self, key: CGWindowID, title: String) {
+        if let Some(discovery) = self.discoveries.get_mut(&key) {
+            discovery.metadata.title = Some(title.clone());
+        }
+        if let Some(id) = self.current_id(key) {
+            self.hub.set_window_title(id, title);
+        }
+    }
+
+    pub(in crate::platform::macos) fn size_constraint(
+        &mut self,
+        key: CGWindowID,
+        limits: LimitObservation,
+    ) {
+        let Some(id) = self.current_id(key) else {
+            return;
+        };
+        let window = self.hub.window(id);
+        if window.is_minimized()
+            || window.workspace().is_none()
+            || window.is_float()
+            || window.is_fullscreen()
+        {
+            return;
+        }
+        let visible = self.hub.get_visible_placements();
+        if visible
+            .monitors
+            .iter()
+            .any(|monitor| match &monitor.layout {
+                crate::core::MonitorLayout::Normal { tiling_windows, .. } => {
+                    tiling_windows.iter().any(|placement| placement.id == id)
+                }
+                crate::core::MonitorLayout::Fullscreen(_) => false,
+            })
+        {
+            self.hub.set_window_constraint(id, limits);
+        }
+    }
+
+    pub(in crate::platform::macos) fn float_moved(&mut self, key: CGWindowID, frame: PixelRect) {
+        let Some(id) = self.current_id(key) else {
+            return;
+        };
+        let window = self.hub.window(id);
+        if !window.is_float()
+            || window.is_minimized()
+            || !window
+                .workspace()
+                .is_some_and(|workspace| self.hub.visible_workspaces().contains(&workspace))
+        {
+            return;
+        }
+        let monitor = self
+            .monitor_registry
+            .find_closest_monitor(frame.to_dimension())
+            .map(|(monitor, _)| monitor)
+            .unwrap_or_else(|| self.hub.primary_monitor());
+        if frame.is_empty() || self.monitor_registry.is_borderless_fullscreen_at(frame) {
+            return;
+        }
+        self.hub.update_float_rect(id, frame, monitor);
+        if let Some(discovery) = self.discoveries.get_mut(&key) {
+            discovery.frame = Some(frame);
+        }
+    }
+
+    pub(in crate::platform::macos) fn fullscreen_changed(
+        &mut self,
+        key: CGWindowID,
+        fullscreen: Option<FullscreenKind>,
+        frame: Option<PixelRect>,
+    ) {
+        match fullscreen {
+            Some(FullscreenKind::Borderless)
+                if !frame.is_some_and(|frame| {
+                    self.monitor_registry.is_borderless_fullscreen_at(frame)
+                }) =>
+            {
+                return;
+            }
+            None if frame.is_none_or(|frame| {
+                frame.is_empty() || self.monitor_registry.is_borderless_fullscreen_at(frame)
+            }) =>
+            {
+                return;
+            }
+            _ => {}
+        }
+        let Some(id) = self.current_id(key) else {
+            if let Some(discovery) = self.discoveries.get_mut(&key) {
+                discovery.fullscreen = fullscreen;
+            }
+            return;
+        };
+        let window = self.hub.window(id);
+        if window.is_minimized() || window.workspace().is_none() {
+            return;
+        }
+        let previous = self
+            .discoveries
+            .get(&key)
+            .and_then(|discovery| discovery.fullscreen);
+        if fullscreen.is_some() {
+            self.hub
+                .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
+        } else if previous.is_some() && window.is_fullscreen() {
+            self.hub.unset_fullscreen(id);
+        }
+        if let Some(discovery) = self.discoveries.get_mut(&key) {
+            discovery.fullscreen = fullscreen;
+        }
     }
 
     pub(in crate::platform::macos) fn apply_layout_file(&mut self, path: &str) {
         let layouts = match PreferredLayouts::load(path) {
             Ok(layouts) => layouts,
-            Err(e) => {
-                tracing::error!("Apply layout failed: {e:#}");
+            Err(error) => {
+                tracing::error!("Apply layout failed: {error:#}");
                 return;
             }
         };
@@ -393,200 +357,51 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn tracked_window(
-        &self,
-        cg_id: CGWindowID,
-    ) -> Option<ManagedWindow> {
-        self.registry.get(cg_id).cloned()
-    }
-
-    #[tracing::instrument(skip(self), fields(cg_id = %cg_id))]
-    pub(in crate::platform::macos) fn focus_window_by_cg(&mut self, cg_id: CGWindowID) {
-        let Some(entry) = self.registry.get(cg_id) else {
-            return;
-        };
-        let window_id = entry.window_id;
-        // A minimized window holds no workspace, so the hub cannot focus it
-        // until the deminiaturize notification reattaches it.
-        if entry.is_minimized {
-            self.registry.unminimize_window(window_id);
-            return;
-        }
-        self.hub.set_focus(window_id);
-        self.flush_layout();
-    }
-
-    #[tracing::instrument(skip(self, title), fields(cg_id = %cg_id))]
-    pub(in crate::platform::macos) fn update_title(
-        &mut self,
-        cg_id: CGWindowID,
-        title: Option<String>,
-    ) {
-        if let Some(entry) = self.registry.get_mut(cg_id)
-            && let Some(title) = title
-        {
-            if self.hub.set_window_title(entry.window_id, title.clone()) {
-                tracing::trace!(title = %title, "Title changed");
-            }
-            self.flush_layout();
-        }
-    }
-
-    /// Takes effect at the next `flush_layout`.
-    pub(in crate::platform::macos) fn update_corner_radius(
-        &mut self,
-        cg_id: CGWindowID,
-        corner_radius: Length<Logical>,
-    ) {
-        if let Some(entry) = self.registry.get_mut(cg_id) {
-            entry.corner_radius = corner_radius;
-        }
-    }
-
     pub(in crate::platform::macos) fn monitors_changed(&mut self, monitors: Vec<MonitorInfo>) {
-        self.rehide_offscreen_windows(&monitors);
+        if monitors.is_empty() {
+            return;
+        }
         self.monitors = monitors;
         self.reconcile_monitors();
-        self.monitor_settling = true;
+        self.displays_changed_at = Instant::now();
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn finish_monitor_settle(&mut self) {
-        self.monitor_settling = false;
-    }
-
-    #[tracing::instrument(skip(self), fields(cg_id = %cg_id))]
-    pub(in crate::platform::macos) fn mirror_clicked(&mut self, cg_id: CGWindowID) {
-        let Some(entry) = self.registry.get(cg_id) else {
+    pub(in crate::platform::macos) fn mirror_clicked(&mut self, key: CGWindowID) {
+        let Some(id) = self.current_id(key) else {
             return;
         };
-        let window_id = entry.window_id;
-        let ext = entry.ext.clone();
-        if entry.is_minimized {
-            self.registry.unminimize_window(window_id);
+        if self.hub.window(id).is_minimized() {
+            self.sender
+                .send(HubMessage::Command(WindowCommand::Unminimize(key)));
             return;
         }
-        if let Err(e) = ext.focus() {
-            tracing::debug!("Failed to focus window: {e:#}");
-        }
-        self.hub.set_focus(window_id);
+        self.hub.set_focus(id);
+        self.focus_request = Some(FocusTarget::Window(key));
         self.flush_layout();
     }
 
-    #[tracing::instrument(skip(self), fields(container_id = %container_id, tab_idx))]
-    pub(in crate::platform::macos) fn tab_clicked(
-        &mut self,
-        container_id: ContainerId,
-        tab_idx: usize,
-    ) {
-        self.hub.focus_tab_index(container_id, tab_idx);
-        self.flush_layout();
+    pub(in crate::platform::macos) fn tab_clicked(&mut self, container: ContainerId, index: usize) {
+        // A click can outlive the scene that created its tab bar.
+        let current = self.hub.get_visible_placements();
+        if current
+            .monitors
+            .iter()
+            .any(|monitor| match &monitor.layout {
+                crate::core::MonitorLayout::Normal { containers, .. } => containers
+                    .iter()
+                    .any(|placement| placement.id == container && index < placement.titles.len()),
+                crate::core::MonitorLayout::Fullscreen(_) => false,
+            })
+        {
+            self.hub.focus_tab_index(container, index);
+            self.flush_layout();
+        }
     }
 
     pub(in crate::platform::macos) fn save_layout_file(&mut self, path: &std::path::Path) {
-        if let Err(e) = self.hub.save_layout(path) {
-            tracing::error!("Save layout failed: {e:#}");
-        }
-    }
-
-    /// Handles the frontmost window entering native fullscreen after a space
-    /// change.
-    #[tracing::instrument(skip(self, new), fields(cg_id = %cg_id))]
-    pub(in crate::platform::macos) fn enter_native_fullscreen(
-        &mut self,
-        cg_id: CGWindowID,
-        new: NewWindow,
-    ) {
-        if let Some(entry) = self.registry.get(cg_id) {
-            let window_id = entry.window_id;
-            self.window_entered_native_fullscreen(window_id);
-        } else {
-            self.add_native_fullscreen_window(new);
-        }
-        self.flush_layout();
-    }
-
-    /// Handles the frontmost window exiting native fullscreen after a space
-    /// change. Routes through `window_moved` so the window re-enters tiling via
-    /// the same path as reconcile-detected exits.
-    #[tracing::instrument(skip(self, pos, size), fields(cg_id = %cg_id))]
-    pub(in crate::platform::macos) fn exit_native_fullscreen(
-        &mut self,
-        cg_id: CGWindowID,
-        pos: (Length<Logical>, Length<Logical>),
-        size: (Length<Logical>, Length<Logical>),
-    ) {
-        if let Some(entry) = self.registry.get(cg_id)
-            && matches!(entry.state, WindowState::NativeFullscreen)
-        {
-            let window_id = entry.window_id;
-            let now = Instant::now();
-            self.window_moved(
-                window_id,
-                PixelRect::from_dimension(Dimension::new(pos.0, pos.1, size.0, size.1)),
-                DebounceBurst {
-                    first: now,
-                    last: now,
-                },
-            );
-            self.flush_layout();
-        }
-    }
-
-    pub(in crate::platform::macos) fn tracked_for_pid(
-        &self,
-        pid: i32,
-    ) -> HashMap<CGWindowID, ManagedWindow> {
-        self.registry
-            .for_pid(pid)
-            .map(|(id, e)| (id, e.clone()))
-            .collect()
-    }
-
-    pub(in crate::platform::macos) fn all_tracked(&self) -> HashMap<CGWindowID, ManagedWindow> {
-        self.registry
-            .iter()
-            .map(|(id, e)| (id, e.clone()))
-            .collect()
-    }
-
-    pub(in crate::platform::macos) fn observed_pids(&self) -> HashSet<i32> {
-        self.observed_pids.clone()
-    }
-
-    pub(in crate::platform::macos) fn set_pid_moving(&mut self, pid: i32, moving: bool) {
-        self.registry.set_pid_moving(pid, moving);
-    }
-
-    pub(in crate::platform::macos) fn mark_pid_observed(&mut self, pid: i32) {
-        self.observed_pids.insert(pid);
-    }
-
-    pub(in crate::platform::macos) fn set_observed_pids(&mut self, pids: HashSet<i32>) {
-        self.observed_pids = pids;
-    }
-
-    pub(in crate::platform::macos) fn remove_untracked_app(&mut self, pid: i32) {
-        self.remove_app_windows(pid);
-    }
-
-    pub(in crate::platform::macos) fn refresh_observers(&self) {
-        self.sender.send(HubMessage::RefreshObservers);
-    }
-
-    fn remove_window(&mut self, wid: WindowId) {
-        self.hub.delete_window(wid);
-        self.pending_deleted.push(wid);
-    }
-
-    fn remove_app_windows(&mut self, pid: i32) {
-        let window_ids: Vec<WindowId> = self
-            .registry
-            .for_pid(pid)
-            .map(|(_, entry)| entry.window_id)
-            .collect();
-        for wid in window_ids {
-            self.remove_window(wid);
+        if let Err(error) = self.hub.save_layout(path) {
+            tracing::error!("Save layout failed: {error:#}");
         }
     }
 
@@ -605,12 +420,12 @@ impl Dome {
             .hub
             .minimized_window_entries()
             .into_iter()
-            .map(|e| MinimizedWindow {
-                id: e.id,
-                title: e.title,
-                app_name: e.app_name,
-                bundle_id: e.bundle_id,
-                executable_path: e.executable_path,
+            .map(|entry| MinimizedWindow {
+                id: entry.id,
+                title: entry.title,
+                app_name: entry.app_name,
+                bundle_id: entry.bundle_id,
+                executable_path: entry.executable_path,
             })
             .collect();
         serde_json::to_string(&entries).expect("MinimizedWindow is infallibly serializable")
@@ -622,8 +437,15 @@ impl Dome {
         keystroke: &Keystroke,
         signal: &LoopSignal,
     ) {
-        let mut effects = MacPlatformEffects {
-            registry: &mut self.registry,
+        let mut effects = MacOsPlatformEffects {
+            native_keys: &self.native_keys,
+            minimized: self
+                .hub
+                .minimized_window_entries()
+                .into_iter()
+                .map(|entry| entry.id)
+                .collect(),
+            sender: self.sender.as_ref(),
             signal,
             env: &self.env,
         };
@@ -637,8 +459,15 @@ impl Dome {
         actions: &Actions,
         signal: &LoopSignal,
     ) {
-        let mut effects = MacPlatformEffects {
-            registry: &mut self.registry,
+        let mut effects = MacOsPlatformEffects {
+            native_keys: &self.native_keys,
+            minimized: self
+                .hub
+                .minimized_window_entries()
+                .into_iter()
+                .map(|entry| entry.id)
+                .collect(),
+            sender: self.sender.as_ref(),
             signal,
             env: &self.env,
         };
@@ -652,15 +481,18 @@ impl Dome {
         self.env = config.env.clone();
         self.sender
             .send(HubMessage::AppearanceChanged(config.appearance.clone()));
+        let mut ignored: Vec<_> = self
+            .discoveries
+            .keys()
+            .copied()
+            .filter(|key| self.current_id(*key).is_none())
+            .collect();
+        ignored.sort_unstable();
+        for key in ignored {
+            self.admit_discovery(key);
+        }
         tracing::info!("Config reloaded");
         self.flush_layout();
         Some(config)
-    }
-}
-
-impl Drop for Dome {
-    fn drop(&mut self) {
-        self.recovery.restore_all();
-        self.sender.send(HubMessage::Shutdown);
     }
 }

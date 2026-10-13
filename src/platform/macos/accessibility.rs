@@ -23,6 +23,9 @@ use crate::platform::macos::objc2_wrapper::{
     kAXWindowsAttribute, perform_action, set_attribute_value,
 };
 
+#[cfg(test)]
+type EnhancedUiSetter = Box<dyn Fn(bool) -> Result<(), AXError> + Send + Sync>;
+
 /// Per-app accessibility state shared across all windows of the same application.
 ///
 /// Holds the AXUIElement for the app process and cached app metadata (name, bundle ID).
@@ -36,6 +39,8 @@ pub(super) struct AXApp {
     /// Used by `with_animation_disabled` to skip set calls on apps that don't support it.
     /// Refreshed periodically via `refresh_enhanced_ui` during reconciliation.
     can_set_enhanced_ui: AtomicBool,
+    #[cfg(test)]
+    enhanced_ui_setter: Option<EnhancedUiSetter>,
 }
 
 // Safety: AXUIElement operations are IPC calls to the accessibility server,
@@ -49,14 +54,15 @@ impl AXApp {
         let element = unsafe { AXUIElement::new_application(pid) };
         let app_name = app.localizedName().map(|n| n.to_string());
         let bundle_id = app.bundleIdentifier().map(|b| b.to_string());
-        let can_set_enhanced_ui =
-            is_attribute_settable(&element, &kAXEnhancedUserInterfaceAttribute());
+        let can_set_enhanced_ui = false;
         Self {
             element,
             pid,
             app_name,
             bundle_id,
             can_set_enhanced_ui: AtomicBool::new(can_set_enhanced_ui),
+            #[cfg(test)]
+            enhanced_ui_setter: None,
         }
     }
 
@@ -73,38 +79,60 @@ impl AXApp {
     }
 
     /// Whether `kAXEnhancedUserInterfaceAttribute` is settable on this app.
-    /// Uses a cached value — `Relaxed` ordering is fine since this is a
-    /// performance hint, not a synchronization primitive.
+    /// Relaxed ordering suffices for this capability hint.
     pub(super) fn can_set_enhanced_ui(&self) -> bool {
         self.can_set_enhanced_ui.load(Ordering::Relaxed)
     }
 
     /// Re-probes whether `kAXEnhancedUserInterfaceAttribute` is settable on the
     /// app element and updates the cache. Called during periodic reconciliation.
-    pub(super) fn refresh_enhanced_ui(&self) {
-        let settable = is_attribute_settable(&self.element, &kAXEnhancedUserInterfaceAttribute());
+    pub(super) fn refresh_enhanced_ui(&self, marker: &DispatcherMarker) {
+        let settable =
+            is_attribute_settable(marker, &self.element, &kAXEnhancedUserInterfaceAttribute());
         self.can_set_enhanced_ui.store(settable, Ordering::Relaxed);
     }
 
-    pub(super) fn set_frontmost(&self) -> Result<(), AXError> {
-        set_attribute_value(&self.element, &kAXFrontmostAttribute(), unsafe {
+    pub(super) fn set_frontmost(&self, marker: &DispatcherMarker) -> Result<(), AXError> {
+        set_attribute_value(marker, &self.element, &kAXFrontmostAttribute(), unsafe {
             kCFBooleanTrue.unwrap()
         })
     }
 
-    pub(super) fn set_enhanced_ui(&self, enabled: bool) -> Result<(), AXError> {
-        let value = if enabled {
-            unsafe { kCFBooleanTrue.unwrap() }
-        } else {
-            unsafe { kCFBooleanFalse.unwrap() }
+    pub(super) fn set_enhanced_ui(
+        &self,
+        marker: &DispatcherMarker,
+        enabled: bool,
+    ) -> Result<(), AXError> {
+        #[cfg(test)]
+        if let Some(setter) = &self.enhanced_ui_setter {
+            return setter(enabled);
+        }
+        let value = unsafe {
+            if enabled {
+                kCFBooleanTrue
+            } else {
+                kCFBooleanFalse
+            }
         };
-        set_attribute_value(&self.element, &kAXEnhancedUserInterfaceAttribute(), value)
+        let Some(value) = value else {
+            return Ok(());
+        };
+        set_attribute_value(
+            marker,
+            &self.element,
+            &kAXEnhancedUserInterfaceAttribute(),
+            value,
+        )
     }
 
     /// Returns `true` if the window's parent is the app element itself (i.e. a
     /// top-level window, not a sheet or child panel).
-    pub(super) fn is_root_window(&self, window_element: &AXUIElement) -> bool {
-        match get_attribute::<AXUIElement>(window_element, &kAXParentAttribute()) {
+    pub(super) fn is_root_window(
+        &self,
+        marker: &DispatcherMarker,
+        window_element: &AXUIElement,
+    ) -> bool {
+        match get_attribute::<AXUIElement>(marker, window_element, &kAXParentAttribute()) {
             Err(_) => true,
             Ok(parent) => CFEqual(Some(&*parent), Some(&*self.element)),
         }
@@ -112,18 +140,19 @@ impl AXApp {
 
     pub(super) fn windows(
         self: Arc<Self>,
-        _marker: &DispatcherMarker,
+        marker: &DispatcherMarker,
     ) -> Result<Vec<AXWindow>, AXError> {
-        let windows = get_attribute::<CFArray<AXUIElement>>(&self.element, &kAXWindowsAttribute())?;
+        let windows =
+            get_attribute::<CFArray<AXUIElement>>(marker, &self.element, &kAXWindowsAttribute())?;
         let windows = windows
             .into_iter()
             .filter_map(|w| {
                 // TODO: figure out how to logs this error, as windows should have cg_id under
                 // normal circumstances
-                let Ok(cg_id) = get_cg_window_id(&w) else {
+                let Ok(cg_id) = get_cg_window_id(marker, &w) else {
                     return None;
                 };
-                Some(AXWindow::new(w, cg_id, self.clone()))
+                Some(AXWindow::new(w, cg_id, self.clone(), marker))
             })
             .collect();
         Ok(windows)
@@ -131,11 +160,12 @@ impl AXApp {
 
     pub(super) fn focused_window(
         self: Arc<Self>,
-        _marker: &DispatcherMarker,
+        marker: &DispatcherMarker,
     ) -> Result<AXWindow, AXError> {
-        let focused = get_attribute::<AXUIElement>(&self.element, &kAXFocusedWindowAttribute())?;
-        let cg_id = get_cg_window_id(&focused)?;
-        Ok(AXWindow::new(focused, cg_id, self))
+        let focused =
+            get_attribute::<AXUIElement>(marker, &self.element, &kAXFocusedWindowAttribute())?;
+        let cg_id = get_cg_window_id(marker, &focused)?;
+        Ok(AXWindow::new(focused, cg_id, self, marker))
     }
 
     /// Exposes the raw AXUIElement for observer registration (add/remove notification).
@@ -165,6 +195,8 @@ pub(super) struct AXWindow {
     app: Arc<AXApp>,
     cg_id: CGWindowID,
     title: Option<String>,
+    #[cfg(test)]
+    native_focus: Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
 }
 
 // Safety: AXUIElement operations are IPC calls to the accessibility server,
@@ -192,12 +224,52 @@ impl std::fmt::Display for AXWindow {
 }
 
 impl AXWindow {
+    #[cfg(test)]
+    pub(super) fn test_handle(pid: i32, cg_id: CGWindowID) -> Self {
+        let element = unsafe { AXUIElement::new_application(pid) };
+        let app = Arc::new(AXApp {
+            element: element.clone(),
+            pid,
+            app_name: Some("test application".into()),
+            bundle_id: None,
+            can_set_enhanced_ui: AtomicBool::new(false),
+            enhanced_ui_setter: None,
+        });
+        Self {
+            element,
+            app,
+            cg_id,
+            title: Some("test window".into()),
+            native_focus: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_native_focus(
+        mut self,
+        focus: impl Fn() -> Result<()> + Send + Sync + 'static,
+    ) -> Self {
+        self.native_focus = Some(Arc::new(focus));
+        self
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_app(&self) -> Arc<AXApp> {
+        self.app.clone()
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_element_address(&self) -> usize {
+        (&*self.element as *const AXUIElement) as usize
+    }
+
     pub(super) fn new(
         element: CFRetained<AXUIElement>,
         cg_id: CGWindowID,
         app: Arc<AXApp>,
+        marker: &DispatcherMarker,
     ) -> Self {
-        let title = get_attribute::<CFString>(&element, &kAXTitleAttribute())
+        let title = get_attribute::<CFString>(marker, &element, &kAXTitleAttribute())
             .map(|t| t.to_string())
             .ok();
 
@@ -206,6 +278,8 @@ impl AXWindow {
             app,
             cg_id,
             title,
+            #[cfg(test)]
+            native_focus: None,
         }
     }
 
@@ -229,14 +303,23 @@ impl AXWindow {
         self.title.as_deref()
     }
 
-    pub(super) fn is_native_fullscreen(&self) -> bool {
-        get_attribute::<CFBoolean>(&self.element, &kAXFullScreenAttribute())
-            .map(|b| b.as_bool())
-            .unwrap_or(false)
+    pub(super) fn is_native_fullscreen(&self, marker: &DispatcherMarker) -> Result<bool, AXError> {
+        match get_attribute::<CFBoolean>(marker, &self.element, &kAXFullScreenAttribute()) {
+            Ok(value) => Ok(value.as_bool()),
+            Err(AXError::Other(error))
+                if error == objc2_application_services::AXError::AttributeUnsupported =>
+            {
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
     }
 
-    pub(super) fn get_position(&self) -> Result<(Length<Logical>, Length<Logical>)> {
-        let pos = get_attribute::<AXValue>(&self.element, &kAXPositionAttribute())
+    pub(super) fn get_position(
+        &self,
+        marker: &DispatcherMarker,
+    ) -> Result<(Length<Logical>, Length<Logical>)> {
+        let pos = get_attribute::<AXValue>(marker, &self.element, &kAXPositionAttribute())
             .with_context(|| format!("get_position for {self}"))?;
         let mut cg_pos = CGPoint::new(0.0, 0.0);
         let ptr = NonNull::new((&mut cg_pos as *mut CGPoint).cast()).unwrap();
@@ -248,12 +331,12 @@ impl AXWindow {
 
     /// As we're tracking windows with CGWindowID, we have to check whether a window is still valid
     /// as macOS can reuse CGWindowID of deleted windows.
-    pub(super) fn is_valid(&self) -> bool {
+    pub(super) fn is_valid(&self, marker: &DispatcherMarker) -> bool {
         if is_screen_locked() {
             return true;
         }
         let is_deleted = matches!(
-            get_attribute::<CFString>(&self.element, &kAXRoleAttribute()),
+            get_attribute::<CFString>(marker, &self.element, &kAXRoleAttribute()),
             Err(AXError::InvalidUIElement)
         );
         if is_deleted {
@@ -263,27 +346,34 @@ impl AXWindow {
         true
     }
 
-    pub(super) fn is_minimized(&self) -> bool {
-        get_attribute::<CFBoolean>(&self.element, &kAXMinimizedAttribute())
+    pub(super) fn is_minimized(&self, marker: &DispatcherMarker) -> Result<bool, AXError> {
+        get_attribute::<CFBoolean>(marker, &self.element, &kAXMinimizedAttribute())
             .map(|b| b.as_bool())
-            .unwrap_or(false)
     }
 
-    #[tracing::instrument(skip(self))]
-    pub(super) fn set_frame(&self, rect: PixelRect<Logical>) -> Result<()> {
+    #[tracing::instrument(skip(self, marker))]
+    pub(super) fn set_frame(
+        &self,
+        marker: &DispatcherMarker,
+        rect: PixelRect<Logical>,
+    ) -> Result<()> {
         let dim = rect.to_dimension();
-        self.with_animation_disabled(|| {
-            self.set_position(dim.x, dim.y)?;
-            self.set_size(dim.width, dim.height)
+        self.with_animation_disabled(marker, || {
+            self.set_position(marker, dim.x, dim.y)?;
+            self.set_size(marker, dim.width, dim.height)
         })
         .with_context(|| format!("set_frame for {self}"))
     }
 
-    pub(super) fn focus(&self) -> Result<()> {
+    pub(super) fn focus(&self, marker: &DispatcherMarker) -> Result<()> {
+        #[cfg(test)]
+        if let Some(focus) = &self.native_focus {
+            return focus();
+        }
         self.app
-            .set_frontmost()
+            .set_frontmost(marker)
             .with_context(|| format!("focus for {self}"))?;
-        set_attribute_value(&self.element, &kAXMainAttribute(), unsafe {
+        set_attribute_value(marker, &self.element, &kAXMainAttribute(), unsafe {
             kCFBooleanTrue.unwrap()
         })
         .with_context(|| format!("focus for {self}"))?;
@@ -293,38 +383,48 @@ impl AXWindow {
     /// Hide the window by moving it offscreen.
     /// We don't minimize windows as there is no way to disable minimizing animation. When hiding
     /// multiple windows, it gets triggered in a staggered manner, which is extremely slow.
-    pub(super) fn hide_at(&self, x: Length<Logical>, y: Length<Logical>) -> Result<()> {
-        self.with_animation_disabled(|| self.set_position(x, y))
+    pub(super) fn move_offscreen(
+        &self,
+        marker: &DispatcherMarker,
+        x: Length<Logical>,
+        y: Length<Logical>,
+    ) -> Result<()> {
+        self.with_animation_disabled(marker, || self.set_position(marker, x, y))
             .with_context(|| format!("hide for {self}"))
     }
 
-    pub(super) fn minimize(&self) -> Result<()> {
-        set_attribute_value(&self.element, &kAXMinimizedAttribute(), unsafe {
+    pub(super) fn minimize(&self, marker: &DispatcherMarker) -> Result<()> {
+        set_attribute_value(marker, &self.element, &kAXMinimizedAttribute(), unsafe {
             kCFBooleanTrue.unwrap()
         })
         .with_context(|| format!("minimize for {self}"))
     }
 
-    pub(super) fn unminimize(&self) -> Result<()> {
-        set_attribute_value(&self.element, &kAXMinimizedAttribute(), unsafe {
+    pub(super) fn unminimize(&self, marker: &DispatcherMarker) -> Result<()> {
+        set_attribute_value(marker, &self.element, &kAXMinimizedAttribute(), unsafe {
             kCFBooleanFalse.unwrap()
         })
         .with_context(|| format!("unminimize for {self}"))
     }
 
-    pub(super) fn close(&self) -> Result<()> {
-        let button = match get_attribute::<AXUIElement>(&self.element, &kAXCloseButtonAttribute()) {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::warn!(window = %self, "close button missing: {e}");
-                return Ok(());
-            }
-        };
-        perform_action(&button, &kAXPressAction()).with_context(|| format!("close for {self}"))
+    pub(super) fn close(&self, marker: &DispatcherMarker) -> Result<()> {
+        let button =
+            match get_attribute::<AXUIElement>(marker, &self.element, &kAXCloseButtonAttribute()) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(window = %self, "close button missing: {e}");
+                    return Ok(());
+                }
+            };
+        perform_action(marker, &button, &kAXPressAction())
+            .with_context(|| format!("close for {self}"))
     }
 
-    pub(super) fn get_size(&self) -> Result<(Length<Logical>, Length<Logical>)> {
-        let size = get_attribute::<AXValue>(&self.element, &kAXSizeAttribute())
+    pub(super) fn get_size(
+        &self,
+        marker: &DispatcherMarker,
+    ) -> Result<(Length<Logical>, Length<Logical>)> {
+        let size = get_attribute::<AXValue>(marker, &self.element, &kAXSizeAttribute())
             .with_context(|| format!("get_size for {self}"))?;
         let mut cg_size = CGSize::new(0.0, 0.0);
         let ptr = NonNull::new((&mut cg_size as *mut CGSize).cast()).unwrap();
@@ -337,7 +437,7 @@ impl AXWindow {
         ))
     }
 
-    pub(super) fn check_unmanageable(&self) -> bool {
+    pub(super) fn check_unmanageable(&self, marker: &DispatcherMarker) -> bool {
         let cg_id = self.cg_id();
         let pid = self.pid();
         if self.title.is_none() {
@@ -348,7 +448,7 @@ impl AXWindow {
             return true;
         }
 
-        let role = get_attribute::<CFString>(&self.element, &kAXRoleAttribute()).ok();
+        let role = get_attribute::<CFString>(marker, &self.element, &kAXRoleAttribute()).ok();
         let is_window = role
             .as_ref()
             .map(|r| CFEqual(Some(&**r), Some(&*kAXWindowRole())))
@@ -363,7 +463,7 @@ impl AXWindow {
             return true;
         }
 
-        let subrole = get_attribute::<CFString>(&self.element, &kAXSubroleAttribute()).ok();
+        let subrole = get_attribute::<CFString>(marker, &self.element, &kAXSubroleAttribute()).ok();
         let is_standard = subrole
             .as_ref()
             .map(|sr| CFEqual(Some(&**sr), Some(&*kAXStandardWindowSubrole())))
@@ -378,7 +478,7 @@ impl AXWindow {
             return true;
         }
 
-        let is_root = self.app.is_root_window(&self.element);
+        let is_root = self.app.is_root_window(marker, &self.element);
         if !is_root {
             crate::trace_once!(
                 key: (cg_id, pid),
@@ -387,7 +487,9 @@ impl AXWindow {
             return true;
         }
 
-        if !is_attribute_settable(&self.element, &kAXPositionAttribute()) {
+        if !self.is_native_fullscreen(marker).unwrap_or(false)
+            && !is_attribute_settable(marker, &self.element, &kAXPositionAttribute())
+        {
             crate::trace_once!(
                 key: (cg_id, pid),
                 window = %self, "not manageable: position not settable"
@@ -395,7 +497,7 @@ impl AXWindow {
             return true;
         }
 
-        if !is_attribute_settable(&self.element, &kAXSizeAttribute()) {
+        if !is_attribute_settable(marker, &self.element, &kAXSizeAttribute()) {
             crate::trace_once!(
                 key: (cg_id, pid),
                 window = %self, "not manageable: size not settable"
@@ -403,7 +505,7 @@ impl AXWindow {
             return true;
         }
 
-        if !is_attribute_settable(&self.element, &kAXMainAttribute()) {
+        if !is_attribute_settable(marker, &self.element, &kAXMainAttribute()) {
             crate::trace_once!(
                 key: (cg_id, pid),
                 window = %self, "not manageable: main not settable"
@@ -411,50 +513,37 @@ impl AXWindow {
             return true;
         }
 
-        let is_minimized = get_attribute::<CFBoolean>(&self.element, &kAXMinimizedAttribute())
-            .map(|b| b.as_bool())
-            .unwrap_or(false);
-        if is_minimized {
-            crate::trace_once!(
-                key: (cg_id, pid),
-                window = %self, "not manageable: minimized"
-            );
-            return true;
-        }
-
         false
     }
 
-    /// Without this the windows move in a janky way
-    /// https://github.com/nikitabobko/AeroSpace/issues/51
-    fn with_animation_disabled<F>(&self, f: F) -> Result<()>
+    fn with_animation_disabled<F>(&self, marker: &DispatcherMarker, operation: F) -> Result<()>
     where
         F: FnOnce() -> Result<()>,
     {
-        let can_set = self.app.can_set_enhanced_ui();
-        let pid = self.app.pid();
-        if can_set && let Err(err) = self.app.set_enhanced_ui(false) {
-            crate::trace_once!(
-                key: pid,
-                window = %self, "Failed to disable enhanced UI: {err:#}"
-            );
+        let restore = self.app.can_set_enhanced_ui().then(|| EnhancedUiRestore {
+            app: self.app.clone(),
+            marker,
+        });
+        if restore.is_some() {
+            let _ = self.app.set_enhanced_ui(marker, false);
         }
-        let result = f();
-        if can_set && let Err(err) = self.app.set_enhanced_ui(true) {
-            crate::trace_once!(
-                key: pid,
-                window = %self, "Failed to re-enable enhanced UI: {err:#}"
-            );
-        }
+        let result = operation();
+        drop(restore);
         result
     }
 
     /// FFI boundary: packs a logical position into a CGPoint for the AX API.
-    fn set_position(&self, x: Length<Logical>, y: Length<Logical>) -> Result<()> {
+    fn set_position(
+        &self,
+        marker: &DispatcherMarker,
+        x: Length<Logical>,
+        y: Length<Logical>,
+    ) -> Result<()> {
         let pos_ptr: *mut CGPoint = &mut CGPoint::new(x.value() as f64, y.value() as f64);
         let pos_ptr = NonNull::new(pos_ptr.cast()).unwrap();
         let pos_ptr = unsafe { AXValue::new(AXValueType::CGPoint, pos_ptr) }.unwrap();
         Ok(set_attribute_value(
+            marker,
             &self.element,
             &kAXPositionAttribute(),
             &pos_ptr,
@@ -462,15 +551,49 @@ impl AXWindow {
     }
 
     /// FFI boundary: packs a logical size into a CGSize for the AX API.
-    fn set_size(&self, width: Length<Logical>, height: Length<Logical>) -> Result<()> {
+    fn set_size(
+        &self,
+        marker: &DispatcherMarker,
+        width: Length<Logical>,
+        height: Length<Logical>,
+    ) -> Result<()> {
         let size_ptr: *mut CGSize = &mut CGSize::new(width.value() as f64, height.value() as f64);
         let size = NonNull::new(size_ptr.cast()).unwrap();
         let size = unsafe { AXValue::new(AXValueType::CGSize, size) }.unwrap();
         Ok(set_attribute_value(
+            marker,
             &self.element,
             &kAXSizeAttribute(),
             &size,
         )?)
+    }
+    pub(super) fn read_title(&self, marker: &DispatcherMarker) -> Option<String> {
+        get_attribute::<CFString>(marker, &self.element, &kAXTitleAttribute())
+            .map(|t| t.to_string())
+            .ok()
+    }
+    pub(super) fn read_close_button_frame(
+        &self,
+        marker: &DispatcherMarker,
+    ) -> Option<Dimension<Logical>> {
+        let button =
+            get_attribute::<AXUIElement>(marker, &self.element, &kAXCloseButtonAttribute()).ok()?;
+        let position = get_attribute::<AXValue>(marker, &button, &kAXPositionAttribute()).ok()?;
+        let size = get_attribute::<AXValue>(marker, &button, &kAXSizeAttribute()).ok()?;
+        let mut origin = CGPoint::new(0.0, 0.0);
+        let mut extent = CGSize::new(0.0, 0.0);
+        let has_origin =
+            unsafe { position.value(AXValueType::CGPoint, NonNull::from(&mut origin).cast()) };
+        let has_extent =
+            unsafe { size.value(AXValueType::CGSize, NonNull::from(&mut extent).cast()) };
+        (has_origin && has_extent).then(|| {
+            Dimension::new(
+                Length::new(origin.x as f32),
+                Length::new(origin.y as f32),
+                Length::new(extent.width as f32),
+                Length::new(extent.height as f32),
+            )
+        })
     }
 }
 
@@ -497,121 +620,137 @@ fn is_screen_locked() -> bool {
     false
 }
 
-/// External-window operations on macOS.
-///
-/// Stored as `Arc<dyn ExternalWindow>` inside `ManagedWindow`. Read methods
-/// take a `&DispatcherMarker` so they can only be called from inside the
-/// GCD-dispatch helper, where blocking AX IPC calls are safe; write methods
-/// (which are intentionally dome-thread operations) and pure getters omit the
-/// marker.
-///
-/// The Windows shell splits the same idea into `ManageExternalWindow` /
-/// `InspectExternalWindow` because re-fabricating an `ExternalHwnd` from a
-/// bare `HwndId` is free (it is a thin HWND wrapper with no per-window
-/// state). macOS keeps one trait because re-fabricating an `AXWindow` would
-/// re-resolve the cached `AXUIElement`; the marker gives the same
-/// "reads only off-thread" guarantee with one Arc per `ManagedWindow`.
-pub(crate) trait ExternalWindow: Send + Sync + std::fmt::Display {
-    fn cg_id(&self) -> CGWindowID;
-    fn pid(&self) -> i32;
-    fn is_native_fullscreen(&self, marker: &DispatcherMarker) -> bool;
-    /// Reads the window's AX position as `(x, y)` in logical points (top-left origin).
-    fn get_position(&self, marker: &DispatcherMarker)
-    -> Result<(Length<Logical>, Length<Logical>)>;
-    /// Reads the window's AX size as `(width, height)` in logical points.
-    fn get_size(&self, marker: &DispatcherMarker) -> Result<(Length<Logical>, Length<Logical>)>;
-    /// Positions and resizes the window via AX. Owns the `Dimension<Logical>` to
-    /// `CGPoint`/`CGSize` conversion (f64 casts happen inside the impl).
-    fn set_frame(&self, rect: PixelRect<Logical>) -> Result<()>;
-    fn focus(&self) -> Result<()>;
-    /// Moves the window offscreen to hide it (no minimize animation).
-    fn hide_at(&self, x: Length<Logical>, y: Length<Logical>) -> Result<()>;
-    fn minimize(&self) -> Result<()>;
-    fn unminimize(&self) -> Result<()>;
-    fn close(&self) -> Result<()>;
-    fn is_valid(&self, marker: &DispatcherMarker) -> bool;
-    fn is_minimized(&self, marker: &DispatcherMarker) -> bool;
-    fn read_title(&self, marker: &DispatcherMarker) -> Option<String>;
-    /// In logical points from the top-left of the primary display. `None` when the window has no
-    /// close button.
-    fn read_close_button_frame(&self, marker: &DispatcherMarker) -> Option<Dimension<Logical>>;
-    /// Refresh the cached `kAXEnhancedUserInterfaceAttribute` probe for this
-    /// window's app. Deduplication by PID is the caller's responsibility.
-    fn refresh_enhanced_ui(&self, marker: &DispatcherMarker);
+struct EnhancedUiRestore<'worker> {
+    app: Arc<AXApp>,
+    marker: &'worker DispatcherMarker,
 }
 
-// The marker proves the caller is on a GCD queue. It isn't forwarded to the
-// concrete `AXWindow` methods because those are the underlying implementation
-// that the trait delegates to.
-impl ExternalWindow for AXWindow {
-    fn cg_id(&self) -> CGWindowID {
-        self.cg_id()
+impl Drop for EnhancedUiRestore<'_> {
+    fn drop(&mut self) {
+        let _ = self.app.set_enhanced_ui(self.marker, true);
     }
-    fn pid(&self) -> i32 {
-        self.pid()
-    }
-    fn is_native_fullscreen(&self, _marker: &DispatcherMarker) -> bool {
-        self.is_native_fullscreen()
-    }
-    fn get_position(
-        &self,
-        _marker: &DispatcherMarker,
-    ) -> Result<(Length<Logical>, Length<Logical>)> {
-        self.get_position()
-    }
-    fn get_size(&self, _marker: &DispatcherMarker) -> Result<(Length<Logical>, Length<Logical>)> {
-        self.get_size()
-    }
-    fn set_frame(&self, rect: PixelRect<Logical>) -> Result<()> {
-        self.set_frame(rect)
-    }
-    fn focus(&self) -> Result<()> {
-        self.focus()
-    }
-    fn hide_at(&self, x: Length<Logical>, y: Length<Logical>) -> Result<()> {
-        self.hide_at(x, y)
-    }
-    fn minimize(&self) -> Result<()> {
-        self.minimize()
-    }
-    fn unminimize(&self) -> Result<()> {
-        self.unminimize()
-    }
-    fn close(&self) -> Result<()> {
-        self.close()
-    }
-    fn is_valid(&self, _marker: &DispatcherMarker) -> bool {
-        self.is_valid()
-    }
-    fn is_minimized(&self, _marker: &DispatcherMarker) -> bool {
-        self.is_minimized()
-    }
-    fn read_title(&self, _marker: &DispatcherMarker) -> Option<String> {
-        get_attribute::<CFString>(&self.element, &kAXTitleAttribute())
-            .map(|t| t.to_string())
-            .ok()
-    }
-    fn read_close_button_frame(&self, _marker: &DispatcherMarker) -> Option<Dimension<Logical>> {
-        let button =
-            get_attribute::<AXUIElement>(&self.element, &kAXCloseButtonAttribute()).ok()?;
-        let position = get_attribute::<AXValue>(&button, &kAXPositionAttribute()).ok()?;
-        let size = get_attribute::<AXValue>(&button, &kAXSizeAttribute()).ok()?;
-        let mut origin = CGPoint::new(0.0, 0.0);
-        let mut extent = CGSize::new(0.0, 0.0);
-        let has_origin =
-            unsafe { position.value(AXValueType::CGPoint, NonNull::from(&mut origin).cast()) };
-        let has_extent =
-            unsafe { size.value(AXValueType::CGSize, NonNull::from(&mut extent).cast()) };
-        (has_origin && has_extent).then(|| {
-            Dimension::new(
-                Length::new(origin.x as f32),
-                Length::new(origin.y as f32),
-                Length::new(extent.width as f32),
-                Length::new(extent.height as f32),
-            )
-        })
-    }
-    fn refresh_enhanced_ui(&self, _marker: &DispatcherMarker) {
-        self.app.refresh_enhanced_ui();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::macos::dispatcher::{
+        AccessibilityApplication, ApplicationCommand, ApplicationNative, ApplicationOperation,
+    };
+    use crate::platform::macos::window_server::ApplicationLifetime;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    include!("accessibility_serialization_tests.rs");
+
+    #[test]
+    fn disable_animation_on_disable_or_operation_unwind_restores_enhanced_ui() {
+        struct NativeFrame {
+            panic_in_operation: bool,
+            entered: mpsc::Sender<thread::ThreadId>,
+        }
+        impl ApplicationNative for NativeFrame {
+            fn probe(&mut self, _: &DispatcherMarker) {}
+            fn execute(&mut self, operation: ApplicationOperation, marker: &DispatcherMarker) {
+                if let ApplicationOperation::SetFrame { window, .. } = operation {
+                    let _ = window.with_animation_disabled(marker, || {
+                        self.entered.send(thread::current().id()).unwrap();
+                        assert!(!self.panic_in_operation, "injected frame panic");
+                        Ok(())
+                    });
+                }
+            }
+        }
+        struct Exit(mpsc::Sender<bool>);
+        impl Drop for Exit {
+            fn drop(&mut self) {
+                let _ = self.0.send(thread::panicking());
+            }
+        }
+        for panic_site in [None, Some("disable"), Some("operation")] {
+            let (toggles, calls) = mpsc::channel();
+            let (entered, operations) = mpsc::channel();
+            let (exit, exited) = mpsc::channel();
+            let (restore_release, restore_gate) = mpsc::channel();
+            let restore_gate = std::sync::Mutex::new(Some(restore_gate));
+            let attempts = std::rc::Rc::new(std::cell::Cell::new(0));
+            let attempted = attempts.clone();
+            let mut window = AXWindow::test_handle(123, 1);
+            let app = Arc::get_mut(&mut window.app).unwrap();
+            app.can_set_enhanced_ui.store(true, Ordering::Relaxed);
+            app.enhanced_ui_setter = Some(Box::new(move |enabled| {
+                toggles.send((enabled, thread::current().id())).unwrap();
+                assert!(
+                    enabled || panic_site != Some("disable"),
+                    "injected disable panic"
+                );
+                if enabled {
+                    restore_gate.lock().unwrap().take().unwrap().recv().unwrap();
+                    Err(AXError::InvalidUIElement)
+                } else {
+                    Ok(())
+                }
+            }));
+            let mut owner = AccessibilityApplication::with_native(
+                Arc::new(ApplicationLifetime { pid: 123 }),
+                false,
+                false,
+                Box::new(move |_, _| {
+                    Box::new(NativeFrame {
+                        panic_in_operation: panic_site == Some("operation"),
+                        entered: entered.clone(),
+                    })
+                }),
+                Box::new(move |job| {
+                    attempted.set(attempted.get() + 1);
+                    let exit = exit.clone();
+                    thread::Builder::new().spawn(move || {
+                        let _exit = Exit(exit);
+                        job();
+                    })
+                }),
+            );
+            owner.send(ApplicationCommand::Operation(
+                ApplicationOperation::SetFrame {
+                    window,
+                    frame: PixelRect::from_dimension(Dimension::new(
+                        Length::new(0.0),
+                        Length::new(0.0),
+                        Length::new(80.0),
+                        Length::new(60.0),
+                    )),
+                },
+            ));
+            let disable = calls.recv_timeout(Duration::from_secs(3)).unwrap();
+            let restore = calls.recv_timeout(Duration::from_secs(3)).unwrap();
+            assert!(!disable.0);
+            assert!(restore.0);
+            assert_eq!(disable.1, restore.1);
+            assert_ne!(disable.1, thread::current().id());
+            owner.send(ApplicationCommand::Read(
+                crate::platform::macos::window_server::InspectionKind::Title(1),
+            ));
+            assert_eq!(
+                attempts.get(),
+                1,
+                "restoration must retain the sole receiver"
+            );
+            restore_release.send(()).unwrap();
+            if panic_site == Some("disable") {
+                assert!(operations.try_recv().is_err());
+            } else {
+                assert_eq!(
+                    operations.recv_timeout(Duration::from_secs(3)).unwrap(),
+                    restore.1
+                );
+            }
+            drop(owner);
+            assert_eq!(
+                exited.recv_timeout(Duration::from_secs(3)).unwrap(),
+                panic_site.is_some()
+            );
+            assert!(calls.try_recv().is_err());
+        }
     }
 }

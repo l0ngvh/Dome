@@ -1,11 +1,14 @@
-use std::cell::{OnceCell, RefCell};
-use std::ffi::c_void;
+use std::cell::OnceCell;
+use std::hash::Hash;
+use std::rc::Rc;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, mpsc};
 
 use dispatch2::DispatchQueue;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{
-    AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel,
+    AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, sel,
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
@@ -13,14 +16,18 @@ use objc2_app_kit::{
     NSControlStateValueOff, NSControlStateValueOn, NSImage, NSMenu, NSMenuDelegate, NSMenuItem,
     NSSquareStatusItemLength, NSStatusBar, NSStatusBarButton, NSStatusItem,
 };
-use objc2_core_foundation::{CFRetained, CFRunLoop, CFRunLoopSource, kCFRunLoopDefaultMode};
+use objc2_core_foundation::{CFRunLoop, kCFRunLoopCommonModes};
 use objc2_foundation::{
     NSData, NSInteger, NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSSize,
     NSString,
 };
 
-use super::run_loop::{LoopHandle, LoopWaker, create_wake_source};
-use crate::{AppHandler, MenuEntry, MenuItem};
+use super::run_loop::{
+    CallbackContext, DispatchBridge, LoopHandle, LoopState, NativeDispatch, WakeTarget,
+    create_wake_source,
+};
+use crate::delivery::{Callbacks, WakeDelivery};
+use crate::{AppHandler, LoopWaker, MenuEntry, MenuItem};
 
 /// A decoded menu-bar icon. Built before the loop runs, applied to the status button at
 /// launch.
@@ -41,15 +48,19 @@ impl Icon {
     }
 }
 
-/// A handle to the status item's button. Owns a retain rather than a borrow, so the
-/// public `Shell` carries no lifetime.
-pub(crate) struct Shell {
-    button: Retained<NSStatusBarButton>,
+pub(crate) enum Shell {
+    Button(Retained<NSStatusBarButton>),
+    #[cfg(test)]
+    Test,
 }
 
 impl Shell {
     pub(crate) fn set_tooltip(&self, tooltip: &str) {
-        self.button.setToolTip(Some(&NSString::from_str(tooltip)));
+        match self {
+            Self::Button(button) => button.setToolTip(Some(&NSString::from_str(tooltip))),
+            #[cfg(test)]
+            Self::Test => panic!("test shell has no native tooltip"),
+        }
     }
 }
 
@@ -59,60 +70,112 @@ struct ShellState {
     button: Retained<NSStatusBarButton>,
 }
 
-pub(crate) struct App {
+pub(crate) struct App<W: Clone + Eq + Hash + Send + 'static> {
     app: Retained<NSApplication>,
     delegate: Retained<AppDelegate>,
-    source: CFRetained<CFRunLoopSource>,
-    run_loop: CFRetained<CFRunLoop>,
+    state: Rc<LoopState<W>>,
+    waker: LoopWaker<W>,
+    context: Arc<CallbackContext>,
+    _bridge: Box<DispatchBridge>,
     mtm: MainThreadMarker,
 }
 
-impl App {
-    pub(crate) fn new(icon: Icon, handler: Box<dyn AppHandler>) -> anyhow::Result<Self> {
+impl<W: Clone + Eq + Hash + Send + 'static> App<W> {
+    pub(crate) fn new(icon: Icon, handler: Box<dyn AppHandler<Wake = W>>) -> anyhow::Result<Self> {
         let mtm = MainThreadMarker::new()
             .ok_or_else(|| anyhow::anyhow!("App::new must run on the main thread"))?;
         let app = NSApplication::sharedApplication(mtm);
         app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
-
-        let delegate = AppDelegate::new(mtm, icon, handler);
-        let source = create_wake_source(Retained::as_ptr(&delegate) as *mut c_void, wake_callback);
-        let run_loop = CFRunLoop::main().unwrap();
-        run_loop.add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
-
+        let context = Arc::new(CallbackContext::new());
+        let source = create_wake_source(&context);
+        let run_loop = CFRunLoop::main().expect("main run loop");
+        let (sender, receiver) = mpsc::channel();
+        let waker = LoopWaker {
+            sender,
+            target: WakeTarget {
+                source,
+                run_loop,
+                #[cfg(test)]
+                recorder: None,
+            },
+        };
+        let state = Rc::new(LoopState::new(
+            WakeDelivery::new(receiver, handler),
+            context.clone(),
+            waker.clone(),
+        ));
+        let mut bridge = Box::new(DispatchBridge {
+            dispatch: state.clone(),
+        });
+        let delegate = AppDelegate::new(mtm, icon, state.clone(), context.clone());
+        context.dispatch.store(&mut *bridge, Ordering::Release);
+        waker
+            .target
+            .run_loop
+            .add_source(Some(&waker.target.source), unsafe { kCFRunLoopCommonModes });
         Ok(Self {
             app,
             delegate,
-            source,
-            run_loop,
+            state,
+            waker,
+            context,
+            _bridge: bridge,
             mtm,
         })
     }
 
-    pub(crate) fn waker(&self) -> LoopWaker {
-        LoopWaker::new(self.source.clone(), self.run_loop.clone())
+    pub(crate) fn waker(&self) -> LoopWaker<W> {
+        self.waker.clone()
     }
 
-    pub(crate) fn handle(&self) -> LoopHandle {
-        LoopHandle::new(self.mtm)
+    pub(crate) fn handle(&self) -> LoopHandle<W> {
+        LoopHandle::new(&self.state, self.mtm)
     }
 
     pub(crate) fn run(self) {
         self.app
             .setDelegate(Some(ProtocolObject::from_ref(&*self.delegate)));
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.app.run()));
+        self.state.stopping();
+    }
+}
 
-        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.app.run())).is_err() {
-            self.delegate.ivars().handler.borrow_mut().on_stopping();
+impl<W: Clone + Eq + Hash + Send + 'static> Drop for App<W> {
+    fn drop(&mut self) {
+        self.context.clear();
+        self.state.close();
+        self.waker.target.source.invalidate();
+        self.waker
+            .target
+            .run_loop
+            .remove_source(Some(&self.waker.target.source), unsafe {
+                kCFRunLoopCommonModes
+            });
+        self.app.setDelegate(None);
+        unsafe { NSNotificationCenter::defaultCenter().removeObserver(&self.delegate) };
+        if let Some(state) = self.delegate.ivars().shell.get() {
+            if let Some(menu) = state.status_item.menu(self.mtm) {
+                detach_menu(&menu);
+            }
+            state.status_item.setMenu(None);
+            NSStatusBar::systemStatusBar().removeStatusItem(&state.status_item);
         }
     }
 }
 
-impl Drop for App {
-    fn drop(&mut self) {
-        unsafe { NSNotificationCenter::defaultCenter().removeObserver(&self.delegate) };
-        if let Some(state) = self.delegate.ivars().shell.get() {
-            NSStatusBar::systemStatusBar().removeStatusItem(&state.status_item);
+fn detach_menu(menu: &NSMenu) {
+    menu.setDelegate(None);
+    detach_items(menu);
+}
+
+fn detach_items(menu: &NSMenu) {
+    for item in menu.itemArray() {
+        unsafe { item.setTarget(None) };
+        if let Some(submenu) = item.submenu() {
+            detach_menu(&submenu);
         }
     }
+    menu.removeAllItems();
 }
 
 fn make_item(
@@ -141,7 +204,7 @@ fn make_item(
 }
 
 fn rebuild_menu(mtm: MainThreadMarker, menu: &NSMenu, target: &AppDelegate, entries: &[MenuEntry]) {
-    menu.removeAllItems();
+    detach_items(menu);
     let empty = NSString::from_str("");
     for entry in entries {
         match entry {
@@ -175,7 +238,8 @@ fn rebuild_menu(mtm: MainThreadMarker, menu: &NSMenu, target: &AppDelegate, entr
 }
 
 struct AppDelegateIvars {
-    handler: RefCell<Box<dyn AppHandler>>,
+    callbacks: Rc<dyn NativeDispatch>,
+    context: Arc<CallbackContext>,
     icon: Icon,
     shell: OnceCell<ShellState>,
 }
@@ -196,10 +260,8 @@ define_class!(
                 .expect("applicationDidFinishLaunching runs on the main thread");
             self.install_status_item(mtm);
             let state = self.ivars().shell.get().expect("status item set at launch");
-            let shell = crate::Shell::new(Shell {
-                button: state.button.clone(),
-            });
-            self.ivars().handler.borrow_mut().on_started(&shell);
+            let shell = crate::Shell::new(Shell::Button(state.button.clone()));
+            self.ivars().callbacks.started(shell);
         }
 
         // A terminate from inside a handler callback would reach will_terminate while the
@@ -208,20 +270,23 @@ define_class!(
         // because it waits in a nested run loop that can still be inside the callback.
         #[unsafe(method(applicationShouldTerminate:))]
         fn should_terminate(&self, _sender: &NSApplication) -> NSApplicationTerminateReply {
-            if self.ivars().handler.try_borrow_mut().is_ok() {
+            if !self.ivars().callbacks.active() {
                 return NSApplicationTerminateReply::TerminateNow;
             }
-            DispatchQueue::main().exec_async(|| {
-                let mtm = MainThreadMarker::new()
-                    .expect("main dispatch queue runs on the main thread");
-                NSApplication::sharedApplication(mtm).terminate(None);
+            let context = self.ivars().context.clone();
+            DispatchQueue::main().exec_async(move || {
+                if context.dispatch().is_some() {
+                    let mtm = MainThreadMarker::new()
+                        .expect("main dispatch queue runs on the main thread");
+                    NSApplication::sharedApplication(mtm).terminate(None);
+                }
             });
             NSApplicationTerminateReply::TerminateCancel
         }
 
         #[unsafe(method(applicationWillTerminate:))]
         fn will_terminate(&self, _notification: &NSNotification) {
-            self.ivars().handler.borrow_mut().on_stopping();
+            self.ivars().callbacks.stopping();
         }
     }
 
@@ -229,8 +294,11 @@ define_class!(
         #[unsafe(method(menuNeedsUpdate:))]
         fn menu_needs_update(&self, menu: &NSMenu) {
             let mtm = MainThreadMarker::new().expect("menuNeedsUpdate runs on the main thread");
-            let entries = self.ivars().handler.borrow_mut().menu();
-            rebuild_menu(mtm, menu, self, &entries);
+            let menu = menu.retain();
+            let target = self.retain();
+            self.ivars().callbacks.menu(Box::new(move |entries| {
+                rebuild_menu(mtm, &menu, &target, &entries);
+            }));
         }
     }
 
@@ -238,20 +306,26 @@ define_class!(
         #[unsafe(method(menuClicked:))]
         fn menu_clicked(&self, sender: &NSMenuItem) {
             let id = sender.tag() as u32;
-            self.ivars().handler.borrow_mut().on_menu_selected(id);
+            self.ivars().callbacks.selected(id);
         }
 
         #[unsafe(method(screenParametersChanged:))]
         fn screen_parameters_changed(&self, _notification: &NSNotification) {
-            self.ivars().handler.borrow_mut().on_display_changed();
+            self.ivars().callbacks.display_changed();
         }
     }
 );
 
 impl AppDelegate {
-    fn new(mtm: MainThreadMarker, icon: Icon, handler: Box<dyn AppHandler>) -> Retained<Self> {
+    fn new(
+        mtm: MainThreadMarker,
+        icon: Icon,
+        callbacks: Rc<dyn NativeDispatch>,
+        context: Arc<CallbackContext>,
+    ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(AppDelegateIvars {
-            handler: RefCell::new(handler),
+            callbacks,
+            context,
             icon,
             shell: OnceCell::new(),
         });
@@ -262,8 +336,8 @@ impl AppDelegate {
         let status_item =
             NSStatusBar::systemStatusBar().statusItemWithLength(NSSquareStatusItemLength);
         let Some(button) = status_item.button(mtm) else {
-            tracing::error!("NSStatusItem has no button");
-            return;
+            NSStatusBar::systemStatusBar().removeStatusItem(&status_item);
+            panic!("NSStatusItem has no button");
         };
         button.setImage(Some(&self.ivars().icon.image));
 
@@ -297,18 +371,4 @@ impl AppDelegate {
             unreachable!("status item set once at launch");
         }
     }
-}
-
-// Keeps the `C-unwind` ABI so a panic unwinds through the CoreFoundation frame instead
-// of aborting.
-unsafe extern "C-unwind" fn wake_callback(info: *mut c_void) {
-    let delegate: &AppDelegate = unsafe { &*(info as *const AppDelegate) };
-    let ivars = delegate.ivars();
-    let Some(state) = ivars.shell.get() else {
-        return;
-    };
-    let shell = crate::Shell::new(Shell {
-        button: state.button.clone(),
-    });
-    ivars.handler.borrow_mut().on_wake(&shell);
 }

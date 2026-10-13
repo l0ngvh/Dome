@@ -1,16 +1,11 @@
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
-use std::ffi::c_void;
-use std::marker::PhantomData;
-use std::pin::Pin;
-use std::ptr::NonNull;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
-
-use calloop::channel::Sender as CalloopSender;
-
+use super::Wake;
+use super::accessibility::AXApp;
+use super::dispatcher::DispatcherMarker;
+use super::objc2_wrapper::*;
+use super::running_application::RunningApp;
+use super::window_server::{ApplicationEvent, NativeEvent, ObserverContext, TitleElement};
 use block2::RcBlock;
+use dome_auxiliary_window::LoopWaker;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{
@@ -20,490 +15,319 @@ use objc2_app_kit::{
     NSWorkspaceWillSleepNotification,
 };
 use objc2_application_services::{AXObserver, AXUIElement};
-use objc2_core_foundation::{
-    CFAbsoluteTimeGetCurrent, CFEqual, CFRetained, CFRunLoop, CFRunLoopTimer,
-    CFRunLoopTimerContext, CFString, kCFRunLoopDefaultMode,
-};
-use objc2_core_graphics::CGWindowID;
+use objc2_core_foundation::{CFEqual, CFRetained, CFString};
 use objc2_foundation::{
     NSDistributedNotificationCenter, NSNotification, NSObjectProtocol, NSOperationQueue, NSString,
 };
+use std::ffi::c_void;
+use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
+use std::time::{Duration, Instant};
 
-use crate::platform::macos::accessibility::AXApp;
-use crate::platform::macos::dome::HubEvent;
-use crate::platform::macos::objc2_wrapper::{
-    add_observer_notification, create_observer, get_cg_window_id, get_pid,
-    kAXApplicationHiddenNotification, kAXApplicationShownNotification,
-    kAXFocusedWindowChangedNotification, kAXMovedNotification, kAXResizedNotification,
-    kAXTitleChangedNotification, kAXUIElementDestroyedNotification, kAXWindowCreatedNotification,
-    kAXWindowDeminiaturizedNotification, kAXWindowMiniaturizedNotification,
-    remove_observer_notification,
-};
-use crate::platform::macos::running_application::RunningApp;
-use crate::platform::macos::send_hub_event;
-use crate::platform::macos::throttle::Throttle;
+#[cfg(test)]
+#[path = "listeners_tests.rs"]
+pub(super) mod tests;
 
-const FRAME_THROTTLE: Duration = Duration::from_millis(16);
-const SYNC_INTERVAL: Duration = Duration::from_secs(5);
+#[cfg(feature = "native-ui-test")]
+#[path = "listeners_native_source.rs"]
+pub(super) mod native_source;
 
-struct ListenerCtx {
-    is_suspended: Arc<AtomicBool>,
-    observers: Observers,
-    // Prevent feedback loop when Mac queue a focus event, but by the time the event is processed
-    // the focus have been given to another window. This window then tries to take focus and
-    // succeeds, but the focus event for the other window is already queued. The other window will
-    // then proceed to take focus when the event is processed, which tries to take focus and
-    // succeeds after the focus event for the original window is queued but before it's executed
-    // and forms the feedback loop. By throttling the focus events, we can be confident that as
-    // long as the processing of each focus event is shorter than the throttle duration, the
-    // feedback loop can't be formed.
-    focus_throttle: FocusThrottle,
-    title_throttle: TitleThrottle,
-    hub_sender: CalloopSender<HubEvent>,
+pub(super) const SYNC_INTERVAL: Duration = Duration::from_secs(5);
+pub(super) const TITLE_INTERVAL: Duration = Duration::from_millis(16);
+
+pub(super) struct RetainedObserverRegistration {
+    native: Option<Box<dyn ObserverNative>>,
+    registered: Vec<CFRetained<CFString>>,
 }
 
-pub(super) struct EventListener {
-    ctx: Box<ListenerCtx>,
-    sync_timer: Option<CFRetained<CFRunLoopTimer>>,
-    workspace_observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
-    distributed_observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
+// Notification names are immutable and registration state stays on one worker.
+unsafe impl Send for RetainedObserverRegistration {}
+
+trait ObserverNative: Send {
+    fn source(&self) -> CFRetained<objc2_core_foundation::CFRunLoopSource>;
+    fn context(&self) -> Arc<ObserverContext>;
+    fn add(&mut self, marker: &DispatcherMarker, notification: &CFString) -> Result<(), AXError>;
+    fn remove(&mut self, marker: &DispatcherMarker, notification: &CFString)
+    -> Result<(), AXError>;
 }
 
-/// Wraps an `AXObserver` added to a run loop. Tracks registered notifications
-/// so `Drop` can remove them, then removes the run loop source.
-/// `PhantomData<*const ()>` makes the type `!Send`/`!Sync`.
-struct RegisteredObserver {
+struct NativeObserver {
     observer: CFRetained<AXObserver>,
     app: Arc<AXApp>,
-    notifications: Vec<CFRetained<CFString>>,
-    run_loop: CFRetained<CFRunLoop>,
-    _bound_to_thread: PhantomData<*const ()>,
+    context: Arc<ObserverContext>,
 }
 
-impl RegisteredObserver {
-    fn add_notification(
+// AX observer registration is transferred to one serial worker and never messaged elsewhere.
+unsafe impl Send for NativeObserver {}
+
+impl ObserverNative for NativeObserver {
+    fn source(&self) -> CFRetained<objc2_core_foundation::CFRunLoopSource> {
+        unsafe { self.observer.run_loop_source() }
+    }
+
+    fn context(&self) -> Arc<ObserverContext> {
+        self.context.clone()
+    }
+
+    fn add(&mut self, marker: &DispatcherMarker, notification: &CFString) -> Result<(), AXError> {
+        add_observer_notification(
+            marker,
+            &self.observer,
+            self.app.element(),
+            notification,
+            Arc::as_ptr(&self.context) as *mut c_void,
+        )
+    }
+
+    fn remove(
         &mut self,
-        notification: CFRetained<CFString>,
-        refcon: *mut std::ffi::c_void,
-    ) -> Result<(), crate::platform::macos::objc2_wrapper::AXError> {
-        add_observer_notification(&self.observer, self.app.element(), &notification, refcon)?;
-        self.notifications.push(notification);
-        Ok(())
+        marker: &DispatcherMarker,
+        notification: &CFString,
+    ) -> Result<(), AXError> {
+        remove_observer_notification(marker, &self.observer, self.app.element(), notification)
     }
 }
 
-impl Drop for RegisteredObserver {
-    fn drop(&mut self) {
-        for notification in &self.notifications {
-            if let Err(err) =
-                remove_observer_notification(&self.observer, self.app.element(), notification)
+impl RetainedObserverRegistration {
+    pub(super) fn new(
+        app: Arc<AXApp>,
+        context: Arc<ObserverContext>,
+        marker: &DispatcherMarker,
+    ) -> Result<Self, AXError> {
+        let observer = create_observer(marker, app.pid(), Some(observer_callback))?;
+        let mut registration = Self {
+            native: Some(Box::new(NativeObserver {
+                observer,
+                app,
+                context,
+            })),
+            registered: Vec::new(),
+        };
+        registration.repair(marker);
+        Ok(registration)
+    }
+
+    pub(super) fn source(&self) -> CFRetained<objc2_core_foundation::CFRunLoopSource> {
+        self.native.as_ref().unwrap().source()
+    }
+
+    pub(super) fn context(&self) -> Arc<ObserverContext> {
+        self.native.as_ref().unwrap().context()
+    }
+
+    pub(super) fn repair(&mut self, marker: &DispatcherMarker) {
+        for notification in [
+            kAXWindowCreatedNotification(),
+            kAXWindowMiniaturizedNotification(),
+            kAXWindowDeminiaturizedNotification(),
+            kAXMovedNotification(),
+            kAXResizedNotification(),
+            kAXUIElementDestroyedNotification(),
+            kAXFocusedWindowChangedNotification(),
+            kAXApplicationHiddenNotification(),
+            kAXApplicationShownNotification(),
+            kAXTitleChangedNotification(),
+        ] {
+            if self
+                .registered
+                .iter()
+                .any(|registered| CFEqual(Some(&**registered), Some(&*notification)))
             {
-                tracing::trace!("Failed to remove notification: {err:#}");
+                continue;
+            }
+            if self
+                .native
+                .as_mut()
+                .unwrap()
+                .add(marker, &notification)
+                .is_ok()
+            {
+                self.registered.push(notification);
             }
         }
-        let source = unsafe { self.observer.run_loop_source() };
-        self.run_loop
-            .remove_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
+    }
+
+    pub(super) fn remove(mut self, marker: &DispatcherMarker) {
+        let native = self.native.as_mut().unwrap();
+        self.registered
+            .retain(|notification| native.remove(marker, notification).is_err());
     }
 }
 
-type Observers = RefCell<HashMap<i32, RegisteredObserver>>;
-type FocusThrottle = Pin<Box<Throttle<i32>>>;
-type TitleThrottle = Pin<Box<Throttle<CGWindowID>>>;
-
-impl EventListener {
-    pub(super) fn new(hub_sender: CalloopSender<HubEvent>, is_suspended: Arc<AtomicBool>) -> Self {
-        let (focus_throttle, title_throttle) = setup_throttles(hub_sender.clone());
-
-        let mut ctx = Box::new(ListenerCtx {
-            is_suspended,
-            observers: RefCell::new(HashMap::new()),
-            focus_throttle,
-            title_throttle,
-            hub_sender,
-        });
-
-        let (workspace_observers, distributed_observers) = setup_app_observers(&mut ctx);
-        let sync_timer = schedule_sync_timer(&ctx);
-
-        Self {
-            ctx,
-            sync_timer,
-            workspace_observers,
-            distributed_observers,
-        }
-    }
-
-    /// Tears down all observers and re-registers from scratch. Sends
-    /// `ObservedPidsRefreshed` back to the hub thread with the full set of
-    /// successfully registered PIDs. Must be called on the main thread.
-    pub(super) fn refresh_all_observers(&self) {
-        self.ctx.observers.borrow_mut().clear();
-        for app in RunningApp::all() {
-            let ax_app = app.ax_app();
-            try_register_app(&self.ctx, &app, &ax_app);
-        }
-        let pids: HashSet<i32> = self.ctx.observers.borrow().keys().copied().collect();
-        send_hub_event(&self.ctx.hub_sender, HubEvent::ObservedPidsRefreshed(pids));
-    }
-}
-
-impl Drop for EventListener {
+impl Drop for RetainedObserverRegistration {
     fn drop(&mut self) {
-        if let Some(ref timer) = self.sync_timer {
-            CFRunLoopTimer::invalidate(timer);
-        }
-
-        let notification_center = NSWorkspace::sharedWorkspace().notificationCenter();
-        for observer in &self.workspace_observers {
-            unsafe { notification_center.removeObserver(ProtocolObject::as_ref(observer)) };
-        }
-
-        let distributed_center = NSDistributedNotificationCenter::defaultCenter();
-        for observer in &self.distributed_observers {
-            unsafe { distributed_center.removeObserver(ProtocolObject::as_ref(observer)) };
+        if !self.registered.is_empty() {
+            // Failed removal or unwind leaves callback ownership uncertain.
+            std::mem::forget(self.native.take());
         }
     }
-}
-
-type WorkspaceObservers = Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>;
-type DistributedObservers = Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>;
-
-fn setup_app_observers(ctx: &mut ListenerCtx) -> (WorkspaceObservers, DistributedObservers) {
-    // To bypass FnMut and lifetime requirement of block2. ctx will outlive these callbacks as
-    // these callbacks are removed on EventListener drop
-    let ctx_ptr = ctx as *mut ListenerCtx;
-
-    let notification_center = NSWorkspace::sharedWorkspace().notificationCenter();
-    let mut workspace_observers = Vec::new();
-
-    workspace_observers.push(unsafe {
-        notification_center.addObserverForName_object_queue_usingBlock(
-            Some(NSWorkspaceDidLaunchApplicationNotification),
-            None,
-            Some(&NSOperationQueue::mainQueue()),
-            &RcBlock::new(move |notification: NonNull<NSNotification>| {
-                handle_app_launched(&*ctx_ptr, notification.as_ref());
-            }),
-        )
-    });
-
-    workspace_observers.push(unsafe {
-        notification_center.addObserverForName_object_queue_usingBlock(
-            Some(NSWorkspaceDidTerminateApplicationNotification),
-            None,
-            Some(&NSOperationQueue::mainQueue()),
-            &RcBlock::new(move |notification: NonNull<NSNotification>| {
-                handle_app_terminated(&*ctx_ptr, notification.as_ref());
-            }),
-        )
-    });
-
-    workspace_observers.push(unsafe {
-        notification_center.addObserverForName_object_queue_usingBlock(
-            Some(NSWorkspaceDidActivateApplicationNotification),
-            None,
-            Some(&NSOperationQueue::mainQueue()),
-            &RcBlock::new(move |notification: NonNull<NSNotification>| {
-                handle_app_activated(&mut *ctx_ptr, notification.as_ref());
-            }),
-        )
-    });
-
-    // Suspend on system sleep, screen sleep, or lock, as AX APIs are unusable while under these
-    // conditions
-    // Resume ONLY on unlock, as screen can wake while locked, AX APIs are still unusable while
-    // locked
-    workspace_observers.push(unsafe {
-        notification_center.addObserverForName_object_queue_usingBlock(
-            Some(NSWorkspaceWillSleepNotification),
-            None,
-            Some(&NSOperationQueue::mainQueue()),
-            &RcBlock::new(move |_: NonNull<NSNotification>| {
-                tracing::info!("System will sleep, suspending window management");
-                (*ctx_ptr).is_suspended.store(true, Ordering::Relaxed);
-            }),
-        )
-    });
-
-    workspace_observers.push(unsafe {
-        notification_center.addObserverForName_object_queue_usingBlock(
-            Some(NSWorkspaceScreensDidSleepNotification),
-            None,
-            Some(&NSOperationQueue::mainQueue()),
-            &RcBlock::new(move |_: NonNull<NSNotification>| {
-                tracing::info!("Screen did sleep, suspending window management");
-                (*ctx_ptr).is_suspended.store(true, Ordering::Relaxed);
-            }),
-        )
-    });
-
-    workspace_observers.push(unsafe {
-        notification_center.addObserverForName_object_queue_usingBlock(
-            Some(NSWorkspaceActiveSpaceDidChangeNotification),
-            None,
-            Some(&NSOperationQueue::mainQueue()),
-            &RcBlock::new(move |_: NonNull<NSNotification>| {
-                send_hub_event(&(*ctx_ptr).hub_sender, HubEvent::SpaceChanged);
-            }),
-        )
-    });
-
-    let distributed_center = NSDistributedNotificationCenter::defaultCenter();
-    let lock_name = NSString::from_str("com.apple.screenIsLocked");
-    let unlock_name = NSString::from_str("com.apple.screenIsUnlocked");
-    let mut distributed_observers = Vec::new();
-
-    distributed_observers.push(unsafe {
-        distributed_center.addObserverForName_object_queue_usingBlock(
-            Some(lock_name.as_ref()),
-            None,
-            Some(&NSOperationQueue::mainQueue()),
-            &RcBlock::new(move |_: NonNull<NSNotification>| {
-                tracing::info!("Screen locked, suspending window management");
-                (*ctx_ptr).is_suspended.store(true, Ordering::Relaxed);
-            }),
-        )
-    });
-
-    distributed_observers.push(unsafe {
-        distributed_center.addObserverForName_object_queue_usingBlock(
-            Some(unlock_name.as_ref()),
-            None,
-            Some(&NSOperationQueue::mainQueue()),
-            &RcBlock::new(move |_: NonNull<NSNotification>| {
-                tracing::info!("Screen unlocked, resuming window management");
-                (*ctx_ptr).is_suspended.store(false, Ordering::Relaxed);
-                send_hub_event(&(*ctx_ptr).hub_sender, HubEvent::Sync);
-            }),
-        )
-    });
-
-    (workspace_observers, distributed_observers)
-}
-
-fn setup_throttles(hub_sender: CalloopSender<HubEvent>) -> (FocusThrottle, TitleThrottle) {
-    let hub_sender2 = hub_sender.clone();
-
-    let focus_throttle = Throttle::new(Duration::from_millis(500), move |pid: i32| {
-        send_hub_event(&hub_sender, HubEvent::SyncFocus { pid });
-    });
-
-    let title_throttle = Throttle::new(FRAME_THROTTLE, move |cg_id: CGWindowID| {
-        send_hub_event(&hub_sender2, HubEvent::TitleChanged(cg_id));
-    });
-
-    (focus_throttle, title_throttle)
-}
-
-fn schedule_sync_timer(ctx: &ListenerCtx) -> Option<CFRetained<CFRunLoopTimer>> {
-    let ctx_ptr = ctx as *const ListenerCtx as *mut c_void;
-    let mut timer_context = CFRunLoopTimerContext {
-        version: 0,
-        info: ctx_ptr,
-        retain: None,
-        release: None,
-        copyDescription: None,
-    };
-    let timer = unsafe {
-        CFRunLoopTimer::new(
-            None,
-            CFAbsoluteTimeGetCurrent() + SYNC_INTERVAL.as_secs_f64(),
-            SYNC_INTERVAL.as_secs_f64(),
-            0,
-            0,
-            Some(sync_timer_callback),
-            &mut timer_context,
-        )
-    };
-    if let Some(ref timer) = timer {
-        CFRunLoop::current()
-            .unwrap()
-            .add_timer(Some(timer), unsafe { kCFRunLoopDefaultMode });
-    }
-    timer
-}
-
-unsafe extern "C-unwind" fn sync_timer_callback(_timer: *mut CFRunLoopTimer, info: *mut c_void) {
-    let ctx: &mut ListenerCtx = unsafe { &mut *(info as *mut ListenerCtx) };
-    if ctx.is_suspended.load(Ordering::Relaxed) {
-        return;
-    }
-    send_hub_event(&ctx.hub_sender, HubEvent::Sync);
-}
-
-fn handle_app_launched(ctx: &ListenerCtx, notification: &NSNotification) {
-    let Some(app) = RunningApp::from_notification(notification) else {
-        return;
-    };
-    tracing::debug!(%app, "App launched");
-    let ax_app = app.ax_app();
-    if try_register_app(ctx, &app, &ax_app) {
-        tracing::debug!(%app, "Registered app");
-    }
-    if ctx.observers.borrow().contains_key(&app.pid()) {
-        send_hub_event(&ctx.hub_sender, HubEvent::PidObserved { pid: app.pid() });
-    }
-    send_hub_event(
-        &ctx.hub_sender,
-        HubEvent::VisibleWindowsChanged { pid: app.pid() },
-    );
-}
-
-fn handle_app_terminated(ctx: &ListenerCtx, notification: &NSNotification) {
-    let Some(app) = RunningApp::from_notification(notification) else {
-        return;
-    };
-    let pid = app.pid();
-    tracing::debug!(%app, "App terminated");
-    ctx.observers.borrow_mut().remove(&pid);
-    send_hub_event(&ctx.hub_sender, HubEvent::AppTerminated { pid });
-}
-
-fn handle_app_activated(ctx: &mut ListenerCtx, notification: &NSNotification) {
-    if ctx.is_suspended.load(Ordering::Relaxed) {
-        return;
-    }
-    let Some(app) = RunningApp::from_notification(notification) else {
-        return;
-    };
-
-    // This can happen when Mac queue an event for an activated application, but by the time this
-    // callback is run the focus have been given to another app. See focus_throttle for more detail
-    if !app.is_active() {
-        return;
-    }
-
-    tracing::debug!(%app, "App activated");
-    ctx.focus_throttle.submit(app.pid());
-}
-
-fn try_register_app(ctx: &ListenerCtx, app: &RunningApp, ax_app: &Arc<AXApp>) -> bool {
-    let pid = app.pid();
-
-    let mut observers_ref = ctx.observers.borrow_mut();
-    if observers_ref.contains_key(&pid) {
-        return false;
-    }
-
-    let run_loop = CFRunLoop::current().unwrap();
-    let observer = match create_observer(pid, Some(observer_callback)) {
-        Ok(o) => o,
-        Err(err) => {
-            tracing::debug!(%pid, "Can't create observer: {err:#}");
-            return false;
-        }
-    };
-    let source = unsafe { observer.run_loop_source() };
-    run_loop.add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
-
-    let mut registered = RegisteredObserver {
-        observer,
-        app: ax_app.clone(),
-        notifications: Vec::new(),
-        run_loop: run_loop.clone(),
-        _bound_to_thread: PhantomData,
-    };
-
-    let context_ptr = ctx as *const ListenerCtx as *mut std::ffi::c_void;
-    for notification in [
-        kAXWindowCreatedNotification(),
-        kAXWindowMiniaturizedNotification(),
-        kAXWindowDeminiaturizedNotification(),
-        kAXMovedNotification(),
-        kAXResizedNotification(),
-        kAXUIElementDestroyedNotification(),
-        kAXFocusedWindowChangedNotification(),
-        kAXApplicationHiddenNotification(),
-        kAXApplicationShownNotification(),
-        kAXTitleChangedNotification(),
-    ] {
-        if let Err(err) = registered.add_notification(notification, context_ptr) {
-            tracing::debug!(%pid, "Can't add notification: {err:#}");
-        }
-    }
-
-    observers_ref.insert(pid, registered);
-    true
 }
 
 unsafe extern "C-unwind" fn observer_callback(
     _observer: NonNull<AXObserver>,
     element: NonNull<AXUIElement>,
     notification: NonNull<CFString>,
-    refcon: *mut std::ffi::c_void,
+    refcon: *mut c_void,
 ) {
-    let ctx: &mut ListenerCtx = unsafe { &mut *(refcon as *mut ListenerCtx) };
-    if ctx.is_suspended.load(Ordering::Relaxed) {
-        return;
-    }
+    unsafe { deliver_observer_notification(element, notification, refcon, || {}) };
+}
 
+unsafe fn deliver_observer_notification(
+    element: NonNull<AXUIElement>,
+    notification: NonNull<CFString>,
+    refcon: *mut c_void,
+    during_callback: impl FnOnce(),
+) {
+    let context = refcon.cast::<ObserverContext>();
+    unsafe {
+        Arc::increment_strong_count(context);
+    }
+    let context = unsafe { Arc::from_raw(context) };
     let notification = unsafe { notification.as_ref() };
-    let element = unsafe { CFRetained::retain(element) };
-
-    if CFEqual(Some(notification), Some(&*kAXWindowCreatedNotification()))
-        || CFEqual(
-            Some(notification),
-            Some(&*kAXUIElementDestroyedNotification()),
-        )
-        || CFEqual(
-            Some(notification),
-            Some(&*kAXWindowMiniaturizedNotification()),
-        )
-        || CFEqual(
-            Some(notification),
-            Some(&*kAXApplicationHiddenNotification()),
-        )
-        || CFEqual(
-            Some(notification),
-            Some(&*kAXApplicationShownNotification()),
-        )
+    let is = |name: CFRetained<CFString>| CFEqual(Some(notification), Some(&*name));
+    let event = if is(kAXMovedNotification())
+        || is(kAXResizedNotification())
+        || is(kAXWindowDeminiaturizedNotification())
     {
-        if let Ok(pid) = get_pid(&element) {
-            send_hub_event(&ctx.hub_sender, HubEvent::VisibleWindowsChanged { pid });
+        ApplicationEvent::MovedOrResized {
+            observed_at: Instant::now(),
         }
-        return;
-    }
-
-    if CFEqual(
-        Some(notification),
-        Some(&*kAXFocusedWindowChangedNotification()),
-    ) {
-        if let Ok(pid) = get_pid(&element) {
-            ctx.focus_throttle.submit(pid);
-        }
-        return;
-    }
-
-    if CFEqual(Some(notification), Some(&*kAXMovedNotification()))
-        || CFEqual(Some(notification), Some(&*kAXResizedNotification()))
-        // Deminiaturized is treated similar to window moved, in that we need to get the window's
-        // new position/size, and a missed deminiaturized can be perfectly compensated by a
-        // standard move/resized event
-        || CFEqual(
-            Some(notification),
-            Some(&*kAXWindowDeminiaturizedNotification()),
-        )
+    } else if is(kAXApplicationHiddenNotification()) {
+        ApplicationEvent::Hidden
+    } else if is(kAXApplicationShownNotification()) {
+        ApplicationEvent::Shown
+    } else if is(kAXFocusedWindowChangedNotification()) {
+        ApplicationEvent::FocusChanged
+    } else if is(kAXTitleChangedNotification()) {
+        ApplicationEvent::TitleElementChanged(TitleElement(unsafe { CFRetained::retain(element) }))
+    } else if is(kAXWindowCreatedNotification())
+        || is(kAXUIElementDestroyedNotification())
+        || is(kAXWindowMiniaturizedNotification())
     {
-        if let Ok(pid) = get_pid(&element) {
-            send_hub_event(
-                &ctx.hub_sender,
-                HubEvent::WindowMovedOrResized {
-                    pid,
-                    observed_at: Instant::now(),
-                },
-            );
-        }
+        ApplicationEvent::WindowsChanged
+    } else {
         return;
-    }
+    };
+    send_native(
+        &context.events,
+        &context.loop_waker,
+        NativeEvent::Application {
+            lifetime: context.lifetime.clone(),
+            event,
+        },
+    );
+    during_callback();
+}
 
-    if CFEqual(Some(notification), Some(&*kAXTitleChangedNotification())) {
-        // TODO: might need to log this in case of error
-        if let Ok(cg_id) = get_cg_window_id(&element) {
-            ctx.title_throttle.submit(cg_id);
+pub(super) fn send_native(
+    sender: &mpsc::Sender<NativeEvent>,
+    waker: &LoopWaker<Wake>,
+    event: NativeEvent,
+) {
+    if sender.send(event).is_ok() {
+        waker.wake(Wake::WindowServer);
+    }
+}
+
+type NotificationTokens = Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>;
+pub(super) struct EventListener {
+    workspace: NotificationTokens,
+    distributed: NotificationTokens,
+}
+
+impl EventListener {
+    pub(super) fn new(
+        sender: mpsc::Sender<NativeEvent>,
+        waker: LoopWaker<Wake>,
+        is_suspended: Arc<AtomicBool>,
+    ) -> Self {
+        let center = NSWorkspace::sharedWorkspace().notificationCenter();
+        let mut workspace = Vec::new();
+        for (name, kind) in unsafe {
+            [
+                (NSWorkspaceDidLaunchApplicationNotification, 0),
+                (NSWorkspaceDidTerminateApplicationNotification, 1),
+                (NSWorkspaceDidActivateApplicationNotification, 2),
+                (NSWorkspaceActiveSpaceDidChangeNotification, 3),
+                (NSWorkspaceWillSleepNotification, 4),
+                (NSWorkspaceScreensDidSleepNotification, 4),
+            ]
+        } {
+            let is_suspended = is_suspended.clone();
+            let sender = sender.clone();
+            let waker = waker.clone();
+            workspace.push(unsafe {
+                center.addObserverForName_object_queue_usingBlock(
+                    Some(name),
+                    None,
+                    Some(&NSOperationQueue::mainQueue()),
+                    &RcBlock::new(move |notification: NonNull<NSNotification>| {
+                        let event = match kind {
+                            3 => NativeEvent::SpaceChanged,
+                            4 => NativeEvent::Suspended(true),
+                            _ => {
+                                let Some(process_id) =
+                                    RunningApp::process_id_from_notification(notification.as_ref())
+                                else {
+                                    return;
+                                };
+                                match kind {
+                                    0 => NativeEvent::ApplicationLaunched { process_id },
+                                    1 => NativeEvent::ApplicationTerminated { process_id },
+                                    _ => NativeEvent::ApplicationActivated { process_id },
+                                }
+                            }
+                        };
+                        if let NativeEvent::Suspended(suspended) = &event {
+                            is_suspended.store(*suspended, Ordering::Relaxed);
+                        }
+                        send_native(&sender, &waker, event);
+                    }),
+                )
+            });
         }
-        return;
+        let center = NSDistributedNotificationCenter::defaultCenter();
+        let mut distributed = Vec::new();
+        for (name, suspended) in [
+            ("com.apple.screenIsLocked", true),
+            ("com.apple.screenIsUnlocked", false),
+        ] {
+            let is_suspended = is_suspended.clone();
+            let sender = sender.clone();
+            let waker = waker.clone();
+            distributed.push(unsafe {
+                center.addObserverForName_object_queue_usingBlock(
+                    Some(&NSString::from_str(name)),
+                    None,
+                    Some(&NSOperationQueue::mainQueue()),
+                    &RcBlock::new(move |_: NonNull<NSNotification>| {
+                        is_suspended.store(suspended, Ordering::Relaxed);
+                        send_native(&sender, &waker, NativeEvent::Suspended(suspended));
+                    }),
+                )
+            });
+        }
+        Self {
+            workspace,
+            distributed,
+        }
     }
+}
 
-    tracing::trace!(%notification, "unexpected AX event");
+impl Drop for EventListener {
+    fn drop(&mut self) {
+        let center = NSWorkspace::sharedWorkspace().notificationCenter();
+        for token in &self.workspace {
+            unsafe {
+                center.removeObserver(ProtocolObject::as_ref(token));
+            }
+        }
+        let center = NSDistributedNotificationCenter::defaultCenter();
+        for token in &self.distributed {
+            unsafe {
+                center.removeObserver(ProtocolObject::as_ref(token));
+            }
+        }
+    }
 }

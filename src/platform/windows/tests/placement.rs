@@ -51,7 +51,7 @@ fn dropping_all_limits_restores_the_even_split() {
 
     // Mirrors dispatch_constraint_read re-reading an app that no longer reports a
     // minimum. Discarding an all-clear observation would strand the 1200 forever.
-    env.dome.set_constraints_for(
+    env.report_size_limits(
         w1,
         LimitObservation {
             min_width: LimitUpdate::Cleared,
@@ -122,10 +122,8 @@ fn dont_correct_float_move() {
 
     env.flush_moves();
 
-    env.assert_settled("float observation should not trigger set_position");
-
-    // Idempotence: fp.target == new_target short-circuits show_float, so no
-    // set_position calls are issued across two successive apply_layout rounds.
+    env.assert_placement_pending("the responding float scene submits the observed frame once");
+    env.settle(10);
     env.layout();
     env.settle(10);
     env.layout();
@@ -215,6 +213,8 @@ fn degenerate_content_box_hides_window() {
 #[test]
 fn show_tiling_places_at_200pct_offset_monitor() {
     let primary = MonitorInfo {
+        full_rect: PixelRect::new(0, 0, 1920, 1080),
+        dots_per_inch: (1.0 * 96.0) as u32,
         handle: 1,
         name: "Primary".to_string(),
         gdi_device: "\\\\.\\DISPLAY1".to_string(),
@@ -222,8 +222,10 @@ fn show_tiling_places_at_200pct_offset_monitor() {
         is_primary: true,
         scale: 1.0,
     };
-    // Physical dimensions at 2.0x: 2560*2=5120, 1440*2=2880, origin 1920
+
     let secondary = MonitorInfo {
+        full_rect: PixelRect::new(1920, 0, 5120, 2880),
+        dots_per_inch: (2.0 * 96.0) as u32,
         handle: 2,
         name: "Secondary".to_string(),
         gdi_device: "\\\\.\\DISPLAY2".to_string(),
@@ -368,6 +370,8 @@ fn float_settle_does_not_drift_at_fractional_scaled_border() {
 #[test]
 fn window_drifted_float_ignores_unknown_monitor_handle() {
     let primary = MonitorInfo {
+        full_rect: PixelRect::new(0, 0, 1920, 1080),
+        dots_per_inch: (1.0 * 96.0) as u32,
         handle: 1,
         name: "Primary".to_string(),
         gdi_device: "\\\\.\\DISPLAY1".to_string(),
@@ -376,6 +380,8 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
         scale: 1.0,
     };
     let secondary = MonitorInfo {
+        full_rect: PixelRect::new(1920, 0, 3840, 2160),
+        dots_per_inch: (2.0 * 96.0) as u32,
         handle: 2,
         name: "Secondary".to_string(),
         gdi_device: "\\\\.\\DISPLAY2".to_string(),
@@ -394,7 +400,7 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
 
     env.clear_moves();
 
-    env.dome.handle_window_moved(
+    env.report_move(
         win,
         PixelRect::new(3000, 500, 600, 400),
         999,
@@ -413,6 +419,8 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
 #[test]
 fn dpi_reconcile_reruns_layout_with_new_scale() {
     let monitor = MonitorInfo {
+        full_rect: PixelRect::new(0, 0, 1920, 1080),
+        dots_per_inch: (1.0 * 96.0) as u32,
         handle: 1,
         name: "Test".to_string(),
         gdi_device: "\\\\.\\DISPLAY1".to_string(),
@@ -435,7 +443,7 @@ fn dpi_reconcile_reruns_layout_with_new_scale() {
     assert_eq!(d_before.y, (border + tab_h_1x));
 
     env.set_monitor_scale(monitor.handle, 2.0);
-    env.dome.handle_dpi_change();
+    env.dpi_changed();
     env.layout();
     env.settle(10);
 
@@ -461,25 +469,22 @@ fn handle_window_moved_signals_monitor_change() {
 
     // Settled on monitor 1: a report on monitor 1 is no change.
     assert!(
-        !env.dome
-            .handle_window_moved(w, PixelRect::new(200, 150, 600, 400), 1, Instant::now()),
+        !env.report_move(w, PixelRect::new(200, 150, 600, 400), 1, Instant::now()),
         "same monitor must not signal a constraint re-read"
     );
     // Crossing to monitor 2 signals a re-read.
     assert!(
-        env.dome
-            .handle_window_moved(w, PixelRect::new(2000, 100, 600, 400), 2, Instant::now()),
+        env.report_move(w, PixelRect::new(2000, 100, 600, 400), 2, Instant::now()),
         "monitor change must signal a constraint re-read"
     );
     // Staying on monitor 2 is no change.
     assert!(
-        !env.dome
-            .handle_window_moved(w, PixelRect::new(2200, 200, 600, 400), 2, Instant::now()),
+        !env.report_move(w, PixelRect::new(2200, 200, 600, 400), 2, Instant::now()),
         "same monitor must not signal a constraint re-read"
     );
     // Unknown window: no entry to compare, no re-read.
     assert!(
-        !env.dome.handle_window_moved(
+        !env.report_move(
             HwndId::test(0x9999),
             PixelRect::new(200, 150, 600, 400),
             1,
@@ -529,6 +534,8 @@ fn float_move_monitor_same_dpi_preserves_content_rect() {
 #[test]
 fn float_move_monitor_different_dpi_rescales_border() {
     let primary = MonitorInfo {
+        full_rect: PixelRect::new(0, 0, 1920, 1080),
+        dots_per_inch: (1.0 * 96.0) as u32,
         handle: 1,
         name: "Primary".to_string(),
         gdi_device: "\\\\.\\DISPLAY1".to_string(),
@@ -537,6 +544,8 @@ fn float_move_monitor_different_dpi_rescales_border() {
         scale: 1.0,
     };
     let secondary = MonitorInfo {
+        full_rect: PixelRect::new(1920, 0, 5120, 2880),
+        dots_per_inch: (2.0 * 96.0) as u32,
         handle: 2,
         name: "Secondary".to_string(),
         gdi_device: "\\\\.\\DISPLAY2".to_string(),
@@ -574,6 +583,13 @@ fn float_move_monitor_different_dpi_rescales_border() {
 #[test]
 fn dome_new_assigns_per_monitor_scale() {
     let primary = MonitorInfo {
+        full_rect: PixelRect::from_dimension(Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            SCREEN_WIDTH * 1.5,
+            SCREEN_HEIGHT * 1.5,
+        )),
+        dots_per_inch: (1.5 * 96.0) as u32,
         handle: 1,
         name: "Primary".to_string(),
         gdi_device: "\\\\.\\DISPLAY1".to_string(),
@@ -587,6 +603,13 @@ fn dome_new_assigns_per_monitor_scale() {
         scale: 1.5,
     };
     let secondary = MonitorInfo {
+        full_rect: PixelRect::from_dimension(Dimension::new(
+            SCREEN_WIDTH * 1.5,
+            Length::ZERO,
+            Length::new(5120.0),
+            Length::new(2880.0),
+        )),
+        dots_per_inch: (2.0 * 96.0) as u32,
         handle: 2,
         name: "Secondary".to_string(),
         gdi_device: "\\\\.\\DISPLAY2".to_string(),
@@ -608,7 +631,6 @@ fn dome_new_assigns_per_monitor_scale() {
     let d_a = env.dim(w_a);
     assert_eq!(d_a.x, border * 1.5);
 
-    // Its origin carries the primary's scaled width, so this pins both monitors' scales at once.
     let w_b = env.open();
     env.run_actions("move monitor right");
     env.settle(10);
@@ -851,4 +873,67 @@ fn float_border_takes_the_window_corner_radius() {
     env.run_actions("toggle float");
     env.settle(10);
     assert_eq!(env.painted_float_corner_radius(), Some(SMALL_RADIUS));
+}
+
+#[test]
+fn correct_from_accepted_geometry_instead_of_live_mock_geometry() {
+    let mut env = TestEnv::new();
+    let window = env.open();
+    env.settle(10);
+    let target = PixelRect::from_dimension(env.dim(window));
+    let before = env.frame_submissions().len();
+    env.report_move(window, PixelRect::new(100, 100, 600, 400), 1, env.now());
+    assert_eq!(&env.frame_submissions()[before..], &[(window, target)]);
+    env.move_window_to(window, dim(200, 200, 700, 500));
+    env.clear_moves();
+    let before = env.frame_submissions().len();
+    env.report_move(window, target, 1, env.now());
+    assert_eq!(env.frame_submissions().len(), before);
+    assert_eq!(env.dim(window), dim(200, 200, 700, 500));
+}
+
+#[test]
+fn request_monitor_limits_before_stale_fullscreen_and_unknown_float_returns() {
+    use crate::platform::windows::window_server::{Observation, SettleRead};
+    let mut env = TestEnv::builder()
+        .monitors(vec![default_monitor(), second_monitor()])
+        .build();
+    let window = env.open();
+    env.settle(10);
+    let stale = env.now() - std::time::Duration::from_nanos(1);
+    let before = env.limits_demand().len();
+    env.report_move(window, PixelRect::new(2000, 100, 600, 400), 2, stale);
+    env.report_move(window, PixelRect::new(2100, 100, 600, 400), 2, stale);
+    assert_eq!(&env.limits_demand()[before..], &[window]);
+    env.hold_reports(true);
+    env.report_move(
+        window,
+        PixelRect::from_dimension(fullscreen_dim()),
+        1,
+        env.now(),
+    );
+    assert_eq!(&env.limits_demand()[before..], &[window, window]);
+    env.inject_observation(Observation::Settled {
+        window,
+        read: SettleRead {
+            observed_at: env.now(),
+            minimized: false,
+            is_maximized: false,
+            placement: None,
+        },
+    });
+    assert_eq!(&env.limits_demand()[before..], &[window, window]);
+    let mut floating = TestEnv::new();
+    let window = floating.open();
+    floating.run_actions("toggle float");
+    floating.hold_reports(true);
+    let before = floating.limits_demand().len();
+    floating.report_move(
+        window,
+        PixelRect::new(100, 100, 600, 400),
+        999,
+        floating.now(),
+    );
+    assert_eq!(&floating.limits_demand()[before..], &[window]);
+    assert!(floating.take_reports().is_empty());
 }

@@ -3,8 +3,8 @@ use crate::core::{PartitionTreeConfig, WindowMatcher};
 
 /// Count minimized windows tracked by the daemon by parsing the same JSON
 /// blob external launchers consume via `Query::MinimizedWindows`.
-fn minimized_json_len(dome: &Dome) -> usize {
-    let json = dome.query_minimized_windows_json();
+fn minimized_json_len(env: &TestEnv) -> usize {
+    let json = env.query_minimized_windows_json();
     let arr: Vec<serde_json::Value> =
         serde_json::from_str(&json).expect("query_minimized_windows_json is well-formed");
     arr.len()
@@ -33,7 +33,7 @@ fn window_minimized_removes_from_tiling() {
     env.assert_horizontally_tiled(&[env.dim(w1)]);
     // w2 stays tracked as a minimized window (not deleted), reachable
     // via the external launcher query surface.
-    assert_eq!(minimized_json_len(&env.dome), 1);
+    assert_eq!(minimized_json_len(&env), 1);
 }
 
 #[test]
@@ -43,28 +43,28 @@ fn user_minimize_then_restore() {
     let w2 = env.open();
 
     env.minimize_window(w2);
-    assert_eq!(minimized_json_len(&env.dome), 1);
+    assert_eq!(minimized_json_len(&env), 1);
 
     env.unminimize_window(w2);
-    assert_eq!(minimized_json_len(&env.dome), 0);
+    assert_eq!(minimized_json_len(&env), 0);
     env.assert_horizontally_tiled(&[env.dim(w1), env.dim(w2)]);
 }
 
 #[test]
-fn move_size_suppresses_placement() {
+fn move_size_keeps_changed_placement_eligible() {
     let mut env = TestEnv::new();
     let w1 = env.open();
 
     let placed = env.dim(w1);
 
-    env.dome.move_size_started(w1);
+    env.start_drag(w1);
 
-    // Add a second window -- triggers relayout, but w1 should be skipped
     let w2 = env.open();
 
-    assert_eq!(env.dim(w1), placed);
+    assert_ne!(env.dim(w1), placed);
+    env.assert_horizontally_tiled(&[env.dim(w1), env.dim(w2)]);
 
-    env.dome.clear_move_state(w1);
+    env.finish_drag(w1);
     env.layout();
 
     assert!(!env.is_offscreen(w1));
@@ -79,6 +79,8 @@ fn monitors_changed_updates_layout() {
     let before = env.dim(w1);
 
     let new_monitor = MonitorInfo {
+        full_rect: PixelRect::new(0, 0, 1280, 720),
+        dots_per_inch: (1.0 * 96.0) as u32,
         handle: 1,
         name: "Test".to_string(),
         gdi_device: "\\\\.\\DISPLAY1".to_string(),
@@ -86,7 +88,7 @@ fn monitors_changed_updates_layout() {
         is_primary: true,
         scale: 1.0,
     };
-    env.dome.monitors_changed(vec![new_monitor]);
+    env.report_monitors(vec![new_monitor]);
     env.layout();
 
     let after = env.dim(w1);
@@ -175,7 +177,7 @@ fn zebar_stays_unmanaged() {
     let mut env = TestEnv::new();
     let bar = env.open_bar();
 
-    assert!(!env.dome.is_managed(bar));
+    assert!(!env.is_managed(bar));
 }
 
 #[test]
@@ -201,8 +203,7 @@ fn title_change_reaches_the_painted_tab_strip() {
     let _w2 = env.open();
     env.run_actions("toggle layout");
 
-    env.dome
-        .update_titles(vec![(w1, Some("Renamed".to_string()))]);
+    env.report_titles(vec![(w1, Some("Renamed".to_string()))]);
 
     assert!(
         tabbed_container(&env)
@@ -263,6 +264,8 @@ fn workspace_switch_back_does_not_focus_overlay() {
 
     env.run_actions("focus workspace 1");
     env.run_actions("focus workspace 0");
+    env.advance_time(std::time::Duration::from_millis(100));
+    env.deliver_due();
     assert_eq!(env.focus_target(), FocusTarget::Window(w1));
 }
 
@@ -294,6 +297,8 @@ fn focus_child_after_parent_does_not_focus_overlay() {
 
     env.run_actions("focus parent");
     env.run_actions("focus left");
+    env.advance_time(std::time::Duration::from_millis(100));
+    env.deliver_due();
     assert!(
         matches!(env.focus_target(), FocusTarget::Window(_)),
         "after focus left from container, a window must be the focus target, got {:?}",
@@ -317,10 +322,8 @@ fn programmatic_echo_keeps_tiling_overlay() {
     let w1 = env.open();
     let w2 = env.open();
 
-    // Simulate OS echoing LOCATIONCHANGE for windows we just placed.
-    // Both enter MoveKind::Programmatic.
-    assert!(env.dome.location_changed(w1));
-    assert!(env.dome.location_changed(w2));
+    assert!(env.location_changed(w1));
+    assert!(env.location_changed(w2));
 
     env.layout();
 
@@ -336,7 +339,7 @@ fn user_drag_keeps_tiling_overlay() {
 
     let placed_w1 = env.dim(w1);
 
-    env.dome.move_size_started(w1);
+    env.start_drag(w1);
     env.layout();
 
     assert_eq!(env.dim(w1), placed_w1);
@@ -360,7 +363,7 @@ fn dpi_reconcile_with_unchanged_scale_does_not_move_windows() {
     let w = env.open();
     let before = env.dim(w);
 
-    env.dome.handle_dpi_change();
+    env.dpi_changed();
     env.layout();
 
     let after = env.dim(w);
@@ -379,7 +382,7 @@ fn dpi_change_then_apply_layout_places_at_new_scale() {
     assert!(before.width > Length::new(0.0));
 
     env.set_monitor_scale(default_monitor().handle, 1.5);
-    env.dome.handle_dpi_change();
+    env.dpi_changed();
     env.layout();
 
     let after = env.dim(w);
@@ -412,7 +415,7 @@ fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
     let before_b = env.dim(w_b);
 
     env.set_monitor_scale(second_monitor().handle, 2.0);
-    env.dome.handle_dpi_change();
+    env.dpi_changed();
     env.layout();
 
     let after_a = env.dim(w_a);
@@ -491,7 +494,7 @@ fn tab_click_focuses_tab_index() {
     let container = tabbed_container(&env);
     assert_eq!(container.active_tab_index, 1);
 
-    env.dome.tab_clicked(container.id, 0);
+    env.tab_clicked(container.id, 0);
 
     assert_eq!(tabbed_container(&env).active_tab_index, 0);
 }
@@ -500,10 +503,10 @@ fn tab_click_focuses_tab_index() {
 fn primary_monitor_answers_to_its_display_name() {
     let env = TestEnv::new();
 
-    let monitors = env.dome.query_monitors_json();
+    let monitors = env.query_monitors_json();
     assert!(monitors.contains("\"unique_name\":\"Test\""), "{monitors}");
 
-    let workspaces = env.dome.query_workspaces_json();
+    let workspaces = env.query_workspaces_json();
     assert!(workspaces.contains("\"monitor\":\"Test\""), "{workspaces}");
     assert!(!workspaces.contains("primary"), "{workspaces}");
 }
@@ -518,7 +521,7 @@ fn primary_change_to_a_new_display_carries_the_workspaces() {
     promoted.is_primary = true;
     env.change_monitors(vec![demoted, promoted]);
 
-    let workspaces = env.dome.query_workspaces_json();
+    let workspaces = env.query_workspaces_json();
     assert!(
         workspaces.contains("\"monitor\":\"External\""),
         "{workspaces}"
@@ -538,7 +541,7 @@ fn primary_change_to_a_tracked_display_parks_the_displaced_workspaces() {
     promoted.is_primary = true;
     env.change_monitors(vec![demoted, promoted]);
 
-    let workspaces = env.dome.query_workspaces_json();
+    let workspaces = env.query_workspaces_json();
     assert!(workspaces.contains("\"state\":\"parked\""), "{workspaces}");
     assert!(
         workspaces.contains("\"monitor\":\"External\""),

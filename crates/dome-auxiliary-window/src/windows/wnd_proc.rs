@@ -15,7 +15,6 @@ use crate::{MouseButton, NativeUnit, Point, Size};
 
 /// Universal messages handled before the per-window state lookup, because they can arrive
 /// during creation while `GWLP_USERDATA` is still null. Returns `Some` when handled.
-/// Every window class's wnd-proc calls this first.
 pub(super) fn wnd_proc_prologue(hwnd: HWND, msg: u32, lparam: LPARAM) -> Option<LRESULT> {
     match msg {
         WM_ERASEBKGND => Some(LRESULT(1)),
@@ -55,6 +54,10 @@ pub(super) unsafe extern "system" fn aux_wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    super::run_loop::guard_callback(|| aux_dispatch(hwnd, msg, wparam, lparam))
+}
+
+fn aux_dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if let Some(reply) = wnd_proc_prologue(hwnd, msg, lparam) {
         return reply;
     }
@@ -64,9 +67,10 @@ pub(super) unsafe extern "system" fn aux_wnd_proc(
         return wnd_proc_no_state(hwnd, msg, wparam, lparam);
     }
 
-    // Borrowed fresh per arm. A window-mutating call inside a handler or a registered
-    // callback can synchronously re-enter this wnd-proc, so a per-arm borrow turns that
-    // re-entry into a loud `RefCell` panic rather than aliasing UB.
+    if !super::run_loop::callbacks_allowed() {
+        return wnd_proc_no_state(hwnd, msg, wparam, lparam);
+    }
+
     let state = unsafe { &*state_ptr };
     match msg {
         // Decline click-activation on every window. This covers the accessibility

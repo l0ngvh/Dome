@@ -1,51 +1,58 @@
+mod auxiliary_windows;
 mod compositor;
+pub(super) mod internal_windows;
 mod mirror;
 mod overlay;
+mod recovery;
+mod registry;
+mod state;
+mod window;
 
 use std::cell::OnceCell;
-use std::collections::{HashMap, HashSet};
+use std::ops::ControlFlow;
 use std::rc::Rc;
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, OnceLock, mpsc};
+use std::time::Instant;
 
-use dispatch2::{DispatchQueue, DispatchRetained};
 use dome_auxiliary_window::{App, AppHandler, Icon, LoopWaker, MenuEntry, Shell};
 use objc2::{MainThreadMarker, rc::Retained};
-use objc2_app_kit::NSApplication;
 use objc2_core_graphics::CGWindowID;
 use objc2_io_surface::IOSurface;
 
-use super::dome::{HubEvent, HubMessage, SceneSender, get_all_monitors};
-use super::listeners::EventListener;
-use crate::action::{Actions, WorkspaceInfo};
+use super::Wake;
+use super::dome::events::{HubEvent, HubMessage};
+use super::dome::{SceneSender, get_all_monitors};
+use super::focus::SharedFocus;
+use super::window_server::WindowServer;
+use crate::action::Actions;
 use crate::config::Appearance;
-use crate::core::{ContainerId, MonitorId, WindowId};
 use crate::platform::render::WgpuContext;
 use crate::platform::shell_menu::{build_menu, focused_tooltip, id_to_action};
-use mirror::{WindowCapture, create_captures_async};
-use overlay::{FloatOverlay, TabBarOverlay, TilingOverlay};
+use auxiliary_windows::AuxiliaryWindows;
+use mirror::WindowCapture;
+pub(super) use state::UiState;
 
 #[derive(Clone)]
-pub(super) struct MessageSender {
-    tx: mpsc::Sender<HubMessage>,
-    waker: LoopWaker,
+pub(super) struct UiSender {
+    sender: mpsc::Sender<HubMessage>,
+    waker: LoopWaker<Wake>,
 }
 
-impl MessageSender {
-    pub(super) fn send(&self, msg: HubMessage) {
-        if self.tx.send(msg).is_ok() {
-            self.waker.wake();
+impl UiSender {
+    pub(super) fn send(&self, message: HubMessage) {
+        if self.sender.send(message).is_ok() {
+            self.waker.wake(Wake::Ui);
         }
     }
 }
 
-impl SceneSender for MessageSender {
-    fn send(&self, msg: HubMessage) {
-        MessageSender::send(self, msg);
+impl SceneSender for UiSender {
+    fn send(&self, message: HubMessage) {
+        UiSender::send(self, message);
     }
 }
 
-/// Separate from `HubMessage` so ScreenCaptureKit types stay inside the ui module.
-enum CaptureMessage {
+pub(super) enum CaptureMessage {
     Ready {
         cg_id: CGWindowID,
         capture: WindowCapture,
@@ -58,73 +65,81 @@ enum CaptureMessage {
 
 #[derive(Clone)]
 pub(super) struct CaptureSender {
-    tx: mpsc::Sender<CaptureMessage>,
-    waker: LoopWaker,
+    sender: mpsc::Sender<CaptureMessage>,
+    waker: LoopWaker<Wake>,
 }
 
 impl CaptureSender {
-    fn send(&self, msg: CaptureMessage) {
-        if self.tx.send(msg).is_ok() {
-            self.waker.wake();
+    fn send(&self, message: CaptureMessage) {
+        if self.sender.send(message).is_ok() {
+            self.waker.wake(Wake::Capture);
         }
     }
 }
 
 pub(super) struct Ui {
-    app: App,
+    app: App<Wake>,
 }
 
 impl Ui {
     pub(super) fn new(
         _mtm: MainThreadMarker,
-        hub_sender: calloop::channel::Sender<HubEvent>,
-        event_listener: EventListener,
+        hub: calloop::channel::Sender<HubEvent>,
+        windows: Box<dyn WindowServer>,
+        focus: Arc<SharedFocus>,
+        loop_waker: Arc<OnceLock<LoopWaker<Wake>>>,
         appearance: Appearance,
-    ) -> (Self, MessageSender) {
-        let (scene_tx, scene_rx) = mpsc::channel();
-        let (capture_tx, capture_rx) = mpsc::channel();
+    ) -> (Self, UiSender) {
+        let (sender, intake) = mpsc::channel();
+        let (capture_sender, capture_intake) = mpsc::channel();
         let gpu = Rc::new(create_wgpu_context().expect("wgpu instance/adapter/device init"));
-
-        let capture_sender: Rc<OnceCell<CaptureSender>> = Rc::new(OnceCell::new());
-        let state = UiState {
-            scene_rx,
-            capture_rx,
-            capture_sender: Rc::clone(&capture_sender),
-            capture_queue: DispatchQueue::new("dome.capture", None),
-            tiling_overlays: HashMap::new(),
-            tab_bar_overlays: HashMap::new(),
-            float_overlays: HashMap::new(),
-            captures: HashMap::new(),
-            event_listener,
-            gpu,
-            appearance,
-            last_focused: None,
-            last_focused_monitor_id: None,
-            workspaces: Vec::new(),
-            hub_sender,
-        };
-
+        let capture_binding = Rc::new(OnceCell::new());
+        let internal = AuxiliaryWindows::new(gpu, appearance, hub.clone(), capture_binding.clone());
+        let ui = UiState::new(
+            intake,
+            hub,
+            Box::new(internal),
+            focus.clone(),
+            capture_intake,
+        );
+        let callbacks = Rc::new(OnceCell::new());
         let app = App::new(
             Icon::from_png(STATUS_BAR_ICON_PNG).expect("status bar icon decodes"),
-            Box::new(WindowLoopHandler { state }),
+            Box::new(WindowLoopHandler::new(ui, windows, callbacks.clone())),
         )
         .expect("app init");
         let waker = app.waker();
-        let sender = MessageSender {
-            tx: scene_tx,
-            waker: waker.clone(),
-        };
-        if capture_sender
-            .set(CaptureSender {
-                tx: capture_tx,
-                waker,
-            })
-            .is_err()
-        {
-            unreachable!("capture sender is set exactly once");
-        }
-
-        (Self { app }, sender)
+        let wake_handle = app.handle();
+        let stop_handle = app.handle();
+        let terminate_handle = app.handle();
+        let callback_waker = waker.clone();
+        assert!(
+            callbacks
+                .set(WindowLoopCallbacks {
+                    wake: Box::new(move |wake| callback_waker.wake(wake)),
+                    wake_at: Box::new(move |wake, at| wake_handle.wake_at(wake, at)),
+                    stop_wakes: Box::new(move || stop_handle.stop_wakes()),
+                    terminate: Box::new(move || terminate_handle.terminate()),
+                })
+                .is_ok(),
+            "loop callbacks already bound"
+        );
+        assert!(
+            loop_waker.set(waker.clone()).is_ok(),
+            "loop waker already bound"
+        );
+        let focus_waker = waker.clone();
+        focus.bind_waker(move || focus_waker.wake(Wake::FocusRequest));
+        assert!(
+            capture_binding
+                .set(CaptureSender {
+                    sender: capture_sender,
+                    waker: waker.clone()
+                })
+                .is_ok(),
+            "capture sender already bound"
+        );
+        (Self { app }, UiSender { sender, waker })
     }
 
     pub(super) fn run(self) {
@@ -150,257 +165,387 @@ fn create_wgpu_context() -> anyhow::Result<WgpuContext> {
     ))
 }
 
-struct UiState {
-    scene_rx: mpsc::Receiver<HubMessage>,
-    capture_rx: mpsc::Receiver<CaptureMessage>,
-    // Shared with Ui::new so it can be set once the loop's waker exists, after the
-    // handler that owns this state has moved into the event loop.
-    capture_sender: Rc<OnceCell<CaptureSender>>,
-    // Serial background queue for SCStream output handlers. Keeps IOSurface extraction
-    // off the main thread while preserving scene ordering.
-    capture_queue: DispatchRetained<DispatchQueue>,
-    tiling_overlays: HashMap<MonitorId, TilingOverlay>,
-    tab_bar_overlays: HashMap<ContainerId, TabBarOverlay>,
-    float_overlays: HashMap<CGWindowID, FloatOverlay>,
-    // Owns each live WindowCapture to keep its SCStream running.
-    captures: HashMap<CGWindowID, WindowCapture>,
-    event_listener: EventListener,
-    gpu: Rc<WgpuContext>,
-    appearance: Appearance,
-    last_focused: Option<WindowId>,
-    last_focused_monitor_id: Option<MonitorId>,
-    workspaces: Vec<WorkspaceInfo>,
-    hub_sender: calloop::channel::Sender<HubEvent>,
-}
-
-/// Template PNG embedded at compile time. macOS auto-tints alpha-defined shapes to match
-/// dark or light mode when setTemplate is true. Embedding avoids the bundle-path search
-/// NSImage::imageNamed uses, so cargo run and cargo make bundle both work with no fork.
 const STATUS_BAR_ICON_PNG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/resources/macos/status_bar_icon.png"
 ));
 
-struct WindowLoopHandler {
-    state: UiState,
+pub(super) struct WindowLoopCallbacks {
+    pub(super) wake: Box<dyn Fn(Wake)>,
+    pub(super) wake_at: Box<dyn Fn(Wake, Option<Instant>)>,
+    pub(super) stop_wakes: Box<dyn Fn()>,
+    pub(super) terminate: Box<dyn Fn()>,
+}
+
+pub(super) struct WindowLoopHandler {
+    ui: UiState,
+    windows: Box<dyn WindowServer>,
+    callbacks: Rc<OnceCell<WindowLoopCallbacks>>,
+    stopping: bool,
+}
+
+impl WindowLoopHandler {
+    pub(super) fn new(
+        ui: UiState,
+        windows: Box<dyn WindowServer>,
+        callbacks: Rc<OnceCell<WindowLoopCallbacks>>,
+    ) -> Self {
+        Self {
+            ui,
+            windows,
+            callbacks,
+            stopping: false,
+        }
+    }
+
+    fn callbacks(&self) -> &WindowLoopCallbacks {
+        self.callbacks
+            .get()
+            .expect("loop callbacks bound before delivery")
+    }
+
+    pub(super) fn process_window_server_at(&mut self, now: Instant) {
+        if self.stopping {
+            return;
+        }
+        self.windows.ingest_native_events(now);
+        self.windows.ingest_read_results(now);
+        self.windows.refresh_applications(now);
+        (self.callbacks().wake_at)(Wake::WindowServer, self.windows.next_deadline());
+        if self.windows.has_observations() {
+            (self.callbacks().wake)(Wake::Ui);
+        }
+    }
+
+    pub(super) fn process_ui_at(&mut self, now: Instant) -> ControlFlow<()> {
+        if self.stopping {
+            return ControlFlow::Break(());
+        }
+        for observation in self.windows.take_observations() {
+            self.ui.observe(self.windows.as_mut(), observation, now);
+        }
+        let ControlFlow::Continue((scene, commands)) = self.ui.drain_intake() else {
+            self.on_stopping();
+            (self.callbacks().terminate)();
+            return ControlFlow::Break(());
+        };
+        if let Some(scene) = &scene {
+            self.ui.apply_placements(self.windows.as_mut(), scene, now);
+        }
+        for command in commands {
+            self.ui.apply_command(self.windows.as_mut(), command);
+        }
+        if let Some(scene) = &scene {
+            self.ui.show_internal_windows(scene);
+        }
+        self.ui.apply_overlay_focus();
+        (self.callbacks().wake_at)(Wake::FocusRequest, self.ui.focus.next_deadline(now));
+        ControlFlow::Continue(())
+    }
+
+    pub(super) fn process_focus_request(&mut self, now: Instant) {
+        if self.stopping {
+            return;
+        }
+        self.ui
+            .focus
+            .submit_pending_focus(now, self.windows.as_mut());
+        (self.callbacks().wake_at)(Wake::FocusRequest, self.ui.focus.next_deadline(now));
+    }
+
+    pub(super) fn process_capture(&mut self) {
+        if !self.stopping {
+            self.ui.process_capture();
+        }
+    }
+
+    pub(super) fn process_wake_at(&mut self, wake: Wake, now: Instant) -> ControlFlow<()> {
+        match wake {
+            Wake::WindowServer => self.process_window_server_at(now),
+            Wake::Ui => return self.process_ui_at(now),
+            Wake::FocusRequest => self.process_focus_request(now),
+            Wake::Capture => self.process_capture(),
+        }
+        ControlFlow::Continue(())
+    }
+
+    pub(super) fn on_stopping(&mut self) {
+        if self.stopping {
+            return;
+        }
+        self.stopping = true;
+        (self.callbacks().stop_wakes)();
+        self.ui.recover(self.windows.as_mut());
+    }
 }
 
 impl AppHandler for WindowLoopHandler {
+    type Wake = Wake;
+
     fn on_started(&mut self, _shell: &Shell) {
-        tracing::info!("Application did finish launching");
+        (self.callbacks().wake)(Wake::WindowServer);
     }
 
     fn on_stopping(&mut self) {
-        self.state.hub_sender.send(HubEvent::Shutdown).ok();
+        WindowLoopHandler::on_stopping(self);
+    }
+
+    fn on_wake(&mut self, shell: &Shell, wake: Wake) {
+        if self.process_wake_at(wake, Instant::now()).is_continue() && wake == Wake::Ui {
+            shell.set_tooltip(&focused_tooltip(&self.ui.workspaces));
+        }
     }
 
     fn menu(&mut self) -> Vec<MenuEntry> {
-        build_menu(&self.state.workspaces, true)
+        build_menu(&self.ui.workspaces, true)
     }
 
     fn on_menu_selected(&mut self, id: u32) {
-        if let Some(action) = id_to_action(id, &self.state.workspaces) {
-            self.state
-                .hub_sender
+        if let Some(action) = id_to_action(id, &self.ui.workspaces) {
+            self.ui
+                .hub
                 .send(HubEvent::Action(Actions::new(vec![action])))
                 .ok();
         }
     }
 
     fn on_display_changed(&mut self) {
-        let mtm =
-            MainThreadMarker::new().expect("screen-change notification runs on the main thread");
+        let mtm = MainThreadMarker::new().expect("screen-change notification runs on UI");
         match get_all_monitors(mtm) {
             Ok(monitors) => {
-                self.state
-                    .hub_sender
-                    .send(HubEvent::MonitorsChanged(monitors))
-                    .ok();
+                self.ui.hub.send(HubEvent::MonitorsChanged(monitors)).ok();
             }
-            Err(e) => tracing::error!(%e, "Failed to enumerate monitors on screen change"),
+            Err(error) => tracing::error!(%error, "Failed to enumerate monitors on screen change"),
         }
     }
+}
 
-    fn on_wake(&mut self, shell: &Shell) {
-        let state = &mut self.state;
-        let mtm = MainThreadMarker::new().expect("on_wake runs on the main thread");
-        while let Ok(msg) = state.scene_rx.try_recv() {
-            match msg {
-                HubMessage::Scene(scene) => {
-                    state.workspaces = scene.workspaces.clone();
-                    shell.set_tooltip(&focused_tooltip(&scene.workspaces));
+#[cfg(feature = "native-ui-test")]
+mod native_loop_test;
+#[cfg(feature = "native-ui-test")]
+pub(crate) use native_loop_test::run as run_native_loop;
+#[cfg(feature = "native-ui-test")]
+pub(in crate::platform::macos) use native_loop_test::{run_bounded_native_test, validated};
+#[cfg(any(test, feature = "native-ui-test"))]
+mod test_support;
 
-                    let appearance = state.appearance.clone();
-                    let gpu = state.gpu.clone();
-                    let hub_sender = state.hub_sender.clone();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::PixelRect;
+    use crate::platform::macos::dome::events::{FocusTarget, WindowCommand, WindowPlacement};
+    use std::time::Duration;
 
-                    let active_monitors: Vec<_> =
-                        scene.tiling.iter().map(|t| t.monitor_id).collect();
-                    for data in &scene.tiling {
-                        let overlay =
-                            state
-                                .tiling_overlays
-                                .entry(data.monitor_id)
-                                .or_insert_with(|| {
-                                    TilingOverlay::new(
-                                        mtm,
-                                        &gpu,
-                                        appearance.clone(),
-                                        data.cocoa_frame,
-                                        data.scale,
-                                    )
-                                });
-                        overlay.set_border_thickness(data.border_thickness);
-                        if data.windows.is_empty() && data.containers.is_empty() {
-                            overlay.clear();
-                        } else {
-                            overlay.render(
-                                data.cocoa_frame,
-                                data.scale,
-                                data.monitor_dim,
-                                &data.windows,
-                                &data.containers,
-                            );
-                        }
-                    }
-                    state
-                        .tiling_overlays
-                        .retain(|id, _| active_monitors.contains(id));
-
-                    let mut active_tab_bars: HashSet<ContainerId> = HashSet::new();
-                    for data in &scene.tiling {
-                        for cs in &data.containers {
-                            if !cs.placement.is_tabbed || cs.placement.titles.is_empty() {
-                                continue;
-                            }
-                            let entry = state
-                                .tab_bar_overlays
-                                .entry(cs.placement.id)
-                                .or_insert_with(|| {
-                                    TabBarOverlay::new(
-                                        mtm,
-                                        &gpu,
-                                        appearance.clone(),
-                                        cs.placement.id,
-                                        cs.tab_bar_cocoa_frame,
-                                        data.scale,
-                                        hub_sender.clone(),
-                                    )
-                                });
-                            entry.render(cs, data.scale, data.border_thickness);
-                            active_tab_bars.insert(cs.placement.id);
-                        }
-                    }
-                    state
-                        .tab_bar_overlays
-                        .retain(|id, _| active_tab_bars.contains(id));
-
-                    let mut capture_pairs = Vec::new();
-                    for show in &scene.float_shows {
-                        let is_new = !state.float_overlays.contains_key(&show.cg_id);
-                        let overlay = state.float_overlays.entry(show.cg_id).or_insert_with(|| {
-                            FloatOverlay::new(
-                                mtm,
-                                show.cocoa_frame,
-                                show.cg_id,
-                                hub_sender.clone(),
-                                &gpu,
-                                appearance.theme,
-                                &appearance.font,
-                            )
-                        });
-                        overlay.render(show, scene.focused_window == Some(show.placement.id));
-
-                        if is_new {
-                            capture_pairs.push(show.cg_id);
-                        }
-
-                        if let Some(capture) = state.captures.get_mut(&show.cg_id) {
-                            if scene.focused_window != Some(show.placement.id) {
-                                capture.start(show.cg_id, show.content_dim, show.scale);
-                            } else {
-                                capture.stop();
-                            }
-                        }
-                    }
-
-                    if !capture_pairs.is_empty() {
-                        let capture_sender = state
-                            .capture_sender
-                            .get()
-                            .expect("capture sender set in Ui::new")
-                            .clone();
-                        create_captures_async(
-                            capture_pairs,
-                            state.capture_queue.clone(),
-                            capture_sender,
-                        );
-                    }
-
-                    // Float windows are rare, so we can afford recreating overlays
-                    // and captures each time the workspace changes rather than
-                    // tracking which windows transitioned from float to tiling.
-                    let active_floats: HashSet<CGWindowID> =
-                        scene.float_shows.iter().map(|s| s.cg_id).collect();
-                    state
-                        .float_overlays
-                        .retain(|cg_id, _| active_floats.contains(cg_id));
-                    state
-                        .captures
-                        .retain(|cg_id, _| active_floats.contains(cg_id));
-
-                    {
-                        let last = state.last_focused;
-                        let last_monitor = state.last_focused_monitor_id;
-                        let monitor_changed =
-                            last_monitor.is_some_and(|m| m != scene.focused_monitor_id);
-                        if last != scene.focused_window || monitor_changed {
-                            state.last_focused = scene.focused_window;
-                            if scene.focused_window.is_none()
-                                && let Some(overlay) =
-                                    state.tiling_overlays.get(&scene.focused_monitor_id)
-                            {
-                                overlay.focus(mtm);
-                            }
-                        }
-                        state.last_focused_monitor_id = Some(scene.focused_monitor_id);
-                    }
-                }
-                HubMessage::RefreshObservers => {
-                    state.event_listener.refresh_all_observers();
-                }
-                HubMessage::AppearanceChanged(new_appearance) => {
-                    state.appearance = new_appearance.clone();
-                    for overlay in state.float_overlays.values_mut() {
-                        overlay.set_appearance(&new_appearance);
-                    }
-                    for overlay in state.tiling_overlays.values_mut() {
-                        overlay.set_appearance(&new_appearance);
-                    }
-                    for overlay in state.tab_bar_overlays.values() {
-                        overlay.set_appearance(&new_appearance);
-                    }
-                }
-                HubMessage::Shutdown => {
-                    NSApplication::sharedApplication(mtm).terminate(None);
-                    return;
-                }
-            }
+    use super::test_support::*;
+    #[test]
+    fn process_typed_wakes_keeps_passes_separate() {
+        let mut fixture = Fixture::new();
+        fixture.discover();
+        fixture
+            .sender
+            .send(HubMessage::Scene(fixture.scene()))
+            .unwrap();
+        fixture
+            .sender
+            .send(HubMessage::Command(WindowCommand::Close(1)))
+            .unwrap();
+        assert_eq!(
+            fixture.wake(Wake::WindowServer),
+            [
+                "native",
+                "results",
+                "refresh",
+                "deadline WindowServer",
+                "wake Ui"
+            ]
+        );
+        assert_eq!(fixture.wake(Wake::Capture), ["capture 0"]);
+        assert_eq!(
+            fixture.wake(Wake::Ui),
+            [
+                "observations",
+                "park 1",
+                "close 1",
+                "monitors",
+                "tiling",
+                "floats",
+                "tabs",
+                "overlay focus",
+                "deadline FocusRequest"
+            ]
+        );
+        assert!(matches!(
+            fixture.reports.try_recv(),
+            Ok(HubEvent::WindowsDiscovered(_))
+        ));
+        fixture.focus.request(1);
+        fixture
+            .capture_sender
+            .send(CaptureMessage::Frame {
+                cg_id: 1,
+                surface: IOSurface::new(),
+            })
+            .unwrap();
+        assert_eq!(
+            fixture.wake(Wake::Ui),
+            ["observations", "deadline FocusRequest"]
+        );
+        assert_eq!(fixture.wake(Wake::Capture), ["capture 1"]);
+        assert_eq!(
+            fixture.wake(Wake::FocusRequest),
+            ["focus 1", "deadline FocusRequest"]
+        );
+        fixture
+            .sender
+            .send(HubMessage::Command(WindowCommand::Unminimize(1)))
+            .unwrap();
+        assert_eq!(fixture.wake(Wake::FocusRequest), ["deadline FocusRequest"]);
+        assert_eq!(
+            fixture.wake(Wake::Ui),
+            ["observations", "unminimize 1", "deadline FocusRequest"]
+        );
+        assert_eq!(
+            fixture.wake(Wake::WindowServer),
+            ["native", "results", "deadline WindowServer"]
+        );
+    }
+    #[test]
+    fn drain_scene_focus_edges_releases_only_newest_pending_intent() {
+        let mut fixture = Fixture::new();
+        fixture.discover();
+        let mut scene = fixture.scene();
+        scene.focus_request = Some(FocusTarget::Window(1));
+        for request in [
+            Some(FocusTarget::Window(1)),
+            None,
+            Some(FocusTarget::Window(1)),
+        ] {
+            scene.focus_request = request;
+            fixture
+                .sender
+                .send(HubMessage::Scene(scene.clone()))
+                .unwrap();
         }
+        let log = fixture.wake(Wake::Ui);
+        assert!(!log.iter().any(|entry| entry.starts_with("focus ")));
+        assert_eq!(
+            fixture.focus_wakes.try_iter().collect::<Vec<_>>(),
+            [Wake::FocusRequest, Wake::FocusRequest]
+        );
+        assert_eq!(
+            fixture.wake(Wake::FocusRequest),
+            ["focus 1", "deadline FocusRequest"]
+        );
+        fixture
+            .sender
+            .send(HubMessage::Scene(scene.clone()))
+            .unwrap();
+        fixture.wake(Wake::Ui);
+        assert!(fixture.focus_wakes.try_recv().is_err());
+        assert_eq!(fixture.wake(Wake::FocusRequest), ["deadline FocusRequest"]);
 
-        while let Ok(msg) = state.capture_rx.try_recv() {
-            match msg {
-                CaptureMessage::Ready { cg_id, capture } => {
-                    if state.float_overlays.contains_key(&cg_id) {
-                        state.captures.insert(cg_id, capture);
-                    }
-                }
-                CaptureMessage::Frame { cg_id, surface } => {
-                    if let Some(overlay) = state.float_overlays.get_mut(&cg_id) {
-                        overlay.apply_frame(&surface);
-                    }
-                }
-            }
-        }
+        fixture.now += Duration::from_millis(50);
+        scene.focus_request = None;
+        fixture
+            .sender
+            .send(HubMessage::Scene(scene.clone()))
+            .unwrap();
+        scene.focus_request = Some(FocusTarget::Window(1));
+        fixture
+            .sender
+            .send(HubMessage::Scene(scene.clone()))
+            .unwrap();
+        fixture.wake(Wake::Ui);
+        assert_eq!(fixture.focus_wakes.try_recv().unwrap(), Wake::FocusRequest);
+        assert_eq!(
+            fixture.focus.next_deadline(fixture.now),
+            Some(fixture.now + Duration::from_millis(50))
+        );
+        assert_eq!(fixture.wake(Wake::FocusRequest), ["deadline FocusRequest"]);
+        fixture.focus.request(2);
+        fixture.focus.request(3);
+        assert_eq!(fixture.focus_wakes.try_iter().count(), 2);
+        fixture.now += Duration::from_millis(50);
+        assert_eq!(
+            fixture.wake(Wake::FocusRequest),
+            ["focus 3", "deadline FocusRequest"]
+        );
+
+        scene.focus_request = Some(FocusTarget::Monitor(scene.monitors[0].id));
+        fixture.sender.send(HubMessage::Scene(scene)).unwrap();
+        let log = fixture.wake(Wake::Ui);
+        let content = log.iter().position(|entry| entry == "monitors").unwrap();
+        let focus = log
+            .iter()
+            .position(|entry| entry == "overlay focus")
+            .unwrap();
+        assert!(content < focus);
+        assert!(!fixture.focus.is_submitted(3));
+        fixture.focus.request(1);
+        assert_eq!(fixture.wake(Wake::FocusRequest), ["deadline FocusRequest"]);
+        fixture.now += Duration::from_millis(100);
+        assert_eq!(
+            fixture.wake(Wake::FocusRequest),
+            ["focus 1", "deadline FocusRequest"]
+        );
+    }
+
+    #[test]
+    fn stop_discards_effects_and_hands_recovery_once() {
+        let mut fixture = Fixture::new();
+        fixture.discover();
+        fixture
+            .sender
+            .send(HubMessage::Scene(fixture.scene()))
+            .unwrap();
+        fixture.wake(Wake::Ui);
+        let mut changed = fixture.scene();
+        changed.windows.get_mut(&1).unwrap().placement = WindowPlacement::Fullscreen {
+            monitor: changed.monitors[0].id,
+        };
+        fixture.sender.send(HubMessage::Scene(changed)).unwrap();
+        assert!(
+            fixture
+                .wake(Wake::Ui)
+                .iter()
+                .any(|entry| entry == "frame 1")
+        );
+        fixture.focus.request(1);
+        assert_eq!(
+            fixture.wake(Wake::FocusRequest),
+            ["focus 1", "deadline FocusRequest"]
+        );
+        assert!(fixture.focus.is_submitted(1));
+        fixture.focus.request(2);
+        fixture
+            .sender
+            .send(HubMessage::Scene(fixture.scene()))
+            .unwrap();
+        fixture
+            .sender
+            .send(HubMessage::Command(WindowCommand::Close(1)))
+            .unwrap();
+        fixture.sender.send(HubMessage::Shutdown).unwrap();
+        assert_eq!(
+            fixture.wake(Wake::Ui),
+            ["observations", "stop wakes", "shutdown", "terminate"]
+        );
+        fixture.handler.on_stopping();
+        fixture.handler.ui.recover(fixture.handler.windows.as_mut());
+        assert_eq!(
+            *fixture.log.borrow(),
+            ["observations", "stop wakes", "shutdown", "terminate"]
+        );
+        assert_eq!(fixture.recovery.borrow().len(), 1);
+        assert_eq!(fixture.recovery.borrow()[0].window, 1);
+        assert_eq!(
+            fixture.recovery.borrow()[0].original_rect,
+            PixelRect::new(810, 440, 300, 200)
+        );
+        assert!(!fixture.focus.is_submitted(1));
+        assert!(fixture.focus.next_deadline(fixture.now).is_none());
+        assert!(fixture.wake(Wake::WindowServer).is_empty());
+        assert!(fixture.wake(Wake::FocusRequest).is_empty());
+        assert!(fixture.wake(Wake::Capture).is_empty());
     }
 }

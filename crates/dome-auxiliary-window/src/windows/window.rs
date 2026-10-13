@@ -7,11 +7,11 @@ use windows::Win32::Graphics::DirectComposition::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, GWLP_USERDATA, HCURSOR, HWND_BOTTOM, HWND_TOPMOST, IDC_ARROW,
-    LoadCursorW, RegisterClassW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WNDCLASSW, WNDPROC,
-    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW,
-    WS_EX_TRANSPARENT, WS_POPUP,
+    CreateWindowExW, DestroyWindow, GWLP_USERDATA, HCURSOR, HWND_BOTTOM, HWND_MESSAGE,
+    HWND_TOPMOST, IDC_ARROW, LoadCursorW, RegisterClassW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSW, WNDPROC, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -191,9 +191,38 @@ pub(super) fn ex_style_for(attributes: &WindowAttributes) -> WINDOW_EX_STYLE {
 
 pub(super) struct OwnedHwnd {
     hwnd: HWND,
+    #[cfg(test)]
+    pub(super) on_destroyed: Option<Box<dyn FnOnce()>>,
 }
 
 impl OwnedHwnd {
+    pub(super) fn message_only() -> anyhow::Result<Self> {
+        const NAME: PCWSTR = w!("DomeWakeWindow");
+        static REGISTER: Once = Once::new();
+        REGISTER.call_once(|| register_class(NAME, Some(super::run_loop::wake_window_proc)));
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                NAME,
+                w!(""),
+                WINDOW_STYLE::default(),
+                0,
+                0,
+                0,
+                0,
+                Some(HWND_MESSAGE),
+                None,
+                Some(GetModuleHandleW(None)?.into()),
+                None,
+            )?
+        };
+        Ok(Self {
+            hwnd,
+            #[cfg(test)]
+            on_destroyed: None,
+        })
+    }
+
     pub(super) fn new(
         class: PCWSTR,
         ex_style: WINDOW_EX_STYLE,
@@ -215,7 +244,11 @@ impl OwnedHwnd {
                 None,
             )?
         };
-        Ok(Self { hwnd })
+        Ok(Self {
+            hwnd,
+            #[cfg(test)]
+            on_destroyed: None,
+        })
     }
 
     pub(super) fn hwnd(&self) -> HWND {
@@ -230,6 +263,11 @@ impl Drop for OwnedHwnd {
     fn drop(&mut self) {
         if let Err(e) = unsafe { DestroyWindow(self.hwnd) } {
             tracing::error!(?e, "failed to destroy window");
+        } else {
+            #[cfg(test)]
+            if let Some(on_destroyed) = self.on_destroyed.take() {
+                on_destroyed();
+            }
         }
     }
 }

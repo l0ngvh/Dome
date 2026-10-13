@@ -16,8 +16,8 @@ use objc2_core_graphics::{
 use crate::config::{Keystroke, Modifiers};
 use crate::platform::macos::{dome::HubEvent, set_current_thread_qos};
 
-struct KeyboardCtx {
-    keymap_rx: Receiver<KeymapView>,
+struct KeyboardState {
+    keymap_intake: Receiver<KeymapView>,
     keymap: RefCell<KeymapView>,
     is_suspended: Arc<AtomicBool>,
     event_sender: calloop::channel::Sender<HubEvent>,
@@ -28,15 +28,15 @@ struct KeyboardCtx {
 /// a run loop's configuration should only be altered from the thread that owns
 /// it.
 pub(super) fn run_event_tap(
-    keymap_rx: Receiver<KeymapView>,
+    keymap_intake: Receiver<KeymapView>,
     is_suspended: Arc<AtomicBool>,
     event_sender: calloop::channel::Sender<HubEvent>,
 ) {
     // Every key press in the session waits on this thread.
     set_current_thread_qos(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE);
 
-    let ctx = KeyboardCtx {
-        keymap_rx,
+    let state = KeyboardState {
+        keymap_intake,
         keymap: RefCell::new(KeymapView::new()),
         is_suspended,
         event_sender,
@@ -45,7 +45,7 @@ pub(super) fn run_event_tap(
 
     let run_loop = CFRunLoop::current().unwrap();
     let event_mask = 1u64 << CGEventType::KeyDown.0;
-    let ctx_ptr = &ctx as *const KeyboardCtx as *mut std::ffi::c_void;
+    let state_pointer = &state as *const KeyboardState as *mut std::ffi::c_void;
 
     let Some(event_tap) = (unsafe {
         CGEvent::tap_create(
@@ -54,7 +54,7 @@ pub(super) fn run_event_tap(
             CGEventTapOptions::Default,
             event_mask,
             Some(event_tap_callback),
-            ctx_ptr,
+            state_pointer,
         )
     }) else {
         tracing::error!("Failed to create event tap, keymaps are unavailable");
@@ -69,7 +69,7 @@ pub(super) fn run_event_tap(
     };
     run_loop.add_source(Some(&run_loop_source), unsafe { kCFRunLoopDefaultMode });
 
-    ctx.event_tap.set(event_tap).ok();
+    state.event_tap.set(event_tap).ok();
 
     CFRunLoop::run();
 
@@ -84,18 +84,18 @@ unsafe extern "C-unwind" fn event_tap_callback(
 ) -> *mut CGEvent {
     let event_ptr = event.as_ptr();
 
-    let ctx: &KeyboardCtx = unsafe { &*(refcon as *const KeyboardCtx) };
+    let state: &KeyboardState = unsafe { &*(refcon as *const KeyboardState) };
 
     let handled = if event_type == CGEventType::TapDisabledByTimeout
         || event_type == CGEventType::TapDisabledByUserInput
     {
-        if let Some(tap) = ctx.event_tap.get() {
+        if let Some(tap) = state.event_tap.get() {
             tracing::warn!(?event_type, "Event tap disabled, re-enabling");
             CGEvent::tap_enable(tap, true);
         }
         false
     } else {
-        event_type == CGEventType::KeyDown && handle_keyboard(ctx, event_ptr)
+        event_type == CGEventType::KeyDown && handle_keyboard(state, event_ptr)
     };
 
     if handled {
@@ -105,7 +105,7 @@ unsafe extern "C-unwind" fn event_tap_callback(
     }
 }
 
-fn handle_keyboard(ctx: &KeyboardCtx, event: *mut CGEvent) -> bool {
+fn handle_keyboard(state: &KeyboardState, event: *mut CGEvent) -> bool {
     let flags = CGEvent::flags(Some(unsafe { &*event }));
     let key = get_key_from_event(event);
 
@@ -124,26 +124,30 @@ fn handle_keyboard(ctx: &KeyboardCtx, event: *mut CGEvent) -> bool {
     }
 
     let keystroke = Keystroke { key, modifiers };
-    while let Ok(next) = ctx.keymap_rx.try_recv() {
-        *ctx.keymap.borrow_mut() = next;
+    while let Ok(next) = state.keymap_intake.try_recv() {
+        *state.keymap.borrow_mut() = next;
     }
-    let resolved = ctx.keymap.borrow().resolve(&keystroke).map(str::to_string);
+    let resolved = state
+        .keymap
+        .borrow()
+        .resolve(&keystroke)
+        .map(str::to_string);
     let Some(keymap) = resolved else {
         return false;
     };
 
-    if ctx.is_suspended.load(Ordering::Relaxed) {
+    if state.is_suspended.load(Ordering::Relaxed) {
         tracing::info!("Received keymap action, resuming window management");
-        ctx.is_suspended.store(false, Ordering::Relaxed);
+        state.is_suspended.store(false, Ordering::Relaxed);
     }
 
     tracing::trace!(%keymap, %keystroke, "Keystroke matched binding");
-    if ctx
+    if state
         .event_sender
         .send(HubEvent::RunBinding { keymap, keystroke })
         .is_err()
     {
-        tracing::warn!("Hub thread unavailable, callback dropped");
+        tracing::warn!("Domain thread unavailable, callback dropped");
     }
     true
 }

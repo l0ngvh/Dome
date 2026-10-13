@@ -1,26 +1,32 @@
-use std::cell::{Ref, RefCell};
-use std::collections::HashMap;
+use std::cell::{OnceCell, RefCell};
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::fixtures::{SPAWN_DIM, baseline_tiling, default_monitor, dim};
 use super::mock::{
-    MockDisplay, MockExternalHwnd, MockSceneSender, MockWiring, MoveLog, NoopTaskbar,
-    OverlayReport, ZOrderStack,
+    MockDisplay, MockExternalHwnd, MockInternalWindows, MockSceneSender, MockWindowServer,
+    MockWiring, MoveLog, NoopTaskbar, ZOrderStack,
 };
 use crate::action::{Action, Actions};
 use crate::config::lua::test_support::{TempFile, loaded_runtime};
 use crate::config::{Appearance, PreferredLayouts};
 use crate::core::{
-    ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, MonitorId, Physical,
-    PixelRect, Pixels, TilingConfig, TilingWindowPlacement, WindowId,
+    ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, LimitObservation,
+    Logical, MonitorId, Physical, PixelRect, Pixels, TilingConfig, TilingWindowPlacement, WindowId,
 };
 use crate::platform::keymap::{KeymapPublisher, KeymapView};
-use crate::platform::windows::dome::events::{FloatOverlayAction, RenderScene};
-use crate::platform::windows::dome::{Dome, MonitorInfo, NewWindow, WindowsMetadata};
+use crate::platform::windows::dome::events::{HubMessage, Scene};
+use crate::platform::windows::dome::{Dome, HubEvent, MonitorInfo, WindowsMetadata};
 use crate::platform::windows::external::HwndId;
+use crate::platform::windows::ui::UiState;
+use crate::platform::windows::window_server::{
+    DiscoveredWindow, NativeEvent, Observation, SettleRead,
+};
+use crate::platform::windows::{HubSender, Wake, WindowLoopCallbacks, WindowLoopHandler};
+use std::sync::mpsc;
 
 /// Last focus directive Dome issued.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -32,15 +38,24 @@ pub(crate) enum FocusTarget {
 }
 
 pub(super) struct TestEnv {
-    pub(super) dome: Dome,
+    dome: Dome,
     moves: MoveLog,
+    display_failed: Arc<AtomicBool>,
     monitors: Arc<Mutex<Vec<MonitorInfo>>>,
     tiling: TilingConfig,
     config_file: TempFile,
     z_stack: ZOrderStack,
     pub(super) focus_target: Arc<Mutex<FocusTarget>>,
     mocks: HashMap<HwndId, Arc<MockExternalHwnd>>,
-    exclusive_fullscreen_hwnd: Arc<Mutex<Option<HwndId>>>,
+    handler: WindowLoopHandler,
+    server: Rc<RefCell<MockWindowServer>>,
+    internal: Rc<RefCell<MockInternalWindows>>,
+    ui_intake: mpsc::Sender<HubMessage>,
+    reports: mpsc::Receiver<HubEvent>,
+    now: Instant,
+    deadlines: Rc<RefCell<HashMap<Wake, Instant>>>,
+    wakes: Rc<RefCell<VecDeque<Wake>>>,
+    hold_reports: bool,
     scene: Rc<RefCell<MockSceneSender>>,
     next_window_id: isize,
 }
@@ -88,18 +103,18 @@ impl TestEnvBuilder {
             config_source,
             monitors,
         } = self;
-        let exclusive_fullscreen_hwnd = Arc::new(Mutex::new(None));
         let shared_monitors = Arc::new(Mutex::new(monitors));
+        let display_failed = Arc::new(AtomicBool::new(false));
         let display = MockDisplay {
+            failed: display_failed.clone(),
             monitors: shared_monitors.clone(),
-            exclusive_fullscreen_hwnd: exclusive_fullscreen_hwnd.clone(),
         };
         let wiring = MockWiring {
             moves: MoveLog::default(),
             z_stack: ZOrderStack::new(),
             focus_target: Arc::new(Mutex::new(FocusTarget::Initial)),
         };
-        let scene = Rc::new(RefCell::new(MockSceneSender::new(wiring.clone())));
+        let scene = Rc::new(RefCell::new(MockSceneSender::new()));
         let (keymap_tx, _keymap_rx) = std::sync::mpsc::channel();
         let keymap = KeymapPublisher::new(KeymapView::new(), keymap_tx);
         let (runtime, config_file) = loaded_runtime("windows_env", &config_source);
@@ -114,20 +129,70 @@ impl TestEnvBuilder {
             HashMap::new(),
         )
         .unwrap();
+        let server = Rc::new(RefCell::new(MockWindowServer::default()));
+        let internal = Rc::new(RefCell::new(MockInternalWindows::new(wiring.clone())));
+        internal.borrow_mut().trace = server.borrow().trace.clone();
+        internal.borrow_mut().stacking = server.borrow().stacking.clone();
+        let (ui_intake, messages) = mpsc::channel();
+        let (events, reports) = mpsc::channel();
+        let hub = HubSender {
+            thread_id: 0,
+            events,
+        };
+        let callbacks = Rc::new(OnceCell::new());
+        let deadlines = Rc::new(RefCell::new(HashMap::new()));
+        let timed = deadlines.clone();
+        let stopped = deadlines.clone();
+        let wakes = Rc::new(RefCell::new(VecDeque::new()));
+        server.borrow_mut().wakes = wakes.clone();
+        let queued = wakes.clone();
+        let stopped_wakes = wakes.clone();
+        let _ = callbacks.set(WindowLoopCallbacks {
+            wake: Box::new(move |wake| queued.borrow_mut().push_back(wake)),
+            wake_at: Box::new(move |wake, deadline| {
+                if let Some(deadline) = deadline {
+                    timed.borrow_mut().insert(wake, deadline);
+                } else {
+                    timed.borrow_mut().remove(&wake);
+                }
+            }),
+            stop_wakes: Box::new(move || {
+                stopped.borrow_mut().clear();
+                stopped_wakes.borrow_mut().clear();
+            }),
+            terminate: Box::new(|| {}),
+        });
+        let handler = WindowLoopHandler {
+            ui: UiState::new(messages, hub.clone(), Box::new(internal.clone())),
+            windows: Box::new(server.clone()),
+            callbacks,
+            hub_sender: hub,
+            observe_foreground: Box::new(|| {}),
+            stopping: false,
+        };
         let mut env = TestEnv {
             dome,
             moves: wiring.moves,
+            display_failed,
             monitors: shared_monitors,
             tiling,
             config_file,
             z_stack: wiring.z_stack,
             focus_target: wiring.focus_target,
             mocks: HashMap::new(),
-            exclusive_fullscreen_hwnd,
+            handler,
+            server,
+            internal,
+            ui_intake,
+            reports,
+            now: Instant::now(),
+            deadlines,
+            wakes,
+            hold_reports: false,
             scene,
             next_window_id: 1,
         };
-        env.deliver_overlay_reports();
+        env.layout();
         env
     }
 }
@@ -202,7 +267,95 @@ impl TestEnv {
 
     pub(super) fn layout(&mut self) {
         self.dome.apply_layout();
-        self.deliver_overlay_reports();
+        self.pump_ui();
+    }
+
+    pub(super) fn report_move(
+        &mut self,
+        window: HwndId,
+        frame: PixelRect<Physical>,
+        monitor: isize,
+        observed_at: Instant,
+    ) -> bool {
+        let before = self.server.borrow().limits.len();
+        self.observe(Observation::Settled {
+            window,
+            read: SettleRead {
+                observed_at,
+                minimized: false,
+                is_maximized: false,
+                placement: Some((frame, monitor)),
+            },
+        });
+        self.server.borrow().limits.len() > before
+    }
+
+    pub(super) fn report_size_limits(&mut self, window: HwndId, limits: LimitObservation) {
+        self.observe(Observation::SizeLimits { window, limits });
+    }
+    pub(super) fn start_drag(&mut self, window: HwndId) {
+        self.server
+            .borrow_mut()
+            .native
+            .push(NativeEvent::MoveStarted {
+                window,
+                observed_at: self.now,
+            });
+    }
+    pub(super) fn finish_drag(&mut self, window: HwndId) {
+        self.server
+            .borrow_mut()
+            .native
+            .push(NativeEvent::MoveEnded {
+                window,
+                observed_at: self.now,
+            });
+    }
+    pub(super) fn location_changed(&mut self, window: HwndId) -> bool {
+        self.server.borrow_mut().native.push(NativeEvent::Moved {
+            window,
+            observed_at: self.now,
+        });
+        self.mocks.contains_key(&window)
+    }
+    pub(super) fn report_monitors(&mut self, monitors: Vec<MonitorInfo>) -> Vec<HwndId> {
+        let before = self.server.borrow().limits.len();
+        self.dome.monitors_changed(monitors);
+        self.layout();
+        self.server.borrow().limits[before..].to_vec()
+    }
+    pub(super) fn dpi_changed(&mut self) -> Vec<HwndId> {
+        let monitors = self.monitors.lock().unwrap().clone();
+        self.report_monitors(monitors)
+    }
+    pub(super) fn report_titles(&mut self, titles: Vec<(HwndId, Option<String>)>) {
+        for (window, title) in titles {
+            self.observe(Observation::Title { window, title });
+        }
+    }
+
+    pub(super) fn tab_clicked(&mut self, container: ContainerId, index: usize) {
+        self.dome.tab_clicked(container, index);
+    }
+
+    pub(super) fn window_id(&self, window: HwndId) -> Option<WindowId> {
+        self.dome.window_id_for(window)
+    }
+
+    pub(super) fn is_managed(&self, window: HwndId) -> bool {
+        self.dome.window_id_for(window).is_some()
+    }
+
+    pub(super) fn query_monitors_json(&self) -> String {
+        self.dome.query_monitors_json()
+    }
+
+    pub(super) fn query_workspaces_json(&self) -> String {
+        self.dome.query_workspaces_json()
+    }
+
+    pub(super) fn query_minimized_windows_json(&self) -> String {
+        self.dome.query_minimized_windows_json()
     }
 
     pub(super) fn window(&mut self) -> WindowBuilder<'_> {
@@ -238,6 +391,7 @@ impl TestEnv {
 
     pub(super) fn settle(&mut self, limit: usize) {
         for _ in 0..limit {
+            self.pump_ui();
             if !self.flush_moves() {
                 return;
             }
@@ -257,7 +411,6 @@ impl TestEnv {
             last_pos.insert(id, dim);
         }
         for (hwnd_id, dim) in last_pos {
-            self.dome.clear_move_state(hwnd_id);
             let minimized = self
                 .mocks
                 .get(&hwnd_id)
@@ -267,12 +420,15 @@ impl TestEnv {
                 continue;
             }
             let monitor = self.monitor_for_pos(dim.x, dim.y);
-            self.dome.handle_window_moved(
-                hwnd_id,
-                PixelRect::from_dimension(dim),
-                monitor,
-                Instant::now(),
-            );
+            self.observe(Observation::Settled {
+                window: hwnd_id,
+                read: SettleRead {
+                    observed_at: self.now,
+                    minimized: false,
+                    is_maximized: false,
+                    placement: Some((PixelRect::from_dimension(dim), monitor)),
+                },
+            });
         }
         self.layout();
         true
@@ -310,14 +466,15 @@ impl TestEnv {
 
     pub(super) fn destroy_window(&mut self, hwnd: HwndId) {
         self.mocks.remove(&hwnd);
-        self.dome.window_destroyed(hwnd);
+        self.server.borrow_mut().windows.remove(&hwnd);
+        self.observe(Observation::Gone(hwnd));
         self.z_stack.remove(hwnd);
         self.layout();
     }
 
     pub(super) fn minimize_window(&mut self, hwnd: HwndId) {
         self.mock(hwnd).minimized.store(true, Ordering::Relaxed);
-        self.dome.window_minimized(hwnd);
+        self.observe(Observation::Minimized(hwnd));
         self.layout();
     }
 
@@ -331,7 +488,7 @@ impl TestEnv {
     }
 
     pub(super) fn focus_window(&mut self, hwnd: HwndId) {
-        self.dome.handle_focus(hwnd);
+        self.observe(Observation::Foreground { window: hwnd });
         self.layout();
     }
 
@@ -404,9 +561,7 @@ impl TestEnv {
     }
 
     pub(super) fn enter_exclusive_fullscreen(&mut self, hwnd: HwndId) {
-        *self.exclusive_fullscreen_hwnd.lock().unwrap() = Some(hwnd);
-        self.dome.handle_display_change();
-        *self.exclusive_fullscreen_hwnd.lock().unwrap() = None;
+        self.observe(Observation::ExclusiveFullscreen(Some(hwnd)));
         self.layout();
     }
 
@@ -421,74 +576,77 @@ impl TestEnv {
     }
 
     pub(super) fn tiling_overlay_id_for(&self, monitor: MonitorId) -> Option<HwndId> {
-        self.scene.borrow().tiling_overlay_for(monitor)
+        self.internal.borrow().tiling_overlay_for(monitor)
     }
 
     pub(super) fn float_overlay_id(&self, window: WindowId) -> Option<HwndId> {
-        self.scene.borrow().float_overlay_for(window)
+        self.internal.borrow().float_overlay_for(window)
     }
 
     pub(super) fn float_overlay_ids(&self) -> Vec<HwndId> {
-        self.scene.borrow().float_overlay_ids()
+        self.internal.borrow().float_overlay_ids()
     }
 
     pub(super) fn painted_monitors(&self) -> usize {
-        self.painted_scene().monitors.len()
+        self.internal.borrow().monitors.len()
     }
 
     pub(super) fn painted_monitor_id(&self, index: usize) -> MonitorId {
-        self.painted_scene().monitors[index].monitor_id
+        self.internal.borrow().monitors[index].monitor.id
     }
 
     pub(super) fn painted_windows(&self, index: usize) -> Vec<TilingWindowPlacement> {
-        self.painted_scene().monitors[index]
-            .tiling_windows
+        self.internal.borrow().monitors[index]
+            .windows
             .iter()
             .map(|show| show.placement)
             .collect()
     }
 
     pub(super) fn painted_corner_radii(&self, index: usize) -> Vec<Length<Logical>> {
-        self.painted_scene().monitors[index]
-            .tiling_windows
+        self.internal.borrow().monitors[index]
+            .windows
             .iter()
             .map(|show| show.corner_radius)
             .collect()
     }
 
     pub(super) fn painted_containers(&self, index: usize) -> Vec<ContainerPlacement> {
-        self.painted_scene().monitors[index].containers.clone()
+        self.internal.borrow().monitors[index]
+            .monitor
+            .containers
+            .clone()
     }
 
     pub(super) fn painted_border_thickness(&self, index: usize) -> Pixels<Physical> {
-        self.painted_scene().monitors[index].border_thickness
+        self.internal.borrow().monitors[index]
+            .monitor
+            .border_thickness
     }
 
     pub(super) fn painted_work_area(&self, index: usize) -> PixelRect {
-        self.painted_scene().monitors[index].work_area
+        self.internal.borrow().monitors[index].monitor.work_area
     }
 
     /// The float placement the newest scene paints, for the one float these tests keep.
     pub(super) fn painted_float(&self) -> Option<FloatWindowPlacement> {
-        self.painted_scene()
-            .float_overlays
-            .iter()
-            .find_map(|a| match a {
-                FloatOverlayAction::Create { placement, .. }
-                | FloatOverlayAction::Update { placement, .. } => Some(*placement),
-                FloatOverlayAction::Hide(_) => None,
-            })
+        self.internal.borrow().floats.first().map(|f| f.placement)
+    }
+
+    pub(super) fn painted_float_scale_and_thickness(&self) -> Option<(f32, Pixels<Physical>)> {
+        self.internal
+            .borrow()
+            .floats
+            .first()
+            .map(|float| (float.scale, float.border_thickness))
     }
 
     pub(super) fn painted_float_corner_radius(&self) -> Option<Length<Logical>> {
-        self.painted_scene()
-            .float_overlays
-            .iter()
-            .find_map(|a| match a {
-                FloatOverlayAction::Create { corner_radius, .. }
-                | FloatOverlayAction::Update { corner_radius, .. } => Some(*corner_radius),
-                FloatOverlayAction::Hide(_) => None,
-            })
+        self.internal
+            .borrow()
+            .floats
+            .first()
+            .map(|f| f.corner_radius)
     }
 
     pub(super) fn set_corner_radius(&self, hwnd: HwndId, radius: Length<Logical>) {
@@ -566,7 +724,7 @@ impl TestEnv {
     }
 
     pub(super) fn window_appearance(&self) -> Option<Appearance> {
-        self.scene.borrow().appearance()
+        self.internal.borrow().appearance.clone()
     }
 
     pub(super) fn change_config(&mut self, source: &str) {
@@ -582,21 +740,28 @@ impl TestEnv {
     pub(super) fn add_monitor(&mut self, monitor: MonitorInfo) {
         self.monitors.lock().unwrap().push(monitor);
         self.dome.handle_display_change();
-        self.deliver_overlay_reports();
+        self.pump_ui();
         self.layout();
     }
 
     pub(super) fn remove_monitor(&mut self, handle: isize) {
         self.monitors.lock().unwrap().retain(|m| m.handle != handle);
         self.dome.handle_display_change();
-        self.deliver_overlay_reports();
+        self.pump_ui();
         self.layout();
+    }
+
+    pub(super) fn fail_display_refresh(&mut self) {
+        self.display_failed.store(true, Ordering::Relaxed);
+        self.dome.handle_display_change();
+        self.pump_ui();
+        self.display_failed.store(false, Ordering::Relaxed);
     }
 
     pub(super) fn change_monitors(&mut self, monitors: Vec<MonitorInfo>) {
         *self.monitors.lock().unwrap() = monitors;
         self.dome.handle_display_change();
-        self.deliver_overlay_reports();
+        self.pump_ui();
         self.layout();
     }
 
@@ -607,6 +772,7 @@ impl TestEnv {
             .find(|m| m.handle == handle)
             .unwrap_or_else(|| panic!("monitor {handle} is not in the test monitor set"));
         monitor.scale = scale;
+        monitor.dots_per_inch = (scale * 96.0).round() as u32;
     }
 
     pub(super) fn raise_without_notifying_dome(&self, hwnd: HwndId) {
@@ -621,50 +787,198 @@ impl TestEnv {
         self.z_stack.normal_stack()
     }
 
-    /// Stands in for the runner's `dispatch_window_created`, except that the
-    /// monitor is fixed at 1 and the mock's `manageable` flag decides
-    /// manageability. Keep everything else in step with the runner.
     fn open_with(&mut self, ext: Arc<MockExternalHwnd>) -> HwndId {
-        let hwnd_id = ext.hwnd_id;
-        self.mocks.insert(hwnd_id, ext.clone());
-        let metadata = WindowsMetadata {
-            title: ext.title.clone(),
-            process: ext.process.clone(),
-            process_path: None,
-            class: ext.class.clone(),
-            aumid: None,
-            app_name: ext.app_name.clone(),
-        };
-        if !ext.manageable {
-            return hwnd_id;
+        let key = ext.hwnd_id;
+        self.mocks.insert(key, ext.clone());
+        self.server.borrow_mut().windows.insert(key, ext.clone());
+        if ext.manageable {
+            let frame = PixelRect::from_dimension(ext.get_dim());
+            let monitor = self.monitor_for_pos(ext.get_dim().x, ext.get_dim().y);
+            self.observe(Observation::Discovered(DiscoveredWindow {
+                key,
+                process_id: 1,
+                is_maximized: false,
+                metadata: WindowsMetadata {
+                    title: ext.title.clone(),
+                    process: ext.process.clone(),
+                    process_path: None,
+                    class: ext.class.clone(),
+                    aumid: None,
+                    app_name: ext.app_name.clone(),
+                },
+                frame,
+                monitor,
+                limits: Some(ext.constraints),
+                fullscreen: None,
+            }));
         }
-        let new = NewWindow {
-            ext: ext.clone(),
-            metadata,
-            constraints: ext.constraints,
-        };
-        let dim = ext.get_dim();
-        self.dome.add_window(new, PixelRect::from_dimension(dim), 1);
-        self.deliver_overlay_reports();
-        hwnd_id
+        key
     }
 
-    /// Drains the pending reports into the domain, standing in for
-    /// `HubEvent::TilingOverlayReady` and `HubEvent::FloatOverlayReady`.
-    fn deliver_overlay_reports(&mut self) {
-        let reports = self.scene.borrow_mut().take_pending_reports();
-        for report in reports {
-            match report {
-                OverlayReport::Tiling(monitor, overlay) => {
-                    self.dome.tiling_overlay_ready(monitor, overlay);
-                }
-                OverlayReport::Float(window, overlay) => {
-                    self.dome.float_overlay_ready(window, overlay);
+    fn observe(&mut self, observation: Observation) {
+        self.queue_observation(observation);
+        self.pump_ui();
+    }
+
+    pub(super) fn queue_observation(&mut self, observation: Observation) {
+        self.server.borrow_mut().observations.push(observation);
+        self.wakes.borrow_mut().push_back(Wake::WindowServer);
+    }
+
+    fn pump_ui(&mut self) {
+        for _ in 0..256 {
+            let mut delivered = false;
+            if !self.hold_reports {
+                while let Ok(event) = self.reports.try_recv() {
+                    assert!(self.dome.handle_report(event).is_ok());
+                    delivered = true;
                 }
             }
+            let count = self.scene.borrow_mut().deliver(&self.ui_intake);
+            if count > 0 {
+                self.wakes.borrow_mut().push_back(Wake::Ui);
+            }
+            self.queue_due();
+            let wake = self.wakes.borrow_mut().pop_front();
+            if let Some(wake) = wake {
+                let _ = self.handler.process_wake_at(wake, self.now);
+            } else if !delivered {
+                return;
+            }
+        }
+        panic!("ready wake/report delivery did not converge");
+    }
+
+    fn queue_due(&mut self) {
+        let due: Vec<_> = self
+            .deadlines
+            .borrow()
+            .iter()
+            .filter(|(_, at)| **at <= self.now)
+            .map(|(&wake, _)| wake)
+            .collect();
+        for wake in due {
+            self.deadlines.borrow_mut().remove(&wake);
+            self.wakes.borrow_mut().push_back(wake);
         }
     }
 
+    pub(super) fn deliver_ready_wakes(&mut self) {
+        for _ in 0..256 {
+            let wake = self.wakes.borrow_mut().pop_front();
+            let Some(wake) = wake else { return };
+            let _ = self.handler.process_wake_at(wake, self.now);
+        }
+        panic!("ready wakes did not converge");
+    }
+
+    pub(super) fn advance_time(&mut self, duration: Duration) {
+        self.now += duration;
+    }
+    pub(super) fn now(&self) -> Instant {
+        self.now
+    }
+    pub(super) fn deliver_due(&mut self) {
+        self.queue_due();
+        self.deliver_ready_wakes();
+    }
+    pub(super) fn deadline(&self, wake: Wake) -> Option<Instant> {
+        self.deadlines.borrow().get(&wake).copied()
+    }
+    pub(super) fn ui_wake(&mut self) {
+        self.wakes.borrow_mut().push_back(Wake::Ui);
+        self.deliver_ready_wakes();
+    }
+    pub(super) fn latest_scene(&self) -> Scene {
+        self.scene.borrow().latest.clone().unwrap()
+    }
+    pub(super) fn send_ui(&mut self, message: HubMessage) {
+        self.ui_intake.send(message).unwrap();
+        self.wakes.borrow_mut().push_back(Wake::Ui);
+    }
+    pub(super) fn hold_reports(&mut self, hold: bool) {
+        self.hold_reports = hold;
+    }
+    pub(super) fn hold_scenes(&mut self, hold: bool) {
+        self.scene.borrow_mut().hold_scenes = hold;
+    }
+    pub(super) fn release(&mut self) {
+        self.pump_ui();
+    }
+    pub(super) fn take_reports(&mut self) -> Vec<HubEvent> {
+        self.reports.try_iter().collect()
+    }
+    pub(super) fn focus_submissions(&self) -> Vec<HwndId> {
+        self.server.borrow().focus.clone()
+    }
+    pub(super) fn close_submissions(&self) -> Vec<HwndId> {
+        self.server.borrow().closed.clone()
+    }
+    pub(super) fn limits_demand(&self) -> Vec<HwndId> {
+        self.server.borrow().limits.clone()
+    }
+    pub(super) fn displayed_monitors(&self) -> Vec<MonitorInfo> {
+        self.server.borrow().displays.clone()
+    }
+    pub(super) fn recovery_records(&self) -> Vec<(HwndId, bool)> {
+        self.server
+            .borrow()
+            .shutdown
+            .iter()
+            .map(|r| (r.window, r.is_maximized))
+            .collect()
+    }
+    pub(super) fn recovery_calls(&self) -> usize {
+        self.server.borrow().shutdown_calls
+    }
+    pub(super) fn stop(&mut self) {
+        self.handler.stop();
+    }
+    pub(super) fn inject_observation(&mut self, observation: Observation) {
+        self.observe(observation);
+    }
+
+    pub(super) fn trace(&self) -> Vec<&'static str> {
+        self.server.borrow().trace.borrow().clone()
+    }
+    pub(super) fn clear_trace(&self) {
+        self.server.borrow().trace.borrow_mut().clear();
+    }
+    pub(super) fn frame_submissions(&self) -> Vec<(HwndId, PixelRect<Physical>)> {
+        self.server.borrow().frames.clone()
+    }
+    pub(super) fn park_submissions(&self) -> Vec<HwndId> {
+        self.server.borrow().parked.clone()
+    }
+    pub(super) fn minimize_submissions(&self) -> Vec<HwndId> {
+        self.server.borrow().minimized.clone()
+    }
+    pub(super) fn order_submissions(
+        &self,
+    ) -> Vec<(HwndId, crate::platform::windows::external::ZOrder)> {
+        self.server.borrow().orders.clone()
+    }
+    pub(super) fn stacking_submissions(
+        &self,
+    ) -> Vec<(HwndId, crate::platform::windows::external::ZOrder)> {
+        self.server.borrow().stacking.borrow().clone()
+    }
+    pub(super) fn tab_containers(&self, index: usize) -> Vec<ContainerPlacement> {
+        self.internal.borrow().tab_monitors[index]
+            .containers
+            .clone()
+    }
+    pub(super) fn output_counts(&self) -> (usize, usize) {
+        let internal = self.internal.borrow();
+        (internal.paint_calls, internal.stack_calls)
+    }
+    pub(super) fn display_refreshes(&self) -> usize {
+        self.server.borrow().display_refreshes
+    }
+    pub(super) fn deliver_report(&mut self, report: HubEvent) {
+        assert!(self.dome.handle_report(report).is_ok());
+        self.pump_ui();
+    }
     fn primary_monitor(&self) -> MonitorInfo {
         let monitors = self.monitors.lock().unwrap();
         monitors
@@ -692,10 +1006,6 @@ impl TestEnv {
         })
     }
 
-    fn painted_scene(&self) -> Ref<'_, RenderScene> {
-        Ref::map(self.scene.borrow(), |sender| sender.latest_scene())
-    }
-
     fn wiring(&self) -> MockWiring {
         MockWiring {
             moves: self.moves.clone(),
@@ -705,7 +1015,7 @@ impl TestEnv {
     }
 
     fn tiling_overlay_ids(&self) -> Vec<HwndId> {
-        self.scene.borrow().tiling_overlay_ids()
+        self.internal.borrow().tiling_overlay_ids()
     }
 
     fn send_action(&mut self, action: &Action) {
@@ -713,7 +1023,7 @@ impl TestEnv {
         let main_thread_id = 0;
         self.dome
             .handle_actions(&Actions::new(vec![action.clone()]), main_thread_id);
-        self.deliver_overlay_reports();
+        self.pump_ui();
     }
 
     /// Replay the restore event, which Win32 reports as a move at the window's

@@ -1,10 +1,10 @@
+use super::Window;
 use super::allocator::{Allocator, NodeId};
 use super::matcher::{MatcherHit, WindowMode};
 use super::monitor::{Monitor, ReportedMonitor};
 use super::node::{
     Container, ContainerId, Direction, DisplayMode, Length, LimitObservation, LimitUpdate,
-    MonitorId, PixelRect, Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions,
-    WorkspaceId,
+    MonitorId, PixelRect, Pixels, Unit, WindowId, WindowMetadata, WindowRestrictions, WorkspaceId,
 };
 use super::partition_tree::Child;
 use super::preferred_layout::{PreferredLayouts, PreferredWorkspace};
@@ -26,6 +26,13 @@ pub(crate) struct TilingWindowPlacement {
     pub(crate) id: WindowId,
     pub(crate) border_box: PixelRect,
     pub(crate) visible_border_box: PixelRect,
+    #[cfg_attr(
+        all(target_os = "macos", not(test)),
+        expect(
+            dead_code,
+            reason = "Windows uses untrimmed tiling content, macOS places visible_content_box"
+        )
+    )]
     pub(crate) content_box: PixelRect,
     /// `content_box` trimmed to the monitor. Zero-area when nothing remains.
     #[cfg_attr(
@@ -202,6 +209,11 @@ pub(crate) struct Hub {
 }
 
 impl Hub {
+    /// Panics unless `id` identifies a live window.
+    pub(crate) fn window(&self, id: WindowId) -> &Window {
+        self.access.windows.get(id)
+    }
+
     pub(crate) fn new(
         primary: ReportedMonitor,
         tiling: TilingConfig,

@@ -355,10 +355,6 @@ impl FloatOverlay {
         });
     }
 
-    pub(super) fn hide(&mut self) {
-        unsafe { ShowWindow(self.aux.hwnd(), SW_HIDE).ok().ok() };
-    }
-
     pub(super) fn set_appearance(&mut self, appearance: &Appearance) {
         // Borders only, no text, so the font is not applied.
         self.renderer.set_theme(appearance.theme);
@@ -369,7 +365,7 @@ pub(in crate::platform::windows) struct WgpuOverlayFactory {
     gpu: WgpuContext,
     hub_sender: HubSender,
     // Any overlay's Commit() flushes this shared device, which is safe because all
-    // overlays run on the one window thread.
+    // overlays run on the one UI thread.
     dcomp_device: IDCompositionDevice,
 }
 

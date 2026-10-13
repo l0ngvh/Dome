@@ -11,17 +11,17 @@ use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW,
 };
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
-use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, MONITORINFOF_PRIMARY};
+use windows::Win32::UI::WindowsAndMessaging::MONITORINFOF_PRIMARY;
 use windows::core::BOOL;
 
 use crate::core::{Hub, MonitorId, Physical, PixelRect, ReportedMonitor};
-use crate::platform::windows::external::HwndId;
 use crate::platform::windows::handle;
 
 #[derive(Clone)]
 pub(in crate::platform::windows) struct MonitorInfo {
     pub(in crate::platform::windows) handle: isize,
+    pub(in crate::platform::windows) full_rect: PixelRect<Physical>,
+    pub(in crate::platform::windows) dots_per_inch: u32,
     /// EDID friendly name (e.g. "DELL U2720Q") when one is available, else the
     /// GDI device string (`\\.\DISPLAY1`) as a last-resort human-usable label.
     pub(in crate::platform::windows) name: String,
@@ -49,8 +49,6 @@ impl From<&MonitorInfo> for ReportedMonitor {
 
 pub(in crate::platform::windows) trait QueryDisplay {
     fn get_all_monitors(&self) -> anyhow::Result<Vec<MonitorInfo>>;
-    /// Returns the hwnd of the foreground window if D3D exclusive fullscreen is active.
-    fn get_exclusive_fullscreen_hwnd(&self) -> Option<HwndId>;
 }
 
 pub(in crate::platform::windows) struct Win32Display;
@@ -59,19 +57,6 @@ impl QueryDisplay for Win32Display {
     fn get_all_monitors(&self) -> anyhow::Result<Vec<MonitorInfo>> {
         get_all_monitors()
     }
-
-    fn get_exclusive_fullscreen_hwnd(&self) -> Option<HwndId> {
-        if is_d3d_exclusive_fullscreen_active() {
-            Some(HwndId::from(unsafe { GetForegroundWindow() }))
-        } else {
-            None
-        }
-    }
-}
-
-pub(super) struct MonitorChange {
-    pub(super) added: Vec<MonitorId>,
-    pub(super) removed: Vec<MonitorId>,
 }
 
 pub(super) struct MonitorRegistry {
@@ -87,10 +72,6 @@ impl MonitorRegistry {
 
     pub(super) fn monitor(&self, id: MonitorId) -> &MonitorInfo {
         &self.monitors[&id]
-    }
-
-    pub(super) fn contains(&self, id: MonitorId) -> bool {
-        self.monitors.contains_key(&id)
     }
 
     pub(super) fn insert(&mut self, id: MonitorId, info: &MonitorInfo) {
@@ -122,10 +103,7 @@ impl MonitorRegistry {
             .unwrap_or(false)
     }
 
-    pub(super) fn reconcile(&mut self, hub: &mut Hub, monitors: &[MonitorInfo]) -> MonitorChange {
-        let mut added = Vec::new();
-        let mut removed = Vec::new();
-
+    pub(super) fn reconcile(&mut self, hub: &mut Hub, monitors: &[MonitorInfo]) {
         let current_handles: HashSet<isize> = monitors.iter().map(|s| s.handle).collect();
 
         // Ahead of the add loop, so the display the primary vacates is picked up
@@ -144,7 +122,6 @@ impl MonitorRegistry {
             if !already_tracked {
                 let id = hub.add_monitor(monitor.into());
                 self.insert(id, monitor);
-                added.push(id);
                 tracing::info!(
                     name = %monitor.name,
                     handle = ?monitor.handle,
@@ -168,7 +145,6 @@ impl MonitorRegistry {
             for monitor_id in &to_remove {
                 hub.remove_monitor(*monitor_id);
             }
-            removed.extend(&to_remove);
             let primary = hub.primary_monitor();
             tracing::info!(?to_remove, primary = %primary, "Monitors removed");
         }
@@ -189,8 +165,6 @@ impl MonitorRegistry {
             }
             hub.update_monitor(id, monitor.into(), None);
         }
-
-        MonitorChange { added, removed }
     }
 
     /// Re-keys the primary entry onto the incoming primary display's handle.
@@ -236,22 +210,22 @@ impl MonitorRegistry {
 /// Windows baseline DPI (100% scaling).
 const BASE_DPI: f32 = 96.0;
 
-fn scale_for_monitor(hmonitor: HMONITOR) -> f32 {
+fn dots_per_inch_for_monitor(hmonitor: HMONITOR) -> u32 {
     let mut dpi_x: u32 = 0;
     let mut dpi_y: u32 = 0;
     if let Err(e) = unsafe { GetDpiForMonitor(hmonitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) }
     {
         tracing::warn!(%e, ?hmonitor, "GetDpiForMonitor failed, falling back to 1.0");
-        return 1.0;
+        return 96;
     }
     if dpi_x == 0 {
         tracing::warn!(
             ?hmonitor,
             "GetDpiForMonitor returned 0, falling back to 1.0"
         );
-        return 1.0;
+        return 96;
     }
-    dpi_x as f32 / BASE_DPI
+    dpi_x
 }
 
 fn get_all_monitors() -> anyhow::Result<Vec<MonitorInfo>> {
@@ -276,13 +250,16 @@ fn get_all_monitors() -> anyhow::Result<Vec<MonitorInfo>> {
             let rc = info.monitorInfo.rcWork;
             let gdi_device = utf16_to_string(&info.szDevice);
 
-            let scale = scale_for_monitor(hmonitor);
+            let dots_per_inch = dots_per_inch_for_monitor(hmonitor);
+            let scale = dots_per_inch as f32 / BASE_DPI;
 
             // name is resolved once, after enumeration, from the friendly-name
             // map keyed on gdi_device. It is left empty here so it never
             // transiently holds the GDI device string.
             monitors.push(MonitorInfo {
                 handle: hmonitor.0 as isize,
+                full_rect: handle::rect_to_pixel_rect(info.monitorInfo.rcMonitor),
+                dots_per_inch,
                 name: String::new(),
                 gdi_device,
                 work_area: handle::rect_to_pixel_rect(rc),
@@ -416,11 +393,6 @@ fn friendly_names_by_gdi_device() -> HashMap<String, String> {
 fn utf16_to_string(units: &[u16]) -> String {
     let end = units.iter().take_while(|&&c| c != 0).count();
     String::from_utf16_lossy(&units[..end])
-}
-
-fn is_d3d_exclusive_fullscreen_active() -> bool {
-    unsafe { SHQueryUserNotificationState() }
-        .is_ok_and(|state| state == QUNS_RUNNING_D3D_FULL_SCREEN)
 }
 
 #[cfg(test)]

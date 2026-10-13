@@ -564,3 +564,100 @@ fn dome_issued_fullscreen_placement_does_not_flip_to_borderless_fullscreen() {
 fn highlighted_float(env: &TestEnv) -> Option<bool> {
     env.painted_float().map(|wp| wp.is_highlighted)
 }
+
+#[test]
+fn suspend_fullscreen_correction_until_response_scene() {
+    use crate::platform::windows::dome::HubEvent;
+    use crate::platform::windows::dome::events::HubMessage;
+    let mut env = TestEnv::new();
+    let window = env.open();
+    env.settle(10);
+    let old = env.latest_scene();
+    env.hold_reports(true);
+    let before = env.frame_submissions().len();
+    env.report_move(
+        window,
+        PixelRect::from_dimension(fullscreen_dim()),
+        1,
+        env.now(),
+    );
+    let reports = env.take_reports();
+    assert!(matches!(
+        reports.as_slice(),
+        [HubEvent::FullscreenChanged {
+            fullscreen: Some(_),
+            ..
+        }]
+    ));
+    env.send_ui(HubMessage::Scene(old.clone()));
+    env.ui_wake();
+    env.report_move(
+        window,
+        PixelRect::from_dimension(fullscreen_dim()),
+        1,
+        env.now(),
+    );
+    env.advance_time(std::time::Duration::from_secs(4));
+    env.ui_wake();
+    assert_eq!(env.frame_submissions().len(), before);
+    assert!(env.take_reports().is_empty());
+    env.hold_reports(false);
+    for report in reports {
+        env.deliver_report(report);
+    }
+    assert_eq!(env.frame_submissions().len(), before);
+    env.hold_reports(true);
+    let exit = PixelRect::new(200, 100, 600, 400);
+    env.report_move(window, exit, 1, env.now());
+    let reports = env.take_reports();
+    assert!(matches!(
+        reports.as_slice(),
+        [HubEvent::FullscreenChanged {
+            fullscreen: None,
+            ..
+        }]
+    ));
+    env.report_move(window, exit, 1, env.now());
+    assert_eq!(env.frame_submissions().len(), before);
+    env.hold_reports(false);
+    for report in reports {
+        env.deliver_report(report);
+    }
+    assert_eq!(env.frame_submissions().len(), before + 1);
+}
+
+#[test]
+fn report_restore_before_float_or_fullscreen_change() {
+    use crate::platform::windows::dome::HubEvent;
+    for fullscreen in [false, true] {
+        let mut env = TestEnv::new();
+        let window = env.open();
+        env.run_actions("toggle float");
+        env.settle(10);
+        env.minimize_window(window);
+        assert_ne!(env.query_minimized_windows_json(), "[]");
+        env.hold_reports(true);
+        let frame = if fullscreen {
+            PixelRect::from_dimension(fullscreen_dim())
+        } else {
+            PixelRect::new(200, 150, 600, 400)
+        };
+        env.report_move(window, frame, 1, env.now());
+        let reports = env.take_reports();
+        assert!(matches!(reports.first(), Some(HubEvent::WindowRestored(key)) if *key == window));
+        if fullscreen {
+            assert!(matches!(
+                reports.get(1),
+                Some(HubEvent::FullscreenChanged { .. })
+            ));
+        } else {
+            assert!(matches!(reports.get(1), Some(HubEvent::FloatMoved { .. })));
+        }
+        assert_eq!(reports.len(), 2);
+        env.hold_reports(false);
+        for report in reports {
+            env.deliver_report(report);
+        }
+        assert_eq!(env.query_minimized_windows_json(), "[]");
+    }
+}

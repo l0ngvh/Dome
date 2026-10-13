@@ -15,18 +15,15 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::w;
 
 use super::menu::{is_tray_context_menu, show_context_menu};
+use super::run_loop::{NativeCallbacks, guard_callback};
 use super::window::{OwnedHwnd, ex_style_for, register_class};
 use super::wnd_proc::{wnd_proc_no_state, wnd_proc_prologue};
 use super::{TRAY_CLASS_NAME, TRAY_UID, WM_APP_TRAY};
-use crate::{AppHandler, Point, Size, WindowAttributes};
+use crate::{Point, Size, WindowAttributes};
 
-/// The consumer's `AppHandler`, shared between `App`, which drives the wake path, and the
-/// tray window's wnd-proc, which drives the menu and the display notifications.
-pub(crate) type SharedHandler = Rc<RefCell<Box<dyn AppHandler>>>;
+pub(crate) type SharedHandler = Rc<dyn NativeCallbacks>;
 
-/// The system-tray icon and its hidden owner window. The icon's callback, its context
-/// menu, and the taskbar-restart re-add all run through this one window's wnd-proc, so no
-/// other window carries tray state.
+/// The system-tray icon and its hidden owner window.
 pub(crate) struct Tray {
     window: OwnedHwnd,
     state: *mut RefCell<TrayState>,
@@ -41,8 +38,7 @@ struct TrayState {
 }
 
 impl Drop for TrayState {
-    /// Removes the icon while the owner window is still alive. `Tray`'s Drop drops this
-    /// before it destroys the window, so the `(hWnd, uID)` key is still valid here.
+    /// The owner window must remain alive until icon removal finishes.
     fn drop(&mut self) {
         if !unsafe { Shell_NotifyIconW(NIM_DELETE, &self.data) }.as_bool() {
             tracing::warn!("Shell_NotifyIconW(NIM_DELETE) failed");
@@ -86,7 +82,6 @@ impl Tray {
             anyhow::bail!("Shell_NotifyIconW(NIM_ADD) failed");
         }
 
-        // Boxed to a thin pointer the wnd-proc reads back from GWLP_USERDATA.
         let state: *mut RefCell<TrayState> = Box::into_raw(Box::new(RefCell::new(TrayState {
             data,
             taskbar_created,
@@ -94,6 +89,11 @@ impl Tray {
         })));
         unsafe { SetWindowLongPtrW(window.hwnd(), GWLP_USERDATA, state as isize) };
         Ok(Self { window, state })
+    }
+
+    #[cfg(test)]
+    pub(super) fn window_for_test(&self) -> HWND {
+        self.window.hwnd()
     }
 
     pub(crate) fn tooltip(&self) -> TrayTooltip {
@@ -104,20 +104,27 @@ impl Tray {
 impl Drop for Tray {
     fn drop(&mut self) {
         unsafe { SetWindowLongPtrW(self.window.hwnd(), GWLP_USERDATA, 0) };
-        // Frees TrayState (its Drop sends NIM_DELETE) while the window is still alive,
-        // before the OwnedHwnd field's Drop destroys it.
+        // Icon removal requires a live owner window.
         drop(unsafe { Box::from_raw(self.state) });
     }
 }
 
-/// A lifetime-free handle to the tray icon's tooltip. The raw pointer stays valid while
-/// the owning `Tray` lives, which outlives every `Shell` the app lends to a callback.
+/// A lifetime-free handle to the tray icon's tooltip. Production handles remain valid
+/// while the owning tray lives.
 pub(crate) struct TrayTooltip {
     state: *mut RefCell<TrayState>,
 }
 
 impl TrayTooltip {
+    #[cfg(test)]
+    pub(super) fn for_test() -> Self {
+        Self {
+            state: std::ptr::null_mut(),
+        }
+    }
+
     pub(crate) fn set(&self, tooltip: &str) {
+        assert!(!self.state.is_null());
         let mut state = unsafe { (*self.state).borrow_mut() };
         write_tooltip(&mut state.data.szTip, tooltip);
         if !unsafe { Shell_NotifyIconW(NIM_MODIFY, &state.data) }.as_bool() {
@@ -137,6 +144,10 @@ unsafe extern "system" fn tray_wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    guard_callback(|| tray_dispatch(hwnd, msg, wparam, lparam))
+}
+
+fn tray_dispatch(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if let Some(reply) = wnd_proc_prologue(hwnd, msg, lparam) {
         return reply;
     }
@@ -147,24 +158,24 @@ unsafe extern "system" fn tray_wnd_proc(
     }
 
     let state = unsafe { &*state_ptr };
+    if !state.borrow().handler.dispatch_enabled() {
+        return wnd_proc_no_state(hwnd, msg, wparam, lparam);
+    }
     match msg {
         WM_DISPLAYCHANGE => {
-            state.borrow().handler.borrow_mut().on_display_changed();
+            let handler = state.borrow().handler.clone();
+            handler.display_changed();
             LRESULT(0)
         }
         WM_SETTINGCHANGE if wparam.0 == SPI_SETWORKAREA.0 as usize => {
-            state.borrow().handler.borrow_mut().on_work_area_changed();
+            let handler = state.borrow().handler.clone();
+            handler.work_area_changed();
             LRESULT(0)
         }
         WM_APP_TRAY => {
             if is_tray_context_menu(lparam) {
-                // The menu entries are pulled fresh, then every borrow ends before the
-                // modal show. TrackPopupMenu pumps messages, and a dispatched message that
-                // re-enters this wnd-proc would re-borrow these cells and panic.
-                let entries = state.borrow().handler.borrow_mut().menu();
-                if let Some(id) = show_context_menu(hwnd, &entries) {
-                    state.borrow().handler.borrow_mut().on_menu_selected(id);
-                }
+                let handler = state.borrow().handler.clone();
+                dispatch_menu(handler, move |entries| show_context_menu(hwnd, entries));
             }
             LRESULT(0)
         }
@@ -183,11 +194,73 @@ unsafe extern "system" fn tray_wnd_proc(
     }
 }
 
+fn dispatch_menu(
+    handler: SharedHandler,
+    track: impl FnOnce(&[crate::MenuEntry]) -> Option<u32> + 'static,
+) {
+    let weak = Rc::downgrade(&handler);
+    handler.menu(Box::new(move |entries| {
+        let selection = track(&entries);
+        if let Some(handler) = weak.upgrade()
+            && !handler.should_stop()
+            && let Some(id) = selection
+        {
+            handler.selected(id);
+        }
+    }));
+}
+
 fn write_tooltip(dst: &mut [u16], tooltip: &str) {
     let wide: Vec<u16> = tooltip.encode_utf16().collect();
     let n = wide.len().min(dst.len().saturating_sub(1));
     dst[..n].copy_from_slice(&wide[..n]);
     for slot in dst.iter_mut().skip(n) {
         *slot = 0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::run_loop::tests::{Event, Fixture};
+    use super::*;
+    use crate::delivery::Callbacks;
+
+    #[test]
+    fn dispatch_menu_releases_handler_borrow() {
+        let fixture = Fixture::new();
+        let state = Rc::downgrade(&fixture.state);
+        let waker = fixture.waker.clone();
+        dispatch_menu(fixture.state.clone(), move |entries| {
+            assert!(matches!(&entries[0], crate::MenuEntry::Item(item) if item.id == 7));
+            waker.wake(1);
+            guard_callback(|| state.upgrade().unwrap().wake());
+            Some(7)
+        });
+        assert_eq!(
+            *fixture.events.borrow(),
+            [Event::Menu, Event::Wake(1), Event::Selected(7)]
+        );
+    }
+
+    #[test]
+    fn select_menu_after_nested_stop_suppresses_selection() {
+        for stop in [0, 1, 2] {
+            let fixture = Fixture::new();
+            let state = Rc::downgrade(&fixture.state);
+            dispatch_menu(fixture.state.clone(), move |_| {
+                match stop {
+                    1 => state.upgrade().unwrap().terminate(),
+                    2 => guard_callback(|| panic!("nested menu callback")),
+                    _ => (),
+                }
+                Some(7)
+            });
+            if stop == 0 {
+                assert_eq!(*fixture.events.borrow(), [Event::Menu, Event::Selected(7)]);
+            } else {
+                assert!(fixture.state.should_stop());
+                assert_eq!(*fixture.events.borrow(), [Event::Menu]);
+            }
+        }
     }
 }

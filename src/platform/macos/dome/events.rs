@@ -1,44 +1,42 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fmt;
 use std::time::Instant;
 
-use objc2_core_graphics::CGWindowID;
-use objc2_foundation::NSRect;
-
-use crate::action::Actions;
-use crate::action::Query;
-use crate::action::WorkspaceInfo;
-use crate::config::{Appearance, Keystroke};
-use crate::core::{
-    ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, MonitorId,
-    TilingWindowPlacement, WindowId,
-};
+use objc2_core_graphics::{CGDirectDisplayID, CGWindowID};
 
 use super::super::MonitorInfo;
+use crate::action::{Actions, Query, WorkspaceInfo};
+use crate::config::{Appearance, Keystroke};
+use crate::core::{
+    ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, LimitObservation,
+    Logical, MonitorId, PixelRect, TilingWindowPlacement, WindowId, WindowMatcher, WindowMetadata,
+    pattern_matches,
+};
 
 pub(in crate::platform::macos) enum HubEvent {
-    /// Visible windows changed for an app (window created/destroyed/minimized/shown/hidden).
-    VisibleWindowsChanged {
-        pid: i32,
+    WindowsDiscovered(Vec<DiscoveredWindow>),
+    WindowGone(CGWindowID),
+    WindowMinimized(CGWindowID),
+    WindowRestored(CGWindowID),
+    /// Zero reports unresolved foreground and still clears pending domain intent.
+    FocusReported(CGWindowID),
+    TitleChanged {
+        key: CGWindowID,
+        title: String,
     },
-    /// Sync focus for an app. Separated from VisibleWindowsChanged because offscreen windows (on
-    /// other workspaces) still report as "active", which would hijack focus and prevent switching
-    /// to empty workspaces.
-    SyncFocus {
-        pid: i32,
+    SizeConstraint {
+        key: CGWindowID,
+        limits: LimitObservation,
     },
-    AppTerminated {
-        pid: i32,
+    FloatMoved {
+        key: CGWindowID,
+        frame: PixelRect<Logical>,
     },
-    TitleChanged(CGWindowID),
-    /// One or more windows of app with pid got resized or moved.
-    /// This can't be on a per CGWindowID basis, as these events are unreliable and are often fired
-    /// on the wrong window. For example, Slack doesn't emit this event on the main application
-    /// window. This can however create a scenario when one window in the app finishes
-    /// moving/resizing and send this notification, but other windows are not finish yet.
-    WindowMovedOrResized {
-        pid: i32,
-        observed_at: Instant,
+    FullscreenChanged {
+        key: CGWindowID,
+        fullscreen: Option<FullscreenKind>,
+        /// Observed window frame, absent for native fullscreen Spaces.
+        frame: Option<PixelRect<Logical>>,
     },
     Action(Actions),
     Query {
@@ -52,34 +50,29 @@ pub(in crate::platform::macos) enum HubEvent {
     ReloadConfig,
     ApplyLayout(String),
     SaveLayout(String),
-    /// Periodic sync to catch missed AX notifications, as AX notifications are unreliable. Only
-    /// syncs window state, not focus, as focus changes should come from user interactions. Beside
-    /// we receive plenty of focus events, so missing them isn't a concern.
-    Sync,
     MonitorsChanged(Vec<MonitorInfo>),
     MirrorClicked(CGWindowID),
     TabClicked(ContainerId, usize),
-    /// Used to detect native fullscreen enter/exit, since native fullscreen
-    /// moves windows to a separate Space.
-    SpaceChanged,
-    PidObserved {
-        pid: i32,
-    },
-    /// Full set of observed PIDs after a refresh cycle. Replaces
-    /// `observed_pids` wholesale.
-    ObservedPidsRefreshed(HashSet<i32>),
     Shutdown,
 }
 
 impl fmt::Display for HubEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::VisibleWindowsChanged { pid } => write!(f, "VisibleWindowsChanged(pid={pid})"),
-            Self::SyncFocus { pid } => write!(f, "SyncFocus(pid={pid})"),
-            Self::AppTerminated { pid } => write!(f, "AppTerminated(pid={pid})"),
-            Self::TitleChanged(cg_id) => write!(f, "TitleChanged(cg_id={cg_id})"),
-            Self::WindowMovedOrResized { pid, .. } => {
-                write!(f, "WindowMovedOrResized(pid={pid})")
+            Self::WindowsDiscovered(windows) => {
+                write!(f, "WindowsDiscovered(count={})", windows.len())
+            }
+            Self::WindowGone(key) => write!(f, "WindowGone({key})"),
+            Self::WindowMinimized(key) => write!(f, "WindowMinimized({key})"),
+            Self::WindowRestored(key) => write!(f, "WindowRestored({key})"),
+            Self::FocusReported(key) => write!(f, "FocusReported({key})"),
+            Self::TitleChanged { key, .. } => write!(f, "TitleChanged({key})"),
+            Self::SizeConstraint { key, .. } => write!(f, "SizeConstraint({key})"),
+            Self::FloatMoved { key, .. } => write!(f, "FloatMoved({key})"),
+            Self::FullscreenChanged {
+                key, fullscreen, ..
+            } => {
+                write!(f, "FullscreenChanged({key}, {fullscreen:?})")
             }
             Self::Action(actions) => write!(f, "Action({actions})"),
             Self::Query { query, .. } => write!(f, "Query({query:?})"),
@@ -89,83 +82,168 @@ impl fmt::Display for HubEvent {
             Self::ReloadConfig => write!(f, "ReloadConfig"),
             Self::ApplyLayout(_) => write!(f, "ApplyLayout"),
             Self::SaveLayout(_) => write!(f, "SaveLayout"),
-            Self::Sync => write!(f, "Sync"),
             Self::MonitorsChanged(monitors) => {
                 write!(f, "MonitorsChanged(count={})", monitors.len())
             }
-            Self::MirrorClicked(cg_id) => write!(f, "MirrorClicked({cg_id})"),
-            Self::TabClicked(container_id, tab_idx) => {
-                write!(f, "TabClicked({container_id}, tab_idx={tab_idx})")
-            }
-            Self::SpaceChanged => write!(f, "SpaceChanged"),
-            Self::PidObserved { pid } => write!(f, "PidObserved(pid={pid})"),
-            Self::ObservedPidsRefreshed(pids) => {
-                write!(f, "ObservedPidsRefreshed(count={})", pids.len())
-            }
+            Self::MirrorClicked(key) => write!(f, "MirrorClicked({key})"),
+            Self::TabClicked(container, index) => write!(f, "TabClicked({container}, {index})"),
             Self::Shutdown => write!(f, "Shutdown"),
         }
     }
 }
 
 pub(in crate::platform::macos) enum HubMessage {
-    Scene(RenderScene),
-    RefreshObservers,
+    Scene(Scene),
+    Command(WindowCommand),
     AppearanceChanged(Appearance),
     Shutdown,
 }
 
-/// Rendering instructions produced by the hub thread after each layout cycle.
-/// The main thread consumes this to create, update, and destroy overlay windows,
-/// since macOS requires all UI operations to happen on the main thread.
-pub(in crate::platform::macos) struct RenderScene {
-    /// One entry per visible monitor. Monitors with no tiling content still get
-    /// an entry so the main thread can hide their overlay.
-    pub(in crate::platform::macos) tiling: Vec<MonitorTilingData>,
-    /// Float windows visible on the current workspace. Created on first appearance,
-    /// updated on subsequent scenes. Float windows are rare, so the UI thread simply
-    /// removes overlays and captures for any window not in this list rather than
-    /// tracking individual deletions or float-to-tiling transitions.
-    pub(in crate::platform::macos) float_shows: Vec<FloatShow>,
-    pub(in crate::platform::macos) focused_window: Option<WindowId>,
-    pub(in crate::platform::macos) focused_monitor_id: MonitorId,
-    pub(in crate::platform::macos) workspaces: Vec<WorkspaceInfo>,
-}
-
-pub(in crate::platform::macos) struct MonitorTilingData {
-    pub(in crate::platform::macos) monitor_id: MonitorId,
-    pub(in crate::platform::macos) monitor_dim: Dimension,
-    pub(in crate::platform::macos) cocoa_frame: NSRect,
-    pub(in crate::platform::macos) scale: f64,
-    pub(in crate::platform::macos) border_thickness: Length<Logical>,
-    pub(in crate::platform::macos) windows: Vec<TilingWindowShow>,
-    pub(in crate::platform::macos) containers: Vec<ContainerShow>,
-}
-
-#[derive(Clone, Copy)]
-pub(in crate::platform::macos) struct TilingWindowShow {
-    pub(in crate::platform::macos) placement: TilingWindowPlacement,
-    pub(in crate::platform::macos) corner_radius: Length<Logical>,
-}
-
-/// Per-container render bundle. Mirrors `FloatShow` for tabbed containers:
-/// wraps the core `ContainerPlacement` with the dome thread's pre-flipped
-/// tab-bar geometry so the UI thread does no Cocoa Y-flip math.
 #[derive(Clone)]
-pub(in crate::platform::macos) struct ContainerShow {
-    pub(in crate::platform::macos) placement: ContainerPlacement,
-    /// Top band of `placement.border_box`.
-    pub(in crate::platform::macos) tab_bar_dim: Dimension<Logical>,
-    /// Pre-flipped Cocoa frame for `tab_bar_dim`. Always populated, even when
-    /// `!placement.is_tabbed`.
-    pub(in crate::platform::macos) tab_bar_cocoa_frame: NSRect,
+pub(in crate::platform::macos) struct Scene {
+    pub windows: HashMap<CGWindowID, ExpectedWindow>,
+    pub monitors: Vec<MonitorScene>,
+    pub focused_window: Option<CGWindowID>,
+    pub focus_request: Option<FocusTarget>,
+    pub workspaces: Vec<WorkspaceInfo>,
+    /// Domain display-event time, not the time this scene reaches UI.
+    pub displays_changed_at: Instant,
 }
 
-pub(in crate::platform::macos) struct FloatShow {
-    pub(in crate::platform::macos) cg_id: CGWindowID,
-    pub(in crate::platform::macos) placement: FloatWindowPlacement,
-    pub(in crate::platform::macos) cocoa_frame: NSRect,
-    pub(in crate::platform::macos) scale: f64,
-    pub(in crate::platform::macos) border_thickness: Length<Logical>,
-    pub(in crate::platform::macos) content_dim: Dimension,
-    pub(in crate::platform::macos) corner_radius: Length<Logical>,
+#[derive(Clone, Copy, Debug)]
+pub(in crate::platform::macos) struct ExpectedWindow {
+    pub id: WindowId,
+    pub placement: WindowPlacement,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(in crate::platform::macos) enum WindowPlacement {
+    Tiling {
+        monitor: MonitorId,
+        placement: TilingWindowPlacement,
+    },
+    Float {
+        monitor: MonitorId,
+        placement: FloatWindowPlacement,
+    },
+    Fullscreen {
+        monitor: MonitorId,
+    },
+    Hidden,
+    Minimized,
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::platform::macos) struct MonitorScene {
+    pub id: MonitorId,
+    pub native: CGDirectDisplayID,
+    pub work_area: PixelRect<Logical>,
+    pub system_work_area: PixelRect<Logical>,
+    pub bounds: Dimension<Logical>,
+    pub is_primary: bool,
+    pub full_height: f32,
+    /// Apply only to render density, not to logical placements.
+    pub scale: f64,
+    pub border_thickness: Length<Logical>,
+    pub containers: Vec<ContainerPlacement>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::platform::macos) enum FocusTarget {
+    Window(CGWindowID),
+    Monitor(MonitorId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::platform::macos) enum WindowCommand {
+    Close(CGWindowID),
+    Unminimize(CGWindowID),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::platform::macos) enum FullscreenKind {
+    Borderless,
+    Native,
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::platform::macos) struct DiscoveredWindow {
+    pub key: CGWindowID,
+    pub process_id: i32,
+    pub metadata: MacOsMetadata,
+    /// Native fullscreen and unreadable minimized windows have no ordinary frame.
+    pub frame: Option<PixelRect<Logical>>,
+    pub corner_radius: Length<Logical>,
+    pub minimized: bool,
+    pub fullscreen: Option<FullscreenKind>,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::platform::macos) struct MacOsMetadata {
+    pub title: Option<String>,
+    pub app_name: Option<String>,
+    pub bundle_id: Option<String>,
+}
+
+impl fmt::Display for MacOsMetadata {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.app_name.as_deref().unwrap_or("Unknown"))?;
+        if let Some(bundle_id) = &self.bundle_id {
+            write!(f, " ({bundle_id})")?;
+        }
+        if let Some(title) = &self.title {
+            write!(f, " - {title}")?;
+        }
+        Ok(())
+    }
+}
+
+impl WindowMetadata for MacOsMetadata {
+    fn app_name(&self) -> Option<String> {
+        self.app_name.clone()
+    }
+    fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+    fn bundle_id(&self) -> Option<String> {
+        self.bundle_id.clone()
+    }
+    fn set_title(&mut self, title: String) {
+        self.title = Some(title);
+    }
+    fn clone_box(&self) -> Box<dyn WindowMetadata> {
+        Box::new(self.clone())
+    }
+    fn matches_window_matcher(&self, matcher: &WindowMatcher) -> bool {
+        let app = self.app_name.as_deref();
+        let bundle_id = self.bundle_id.as_deref();
+        let title = self.title.as_deref();
+        if let Some(pattern) = matcher.app.as_deref()
+            && !app.is_some_and(|value| pattern_matches(pattern, value))
+        {
+            return false;
+        }
+        if let Some(pattern) = matcher.bundle_id.as_deref()
+            && !bundle_id.is_some_and(|value| pattern_matches(pattern, value))
+        {
+            return false;
+        }
+        if let Some(pattern) = matcher.title.as_deref()
+            && !title.is_some_and(|value| pattern_matches(pattern, value))
+        {
+            return false;
+        }
+        if app.is_none() && bundle_id.is_none() && title.is_none() {
+            return false;
+        }
+        matcher.app.is_some() || matcher.bundle_id.is_some() || matcher.title.is_some()
+    }
+    fn to_window_matcher(&self) -> WindowMatcher {
+        WindowMatcher {
+            app: self.app_name.clone(),
+            bundle_id: self.bundle_id.clone(),
+            title: self.title.clone(),
+            ..Default::default()
+        }
+    }
 }

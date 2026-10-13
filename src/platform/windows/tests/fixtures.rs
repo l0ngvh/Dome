@@ -36,6 +36,13 @@ pub(super) fn fullscreen_dim() -> Dimension {
 
 pub(super) fn default_monitor() -> MonitorInfo {
     MonitorInfo {
+        full_rect: PixelRect::from_dimension(Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT,
+        )),
+        dots_per_inch: (1.0 * 96.0) as u32,
         handle: 1,
         name: "Test".to_string(),
         gdi_device: "\\\\.\\DISPLAY1".to_string(),
@@ -52,6 +59,13 @@ pub(super) fn default_monitor() -> MonitorInfo {
 
 pub(super) fn second_monitor() -> MonitorInfo {
     MonitorInfo {
+        full_rect: PixelRect::from_dimension(Dimension::new(
+            SCREEN_WIDTH,
+            Length::ZERO,
+            Length::new(2560.0),
+            Length::new(1440.0),
+        )),
+        dots_per_inch: (1.0 * 96.0) as u32,
         handle: 2,
         name: "External".to_string(),
         gdi_device: "\\\\.\\DISPLAY2".to_string(),
@@ -68,6 +82,13 @@ pub(super) fn second_monitor() -> MonitorInfo {
 
 pub(super) fn scaled_monitor(scale: f32) -> MonitorInfo {
     MonitorInfo {
+        full_rect: PixelRect::from_dimension(Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            SCREEN_WIDTH * scale,
+            SCREEN_HEIGHT * scale,
+        )),
+        dots_per_inch: (scale * 96.0) as u32,
         handle: 1,
         name: "Test".to_string(),
         gdi_device: "\\\\.\\DISPLAY1".to_string(),

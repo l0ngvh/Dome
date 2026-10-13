@@ -1,3 +1,4 @@
+use super::dispatcher::DispatcherMarker;
 use std::fmt;
 use std::ptr::NonNull;
 
@@ -48,6 +49,7 @@ impl fmt::Display for AXError {
 impl std::error::Error for AXError {}
 
 pub(crate) fn get_attribute<T: objc2_core_foundation::Type>(
+    _marker: &DispatcherMarker,
     element: &AXUIElement,
     attribute: &CFString,
 ) -> Result<CFRetained<T>, AXError> {
@@ -67,6 +69,7 @@ pub(crate) fn get_attribute<T: objc2_core_foundation::Type>(
 }
 
 pub(crate) fn set_attribute_value(
+    _marker: &DispatcherMarker,
     element: &AXUIElement,
     attribute: &CFString,
     value: &CFType,
@@ -78,7 +81,11 @@ pub(crate) fn set_attribute_value(
     Ok(())
 }
 
-pub(crate) fn perform_action(element: &AXUIElement, action: &CFString) -> Result<(), AXError> {
+pub(crate) fn perform_action(
+    _marker: &DispatcherMarker,
+    element: &AXUIElement,
+    action: &CFString,
+) -> Result<(), AXError> {
     let res = unsafe { element.perform_action(action) };
     if res != RawAXError::Success {
         return Err(res.into());
@@ -86,17 +93,8 @@ pub(crate) fn perform_action(element: &AXUIElement, action: &CFString) -> Result
     Ok(())
 }
 
-pub(crate) fn get_pid(element: &AXUIElement) -> Result<i32, AXError> {
-    let mut pid = 0;
-    let value_ptr = NonNull::new(&mut pid as *mut i32).unwrap();
-    let res = unsafe { element.pid(value_ptr) };
-    if res != RawAXError::Success {
-        return Err(res.into());
-    }
-    Ok(pid)
-}
-
 pub(crate) fn create_observer(
+    _marker: &DispatcherMarker,
     pid: i32,
     callback: AXObserverCallback,
 ) -> Result<CFRetained<AXObserver>, AXError> {
@@ -114,6 +112,7 @@ pub(crate) fn create_observer(
 }
 
 pub(crate) fn add_observer_notification(
+    _marker: &DispatcherMarker,
     observer: &AXObserver,
     element: &AXUIElement,
     notification: &CFString,
@@ -127,6 +126,7 @@ pub(crate) fn add_observer_notification(
 }
 
 pub(crate) fn remove_observer_notification(
+    _marker: &DispatcherMarker,
     observer: &AXObserver,
     element: &AXUIElement,
     notification: &CFString,
@@ -273,7 +273,11 @@ pub(crate) fn kAXPressAction() -> CFRetained<CFString> {
     CFString::from_static_str("AXPress")
 }
 
-pub(crate) fn is_attribute_settable(element: &AXUIElement, attribute: &CFString) -> bool {
+pub(crate) fn is_attribute_settable(
+    _marker: &DispatcherMarker,
+    element: &AXUIElement,
+    attribute: &CFString,
+) -> bool {
     let mut settable: u8 = 0;
     let settable_ptr = NonNull::new(&mut settable as *mut u8).unwrap();
     let res = unsafe { element.is_attribute_settable(attribute, settable_ptr) };
@@ -320,7 +324,7 @@ pub(super) fn dimension_to_ns_rect_cocoa(
     primary_full_height: Length<Logical>,
     dim: Dimension<Logical>,
 ) -> NSRect {
-    // AppKit uses f64; cast from f32 happens here at the wrapper boundary.
+    // AppKit uses f64 at this boundary.
     NSRect::new(
         NSPoint::new(
             dim.x.value() as f64,
@@ -345,7 +349,10 @@ pub(super) fn dimension_to_cg_rect(dim: Dimension<Logical>) -> CGRect {
     }
 }
 
-pub(crate) fn get_cg_window_id(element: &AXUIElement) -> Result<CGWindowID, AXError> {
+pub(crate) fn get_cg_window_id(
+    _marker: &DispatcherMarker,
+    element: &AXUIElement,
+) -> Result<CGWindowID, AXError> {
     unsafe extern "C" {
         fn _AXUIElementGetWindow(element: &AXUIElement, out: *mut CGWindowID) -> RawAXError;
     }

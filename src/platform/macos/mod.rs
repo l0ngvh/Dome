@@ -3,24 +3,39 @@ mod accessibility;
 mod corner_radius;
 mod dispatcher;
 mod dome;
-mod event_loop;
+mod focus;
 mod font;
 mod keyboard;
 mod listeners;
 mod login_item;
 mod objc2_wrapper;
 mod permissions;
+mod runner;
 mod running_application;
 mod spawn;
 mod throttle;
 mod ui;
+mod window_server;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(in crate::platform::macos) enum Wake {
+    Ui,
+    WindowServer,
+    FocusRequest,
+    Capture,
+}
 
 #[cfg(test)]
 mod tests;
 
-use std::sync::Arc;
+#[cfg(feature = "native-ui-test")]
+pub fn run_native_ui_loop_test() {
+    ui::run_native_loop();
+}
+
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
+use std::sync::{Arc, OnceLock};
 use std::thread;
 
 use objc2::MainThreadMarker;
@@ -33,8 +48,9 @@ use crate::ipc;
 use crate::logging::Logger;
 pub(in crate::platform::macos) use dome::MonitorInfo;
 use dome::{Dome, HubEvent, get_all_monitors};
-use listeners::EventListener;
-use ui::{MessageSender, Ui};
+use focus::SharedFocus;
+use ui::{Ui, UiSender};
+use window_server::MacOsWindowServer;
 
 pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyhow::Result<()> {
     let logger = Logger::init();
@@ -67,6 +83,13 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
         return Ok(());
     }
 
+    let timeout_result = unsafe {
+        objc2_application_services::AXUIElement::new_system_wide().set_messaging_timeout(0.25)
+    };
+    if timeout_result != objc2_application_services::AXError::Success {
+        anyhow::bail!("Failed to set the process accessibility timeout: {timeout_result:?}");
+    }
+
     let (event_tx, event_rx) = calloop::channel::channel();
 
     let (keymap_tx, keymap_rx) = mpsc::channel::<KeymapView>();
@@ -78,11 +101,11 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
 
     let hub_layout = layout.clone();
 
-    // Only the hub thread may touch the VM.
     let (init_tx, init_rx) = mpsc::channel::<Appearance>();
-    let (sender_tx, sender_rx) = mpsc::channel::<MessageSender>();
+    let (sender_tx, sender_rx) = mpsc::channel::<UiSender>();
 
-    let hub_thread = thread::spawn({
+    // Only the domain thread may touch the VM.
+    let domain_thread = thread::spawn({
         let logger = logger.clone();
         let bundle_path = bundle_path.clone();
         let config_path = config_path.clone();
@@ -107,6 +130,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
                 login_item::sync_login_item(config.start_at_login, bundle_path.as_deref());
                 init_tx.send(config.appearance).ok();
                 let sender = sender_rx.recv().expect("main dropped the UI sender");
+                let _exit = runner::DomainExitGuard::new(Box::new(sender.clone()));
                 let dome = Dome::new(
                     &monitors,
                     config.tiling,
@@ -116,7 +140,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
                     keymap,
                     config.env,
                 );
-                event_loop::run_dome(dome, event_rx, logger, bundle_path);
+                runner::run_dome(dome, event_rx, logger, bundle_path);
             }))
             .ok();
         }
@@ -124,7 +148,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
 
     let appearance = init_rx
         .recv()
-        .map_err(|_| anyhow::anyhow!("hub thread exited before the initial config load"))?;
+        .map_err(|_| anyhow::anyhow!("domain thread exited before the initial config load"))?;
 
     let _config_watcher = start_file_watcher(&config_path, {
         let tx = event_tx.clone();
@@ -157,7 +181,17 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
     })?;
 
     let is_suspended = Arc::new(AtomicBool::new(false));
-    let event_listener = EventListener::new(event_tx.clone(), is_suspended.clone());
+    let focus = Arc::new(SharedFocus::new());
+    let loop_waker = Arc::new(OnceLock::new());
+    let (native_sender, native_events) = mpsc::channel();
+    let windows = MacOsWindowServer::new(
+        native_events,
+        native_sender,
+        focus.clone(),
+        loop_waker.clone(),
+        is_suspended.clone(),
+        std::time::Instant::now(),
+    );
 
     thread::Builder::new()
         .name("dome-event-tap".to_owned())
@@ -166,26 +200,22 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
             move || keyboard::run_event_tap(keymap_rx, is_suspended, event_sender)
         })?;
 
-    let (ui, sender) = Ui::new(mtm, event_tx, event_listener, appearance);
+    let (ui, sender) = Ui::new(
+        mtm,
+        event_tx,
+        Box::new(windows),
+        focus,
+        loop_waker,
+        appearance,
+    );
     if sender_tx.send(sender).is_err() {
-        anyhow::bail!("hub thread exited before it could receive the UI sender");
+        anyhow::bail!("domain thread exited before it could receive the UI sender");
     }
 
     ui.run();
 
-    hub_thread.join().ok();
+    domain_thread.join().ok();
     Ok(())
-}
-
-fn send_hub_event(hub_sender: &calloop::channel::Sender<HubEvent>, event: HubEvent) {
-    if hub_sender.send(event).is_err() {
-        tracing::error!("Hub thread died, shutting down");
-        // Off-main callers leave termination to the main thread, which hits the
-        // same closed channel on its next send.
-        if let Some(mtm) = MainThreadMarker::new() {
-            objc2_app_kit::NSApplication::sharedApplication(mtm).terminate(None);
-        }
-    }
 }
 
 /// A `std::thread` starts at `QOS_CLASS_DEFAULT`, not at the QoS of the thread

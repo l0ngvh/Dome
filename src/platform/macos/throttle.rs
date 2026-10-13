@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use objc2_core_foundation::{
     CFAbsoluteTimeGetCurrent, CFRetained, CFRunLoop, CFRunLoopTimer, CFRunLoopTimerContext,
-    kCFRunLoopDefaultMode,
+    kCFRunLoopCommonModes,
 };
 
 /// The callback must not re-enter `submit` (e.g. by pumping the run loop),
@@ -84,7 +84,7 @@ impl<T: 'static> Throttle<T> {
         .expect("Failed to create timer");
 
         this.run_loop
-            .add_timer(Some(&timer), unsafe { kCFRunLoopDefaultMode });
+            .add_timer(Some(&timer), unsafe { kCFRunLoopCommonModes });
         this.timer = Some(timer);
     }
 

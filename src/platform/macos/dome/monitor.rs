@@ -138,10 +138,6 @@ impl MonitorRegistry {
             .expect("primary monitor present")
     }
 
-    pub(in crate::platform::macos) fn primary_full_height(&self) -> f32 {
-        self.primary_monitor().full_height
-    }
-
     /// Returns the monitor displaced from the incoming primary display, if this
     /// registry already tracked one there.
     pub(super) fn replace_primary(&mut self, new_info: &MonitorInfo) -> Option<MonitorId> {
@@ -172,10 +168,6 @@ impl MonitorRegistry {
         stale
     }
 
-    pub(super) fn all_monitors(&self) -> Vec<MonitorInfo> {
-        self.monitors.values().cloned().collect()
-    }
-
     /// Returns the monitor whose `bounds` overlap `dim` the most by intersection
     /// area. Reads only the cached `bounds`, so it works in tests where
     /// CoreGraphics is not initialized.
@@ -191,18 +183,6 @@ impl MonitorRegistry {
             }
         }
         best.map(|(id, info, _)| (id, info))
-    }
-
-    /// A rect that overlaps no monitor on either side counts as no crossing.
-    pub(super) fn crosses_monitor(&self, from: PixelRect, to: PixelRect) -> bool {
-        let id = |rect: PixelRect| {
-            self.find_closest_monitor(rect.to_dimension())
-                .map(|(id, _)| id)
-        };
-        match (id(from), id(to)) {
-            (Some(a), Some(b)) => a != b,
-            _ => false,
-        }
     }
 
     pub(super) fn is_borderless_fullscreen_at(&self, rect: PixelRect) -> bool {
@@ -299,6 +279,5 @@ impl Dome {
     pub(super) fn reconcile_monitors(&mut self) {
         self.monitor_registry
             .reconcile(&mut self.hub, &self.monitors);
-        self.primary_full_height = self.monitor_registry.primary_full_height();
     }
 }

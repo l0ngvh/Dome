@@ -17,8 +17,6 @@ mod tiling;
 mod workspace;
 
 pub(crate) use hub::Hub;
-#[cfg(target_os = "macos")]
-pub(crate) use hub::MonitorPlacements;
 pub(crate) use hub::{
     ContainerPlacement, FloatWindowPlacement, MonitorLayout, TilingWindowPlacement,
 };
@@ -34,7 +32,7 @@ pub(crate) use node::PixelRect;
 pub(crate) use node::Pixels;
 pub(crate) use node::{
     ContainerId, Dimension, Length, LimitObservation, LimitUpdate, Logical, MonitorId, Unit,
-    WindowId, WindowMetadata, WindowRestrictions,
+    Window, WindowId, WindowMetadata, WindowRestrictions,
 };
 pub(crate) use partition_tree::{PartitionTreeConfig, SplitMode, TreeLayoutNode};
 pub(crate) use preferred_layout::{

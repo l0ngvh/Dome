@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::MockWiring;
 use crate::core::{Dimension, Length, LimitObservation, LimitUpdate, Logical, PixelRect};
-use crate::platform::windows::external::{HwndId, ManageExternalWindow, ShowCmd, ZOrder};
+use crate::platform::windows::external::{HwndId, ZOrder};
 use crate::platform::windows::handle::ROUND_RADIUS;
 use crate::platform::windows::tests::env::FocusTarget;
 use crate::platform::windows::tests::fixtures::OFFSCREEN_POS;
@@ -105,16 +105,8 @@ impl MockExternalHwnd {
     }
 }
 
-impl ManageExternalWindow for MockExternalHwnd {
-    fn id(&self) -> HwndId {
-        self.hwnd_id
-    }
-
-    fn pid(&self) -> u32 {
-        1
-    }
-
-    fn set_position(&self, z: ZOrder, rect: PixelRect) {
+impl MockExternalHwnd {
+    pub(crate) fn set_frame(&self, rect: PixelRect) {
         self.minimized.store(false, Ordering::Relaxed);
         let dim = self
             .override_position
@@ -129,15 +121,14 @@ impl ManageExternalWindow for MockExternalHwnd {
                 )
             });
         *self.dimension.lock().unwrap() = dim;
-        self.wiring.z_stack.apply(self.hwnd_id, z);
         self.wiring.moves.record(self.hwnd_id, dim);
     }
 
-    fn set_z_order(&self, z: ZOrder) {
+    pub(crate) fn set_z_order(&self, z: ZOrder) {
         self.wiring.z_stack.apply(self.hwnd_id, z);
     }
 
-    fn move_offscreen(&self) {
+    pub(crate) fn move_offscreen(&self) {
         let dim = if let Some((x, y, w, h)) = *self.override_position.lock().unwrap() {
             let d = Dimension::new(
                 Length::new(x as f32),
@@ -157,38 +148,29 @@ impl ManageExternalWindow for MockExternalHwnd {
         self.wiring.moves.record(self.hwnd_id, dim);
     }
 
-    fn show_cmd(&self, cmd: ShowCmd) {
-        match cmd {
-            ShowCmd::Minimize => {
-                // SW_MINIMIZE parks the window at an iconic-cache rect no test can
-                // observe, so the stored rect stays as it is.
-                self.minimized.store(true, Ordering::Relaxed);
-                let dim = *self.dimension.lock().unwrap();
-                self.wiring.moves.record(self.hwnd_id, dim);
-            }
-            ShowCmd::Restore => {
-                self.minimized.store(false, Ordering::Relaxed);
-            }
-        }
+    pub(crate) fn minimize(&self) {
+        self.minimized.store(true, Ordering::Relaxed);
+        self.wiring
+            .moves
+            .record(self.hwnd_id, *self.dimension.lock().unwrap());
+    }
+    pub(crate) fn unminimize(&self) {
+        self.minimized.store(false, Ordering::Relaxed);
     }
 
-    fn set_foreground_window(&self) {
+    pub(crate) fn set_foreground_window(&self) {
         *self.wiring.focus_target.lock().unwrap() = FocusTarget::Window(self.hwnd_id);
     }
 
-    fn close(&self) {}
+    pub(crate) fn close(&self) {}
 
-    fn is_maximized(&self) -> bool {
-        false
-    }
-
-    fn recover(&self, _was_maximized: bool) {
+    pub(crate) fn recover(&self, _was_maximized: bool) {
         let mut dim = self.dimension.lock().unwrap();
         dim.x = Length::new(100.0);
         dim.y = Length::new(100.0);
     }
 
-    fn corner_radius(&self) -> Length<Logical> {
+    pub(crate) fn corner_radius(&self) -> Length<Logical> {
         *self.corner_radius.lock().unwrap()
     }
 }

@@ -1,4 +1,4 @@
-use std::cell::OnceCell;
+use std::cell::{Cell, OnceCell};
 use std::time::Instant;
 
 use anyhow::{Result, anyhow};
@@ -8,16 +8,16 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EVENT_OBJECT_CLOAKED, EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE,
     EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW,
     EVENT_OBJECT_UNCLOAKED, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND,
-    EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZESTART,
-    GetForegroundWindow, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZESTART, OBJID_WINDOW,
+    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
-use super::HubSender;
-use super::dome::HubEvent;
 use super::external::HwndId;
+use super::window_server::{NativeEvent, NativeEventSender};
 
 thread_local! {
-    static SENDER: OnceCell<HubSender> = const { OnceCell::new() };
+    static SENDER: OnceCell<NativeEventSender> = const { OnceCell::new() };
+    static PANICKED: Cell<bool> = const { Cell::new(false) };
 }
 
 pub(super) struct EventHooks(Vec<HWINEVENTHOOK>);
@@ -32,30 +32,26 @@ impl Drop for EventHooks {
     }
 }
 
-pub(super) fn install_event_hooks(sender: HubSender) -> Result<EventHooks> {
+pub(super) fn install_event_hooks(sender: NativeEventSender) -> Result<EventHooks> {
     SENDER.with(|s| s.set(sender).ok());
 
-    // We need separate hooks because SetWinEventHook only accepts contiguous
-    // event ranges (min <= max). A single hook covering all events would include
-    // thousands of irrelevant events between the ranges we care about:
-    // - foreground/movesize: 0x0003-0x000B
-    // - minimize: 0x0016-0x0017
-    // - object create/hide/namechange: 0x8000-0x800C
-    // - object cloaked/uncloaked: 0x8017-0x8018 (for UWP apps like Settings)
-    // Using a single range like 0x0003-0x8018 would fire our callback for every
-    // event in between, wasting CPU. Worse, if min > max (e.g., 0x8000-0x000B),
-    // SetWinEventHook fails with ERROR_INVALID_HOOK_FILTER (1426).
     let ranges = [
-        (EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MOVESIZEEND),
+        (EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND),
+        (EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND),
         (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND),
         (EVENT_OBJECT_CREATE, EVENT_OBJECT_NAMECHANGE),
         (EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED),
     ];
 
-    let flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
     let mut hooks = Vec::with_capacity(ranges.len());
 
     for (min, max) in ranges {
+        let flags = WINEVENT_OUTOFCONTEXT
+            | if min == EVENT_SYSTEM_FOREGROUND {
+                0
+            } else {
+                WINEVENT_SKIPOWNPROCESS
+            };
         let hook = unsafe { SetWinEventHook(min, max, None, Some(event_hook_proc), 0, 0, flags) };
         if hook.is_invalid() {
             let err = unsafe { GetLastError() };
@@ -81,6 +77,21 @@ unsafe extern "system" fn event_hook_proc(
     _id_event_thread: u32,
     _event_time: u32,
 ) {
+    if PANICKED.get() {
+        return;
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        dispatch_event(event, hwnd, id_object);
+    }));
+    if result.is_err() {
+        PANICKED.set(true);
+        unsafe {
+            windows::Win32::UI::WindowsAndMessaging::PostQuitMessage(1);
+        }
+    }
+}
+
+fn dispatch_event(event: u32, hwnd: HWND, id_object: i32) {
     if id_object != OBJID_WINDOW.0 {
         return;
     }
@@ -90,51 +101,39 @@ unsafe extern "system" fn event_hook_proc(
         let hwnd_id = HwndId::from(hwnd);
         match event {
             EVENT_OBJECT_CREATE | EVENT_OBJECT_SHOW | EVENT_OBJECT_UNCLOAKED => {
-                sender.send(HubEvent::WindowCreated(hwnd_id));
+                sender.send(NativeEvent::Discover(hwnd_id));
             }
             EVENT_SYSTEM_MINIMIZEEND => {
-                sender.send(HubEvent::WindowRestored {
-                    hwnd_id,
+                sender.send(NativeEvent::Restored {
+                    window: hwnd_id,
                     observed_at: Instant::now(),
                 });
             }
             EVENT_OBJECT_NAMECHANGE => {
-                sender.send(HubEvent::WindowTitleChanged(hwnd_id));
+                sender.send(NativeEvent::Title(hwnd_id));
             }
             EVENT_OBJECT_DESTROY | EVENT_OBJECT_HIDE | EVENT_OBJECT_CLOAKED => {
-                sender.send(HubEvent::WindowDestroyed(hwnd_id));
+                sender.send(NativeEvent::Gone(hwnd_id));
             }
             EVENT_SYSTEM_MINIMIZESTART => {
-                sender.send(HubEvent::WindowMinimized(hwnd_id));
+                sender.send(NativeEvent::Minimized(hwnd_id));
             }
-            EVENT_SYSTEM_FOREGROUND => {
-                // This can happen when Windows queue an event for an activated application, but by
-                // the time this callback is run the focus have been given to another app. This
-                // will cause a feedback loop where this app try to take focus and succeed, but the
-                // activation event for the other app is already queued. The other app will then
-                // proceed to take focus when the event is processed, but which tries to take focus
-                // and forms the feedback loop.
-                if unsafe { GetForegroundWindow() } != hwnd {
-                    return;
-                }
-                sender.send(HubEvent::WindowFocused(hwnd_id));
-            }
-            // MOVESIZESTART fires when user begins a drag/resize.
-            // MOVESIZEEND fires after user drag/resize completes.
-            // LOCATIONCHANGE catches programmatic resizes (e.g. maximize, restore)
-            // which don't trigger the move/size cycle.
+            EVENT_SYSTEM_FOREGROUND => sender.observe_foreground(Some(hwnd_id)),
             EVENT_SYSTEM_MOVESIZESTART => {
-                sender.send(HubEvent::MoveSizeStart(hwnd_id));
+                sender.send(NativeEvent::MoveStarted {
+                    window: hwnd_id,
+                    observed_at: Instant::now(),
+                });
             }
             EVENT_SYSTEM_MOVESIZEEND => {
-                sender.send(HubEvent::MoveSizeEnd {
-                    hwnd_id,
+                sender.send(NativeEvent::MoveEnded {
+                    window: hwnd_id,
                     observed_at: Instant::now(),
                 });
             }
             EVENT_OBJECT_LOCATIONCHANGE => {
-                sender.send(HubEvent::LocationChanged {
-                    hwnd_id,
+                sender.send(NativeEvent::Moved {
+                    window: hwnd_id,
                     observed_at: Instant::now(),
                 });
             }

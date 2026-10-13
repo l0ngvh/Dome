@@ -2,13 +2,60 @@ use super::*;
 use crate::core::Pixels;
 
 #[test]
+fn focus_tile_with_visible_float_parks_float_before_mirror_output() {
+    let mut env = TestEnv::new();
+    env.setup();
+    let tile = env.spawn_window(100, "Tile", "Tile");
+    let float = env.spawn_window(200, "Float", "Float");
+    env.discover_windows(&[tile, float]);
+    env.run_actions("toggle float");
+    env.settle(10);
+    env.set_corner_radius(float, Length::new(17.0));
+    env.simulate_external_move(float, 200, 150, 600, 400);
+    env.settle(10);
+    let snapshot = env.last_float_snapshot(float).unwrap();
+    assert_eq!(
+        snapshot.outer_frame,
+        PixelRect::new(196, 146, 608, 408).to_dimension()
+    );
+    assert_eq!(
+        snapshot.content_dim,
+        PixelRect::new(200, 150, 600, 400).to_dimension()
+    );
+    assert_eq!(snapshot.corner_radius, Length::new(17.0));
+    assert_eq!(snapshot.cocoa_frame.origin.x, 196.0);
+    assert_eq!(snapshot.cocoa_frame.origin.y, 526.0);
+    assert_eq!(snapshot.cocoa_frame.size.width, 608.0);
+    assert_eq!(snapshot.cocoa_frame.size.height, 408.0);
+    env.clear_effects();
+    env.focus_window(tile);
+    assert!(env.is_offscreen(float));
+    let effects = env.effects();
+    let park = effects
+        .iter()
+        .position(|effect| effect == &format!("park {float}"))
+        .unwrap();
+    let mirror = effects
+        .iter()
+        .position(|effect| effect == "floats")
+        .unwrap();
+    assert!(park < mirror);
+    assert_eq!(
+        env.last_float_snapshot(float).unwrap().outer_frame,
+        snapshot.outer_frame
+    );
+    env.remove_windows(&[float]);
+    assert!(env.last_float_snapshot(float).is_none());
+}
+
+#[test]
 fn single_window_placed_in_view() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut macos = TestEnv::new();
+    macos.setup();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[cg1]);
+    macos.settle(10);
 
     assert!(!macos.is_offscreen(cg1));
     assert_eq!(macos.window_frame(cg1), (4, 4, 1912, 1072));
@@ -16,42 +63,42 @@ fn single_window_placed_in_view() {
 
 #[test]
 fn a_fractional_work_area_keeps_the_window_inside_it() {
-    let mut macos = MacOS::new();
+    let mut macos = TestEnv::new();
     // Zero border so the sole tile fills the work area exactly, leaving no inset to
     // absorb a sub-point rounding error.
-    let mut dome = macos
-        .dome_builder()
+    macos
+        .builder()
         .tiling(|tiling| tiling.border_size = Pixels::ZERO)
         .build();
 
     let mut monitor = default_monitor();
     monitor.work_area = PixelRect::from_dimension_inward(FRACTIONAL_WORK_AREA);
-    dome.monitors_changed(vec![monitor]);
+    macos.change_monitors(vec![monitor]);
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[cg1]);
+    macos.settle(10);
 
     assert_inside_work_area(macos.window_frame(cg1), FRACTIONAL_WORK_AREA);
 }
 
 #[test]
 fn degenerate_content_box_parks_window() {
-    let mut macos = MacOS::new();
+    let mut macos = TestEnv::new();
     // Each edge exceeds half of SCREEN_HEIGHT, so no content height remains.
-    let mut dome = macos
-        .dome_builder()
+    macos
+        .builder()
         .tiling(|tiling| tiling.border_size = Pixels::new(600))
         .build();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[cg1]);
+    macos.settle(10);
 
     assert!(macos.is_offscreen(cg1));
 
-    macos.change_config(&mut dome, "return {}");
-    macos.settle(&mut dome, 10);
+    macos.change_config("return {}");
+    macos.settle(10);
 
     assert!(!macos.is_offscreen(cg1));
     assert_eq!(macos.window_frame(cg1), (4, 4, 1912, 1072));
@@ -59,20 +106,13 @@ fn degenerate_content_box_parks_window() {
 
 #[test]
 fn two_windows_split_horizontally() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut macos = TestEnv::new();
+    macos.setup();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[cg1, cg2]);
+    macos.settle(10);
 
     let (x1, _, w1, _) = macos.window_frame(cg1);
     let (x2, _, w2, _) = macos.window_frame(cg2);
@@ -84,58 +124,47 @@ fn two_windows_split_horizontally() {
 
 #[test]
 fn tile_past_work_area_is_trimmed() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut macos = TestEnv::new();
+    macos.setup();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[cg1]);
+    macos.settle(10);
 
-    start_drag(&mut dome, 100);
-    macos.window(cg1).position.set((500, 300));
-    macos.window(cg1).size.set((400, 400));
+    use crate::platform::macos::dome::events::{HubMessage, WindowPlacement};
 
-    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg2)], &[], &[]);
-    macos.settle(&mut dome, 10);
-
-    end_drag(&mut dome, &macos, 100, cg1, 500, 300, 400, 400);
-    macos.settle(&mut dome, 10);
-
-    // The drop leaves the tree wider than the work area, so cg1 is scrolled off the
-    // left edge and core's content_box for it starts at -92 with width 1912. macOS
-    // must place the trimmed rect rather than that.
-    let (x, _, w, _) = macos.window_frame(cg1);
-    assert_eq!(x, 0, "left edge clamped to the work area");
-    assert_eq!(w, 1820, "width trimmed down from the untrimmed 1912");
+    let mut scene = macos.scene();
+    let WindowPlacement::Tiling { placement, .. } =
+        &mut scene.windows.get_mut(&cg1).unwrap().placement
+    else {
+        panic!("expected a tile");
+    };
+    placement.content_box = PixelRect::new(-92, 4, 1912, 1072);
+    placement.visible_content_box = PixelRect::new(0, 4, 1820, 1072);
+    macos.send_message(HubMessage::Scene(scene));
+    macos.ui_pass();
+    assert_eq!(macos.window_frame(cg1), (0, 4, 1820, 1072));
 }
 
 #[test]
 fn workspace_switch_hides_and_restores() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut macos = TestEnv::new();
+    macos.setup();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[cg1, cg2]);
+    macos.settle(10);
 
     let placed = macos.window_frame(cg1);
 
-    send(&mut dome, "focus workspace 1");
-    macos.settle(&mut dome, 10);
+    macos.run_actions("focus workspace 1");
+    macos.settle(10);
     assert!(macos.is_offscreen(cg1));
     assert!(macos.is_offscreen(cg2));
 
-    send(&mut dome, "focus workspace 0");
-    macos.settle(&mut dome, 10);
+    macos.run_actions("focus workspace 0");
+    macos.settle(10);
     assert!(!macos.is_offscreen(cg1));
     assert!(!macos.is_offscreen(cg2));
     assert_eq!(macos.window_frame(cg1), placed);
@@ -143,26 +172,19 @@ fn workspace_switch_hides_and_restores() {
 
 #[test]
 fn float_window_moved_by_user() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut macos = TestEnv::new();
+    macos.setup();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[cg1, cg2]);
+    macos.settle(10);
 
-    send(&mut dome, "toggle float");
-    macos.settle(&mut dome, 10);
+    macos.run_actions("toggle float");
+    macos.settle(10);
 
-    macos.simulate_external_move(&mut dome, cg2, 200, 150, 600, 400);
-    macos.settle(&mut dome, 10);
+    macos.simulate_external_move(cg2, 200, 150, 600, 400);
+    macos.settle(10);
 
     // Float should stay at the user-chosen position, not be corrected
     assert_eq!(macos.window_frame(cg2), (200, 150, 600, 400));
@@ -181,9 +203,9 @@ fn float_window_moved_by_user() {
         )
     );
 
-    let moves_before = macos.moves.borrow().len();
-    macos.settle(&mut dome, 10);
-    let moves_after = macos.moves.borrow();
+    let moves_before = macos.recorded_moves().len();
+    macos.settle(10);
+    let moves_after = macos.recorded_moves();
     let new_moves: Vec<_> = moves_after[moves_before..]
         .iter()
         .filter(|(id, _, _, _, _)| *id == cg2)
@@ -196,23 +218,16 @@ fn float_window_moved_by_user() {
 
 #[test]
 fn float_window_reshaped_on_border_size_change() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut macos = TestEnv::new();
+    macos.setup();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[cg1, cg2]);
+    macos.settle(10);
 
-    send(&mut dome, "toggle float");
-    macos.settle(&mut dome, 10);
+    macos.run_actions("toggle float");
+    macos.settle(10);
 
     let snap_before = macos
         .last_float_snapshot(cg2)
@@ -220,16 +235,15 @@ fn float_window_reshaped_on_border_size_change() {
 
     // Clear the move log so we can assert on set_frame calls caused strictly
     // by the config change.
-    macos.moves.borrow_mut().clear();
+    macos.clear_moves();
 
     // A border several points above the default, so the delta cannot be
     // mistaken for rounding noise.
-    macos.change_config(&mut dome, "return { border_size = 12 }");
+    macos.change_config("return { border_size = 12 }");
 
     // Check before settle because settle drains the move log.
     let reshape_moves: Vec<_> = macos
-        .moves
-        .borrow()
+        .recorded_moves()
         .iter()
         .filter(|(id, _, _, _, _)| *id == cg2)
         .copied()
@@ -239,7 +253,7 @@ fn float_window_reshaped_on_border_size_change() {
         "expected at least one set_frame for cg2 after border_size change, got none"
     );
 
-    macos.settle(&mut dome, 10);
+    macos.settle(10);
 
     // Outer-frame values are exact integers by construction (default float
     // placement rounds to whole pixels).
@@ -272,32 +286,24 @@ fn float_window_reshaped_on_border_size_change() {
 
 #[test]
 fn float_place_with_same_target_is_noop() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut macos = TestEnv::new();
+    macos.setup();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[cg1, cg2]);
+    macos.settle(10);
 
-    send(&mut dome, "toggle float");
-    macos.settle(&mut dome, 10);
+    macos.run_actions("toggle float");
+    macos.settle(10);
 
-    macos.moves.borrow_mut().clear();
+    macos.clear_moves();
 
-    dome.flush_layout();
-    macos.settle(&mut dome, 10);
+    macos.layout();
+    macos.settle(10);
 
     let moves: Vec<_> = macos
-        .moves
-        .borrow()
+        .recorded_moves()
         .iter()
         .filter(|(id, _, _, _, _)| *id == cg2)
         .copied()
@@ -310,19 +316,19 @@ fn float_place_with_same_target_is_noop() {
 
 #[test]
 fn multi_monitor_per_display() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut macos = TestEnv::new();
+    macos.setup();
 
-    dome.monitors_changed(vec![default_monitor(), second_monitor()]);
+    macos.change_monitors(vec![default_monitor(), second_monitor()]);
 
     let win1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win1)], &[], &[]);
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[win1]);
+    macos.settle(10);
 
-    send(&mut dome, "focus monitor right");
+    macos.run_actions("focus monitor right");
     let win2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win2)], &[], &[]);
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[win2]);
+    macos.settle(10);
 
     assert_eq!(macos.window_frame(win1), (4, 4, 1912, 1072));
     assert_eq!(macos.window_frame(win2), (1924, 4, 2552, 1432));
@@ -334,15 +340,15 @@ fn reserved_area_config(body: &str) -> String {
 
 #[test]
 fn a_reserved_area_applies_from_startup() {
-    let mut macos = MacOS::new();
-    let mut dome = macos
-        .dome_builder()
+    let mut macos = TestEnv::new();
+    macos
+        .builder()
         .config_source(&reserved_area_config("return { top = 30 }"))
         .build();
 
     let win = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[win]);
+    macos.settle(10);
 
     assert_eq!(macos.window_frame(win), (4, 34, 1912, 1042));
     assert_eq!(
@@ -353,17 +359,17 @@ fn a_reserved_area_applies_from_startup() {
 
 #[test]
 fn a_fullscreen_window_starts_below_the_reserved_area() {
-    let mut macos = MacOS::new();
-    let mut dome = macos
-        .dome_builder()
+    let mut macos = TestEnv::new();
+    macos
+        .builder()
         .config_source(&reserved_area_config("return { top = 30 }"))
         .build();
 
     let win = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);
-    macos.settle(&mut dome, 10);
-    send(&mut dome, "toggle fullscreen");
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[win]);
+    macos.settle(10);
+    macos.run_actions("toggle fullscreen");
+    macos.settle(10);
 
     assert_eq!(macos.window_frame(win), (0, 30, 1920, 1050));
     assert_eq!(
@@ -374,24 +380,24 @@ fn a_fullscreen_window_starts_below_the_reserved_area() {
 
 #[test]
 fn a_reserved_area_applies_to_an_added_monitor() {
-    let mut macos = MacOS::new();
-    let mut dome = macos
-        .dome_builder()
+    let mut macos = TestEnv::new();
+    macos
+        .builder()
         .config_source(&reserved_area_config(
             "if monitor.name == 'External' then return { top = 30 } end",
         ))
         .build();
 
-    dome.monitors_changed(vec![default_monitor(), second_monitor()]);
+    macos.change_monitors(vec![default_monitor(), second_monitor()]);
 
     let win1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win1)], &[], &[]);
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[win1]);
+    macos.settle(10);
 
-    send(&mut dome, "focus monitor right");
+    macos.run_actions("focus monitor right");
     let win2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win2)], &[], &[]);
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[win2]);
+    macos.settle(10);
 
     assert_eq!(macos.window_frame(win1), (4, 4, 1912, 1072));
     assert_eq!(macos.window_frame(win2), (1924, 34, 2552, 1402));
@@ -399,9 +405,9 @@ fn a_reserved_area_applies_to_an_added_monitor() {
 
 #[test]
 fn a_reserved_area_matches_the_numbered_name() {
-    let mut macos = MacOS::new();
-    let mut dome = macos
-        .dome_builder()
+    let mut macos = TestEnv::new();
+    macos
+        .builder()
         .config_source(&reserved_area_config(
             "if monitor.name == 'DELL #2' then return { top = 30 } end",
         ))
@@ -415,16 +421,16 @@ fn a_reserved_area_matches_the_numbered_name() {
         name: "DELL".to_string(),
         ..second_monitor()
     };
-    dome.monitors_changed(vec![left, right]);
+    macos.change_monitors(vec![left, right]);
 
     let win1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win1)], &[], &[]);
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[win1]);
+    macos.settle(10);
 
-    send(&mut dome, "focus monitor right");
+    macos.run_actions("focus monitor right");
     let win2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win2)], &[], &[]);
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[win2]);
+    macos.settle(10);
 
     assert_eq!(macos.window_frame(win1), (4, 4, 1912, 1072));
     assert_eq!(macos.window_frame(win2), (1924, 34, 2552, 1402));
@@ -432,27 +438,26 @@ fn a_reserved_area_matches_the_numbered_name() {
 
 #[test]
 fn a_reload_reapplies_the_reserved_area() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut macos = TestEnv::new();
+    macos.setup();
 
     let win = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[win]);
+    macos.settle(10);
     assert_eq!(macos.window_frame(win), (4, 4, 1912, 1072));
 
-    macos.change_config(&mut dome, &reserved_area_config("return { top = 30 }"));
-    macos.settle(&mut dome, 10);
+    macos.change_config(&reserved_area_config("return { top = 30 }"));
+    macos.settle(10);
     assert_eq!(macos.window_frame(win), (4, 34, 1912, 1042));
     assert_eq!(
         macos.painted_work_area(0),
         PixelRect::new(0, 30, 1920, 1050).to_dimension()
     );
 
-    macos.change_config(
-        &mut dome,
-        &reserved_area_config("return { top = 0, bottom = 0, left = 0, right = 0 }"),
-    );
-    macos.settle(&mut dome, 10);
+    macos.change_config(&reserved_area_config(
+        "return { top = 0, bottom = 0, left = 0, right = 0 }",
+    ));
+    macos.settle(10);
     assert_eq!(macos.window_frame(win), (4, 4, 1912, 1072));
     assert_eq!(
         macos.painted_work_area(0),
@@ -506,48 +511,34 @@ return {
 
 #[test]
 fn apply_layout_file_places_windows_from_the_file() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut macos = TestEnv::new();
+    macos.setup();
     let safari = macos.spawn_window(100, "Safari", "Google");
     let terminal = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![new_window(&macos, safari), new_window(&macos, terminal)],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[safari, terminal]);
+    macos.settle(10);
     assert!(macos.window_frame(safari).0 < macos.window_frame(terminal).0);
     let layout = TempLayoutFile::new("apply_layout_places_windows", TERMINAL_THEN_SAFARI);
 
-    dome.apply_layout_file(layout.path());
-    macos.settle(&mut dome, 10);
+    macos.apply_layout_file(layout.path());
+    macos.settle(10);
 
     assert!(macos.window_frame(terminal).0 < macos.window_frame(safari).0);
 }
 
 #[test]
 fn apply_layout_file_that_fails_to_load_keeps_the_arrangement() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut macos = TestEnv::new();
+    macos.setup();
     let safari = macos.spawn_window(100, "Safari", "Google");
     let terminal = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![new_window(&macos, safari), new_window(&macos, terminal)],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
+    macos.discover_windows(&[safari, terminal]);
+    macos.settle(10);
     let before = (macos.window_frame(safari), macos.window_frame(terminal));
     let missing = temp_layout_path("apply_layout_missing");
 
-    dome.apply_layout_file(missing.to_str().unwrap());
-    macos.settle(&mut dome, 10);
+    macos.apply_layout_file(missing.to_str().unwrap());
+    macos.settle(10);
 
     assert_eq!(
         (macos.window_frame(safari), macos.window_frame(terminal)),
@@ -557,14 +548,14 @@ fn apply_layout_file_that_fails_to_load_keeps_the_arrangement() {
 
 #[test]
 fn tiling_border_takes_the_latest_corner_radius() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut macos = TestEnv::new();
+    macos.setup();
 
     let cg1 = macos.spawn_window(100, "Finder", "Home");
-    macos.window(cg1).corner_radius.set(Length::new(26.0));
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
-    macos.settle(&mut dome, 10);
-    let id = dome.tracked_window(cg1).unwrap().window_id;
+    macos.set_corner_radius(cg1, Length::new(26.0));
+    macos.discover_windows(&[cg1]);
+    macos.settle(10);
+    let id = macos.window_id(cg1).unwrap();
     assert_eq!(
         macos.last_scene_state().tiling_corner_radii[&id],
         Length::new(26.0)
@@ -572,8 +563,8 @@ fn tiling_border_takes_the_latest_corner_radius() {
 
     // Hiding Finder's toolbar shrinks its corner radius without resizing the window.
     let (x, y, w, h) = macos.window_frame(cg1);
-    macos.window(cg1).corner_radius.set(Length::new(16.0));
-    macos.simulate_external_move(&mut dome, cg1, x, y, w, h);
+    macos.set_corner_radius(cg1, Length::new(16.0));
+    macos.simulate_external_move(cg1, x, y, w, h);
     assert_eq!(
         macos.last_scene_state().tiling_corner_radii[&id],
         Length::new(16.0)
@@ -582,15 +573,15 @@ fn tiling_border_takes_the_latest_corner_radius() {
 
 #[test]
 fn float_border_takes_the_window_corner_radius() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut macos = TestEnv::new();
+    macos.setup();
 
     let cg1 = macos.spawn_window(100, "Chrome", "Google");
-    macos.window(cg1).corner_radius.set(Length::new(20.0));
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
-    macos.settle(&mut dome, 10);
-    send(&mut dome, "toggle float");
-    macos.settle(&mut dome, 10);
+    macos.set_corner_radius(cg1, Length::new(20.0));
+    macos.discover_windows(&[cg1]);
+    macos.settle(10);
+    macos.run_actions("toggle float");
+    macos.settle(10);
 
     assert_eq!(
         macos.last_float_snapshot(cg1).unwrap().corner_radius,
@@ -600,29 +591,19 @@ fn float_border_takes_the_window_corner_radius() {
 
 #[test]
 fn a_window_first_seen_in_native_fullscreen_takes_its_corner_radius_on_exit() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
+    let mut macos = TestEnv::new();
+    macos.setup();
 
     let cg1 = macos.spawn_window(100, "Finder", "Home");
-    macos.window(cg1).set_native_fullscreen(true);
-    let PendingAdd::Positioned { new, .. } = new_window(&macos, cg1) else {
-        unreachable!("new_window builds a positioned add");
-    };
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![PendingAdd::NativeFullscreen { new }],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
+    macos.set_native_fullscreen(cg1, true);
+    macos.discover_native_fullscreen(cg1);
+    macos.settle(10);
 
-    macos.window(cg1).corner_radius.set(Length::new(26.0));
-    macos.exit_native_fullscreen(&mut dome, cg1, 200, 200, 800, 600);
-    macos.settle(&mut dome, 10);
+    macos.set_corner_radius(cg1, Length::new(26.0));
+    macos.exit_native_fullscreen(cg1, 200, 200, 800, 600);
+    macos.settle(10);
 
-    let id = dome.tracked_window(cg1).unwrap().window_id;
+    let id = macos.window_id(cg1).unwrap();
     assert_eq!(
         macos.last_scene_state().tiling_corner_radii[&id],
         Length::new(26.0)

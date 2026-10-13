@@ -1,8 +1,8 @@
 use crate::core::{WindowMatcher, WindowMetadata};
-use crate::platform::macos::dome::MacOSMetadata;
+use crate::platform::macos::dome::events::MacOsMetadata;
 
-fn finder() -> MacOSMetadata {
-    MacOSMetadata {
+fn finder() -> MacOsMetadata {
+    MacOsMetadata {
         title: Some("Trash".to_string()),
         app_name: Some("Finder".to_string()),
         bundle_id: Some("com.apple.finder".to_string()),

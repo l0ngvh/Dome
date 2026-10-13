@@ -18,19 +18,21 @@ impl RunningApp {
             return None;
         }
         let app = NSRunningApplication::runningApplicationWithProcessIdentifier(pid)?;
-        (app.activationPolicy() == NSApplicationActivationPolicy::Regular).then_some(Self(app))
+        Self::accepts_process(pid, app.activationPolicy()).then_some(Self(app))
     }
 
-    pub(in crate::platform::macos) fn from_notification(
+    pub(in crate::platform::macos) fn process_id_from_notification(
         notification: &NSNotification,
-    ) -> Option<Self> {
+    ) -> Option<i32> {
         let user_info = notification.userInfo()?;
         let obj = unsafe { user_info.objectForKey(NSWorkspaceApplicationKey)? };
         let app: Retained<NSRunningApplication> = unsafe { Retained::cast_unchecked(obj) };
-        if !is_valid_pid(app.processIdentifier()) {
-            return None;
-        }
-        (app.activationPolicy() == NSApplicationActivationPolicy::Regular).then_some(Self(app))
+        Some(app.processIdentifier())
+    }
+
+    pub(in crate::platform::macos) fn is_active_process(pid: i32) -> bool {
+        NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+            .is_some_and(|app| app.isActive())
     }
 
     pub(in crate::platform::macos) fn pid(&self) -> i32 {
@@ -49,12 +51,18 @@ impl RunningApp {
         Arc::new(AXApp::new(&self.0))
     }
 
+    pub(in crate::platform::macos) fn accepts_process(
+        pid: i32,
+        activation_policy: NSApplicationActivationPolicy,
+    ) -> bool {
+        is_valid_pid(pid) && activation_policy == NSApplicationActivationPolicy::Regular
+    }
+
     pub(in crate::platform::macos) fn all() -> impl Iterator<Item = RunningApp> {
         NSWorkspace::sharedWorkspace()
             .runningApplications()
             .into_iter()
-            .filter(|app| app.activationPolicy() == NSApplicationActivationPolicy::Regular)
-            .filter(|app| is_valid_pid(app.processIdentifier()))
+            .filter(|app| Self::accepts_process(app.processIdentifier(), app.activationPolicy()))
             .map(RunningApp::from)
     }
 }

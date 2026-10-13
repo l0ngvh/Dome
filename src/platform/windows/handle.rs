@@ -1,3 +1,17 @@
+pub(super) mod native;
+mod placement;
+pub(super) mod submission;
+pub(super) use placement::{
+    read_corner_radius, read_foreground, read_placement, read_root_owner, read_visible_frame,
+    submit_close, submit_foreground, submit_frame, submit_recovery, submit_show, submit_z_order,
+};
+
+#[inline]
+pub(super) fn native_query() {
+    #[cfg(test)]
+    submission::record_query();
+}
+
 use std::mem::size_of;
 
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT};
@@ -24,24 +38,21 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::HiDpi::{
     AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT,
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, DPI_AWARENESS_CONTEXT_UNAWARE, GetDpiForMonitor,
-    GetDpiForWindow, GetWindowDpiAwarenessContext, MDT_EFFECTIVE_DPI, SetThreadDpiAwarenessContext,
+    GetDpiForWindow, GetWindowDpiAwarenessContext, MDT_EFFECTIVE_DPI,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GW_OWNER, GWL_EXSTYLE, GWL_STYLE,
     GetAncestor, GetClassNameW, GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
-    HWND_BOTTOM, IsIconic, IsWindowArranged, IsWindowVisible, IsZoomed, MINMAXINFO, PostMessageW,
+    HWND_BOTTOM, IsIconic, IsWindowArranged, IsWindowVisible, IsZoomed, MINMAXINFO,
     SMTO_ABORTIFHUNG, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, SetWindowPos, ShowWindow,
-    ShowWindowAsync, WM_CLOSE, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CAPTION,
-    WS_CHILD, WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, WM_GETMINMAXINFO, WM_GETTEXT,
+    WM_GETTEXTLENGTH, WS_CAPTION, WS_CHILD, WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
 use crate::core::{Length, LimitObservation, LimitUpdate, Logical, PixelRect, Pixels};
-use crate::platform::windows::external::{
-    HwndId, InspectExternalWindow, ManageExternalWindow, ManageOverlay, ShowCmd, ZOrder,
-};
+use crate::platform::windows::external::{HwndId, InspectExternalWindow, ManageOverlay, ZOrder};
 use crate::platform::windows::foreground::force_set_foreground;
 
 // Unlike macOS, we are allowed to move windows completely offscreen on Windows
@@ -106,6 +117,14 @@ impl ManageOverlay for OverlayHwnd {
 ///
 /// WM_GETMINMAXINFO is NOT virtualized the same way. See `target_scale_to_physical`.
 pub(crate) fn get_pixel_rect(hwnd: HWND) -> PixelRect {
+    native_query();
+    #[cfg(test)]
+    if let Some(read) = native::fixtures::read(hwnd, "pixel_rect") {
+        return read
+            .outer
+            .map(rect_to_pixel_rect)
+            .unwrap_or_else(|| PixelRect::new(0, 0, 0, 0));
+    }
     let mut rect = RECT::default();
     if let Err(e) = unsafe { GetWindowRect(hwnd, &mut rect) } {
         tracing::trace!(?hwnd, "GetWindowRect failed: {e}");
@@ -129,17 +148,12 @@ pub(crate) fn rect_to_pixel_rect(rect: RECT) -> PixelRect {
 /// offscreen windows cannot occlude visible windows and the reposition does not
 /// steal foreground activation.
 pub(crate) fn move_window_offscreen(hwnd: HWND) {
-    if let Err(e) = unsafe {
-        SetWindowPos(
-            hwnd,
-            Some(HWND_BOTTOM),
-            OFFSCREEN_POS.value(),
-            OFFSCREEN_POS.value(),
-            0,
-            0,
-            SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
-        )
-    } {
+    if let Err(e) = submission::position(
+        hwnd,
+        Some(HWND_BOTTOM),
+        (OFFSCREEN_POS.value(), OFFSCREEN_POS.value(), 0, 0),
+        SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
+    ) {
         tracing::trace!(?hwnd, "move_window_offscreen SetWindowPos failed: {e}");
     }
 }
@@ -148,6 +162,7 @@ pub(crate) fn enum_windows<F>(mut callback: F) -> windows::core::Result<()>
 where
     F: FnMut(HWND),
 {
+    native_query();
     unsafe extern "system" fn enum_proc<F: FnMut(HWND)>(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let callback = unsafe { &mut *(lparam.0 as *mut F) };
         callback(hwnd);
@@ -162,194 +177,42 @@ where
     }
 }
 
-impl ManageExternalWindow for ExternalHwnd {
-    fn id(&self) -> HwndId {
-        HwndId::from(self.0)
-    }
-
-    fn pid(&self) -> u32 {
-        let mut pid = 0u32;
-        // Non-blocking thread/process-map lookup, safe on external HWNDs.
-        // Returns 0 on a zombie HWND (window already destroyed). 0 is never a
-        // valid Windows pid, so callers can use it as an unambiguous sentinel.
-        unsafe { GetWindowThreadProcessId(self.0, Some(&mut pid)) };
-        if pid == 0 {
+impl InspectExternalWindow for ExternalHwnd {
+    fn process_id(&self) -> u32 {
+        native_query();
+        #[cfg(test)]
+        if let Some(read) = native::fixtures::read(self.0, "process_id") {
+            return read.thread;
+        }
+        let mut process_id = 0;
+        unsafe { GetWindowThreadProcessId(self.0, Some(&mut process_id)) };
+        if process_id == 0 {
             tracing::warn!(id = %HwndId::from(self.0), "GetWindowThreadProcessId returned 0");
         }
-        pid
-    }
-
-    /// Compensates for invisible borders (the gap between `GetWindowRect` and
-    /// `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`) and moves any thread-owned
-    /// child windows by the same delta.
-    fn set_position(&self, z: ZOrder, rect: PixelRect) {
-        let hwnd = self.0;
-        let old = get_pixel_rect(hwnd);
-        let (bl, bt, br, bb) = get_invisible_border(hwnd);
-        let x = rect.x().value() - bl;
-        let y = rect.y().value() - bt;
-        let cx = rect.width().value() + bl + br;
-        let cy = rect.height().value() + bt + bb;
-
-        let insert_after: Option<HWND> = z.into();
-        let mut flags = SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS;
-        if insert_after.is_none() {
-            flags |= SWP_NOZORDER;
-        }
-
-        let ((x, y, cx, cy), restore_ctx) = enter_placement_context(hwnd, x, y, cx, cy);
-        if let Err(e) = unsafe { SetWindowPos(hwnd, insert_after, x, y, cx, cy, flags) } {
-            tracing::trace!(?hwnd, rect = ?(x, y, cx, cy), "SetWindowPos failed: {e}");
-        }
-        if let Some(previous) = restore_ctx {
-            // Restore Dome's PMv2 context before the child propagation below,
-            // whose GetWindowRect reads assume physical pixels.
-            unsafe { SetThreadDpiAwarenessContext(previous) };
-        }
-
-        // Propagate the position delta to owned child windows so they stay anchored
-        // relative to the parent.
-        let dx = x - old.x().value();
-        let dy = y - old.y().value();
-        if dx != 0 || dy != 0 {
-            for_each_owned(hwnd, |child| {
-                let mut child_rect = RECT::default();
-                if unsafe { GetWindowRect(child, &mut child_rect).is_ok() }
-                    && let Err(e) = unsafe {
-                        SetWindowPos(
-                            child,
-                            None,
-                            child_rect.left + dx,
-                            child_rect.top + dy,
-                            0,
-                            0,
-                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
-                        )
-                    }
-                {
-                    tracing::trace!(?child, dx, dy, "SetWindowPos (child propagate) failed: {e}");
-                }
-            });
-        }
-    }
-
-    fn set_z_order(&self, z: ZOrder) {
-        write_z_order(self.0, z);
-    }
-
-    fn move_offscreen(&self) {
-        move_window_offscreen(self.0);
-    }
-
-    fn show_cmd(&self, cmd: ShowCmd) {
-        let sw = match cmd {
-            ShowCmd::Restore => SW_RESTORE,
-            ShowCmd::Minimize => SW_MINIMIZE,
-        };
-        unsafe { ShowWindowAsync(self.0, sw).ok().ok() };
-    }
-
-    fn close(&self) {
-        if let Err(e) = unsafe { PostMessageW(Some(self.0), WM_CLOSE, WPARAM(0), LPARAM(0)) } {
-            tracing::trace!(hwnd = ?self.0, "PostMessage WM_CLOSE failed: {e}");
-        }
-    }
-
-    fn set_foreground_window(&self) {
-        force_set_foreground(self.0);
+        process_id
     }
 
     fn is_maximized(&self) -> bool {
+        native_query();
+        #[cfg(test)]
+        if let Some(read) = native::fixtures::read(self.0, "maximized") {
+            return read.maximized;
+        }
         unsafe { IsZoomed(self.0) }.as_bool()
     }
 
-    fn recover(&self, was_maximized: bool) {
-        let hwnd = self.0;
-        unsafe {
-            if was_maximized {
-                let _ = ShowWindow(hwnd, SW_RESTORE);
-            }
-            if let Err(e) = SetWindowPos(
-                hwnd,
-                None,
-                100,
-                100,
-                0,
-                0,
-                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE,
-            ) {
-                tracing::trace!(
-                    ?hwnd,
-                    op = "recover_set_position",
-                    "SetWindowPos failed: {e}"
-                );
-            }
-            if was_maximized {
-                let _ = ShowWindow(hwnd, SW_MAXIMIZE);
-            }
-        }
-    }
-
-    fn corner_radius(&self) -> Length<Logical> {
-        let hwnd = self.0;
-        let mut preference = DWM_WINDOW_CORNER_PREFERENCE::default();
-        let read = unsafe {
-            DwmGetWindowAttribute(
-                hwnd,
-                DWMWA_WINDOW_CORNER_PREFERENCE,
-                std::ptr::from_mut(&mut preference).cast(),
-                size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
-            )
-        };
-        // The attribute exists from Windows 11 build 22000. Earlier builds reject it and draw
-        // square corners.
-        if read.is_err() {
-            return Length::ZERO;
-        }
-        // Microsoft lists these as states that are never rounded, even when the app
-        // asks for rounding. Microsoft also lists a layered window with per-pixel
-        // alpha, but `WS_EX_LAYERED` also marks a window that uses one alpha over
-        // the whole window, so a layered window can be round or square. This check
-        // skips the style, so the preference and the frame styles decide whether a
-        // layered window is round. A wrong guess then puts a round border around a
-        // square window, which looks better than a square border around a round
-        // one.
-        if self.is_maximized()
-            || unsafe { IsWindowArranged(hwnd) }.as_bool()
-            || unsafe { GetWindowRgnBox(hwnd, &mut RECT::default()) } != RGN_ERROR
-        {
-            return Length::ZERO;
-        }
-        match preference {
-            DWMWCP_DONOTROUND => return Length::ZERO,
-            DWMWCP_ROUNDSMALL => return SMALL_RADIUS,
-            DWMWCP_ROUND => return ROUND_RADIUS,
-            _ => {}
-        }
-        // Microsoft's guide says DWM rounds a window that sets both WS_CAPTION and
-        // WS_THICKFRAME. Measured windows that set only one of the two were rounded
-        // as well.
-        let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
-        if style & WS_CAPTION.0 == WS_CAPTION.0 || style & WS_THICKFRAME.0 != 0 {
-            ROUND_RADIUS
-        } else {
-            Length::ZERO
-        }
-    }
-}
-
-impl InspectExternalWindow for ExternalHwnd {
     fn check_unmanageable(&self) -> bool {
+        native_query();
         // We don't check for empty title here, as most some text editor apps open windows with
         // empty title for untitled documents
         let hwnd = self.0;
-        let pid = self.pid();
+        let pid = self.process_id();
         let title = self.get_window_title();
         if is_silent_unmanageable_title(&title) {
             return true;
         }
         let process_name = self.get_process_name().ok();
-        if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
+        if !native::visible(hwnd) {
             // Those windows that shouldn't be managed have quite preditable title.
             // e.g. OLEChannelWnd or Default IME
             // Previous attempt to key by hwnd proved to be futile, those windows are spawned
@@ -360,7 +223,7 @@ impl InspectExternalWindow for ExternalHwnd {
             );
             return true;
         }
-        if unsafe { IsIconic(hwnd) }.as_bool() {
+        if self.is_minimized() {
             // Already-minimized windows are skipped at registration time. Their
             // visible rect is the iconic-cache value (-32000,-32000), the monitor
             // is unreliable, and we have no way to know the user's intended
@@ -379,15 +242,15 @@ impl InspectExternalWindow for ExternalHwnd {
             );
             return true;
         }
-        if unsafe { GetAncestor(hwnd, GA_ROOT) } != hwnd {
+        if native::root(hwnd) != hwnd {
             crate::trace_once!(
                 key: (title.clone(), process_name.clone()),
                 ?title, ?pid, ?process_name, "not manageable: not top-level ancestor"
             );
             return true;
         }
-        let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
-        let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
+        let style = native::style(hwnd, GWL_STYLE);
+        let ex_style = native::style(hwnd, GWL_EXSTYLE);
         if style & WS_CHILD.0 != 0 {
             crate::trace_once!(
                 key: (title.clone(), process_name.clone()),
@@ -464,10 +327,7 @@ impl InspectExternalWindow for ExternalHwnd {
         // used (not GA_ROOTOWNER) because it returns the direct owner, matching the
         // Shell's documented rule
         // (https://learn.microsoft.com/en-us/windows/win32/shell/taskbar#managing-taskbar-buttons).
-        let has_owner = matches!(
-            unsafe { GetWindow(hwnd, GW_OWNER) },
-            Ok(h) if !h.is_invalid(),
-        );
+        let has_owner = native::owner(hwnd).is_some();
         if has_owner && ex_style & WS_EX_APPWINDOW.0 == 0 {
             crate::trace_once!(
                 key: (title.clone(), process_name.clone()),
@@ -494,10 +354,20 @@ impl InspectExternalWindow for ExternalHwnd {
     }
 
     fn is_minimized(&self) -> bool {
+        native_query();
+        #[cfg(test)]
+        if let Some(read) = native::fixtures::read(self.0, "minimized") {
+            return read.minimized;
+        }
         unsafe { IsIconic(self.0) }.as_bool()
     }
 
     fn get_window_title(&self) -> Option<String> {
+        native_query();
+        #[cfg(test)]
+        if native::fixtures::read(self.0, "title").is_some() {
+            return Some("Native fixture".into());
+        }
         let hwnd = self.0;
         let mut len = 0usize;
         let ret = unsafe {
@@ -542,6 +412,11 @@ impl InspectExternalWindow for ExternalHwnd {
     }
 
     fn get_process_name(&self) -> anyhow::Result<String> {
+        native_query();
+        #[cfg(test)]
+        if native::fixtures::read(self.0, "process").is_some() {
+            return Ok("fixture.exe".into());
+        }
         let hwnd = self.0;
         let path_wide = crate::platform::windows::process::get_exe_path(hwnd)
             .ok_or_else(|| anyhow::anyhow!("could not query process image name"))?;
@@ -554,6 +429,11 @@ impl InspectExternalWindow for ExternalHwnd {
     }
 
     fn get_process_path(&self) -> anyhow::Result<String> {
+        native_query();
+        #[cfg(test)]
+        if native::fixtures::read(self.0, "process_path").is_some() {
+            return Ok("fixture.exe".into());
+        }
         let hwnd = self.0;
         let path_wide = crate::platform::windows::process::get_exe_path(hwnd)
             .ok_or_else(|| anyhow::anyhow!("could not query process image name"))?;
@@ -561,8 +441,12 @@ impl InspectExternalWindow for ExternalHwnd {
         Ok(String::from_utf16_lossy(&path_wide[..end]))
     }
 
-    /// A failed or timed-out read reports `Unchanged`, leaving core's stored limits alone.
-    fn get_size_constraints(&self) -> LimitObservation {
+    fn get_size_constraints(&self) -> Option<LimitObservation> {
+        native_query();
+        #[cfg(test)]
+        if native::fixtures::read(self.0, "limits").is_some() {
+            return None;
+        }
         let hwnd = self.0;
         // Zero-initialisation is the documented initial state for MINMAXINFO, which the
         // target wndproc fills in before returning.
@@ -580,43 +464,26 @@ impl InspectExternalWindow for ExternalHwnd {
         };
         if sent.0 == 0 {
             tracing::trace!(?hwnd, "WM_GETMINMAXINFO failed or timed out");
-            return LimitObservation::default();
+            return None;
         }
         let scale = target_scale_to_physical(hwnd);
         let (left, top, right, bottom) = get_invisible_border(hwnd);
         let horizontal = left + right;
         let vertical = top + bottom;
-        LimitObservation {
+        Some(LimitObservation {
             min_width: scaled_track_limit(info.ptMinTrackSize.x, horizontal, scale),
             min_height: scaled_track_limit(info.ptMinTrackSize.y, vertical, scale),
             max_width: scaled_track_limit(info.ptMaxTrackSize.x, horizontal, scale),
             max_height: scaled_track_limit(info.ptMaxTrackSize.y, vertical, scale),
-        }
+        })
     }
 
-    /// Returns the DWM extended frame bounds in physical pixels. Falls back to
-    /// `GetWindowRect` if the DWM attribute is unavailable.
-    fn get_visible_rect(&self) -> PixelRect {
-        let hwnd = self.0;
-        let mut frame_rect = RECT::default();
-        let result = unsafe {
-            DwmGetWindowAttribute(
-                hwnd,
-                DWMWA_EXTENDED_FRAME_BOUNDS,
-                &mut frame_rect as *mut _ as *mut _,
-                std::mem::size_of::<RECT>() as u32,
-            )
-        };
-        if result.is_ok() {
-            rect_to_pixel_rect(frame_rect)
-        } else {
-            get_pixel_rect(hwnd)
-        }
-    }
-
-    // Returns None for UWP shells, elevated processes we can't open, apps with no
-    // version info, or empty FileDescription. Callers fall back to the executable name.
     fn get_app_display_name(&self) -> Option<String> {
+        native_query();
+        #[cfg(test)]
+        if native::fixtures::read(self.0, "app_name").is_some() {
+            return None;
+        }
         let hwnd = self.0;
         let path = crate::platform::windows::process::get_exe_path(hwnd)?;
         let path_ptr = PCWSTR(path.as_ptr());
@@ -685,12 +552,21 @@ impl InspectExternalWindow for ExternalHwnd {
         }
     }
 
-    // `MonitorFromWindow` is non-blocking and safe to call on external HWNDs.
     fn get_monitor(&self) -> isize {
+        native_query();
+        #[cfg(test)]
+        if let Some(read) = native::fixtures::read(self.0, "monitor") {
+            return read.monitor;
+        }
         unsafe { MonitorFromWindow(self.0, MONITOR_DEFAULTTONEAREST) }.0 as isize
     }
 
     fn get_class_name(&self) -> Option<String> {
+        native_query();
+        #[cfg(test)]
+        if native::fixtures::read(self.0, "class").is_some() {
+            return None;
+        }
         let mut buf = [0u16; 256];
         let len = unsafe { GetClassNameW(self.0, &mut buf) };
         if len <= 0 {
@@ -700,6 +576,11 @@ impl InspectExternalWindow for ExternalHwnd {
     }
 
     fn get_aumid(&self) -> Option<String> {
+        native_query();
+        #[cfg(test)]
+        if native::fixtures::read(self.0, "aumid").is_some() {
+            return None;
+        }
         use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
         use windows::Win32::System::Com::CoTaskMemFree;
         use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
@@ -719,23 +600,13 @@ impl InspectExternalWindow for ExternalHwnd {
 
 /// Returns the invisible border widths (left, top, right, bottom) as raw i32 in physical pixels.
 fn get_invisible_border(hwnd: HWND) -> (i32, i32, i32, i32) {
-    let mut window_rect = RECT::default();
-    let mut frame_rect = RECT::default();
-    unsafe {
-        if GetWindowRect(hwnd, &mut window_rect).is_err() {
-            return (0, 0, 0, 0);
-        }
-        if DwmGetWindowAttribute(
-            hwnd,
-            DWMWA_EXTENDED_FRAME_BOUNDS,
-            &mut frame_rect as *mut _ as *mut _,
-            std::mem::size_of::<RECT>() as u32,
-        )
-        .is_err()
-        {
-            return (0, 0, 0, 0);
-        }
-    }
+    native_query();
+    let Some(window_rect) = native::outer(hwnd) else {
+        return (0, 0, 0, 0);
+    };
+    let Some(frame_rect) = native::extended_frame(hwnd) else {
+        return (0, 0, 0, 0);
+    };
     (
         frame_rect.left - window_rect.left,
         frame_rect.top - window_rect.top,
@@ -747,6 +618,15 @@ fn get_invisible_border(hwnd: HWND) -> (i32, i32, i32, i32) {
 // SAFETY: GetWindowDpiAwarenessContext and AreDpiAwarenessContextsEqual both
 // accept HWNDs from other processes.
 fn target_has_context(hwnd: HWND, ctx: DPI_AWARENESS_CONTEXT) -> bool {
+    native_query();
+    #[cfg(test)]
+    if let Some(read) = native::fixtures::read(hwnd, "awareness") {
+        return if ctx == DPI_AWARENESS_CONTEXT_UNAWARE {
+            read.unaware
+        } else {
+            !read.unaware
+        };
+    }
     let target = unsafe { GetWindowDpiAwarenessContext(hwnd) };
     unsafe { AreDpiAwarenessContextsEqual(target, ctx) }.as_bool()
 }
@@ -759,6 +639,7 @@ fn target_has_context(hwnd: HWND, ctx: DPI_AWARENESS_CONTEXT) -> bool {
 /// report in system-DPI units, scaled via GetDpiForWindow. Unaware targets
 /// report in their virtualized space, scaled via the monitor they occupy.
 fn target_scale_to_physical(hwnd: HWND) -> f32 {
+    native_query();
     if target_has_context(hwnd, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) {
         return 1.0;
     }
@@ -805,6 +686,11 @@ fn is_silent_unmanageable_title(title: &Option<String>) -> bool {
 }
 
 fn is_cloaked(hwnd: HWND) -> bool {
+    native_query();
+    #[cfg(test)]
+    if native::fixtures::read(hwnd, "cloaked").is_some() {
+        return false;
+    }
     let mut cloaked = 0u32;
     let result = unsafe {
         DwmGetWindowAttribute(
@@ -818,6 +704,11 @@ fn is_cloaked(hwnd: HWND) -> bool {
 }
 
 fn is_process_elevated(pid: u32) -> bool {
+    native_query();
+    #[cfg(test)]
+    if let Some(elevated) = native::fixtures::process_elevated(pid) {
+        return elevated;
+    }
     if pid == 0 {
         return false;
     }
@@ -842,6 +733,7 @@ fn is_process_elevated(pid: u32) -> bool {
 }
 
 fn is_token_elevated_or_high_integrity(token: windows::Win32::Foundation::HANDLE) -> bool {
+    native_query();
     let mut elevation = TOKEN_ELEVATION::default();
     let mut ret_len = 0u32;
     if unsafe {
@@ -904,38 +796,22 @@ fn write_z_order(hwnd: HWND, z: ZOrder) {
     if insert_after.is_none() {
         flags |= SWP_NOZORDER;
     }
-    if let Err(e) = unsafe { SetWindowPos(hwnd, insert_after, 0, 0, 0, 0, flags) } {
+    if let Err(e) = submission::position(hwnd, insert_after, (0, 0, 0, 0), flags) {
         tracing::trace!(?hwnd, "SetWindowPos (z-order only) failed: {e}");
     }
 }
 
-fn for_each_owned<F: FnMut(HWND)>(hwnd: HWND, callback: F) {
-    let thread_id = unsafe { GetWindowThreadProcessId(hwnd, None) };
+fn for_each_owned<F: FnMut(HWND)>(hwnd: HWND, mut callback: F) -> bool {
+    native_query();
+    let thread_id = native::thread(hwnd);
     if thread_id == 0 {
-        return;
+        return false;
     }
-
-    unsafe extern "system" fn enum_proc<F: FnMut(HWND)>(child: HWND, lparam: LPARAM) -> BOOL {
-        let (owner, callback) = unsafe { &mut *(lparam.0 as *mut (HWND, F)) };
-        let root_owner = unsafe { GetAncestor(child, GA_ROOTOWNER) };
-        if root_owner == *owner && child != *owner {
+    native::enumerate_thread(thread_id, |child| {
+        if native::root_owner(child) == hwnd && child != hwnd {
             callback(child);
         }
-        BOOL(1)
-    }
-
-    let mut data = (hwnd, callback);
-    // BOOL is FALSE when the callback returns FALSE or no windows are found,
-    // neither of which is an error condition.
-    unsafe {
-        EnumThreadWindows(
-            thread_id,
-            Some(enum_proc::<F>),
-            LPARAM(&mut data as *mut _ as isize),
-        )
-        .ok()
-        .ok();
-    }
+    })
 }
 
 /// Clamps `desc_len` so the returned slice cannot read past `buf`. `desc_len`
@@ -952,6 +828,7 @@ fn clamp_desc_len(desc_ptr: usize, buf_ptr: usize, buf_len: usize, desc_len: u32
 /// Effective DPI of the nearest monitor to `rect`, or None when either query
 /// fails.
 fn monitor_effective_dpi(rect: &RECT) -> Option<u32> {
+    native_query();
     let hmonitor = unsafe { MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST) };
     if hmonitor.0.is_null() {
         return None;
@@ -976,60 +853,59 @@ fn to_logical_rect(dpi: u32, x: i32, y: i32, cx: i32, cy: i32) -> (i32, i32, i32
     (left, top, right - left, bottom - top)
 }
 
-/// Call before SetWindowPos on an unaware target. Enters the target's DPI
-/// awareness context and returns the coordinates converted for it, plus the
-/// previous context.
-///
-/// When a window declares itself DPI unaware, Windows rewrites every
-/// SetWindowPos call on it. It first divides each edge by the scale of the
-/// monitor that edge sits on, converting the rect to logical units. It then
-/// multiplies the whole rect by the scale of the monitor the rect mostly sits
-/// on, the anchor monitor, converting back to physical pixels. An edge that
-/// sits on a monitor other than the anchor is therefore net rescaled by the
-/// ratio between the two.
-///
-/// A right edge that sits on a 100% monitor while the rect anchors on a 125%
-/// monitor divides by 1.0 and multiplies by 1.25, so a requested 2563 lands at
-/// 3204. A left edge that sits on a 125% monitor while the rect anchors on a
-/// 100% monitor divides by 1.25 and multiplies by 1.0, so a requested 2565
-/// lands at 2052, dragging the whole window about 500px sideways. Converting
-/// into the target's context and issuing the converted coordinates skips the
-/// rewrite.
-fn enter_placement_context(
-    hwnd: HWND,
-    x: i32,
-    y: i32,
-    cx: i32,
-    cy: i32,
-) -> ((i32, i32, i32, i32), Option<DPI_AWARENESS_CONTEXT>) {
-    if !target_has_context(hwnd, DPI_AWARENESS_CONTEXT_UNAWARE) {
-        return ((x, y, cx, cy), None);
-    }
-    // Resolve the landing monitor before the swap, so MonitorFromRect reads the
-    // rect in Dome's physical-pixel context.
-    let rect = RECT {
-        left: x,
-        top: y,
-        right: x + cx,
-        bottom: y + cy,
-    };
-    let coords = match monitor_effective_dpi(&rect) {
-        Some(dpi) if dpi != 96 => to_logical_rect(dpi, x, y, cx, cy),
-        _ => (x, y, cx, cy),
-    };
-    let previous = unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE) };
-    if previous.0.is_null() {
-        // The swap failed, so the OS would translate the rect per edge. Issue
-        // identity coords rather than the pre-converted ones.
-        return ((x, y, cx, cy), None);
-    }
-    (coords, Some(previous))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{scaled_track_limit, to_logical_rect};
-    use crate::core::LimitUpdate;
+    use super::submission::{Submission, record_submissions};
+    use super::*;
+
+    #[test]
+    fn recover_submits_async_restore_move_and_maximize_in_order() {
+        let window = HwndId::test(17);
+        let movement = || Submission::Position {
+            window,
+            after: None,
+            rectangle: (100, 100, 0, 0),
+            flags: SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
+        };
+        assert_eq!(
+            record_submissions(|| submit_recovery(window, true)),
+            vec![
+                Submission::Show {
+                    window,
+                    command: SW_RESTORE
+                },
+                movement(),
+                Submission::Show {
+                    window,
+                    command: SW_MAXIMIZE
+                },
+            ],
+        );
+        assert_eq!(
+            record_submissions(|| submit_recovery(window, false)),
+            vec![movement()]
+        );
+    }
+
+    #[test]
+    fn set_z_order_submits_without_geometry_or_owned_propagation() {
+        let window = HwndId::test(19);
+        assert_eq!(
+            record_submissions(|| submit_z_order(window, ZOrder::Topmost)),
+            vec![Submission::Position {
+                window,
+                after: Some(windows::Win32::UI::WindowsAndMessaging::HWND_TOPMOST.into()),
+                rectangle: (0, 0, 0, 0),
+                flags: SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS | SWP_NOMOVE | SWP_NOSIZE,
+            }],
+        );
+    }
+
+    #[test]
+    fn get_size_constraints_when_query_fails_returns_none() {
+        let handle = ExternalHwnd::new(HWND::default());
+        assert!(handle.get_size_constraints().is_none());
+    }
 
     #[test]
     fn identity_at_96_dpi() {

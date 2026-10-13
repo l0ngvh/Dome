@@ -23,10 +23,7 @@ fn assert_tiling_above_overlay(env: &TestEnv, tiling: &[HwndId], overlay_id: Hwn
 }
 
 fn tiling_overlay_showing(env: &TestEnv, hwnd: HwndId) -> HwndId {
-    let id = env
-        .dome
-        .window_id_for(hwnd)
-        .expect("window must be registered");
+    let id = env.window_id(hwnd).expect("window must be registered");
     let mut matching = (0..env.painted_monitors())
         .filter(|&i| env.painted_windows(i).iter().any(|w| w.id == id))
         .filter_map(|i| env.tiling_overlay_id_for(env.painted_monitor_id(i)));
@@ -293,11 +290,7 @@ fn float_overlay_sits_directly_below_float_window() {
     env.run_actions("toggle float");
 
     let overlay_id = env
-        .float_overlay_id(
-            env.dome
-                .window_id_for(w2)
-                .expect("window must be registered"),
-        )
+        .float_overlay_id(env.window_id(w2).expect("window must be registered"))
         .expect("float overlay must exist after toggle float");
 
     let stack = env.z_order();
@@ -426,5 +419,113 @@ fn unfloat_keeps_overlay_out_of_topmost_band() {
         "the unfloated reference {w1:?} must leave the topmost band before the overlay \\
          is inserted below it, or the overlay lands above the still-topmost {w2:?} \\
          and Win32 promotes it into that band"
+    );
+}
+
+#[test]
+fn stack_former_float_before_float_overlay_and_moving_tiles() {
+    use crate::platform::windows::dome::events::{HubMessage, WindowPlacement};
+    use crate::platform::windows::external::ZOrder;
+    let mut env = TestEnv::builder()
+        .monitors(vec![default_monitor(), second_monitor()])
+        .build();
+    let tile = env.open();
+    let former = env.open();
+    env.run_actions("toggle float");
+    let floating = env.open();
+    env.run_actions("toggle float");
+    env.settle(10);
+    let mut scene = env.latest_scene();
+    let tile_id = env.window_id(tile).unwrap();
+    let former_id = env.window_id(former).unwrap();
+    let floating_id = env.window_id(floating).unwrap();
+    let monitor = scene.monitors.iter_mut().find(|m| m.native == 1).unwrap();
+    let mut converted = *monitor
+        .tiling_windows
+        .iter()
+        .find(|p| p.id == tile_id)
+        .unwrap();
+    for placement in &mut monitor.tiling_windows {
+        placement.is_highlighted = placement.id == tile_id;
+    }
+    converted.id = former_id;
+    converted.is_highlighted = false;
+    converted.content_box = PixelRect::new(900, 10, 800, 900);
+    monitor.tiling_windows.push(converted);
+    monitor.float_windows.retain(|p| p.id != former_id);
+    let float = monitor
+        .float_windows
+        .iter_mut()
+        .find(|p| p.id == floating_id)
+        .unwrap();
+    float.content_box = PixelRect::new(150, 150, 650, 450);
+    float.is_highlighted = false;
+    scene.windows.get_mut(&former).unwrap().placement = WindowPlacement::Tiling {
+        monitor: monitor.id,
+        placement: converted,
+    };
+    scene.windows.get_mut(&floating).unwrap().placement = WindowPlacement::Float {
+        monitor: monitor.id,
+        placement: *float,
+    };
+    scene.focused_window = Some(tile);
+    scene.focus_request = None;
+    let float_overlay = env.float_overlay_id(floating_id).unwrap();
+    let tile_overlay = env.tiling_overlay_id_for(monitor.id).unwrap();
+    env.start_drag(tile);
+    let before = env.stacking_submissions().len();
+    env.send_ui(HubMessage::Scene(scene));
+    env.ui_wake();
+    assert_eq!(
+        &env.stacking_submissions()[before..],
+        &[
+            (former, ZOrder::NotTopmost),
+            (float_overlay, ZOrder::After(floating)),
+            (tile_overlay, ZOrder::After(tile)),
+            (former, ZOrder::After(tile)),
+        ]
+    );
+    assert!(!env.is_topmost(former));
+    for (_, order) in &env.stacking_submissions()[before..] {
+        if let ZOrder::After(key) = order {
+            assert!(env.is_managed(*key));
+        }
+    }
+}
+
+#[test]
+fn raise_focused_float_without_geometry_or_tile_budget_reset() {
+    use crate::platform::windows::external::ZOrder;
+    use crate::platform::windows::ui::window::MAX_DRIFT_RETRIES;
+    let mut env = TestEnv::new();
+    let tile = env.open();
+    let floating = env.open();
+    env.run_actions("toggle float");
+    env.focus_window(tile);
+    env.settle(10);
+    let anchor = env.now();
+    for _ in 0..2 {
+        env.report_move(tile, PixelRect::new(100, 100, 600, 400), 1, anchor);
+    }
+    let frames = env.frame_submissions().len();
+    let orders = env.stacking_submissions().len();
+    env.focus_window(floating);
+    assert_eq!(env.frame_submissions().len(), frames);
+    let overlay = env
+        .float_overlay_id(env.window_id(floating).unwrap())
+        .unwrap();
+    assert_eq!(
+        &env.stacking_submissions()[orders..],
+        &[
+            (floating, ZOrder::Topmost),
+            (overlay, ZOrder::After(floating)),
+        ]
+    );
+    for _ in 0..MAX_DRIFT_RETRIES {
+        env.report_move(tile, PixelRect::new(100, 100, 600, 400), 1, anchor);
+    }
+    assert_eq!(
+        env.frame_submissions().len() - frames,
+        usize::from(MAX_DRIFT_RETRIES - 2)
     );
 }

@@ -1,93 +1,81 @@
 pub(super) mod events;
+mod layout;
 pub(super) mod monitor;
-mod placement_tracker;
-mod recovery;
-mod registry;
 pub(super) mod window;
+pub(super) use monitor::{MonitorInfo, QueryDisplay, Win32Display};
+pub(super) use window::WindowsMetadata;
 
-pub(super) use self::monitor::{MonitorInfo, QueryDisplay, Win32Display};
-
+use super::external::HwndId;
+use super::taskbar::{ManageTaskbar, TaskbarRestoreGuard};
+use super::window_server::{DiscoveredWindow, FullscreenKind};
+use crate::action::{Actions, MinimizedWindow, Query};
+use crate::config::{Config, Keystroke, LuaRuntime, PlatformEffects, PreferredLayouts};
+use crate::core::{
+    ContainerId, Hub, LimitObservation, Physical, PixelRect, TilingConfig, WindowId,
+    WindowRestrictions,
+};
+use crate::platform::keymap::KeymapPublisher;
+use events::{FocusTarget, HubMessage, SceneSender, WindowCommand};
+use monitor::MonitorRegistry;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::sync::Arc;
-use std::time::Instant;
-
 use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessageW, WM_QUIT};
 
-use crate::action::Query;
-use crate::action::{Actions, MinimizedWindow, WorkspaceInfo};
-use crate::config::{Config, Keystroke, LuaRuntime, PlatformEffects, PreferredLayouts};
-use crate::core::TilingConfig;
-use crate::core::{
-    ContainerId, Hub, LimitObservation, MonitorId, MonitorLayout, Physical, PixelRect,
-    TilingWindowPlacement, WindowId, WindowRestrictions,
-};
-use crate::platform::keymap::KeymapPublisher;
-
-use self::placement_tracker::PlacementTracker;
-use self::recovery::Recovery;
-use self::registry::ManagedWindow;
-pub(in crate::platform::windows) use self::registry::WindowRegistry;
-use self::window::{PositionedState, WindowState};
-
-struct WinPlatformEffects<'a> {
-    registry: &'a mut WindowRegistry,
+struct WindowsPlatformEffects<'a> {
+    native_keys: &'a HashMap<WindowId, HwndId>,
+    sender: &'a mut dyn SceneSender,
     main_thread_id: u32,
     env: &'a HashMap<String, String>,
 }
-
-impl PlatformEffects for WinPlatformEffects<'_> {
+impl PlatformEffects for WindowsPlatformEffects<'_> {
     fn close(&mut self, id: WindowId) {
-        self.registry.close_window(id);
-    }
-
-    fn execute(&mut self, command: &str) {
-        if let Err(e) = crate::platform::windows::spawn::spawn(command, self.env) {
-            tracing::warn!(%command, "Failed to execute: {e:#}");
+        if let Some(&key) = self.native_keys.get(&id) {
+            self.sender
+                .send(HubMessage::Command(WindowCommand::Close(key)));
         }
     }
-
-    fn exit(&mut self) {
-        unsafe { PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
-        unsafe { PostQuitMessage(0) };
-    }
-
     fn unminimize(&mut self, id: WindowId) {
-        self.registry.unminimize_window(id);
+        if let Some(&key) = self.native_keys.get(&id) {
+            self.sender
+                .send(HubMessage::Command(WindowCommand::Unminimize(key)));
+        }
+    }
+    fn execute(&mut self, command: &str) {
+        if let Err(error) = super::spawn::spawn(command, self.env) {
+            tracing::warn!(%command, %error, "Failed to execute");
+        }
+    }
+    fn exit(&mut self) {
+        unsafe {
+            PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok();
+            PostQuitMessage(0);
+        }
     }
 }
 
-pub(super) use self::window::NewWindow;
-pub(super) use self::window::WindowsMetadata;
-
-use self::events::{
-    FloatOverlayAction, HubMessage, MonitorScene, MonitorSetChange, NewTilingOverlay, RenderScene,
-    SceneSender, TilingWindowShow,
-};
-
-use self::monitor::MonitorRegistry;
-use super::external::{HwndId, ManageExternalWindow, ManageOverlay, ZOrder};
-use super::taskbar::ManageTaskbar;
-
 pub(super) enum HubEvent {
-    WindowCreated(HwndId),
-    WindowDestroyed(HwndId),
+    WindowsDiscovered(Vec<DiscoveredWindow>),
+    WindowGone(HwndId),
     WindowMinimized(HwndId),
-    WindowRestored {
-        hwnd_id: HwndId,
-        observed_at: Instant,
+    WindowRestored(HwndId),
+    FocusReported(HwndId),
+    TitleChanged {
+        key: HwndId,
+        title: String,
     },
-    WindowFocused(HwndId),
-    WindowTitleChanged(HwndId),
-    MoveSizeStart(HwndId),
-    MoveSizeEnd {
-        hwnd_id: HwndId,
-        observed_at: Instant,
+    SizeConstraint {
+        key: HwndId,
+        limits: LimitObservation,
     },
-    LocationChanged {
-        hwnd_id: HwndId,
-        observed_at: Instant,
+    FloatMoved {
+        key: HwndId,
+        frame: PixelRect<Physical>,
+        monitor: isize,
+    },
+    FullscreenChanged {
+        key: HwndId,
+        fullscreen: Option<FullscreenKind>,
     },
     Action(Actions),
     Query {
@@ -102,61 +90,59 @@ pub(super) enum HubEvent {
     ApplyLayout(String),
     SaveLayout(String),
     TabClicked(ContainerId, usize),
-    /// A monitor's effective DPI changed (WM_DPICHANGED).
     DpiChanged,
-    /// The desktop work area changed (SPI_SETWORKAREA).
     WorkAreaChanged,
-    /// A monitor was added, removed, or reconfigured (WM_DISPLAYCHANGE).
     DisplayChanged,
-    TilingOverlayReady {
-        monitor: MonitorId,
-        overlay: Arc<dyn ManageOverlay>,
-    },
-    FloatOverlayReady {
-        window: WindowId,
-        overlay: Arc<dyn ManageOverlay>,
-    },
     Shutdown,
 }
 
-/// Platform-specific state machine that bridges Win32 window events with the core tree
-/// model. Event-loop-facing methods accept `HwndId` rather than `WindowId` because callers
-/// may dispatch work to background threads -- by the time results arrive the window may
-/// have been removed, so resolution to `WindowId` happens here where the registry can be
-/// checked.
 pub(super) struct Dome {
     hub: Hub,
-    registry: WindowRegistry,
+    window_ids: HashMap<HwndId, WindowId>,
+    native_keys: HashMap<WindowId, HwndId>,
+    discoveries: HashMap<HwndId, DiscoveredWindow>,
     monitors: MonitorRegistry,
-    /// The windows Dome currently has on screen. Owned here rather than per monitor entry
-    /// so it survives a monitor removal.
     displayed_windows: HashSet<WindowId>,
-    taskbar: Rc<dyn ManageTaskbar>,
+    taskbar: TaskbarRestoreGuard,
     display: Box<dyn QueryDisplay>,
     window: Box<dyn SceneSender>,
-    last_focused: Option<WindowId>,
-    last_focused_monitor: Option<MonitorId>,
-    pending_created: Vec<WindowId>,
-    placement_tracker: PlacementTracker,
-    /// Handles for the overlays the window thread built. The domain cannot read the handle
-    /// of a window it does not own, so each one arrives as a report.
-    tiling_overlays: HashMap<MonitorId, Arc<dyn ManageOverlay>>,
-    float_overlays: HashMap<WindowId, Arc<dyn ManageOverlay>>,
-    recovery: Recovery,
+    last_focus_target: Option<FocusTarget>,
+    focus_request: Option<FocusTarget>,
     keymap_publisher: KeymapPublisher,
     env: HashMap<String, String>,
 }
-
 impl Drop for Dome {
     fn drop(&mut self) {
-        self.recovery.restore_all();
+        self.window.send(HubMessage::Shutdown);
     }
 }
-
 impl Dome {
+    pub(super) fn handle_report(&mut self, event: HubEvent) -> Result<(), HubEvent> {
+        match event {
+            HubEvent::WindowsDiscovered(windows) => self.windows_discovered(windows),
+            HubEvent::WindowGone(key) => self.window_destroyed(key),
+            HubEvent::WindowMinimized(key) => self.window_minimized(key),
+            HubEvent::WindowRestored(key) => self.window_restored(key),
+            HubEvent::FocusReported(key) => self.handle_focus(key),
+            HubEvent::TitleChanged { key, title } => self.title_changed(key, title),
+            HubEvent::SizeConstraint { key, limits } => self.set_constraints_for(key, limits),
+            HubEvent::FloatMoved {
+                key,
+                frame,
+                monitor,
+            } => self.float_moved(key, frame, monitor),
+            HubEvent::FullscreenChanged { key, fullscreen } => {
+                self.fullscreen_changed(key, fullscreen)
+            }
+            other => return Err(other),
+        }
+        self.apply_layout();
+        Ok(())
+    }
+
     #[expect(
         clippy::too_many_arguments,
-        reason = "constructor wiring the platform collaborators, the runtime, and the keymap publisher"
+        reason = "platform collaborators and domain configuration"
     )]
     pub(super) fn new(
         tiling: TilingConfig,
@@ -172,296 +158,196 @@ impl Dome {
         anyhow::ensure!(!monitors.is_empty(), "No monitors detected");
         let primary = monitors
             .iter()
-            .find(|s| s.is_primary)
+            .find(|m| m.is_primary)
             .unwrap_or(&monitors[0]);
-        let mut hub = Hub::new(primary.into(), tiling, workspace_overrides.clone(), runtime);
-        let primary_monitor_id = hub.primary_monitor();
-        let mut monitors_reg = MonitorRegistry::new();
-        let mut new_overlays: Vec<NewTilingOverlay> = Vec::new();
-        monitors_reg.insert(primary_monitor_id, primary);
-        new_overlays.push(NewTilingOverlay {
-            monitor_id: primary_monitor_id,
-            work_area: primary.work_area,
-            scale: primary.scale,
-        });
-        tracing::info!(
-            name = %primary.name,
-            handle = ?primary.handle,
-            work_area = ?primary.work_area,
-            "Primary monitor"
-        );
-
+        let mut hub = Hub::new(primary.into(), tiling, workspace_overrides, runtime);
+        let mut registry = MonitorRegistry::new();
+        registry.insert(hub.primary_monitor(), primary);
         for monitor in &monitors {
             if monitor.handle != primary.handle {
                 let id = hub.add_monitor(monitor.into());
-                monitors_reg.insert(id, monitor);
-                new_overlays.push(NewTilingOverlay {
-                    monitor_id: id,
-                    work_area: monitor.work_area,
-                    scale: monitor.scale,
-                });
-                tracing::info!(
-                    name = %monitor.name,
-                    handle = ?monitor.handle,
-                    work_area = ?monitor.work_area,
-                    "Monitor"
-                );
+                registry.insert(id, monitor);
             }
         }
-
-        window.send(HubMessage::MonitorsChanged(MonitorSetChange {
-            added: new_overlays,
-            removed: Vec::new(),
-        }));
-
+        window.send(HubMessage::DisplayRefreshed(monitors));
         Ok(Self {
             hub,
-            registry: WindowRegistry::new(),
-            monitors: monitors_reg,
-            taskbar: taskbar.clone(),
+            window_ids: HashMap::new(),
+            native_keys: HashMap::new(),
+            discoveries: HashMap::new(),
+            monitors: registry,
+            displayed_windows: HashSet::new(),
+            taskbar: TaskbarRestoreGuard::new(taskbar),
             display,
             window,
-            last_focused: None,
-            last_focused_monitor: None,
-            pending_created: Vec::new(),
-            placement_tracker: PlacementTracker::new(),
-            tiling_overlays: HashMap::new(),
-            float_overlays: HashMap::new(),
-            displayed_windows: HashSet::new(),
-            recovery: Recovery::new(taskbar),
+            last_focus_target: None,
+            focus_request: None,
             keymap_publisher,
             env,
         })
     }
-
-    pub(super) fn tiling_overlay_ready(
-        &mut self,
-        monitor: MonitorId,
-        overlay: Arc<dyn ManageOverlay>,
-    ) {
-        if self.monitors.contains(monitor) {
-            self.tiling_overlays.insert(monitor, overlay);
+    fn current_id(&self, key: HwndId) -> Option<WindowId> {
+        self.window_ids.get(&key).copied()
+    }
+    pub(super) fn windows_discovered(&mut self, windows: Vec<DiscoveredWindow>) {
+        for discovery in windows {
+            let key = discovery.key;
+            self.discoveries.insert(key, discovery);
+            self.admit_discovery(key);
         }
     }
-
-    pub(super) fn float_overlay_ready(
-        &mut self,
-        window: WindowId,
-        overlay: Arc<dyn ManageOverlay>,
-    ) {
-        self.float_overlays.insert(window, overlay);
-    }
-
-    pub(super) fn apply_layout_file(&mut self, path: &str) {
-        let layouts = match PreferredLayouts::load(path) {
-            Ok(layouts) => layouts,
-            Err(e) => {
-                tracing::error!("Apply layout failed: {e:#}");
-                return;
-            }
+    fn admit_discovery(&mut self, key: HwndId) {
+        if self.current_id(key).is_some() {
+            return;
+        }
+        let Some(discovery) = self.discoveries.get(&key) else {
+            return;
         };
-        self.hub.apply_preferred_layouts(layouts);
-        tracing::info!(%path, "Layout applied");
-        self.apply_layout();
+        let restrictions = match discovery.fullscreen {
+            Some(FullscreenKind::Exclusive) => WindowRestrictions::BlockAll,
+            Some(FullscreenKind::Borderless) => WindowRestrictions::ProtectFullscreen,
+            None => WindowRestrictions::None,
+        };
+        let Some(id) = self.hub.insert_window(
+            Box::new(discovery.metadata.clone()),
+            discovery.frame,
+            restrictions,
+        ) else {
+            tracing::trace!(%key, process_id = discovery.process_id, "ignored by rule");
+            return;
+        };
+        if let Some(limits) = discovery.limits {
+            self.hub.set_window_constraint(id, limits);
+        }
+        tracing::info!(%id, %key, process_id = discovery.process_id, metadata = %discovery.metadata, "New window");
+        self.window_ids.insert(key, id);
+        self.native_keys.insert(id, key);
+        self.taskbar.track(key);
     }
-
-    #[tracing::instrument(
-        skip(self, id_key),
-        fields(hwnd = %id_key),
-    )]
-    pub(super) fn window_destroyed(&mut self, id_key: HwndId) {
-        self.clear_move_state(id_key);
-        self.taskbar.delete_tab(id_key);
-        self.recovery.untrack(id_key);
-        if let Some(id) = self.registry.remove_by_hwnd(id_key) {
-            tracing::info!(%id, "Window removed");
+    pub(super) fn window_destroyed(&mut self, key: HwndId) {
+        self.discoveries.remove(&key);
+        self.taskbar.remove(key);
+        if let Some(id) = self.window_ids.remove(&key) {
+            self.native_keys.remove(&id);
             self.displayed_windows.remove(&id);
             self.hub.delete_window(id);
-            self.apply_layout();
         }
     }
-
-    #[tracing::instrument(
-        skip(self, id_key),
-        fields(hwnd = %id_key),
-    )]
-    pub(super) fn window_minimized(&mut self, id_key: HwndId) {
-        let Some(id) = self.registry.get_id(id_key) else {
-            return;
-        };
-        let Some(entry) = self.registry.get(id) else {
-            return;
-        };
-        // Dome-initiated minimize
-        if matches!(entry.state, WindowState::BorderlessMinimized { .. }) {
-            return;
-        }
-        self.hub.minimize_window(id);
-        if let Some(entry) = self.registry.get_mut(id) {
-            entry.is_minimized = true;
-        }
-        self.apply_layout();
-    }
-
-    pub(super) fn move_size_started(&mut self, id_key: HwndId) {
-        self.placement_tracker.drag_started(id_key);
-    }
-
-    pub(super) fn clear_move_state(&mut self, id_key: HwndId) {
-        self.placement_tracker.clear(id_key);
-    }
-
-    pub(super) fn location_changed(&mut self, id_key: HwndId) -> bool {
-        self.placement_tracker.location_changed(id_key)
-    }
-
-    pub(super) fn monitors_changed(&mut self, monitors: Vec<MonitorInfo>) -> Vec<HwndId> {
-        tracing::info!(count = monitors.len(), "Monitor parameters changed");
-        self.update_monitors(monitors)
-    }
-
-    pub(super) fn tab_clicked(&mut self, container_id: ContainerId, tab_idx: usize) {
-        self.hub.focus_tab_index(container_id, tab_idx);
-        self.apply_layout();
-    }
-
-    pub(super) fn save_layout_file(&mut self, path: &std::path::Path) {
-        if let Err(e) = self.hub.save_layout(path) {
-            tracing::error!("Save layout failed: {e:#}");
-        }
-    }
-
-    pub(super) fn handle_display_change(&mut self) -> Vec<HwndId> {
-        let to_refresh = match self.display.get_all_monitors() {
-            Ok(monitors) => self.monitors_changed(monitors),
-            Err(e) => {
-                tracing::warn!("Failed to enumerate monitors: {e}");
-                Vec::new()
-            }
-        };
-        if let Some(fg) = self.display.get_exclusive_fullscreen_hwnd()
-            && let Some(id) = self.registry.get_id(fg)
+    pub(super) fn window_minimized(&mut self, key: HwndId) {
+        if let Some(id) = self.current_id(key)
+            && !self.hub.window(id).is_minimized()
         {
-            tracing::info!(%id, "D3D exclusive fullscreen entered");
-            self.enter_fullscreen_exclusive(id);
-        }
-        to_refresh
-    }
-
-    pub(super) fn handle_work_area_change(&mut self) -> Vec<HwndId> {
-        match self.display.get_all_monitors() {
-            Ok(monitors) => {
-                tracing::info!("Work area changed, refreshing monitor geometry");
-                self.monitors_changed(monitors)
-            }
-            Err(e) => {
-                tracing::warn!("Failed to enumerate monitors on work area change: {e}");
-                Vec::new()
-            }
+            self.hub.minimize_window(id);
         }
     }
-
-    pub(super) fn handle_dpi_change(&mut self) -> Vec<HwndId> {
-        match self.display.get_all_monitors() {
-            Ok(monitors) => {
-                tracing::info!("DPI changed, refreshing monitor scale");
-                self.monitors_changed(monitors)
-            }
-            Err(e) => {
-                tracing::warn!("Failed to enumerate monitors on DPI change: {e}");
-                Vec::new()
-            }
-        }
-    }
-
-    #[tracing::instrument(skip_all, fields(pid = ext.pid(), hwnd = %ext.id(), metadata = %metadata))]
-    pub(super) fn add_window(
-        &mut self,
-        NewWindow {
-            ext,
-            metadata,
-            constraints,
-        }: NewWindow,
-        rect: PixelRect<Physical>,
-        monitor: isize,
-    ) {
-        if self.registry.contains_hwnd(ext.id()) {
-            return;
-        }
-        let borderless_fs = self.monitors.is_borderless_fullscreen_at(rect, monitor);
-        let restrictions = if borderless_fs {
-            WindowRestrictions::ProtectFullscreen
-        } else {
-            WindowRestrictions::None
-        };
-        let Some(id) = self
-            .hub
-            .insert_window(Box::new(metadata.clone()), rect, restrictions)
-        else {
-            tracing::trace!(hwnd = %ext.id(), pid = ext.pid(), "ignored by rule");
-            return;
-        };
-        tracing::info!(%id, "New window");
-        let state = if borderless_fs {
-            WindowState::BorderlessFullscreen
-        } else {
-            WindowState::Positioned(PositionedState::Offscreen {
-                retries: 0,
-                actual: rect,
-            })
-        };
-        let id_key = ext.id();
-        self.hub.set_window_constraint(id, constraints);
-        self.recovery.track(&ext);
-        self.registry.insert(
-            id_key,
-            id,
-            ManagedWindow {
-                ext,
-                state,
-                is_minimized: false,
-                monitor,
-            },
-        );
-        self.pending_created.push(id);
-        self.apply_layout();
-    }
-
-    pub(super) fn set_constraints_for(&mut self, hwnd_id: HwndId, constraints: LimitObservation) {
-        let Some(id) = self.registry.get_id(hwnd_id) else {
-            return;
-        };
-        self.hub.set_window_constraint(id, constraints);
-    }
-
-    #[tracing::instrument(
-        skip(self, id_key),
-        fields(hwnd = %id_key),
-    )]
-    pub(super) fn handle_focus(&mut self, id_key: HwndId) {
-        let Some(id) = self.registry.get_id(id_key) else {
-            return;
-        };
-        let was_minimized = self
-            .registry
-            .get(id)
-            .map(|entry| entry.is_minimized)
-            .unwrap_or(false);
-        if was_minimized {
+    pub(super) fn window_restored(&mut self, key: HwndId) {
+        if let Some(id) = self.current_id(key)
+            && self.hub.window(id).is_minimized()
+        {
             self.hub.unminimize_window(id);
-            if let Some(entry) = self.registry.get_mut(id) {
-                entry.is_minimized = false;
-            }
         }
-        self.hub.set_focus(id);
-        tracing::info!("Window focused");
+    }
+    pub(super) fn handle_focus(&mut self, key: HwndId) {
+        self.focus_request = None;
+        self.window_restored(key);
+        if let Some(id) = self.current_id(key)
+            && self.hub.window(id).workspace().is_some()
+        {
+            self.hub.set_focus(id);
+        }
+        self.last_focus_target = Some(self.current_focus_target());
+    }
+    pub(super) fn title_changed(&mut self, key: HwndId, title: String) {
+        if let Some(discovery) = self.discoveries.get_mut(&key) {
+            discovery.metadata.title = Some(title.clone());
+        }
+        if let Some(id) = self.current_id(key) {
+            self.hub.set_window_title(id, title);
+        }
+    }
+    pub(super) fn set_constraints_for(&mut self, key: HwndId, limits: LimitObservation) {
+        if let Some(id) = self.current_id(key)
+            && !self.hub.window(id).is_minimized()
+            && !self.hub.window(id).is_fullscreen()
+            && self.hub.window(id).workspace().is_some()
+        {
+            self.hub.set_window_constraint(id, limits);
+        }
+    }
+    pub(super) fn float_moved(&mut self, key: HwndId, frame: PixelRect<Physical>, monitor: isize) {
+        let Some(id) = self.current_id(key) else {
+            return;
+        };
+        let Some(monitor_id) = self.monitors.id_for_handle(monitor) else {
+            return;
+        };
+        if frame.is_empty() || self.monitors.is_borderless_fullscreen_at(frame, monitor) {
+            return;
+        }
+        let window = self.hub.window(id);
+        if window.is_float()
+            && !window.is_minimized()
+            && window
+                .workspace()
+                .is_some_and(|workspace| self.hub.visible_workspaces().contains(&workspace))
+        {
+            self.hub.update_float_rect(id, frame, monitor_id);
+        }
+    }
+    pub(super) fn fullscreen_changed(&mut self, key: HwndId, fullscreen: Option<FullscreenKind>) {
+        let Some(id) = self.current_id(key) else {
+            return;
+        };
+        let window = self.hub.window(id);
+        if window.is_minimized() || window.workspace().is_none() {
+            return;
+        }
+        let previous = self.discoveries.get(&key).and_then(|d| d.fullscreen);
+        match fullscreen {
+            Some(FullscreenKind::Exclusive) => {
+                self.hub.set_fullscreen(id, WindowRestrictions::BlockAll)
+            }
+            Some(FullscreenKind::Borderless) => self
+                .hub
+                .set_fullscreen(id, WindowRestrictions::ProtectFullscreen),
+            None if previous.is_some() => self.hub.unset_fullscreen(id),
+            None => return,
+        }
+        if let Some(discovery) = self.discoveries.get_mut(&key) {
+            discovery.fullscreen = fullscreen;
+        }
+    }
+    pub(super) fn monitors_changed(&mut self, monitors: Vec<MonitorInfo>) {
+        if monitors.is_empty() {
+            return;
+        }
+        self.monitors.reconcile(&mut self.hub, &monitors);
+        self.window.send(HubMessage::DisplayRefreshed(monitors));
+    }
+    pub(super) fn handle_display_change(&mut self) {
+        match self.display.get_all_monitors() {
+            Ok(monitors) => self.monitors_changed(monitors),
+            Err(error) => tracing::warn!(%error, "Failed to enumerate monitors"),
+        }
+    }
+    pub(super) fn tab_clicked(&mut self, id: ContainerId, index: usize) {
+        self.hub.focus_tab_index(id, index);
         self.apply_layout();
     }
-
-    pub(super) fn query_workspaces(&self) -> Vec<WorkspaceInfo> {
-        self.hub.query_workspaces()
+    pub(super) fn apply_layout_file(&mut self, path: &str) {
+        match PreferredLayouts::load(path) {
+            Ok(layout) => {
+                self.hub.apply_preferred_layouts(layout);
+                self.apply_layout();
+            }
+            Err(error) => tracing::error!(%error, "Apply layout failed"),
+        }
     }
-
+    pub(super) fn save_layout_file(&mut self, path: &std::path::Path) {
+        if let Err(error) = self.hub.save_layout(path) {
+            tracing::error!(%error, "Save layout failed");
+        }
+    }
     pub(super) fn query_workspaces_json(&self) -> String {
         serde_json::to_string(&self.hub.query_workspaces())
             .expect("WorkspaceInfo is infallibly serializable")
@@ -490,8 +376,9 @@ impl Dome {
 
     pub(super) fn run_binding(&mut self, keymap: &str, keystroke: &Keystroke, main_thread_id: u32) {
         {
-            let mut effects = WinPlatformEffects {
-                registry: &mut self.registry,
+            let mut effects = WindowsPlatformEffects {
+                native_keys: &self.native_keys,
+                sender: self.window.as_mut(),
                 main_thread_id,
                 env: &self.env,
             };
@@ -503,8 +390,9 @@ impl Dome {
 
     #[tracing::instrument(skip(self))]
     pub(super) fn handle_actions(&mut self, actions: &Actions, main_thread_id: u32) {
-        let mut effects = WinPlatformEffects {
-            registry: &mut self.registry,
+        let mut effects = WindowsPlatformEffects {
+            native_keys: &self.native_keys,
+            sender: self.window.as_mut(),
             main_thread_id,
             env: &self.env,
         };
@@ -516,356 +404,25 @@ impl Dome {
     pub(super) fn reload(&mut self) -> Option<Box<Config>> {
         let config = self.hub.reload_config(&mut self.keymap_publisher)?;
         self.env = config.env.clone();
-        self.dispatch(HubMessage::AppearanceChanged(config.appearance.clone()));
-        tracing::info!("Config reloaded");
+        self.window
+            .send(HubMessage::AppearanceChanged(config.appearance.clone()));
+        let ignored: Vec<_> = self
+            .discoveries
+            .keys()
+            .copied()
+            .filter(|key| self.current_id(*key).is_none())
+            .collect();
+        for key in ignored {
+            self.admit_discovery(key);
+        }
         self.apply_layout();
         Some(config)
     }
-
-    #[tracing::instrument(level = "trace", skip_all)]
-    pub(super) fn apply_layout(&mut self) {
-        let created = std::mem::take(&mut self.pending_created);
-
-        let result = self.hub.get_visible_placements();
-        let focused_window = result.focused_window;
-        let focused_monitor = result.focused_monitor;
-        let focused = focused_window;
-
-        let mut per_monitor: Vec<MonitorScene> = Vec::new();
-        let mut new_window_ids: HashSet<WindowId> = HashSet::new();
-        let mut float_actions: Vec<FloatOverlayAction> = Vec::new();
-
-        for mp in result.monitors {
-            let work_area = mp.work_area;
-
-            let mut window_ids = HashSet::new();
-
-            match &mp.layout {
-                MonitorLayout::Fullscreen(id) => {
-                    window_ids.insert(*id);
-                    self.show_fullscreen_window(*id, work_area, mp.monitor_id);
-                }
-                MonitorLayout::Normal {
-                    tiling_windows,
-                    float_windows: fw,
-                    containers,
-                } => {
-                    let mut placed_tiling = Vec::new();
-                    let mut placed_floats = Vec::new();
-                    let mut container_data = Vec::new();
-
-                    // Windows places tiles unclipped, so a tile extending past the work area stays where core put it.
-                    // That is a current choice, not an invariant. macOS trims instead.
-                    for wp in tiling_windows {
-                        window_ids.insert(wp.id);
-                        let Some(entry) = self.registry.get(wp.id) else {
-                            continue;
-                        };
-                        if wp.content_box.is_empty() {
-                            tracing::debug!(
-                                window_id = %wp.id,
-                                border_box = ?wp.border_box,
-                                "Content box entirely border, hiding window"
-                            );
-                            float_actions.extend(self.hide_window(wp.id));
-                            continue;
-                        }
-                        placed_tiling.push(TilingWindowShow {
-                            placement: *wp,
-                            corner_radius: entry.ext.corner_radius(),
-                        });
-                    }
-                    for wp in fw {
-                        window_ids.insert(wp.id);
-                        if self.registry.get(wp.id).is_none() {
-                            continue;
-                        }
-                        if wp.content_box.is_empty() {
-                            tracing::debug!(
-                                window_id = %wp.id,
-                                border_box = ?wp.border_box,
-                                "Float content box entirely border, hiding window"
-                            );
-                            float_actions.extend(self.hide_window(wp.id));
-                            continue;
-                        }
-                        placed_floats.push(*wp);
-                    }
-                    for cp in containers {
-                        if !cp.is_tabbed && !cp.is_highlighted {
-                            continue;
-                        }
-                        container_data.push(cp.clone());
-                    }
-
-                    per_monitor.push(MonitorScene {
-                        monitor_id: mp.monitor_id,
-                        work_area,
-                        scale: self.monitors.monitor(mp.monitor_id).scale,
-                        border_thickness: mp.border_thickness,
-                        tiling_windows: placed_tiling,
-                        float_windows: placed_floats,
-                        containers: container_data,
-                    });
-                }
-            }
-
-            new_window_ids.extend(window_ids);
-        }
-
-        let to_hide: Vec<WindowId> = self
-            .displayed_windows
-            .difference(&new_window_ids)
-            .copied()
-            .collect();
-        let tabs_to_add: Vec<WindowId> = new_window_ids
-            .difference(&self.displayed_windows)
-            .copied()
-            .collect();
-
-        self.displayed_windows = new_window_ids;
-
-        for &id in &to_hide {
-            // Keep taskbar tab for user-minimized windows so the user can
-            // click it to restore.
-            if let Some(entry) = self.registry.get(id)
-                && !entry.is_minimized
-            {
-                self.taskbar.delete_tab(entry.ext.id());
-            }
-            float_actions.extend(self.hide_window(id));
-        }
-
-        for &id in &created {
-            if !self.displayed_windows.contains(&id) {
-                float_actions.extend(self.hide_window(id));
-            }
-        }
-
-        float_actions.extend(self.position_windows(&per_monitor, focused));
-
-        for &id in &tabs_to_add {
-            if let Some(entry) = self.registry.get(id) {
-                self.taskbar.add_tab(entry.ext.id());
-            }
-        }
-
-        let current_monitor = focused_monitor;
-        let monitor_changed = self
-            .last_focused_monitor
-            .is_some_and(|m| m != current_monitor);
-
-        let mut focus_monitor = None;
-        if focused != self.last_focused || monitor_changed {
-            self.last_focused = focused;
-            if let Some(id) = focused {
-                if let Some(entry) = self.registry.get(id)
-                    && !matches!(entry.state, WindowState::ExclusiveFullscreen)
-                {
-                    entry.ext.set_foreground_window();
-                }
-            } else {
-                focus_monitor = Some(focused_monitor);
-            }
-        }
-        if let Some(monitor) = focus_monitor
-            && let Some(overlay) = self.tiling_overlays.get(&monitor)
-        {
-            overlay.focus();
-        }
-        self.last_focused_monitor = Some(current_monitor);
-
-        let live_floats: HashSet<WindowId> = per_monitor
-            .iter()
-            .flat_map(|m| m.float_windows.iter().map(|wp| wp.id))
-            .collect();
-        self.float_overlays.retain(|id, _| live_floats.contains(id));
-
-        let scene = RenderScene {
-            monitors: per_monitor,
-            float_overlays: float_actions,
-            workspaces: self.query_workspaces(),
-        };
-        self.dispatch(HubMessage::Scene(scene));
-    }
-
-    /// Returns `true` when the window settled on a different monitor than
-    /// before, the signal to re-read its size constraints.
-    pub(super) fn handle_window_moved(
-        &mut self,
-        id_key: HwndId,
-        new_placement: PixelRect<Physical>,
-        monitor_handle: isize,
-        observed_at: Instant,
-    ) -> bool {
-        let Some(id) = self.registry.get_id(id_key) else {
-            return false;
-        };
-        let monitor_changed = self.registry.get_mut(id).is_some_and(|entry| {
-            let changed = entry.monitor != monitor_handle;
-            entry.monitor = monitor_handle;
-            changed
-        });
-        self.window_moved(id, new_placement, monitor_handle, observed_at);
-        self.apply_layout();
-        monitor_changed
-    }
-
-    pub(super) fn update_titles(&mut self, titles: Vec<(HwndId, Option<String>)>) {
-        for (hwnd_id, title) in &titles {
-            if let (Some(window_id), Some(title)) = (self.registry.get_id(*hwnd_id), title)
-                && self.hub.set_window_title(window_id, title.clone())
-            {
-                tracing::trace!(%window_id, ?hwnd_id, title = %title, "Title changed");
-            }
-        }
-        // TODO: full re-layout on every title change is expensive -- we should
-        // selectively re-render only the affected tiling overlay instead.
-        self.apply_layout();
-    }
-
-    pub(super) fn retry_drifted_windows(&mut self) {
-        let window_ids: Vec<(HwndId, WindowId)> = self.registry.iter().collect();
-        for (_hwnd_id, window_id) in window_ids {
-            self.retry_drift(window_id);
-        }
-    }
-
-    pub(super) fn is_managed(&self, id_key: HwndId) -> bool {
-        self.registry.contains_hwnd(id_key)
-    }
-
     #[cfg(test)]
-    pub(super) fn window_id_for(&self, hwnd: HwndId) -> Option<WindowId> {
-        self.registry.get_id(hwnd)
-    }
-
-    fn dispatch(&mut self, msg: HubMessage) {
-        self.window.send(msg);
-    }
-
-    #[tracing::instrument(level = "trace", skip_all)]
-    fn position_windows(
-        &mut self,
-        per_monitor: &[MonitorScene],
-        focused: Option<WindowId>,
-    ) -> Vec<FloatOverlayAction> {
-        let focus_changed = focused != self.last_focused;
-        let mut float_actions: Vec<FloatOverlayAction> = Vec::new();
-
-        for data in per_monitor {
-            for wp in &data.float_windows {
-                let Some(entry) = self.registry.get(wp.id) else {
-                    tracing::debug!(id = ?wp.id, "position_windows: float window missing from registry");
-                    continue;
-                };
-                let hwnd_id = entry.ext.id();
-                if self.placement_tracker.is_moving(hwnd_id) {
-                    continue;
-                }
-                float_actions.extend(self.show_float(
-                    wp.id,
-                    wp,
-                    focus_changed,
-                    focused == Some(wp.id),
-                    data.monitor_id,
-                    data.border_thickness,
-                ));
-            }
-
-            let reference = self.tiling_reference(data);
-            if let Some((wp, ext)) = &reference {
-                self.position_tiling_window(wp, data.monitor_id, ZOrder::Unchanged);
-                // The overlay goes in before the loop below. Each window that loop inserts
-                // against the same reference moves the overlay one place lower, so the overlay
-                // ends up below every window on this monitor.
-                if let Some(overlay) = self.tiling_overlays.get(&data.monitor_id) {
-                    overlay.set_z_order(ZOrder::After(ext.id()));
-                }
-            }
-
-            let z = reference.map_or(ZOrder::Unchanged, |(_, ext)| ZOrder::After(ext.id()));
-            for show in data
-                .tiling_windows
-                .iter()
-                .filter(|show| !show.placement.is_highlighted)
-            {
-                self.position_tiling_window(&show.placement, data.monitor_id, z);
-            }
-        }
-        float_actions
-    }
-
-    /// The z-order reference for one monitor, the tiling window that carries the focus
-    /// highlight. `None` leaves this monitor's order alone, which covers a monitor without
-    /// focus, a focused container, and a focused float.
-    fn tiling_reference<'a>(
-        &self,
-        data: &'a MonitorScene,
-    ) -> Option<(&'a TilingWindowPlacement, Arc<dyn ManageExternalWindow>)> {
-        let wp = &data
-            .tiling_windows
-            .iter()
-            .find(|show| show.placement.is_highlighted)?
-            .placement;
-        let entry = self.registry.get(wp.id)?;
-        Some((wp, Arc::clone(&entry.ext)))
-    }
-
-    fn position_tiling_window(
-        &mut self,
-        wp: &TilingWindowPlacement,
-        monitor: MonitorId,
-        z: ZOrder,
-    ) {
-        let Some(entry) = self.registry.get(wp.id) else {
-            tracing::debug!(id = ?wp.id, "position_windows: tiling window missing from registry");
-            return;
-        };
-        if self.placement_tracker.is_moving(entry.ext.id()) {
-            return;
-        }
-        self.show_tiling(wp.id, wp, monitor, z);
-    }
-
-    fn update_monitors(&mut self, monitors: Vec<MonitorInfo>) -> Vec<HwndId> {
-        if monitors.is_empty() {
-            tracing::warn!("Empty monitor list, skipping update");
-            return Vec::new();
-        }
-        let change = self.monitors.reconcile(&mut self.hub, &monitors);
-        let added: Vec<NewTilingOverlay> = change
-            .added
-            .iter()
-            .map(|&monitor_id| {
-                let m = self.monitors.monitor(monitor_id);
-                NewTilingOverlay {
-                    monitor_id,
-                    work_area: m.work_area,
-                    scale: m.scale,
-                }
-            })
-            .collect();
-        for &monitor_id in &change.removed {
-            self.tiling_overlays.remove(&monitor_id);
-        }
-        self.dispatch(HubMessage::MonitorsChanged(MonitorSetChange {
-            added,
-            removed: change.removed,
-        }));
-
-        self.registry
-            .iter()
-            .filter(|(_, id)| {
-                self.registry
-                    .get(*id)
-                    .is_none_or(|e| !matches!(e.state, WindowState::ExclusiveFullscreen))
-            })
-            .map(|(hwnd_id, _)| hwnd_id)
-            .collect()
+    pub(super) fn window_id_for(&self, key: HwndId) -> Option<WindowId> {
+        self.current_id(key)
     }
 }
-
 // Fallback display string derived from the executable name. Prefer
 // FileDescription from version info when available.
 pub(super) fn display_from_process(process: &str) -> String {

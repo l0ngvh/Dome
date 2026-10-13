@@ -47,6 +47,8 @@ pub(super) fn show_context_menu(hwnd: HWND, entries: &[MenuEntry]) -> Option<u32
 
     // TPM_RETURNCMD returns the selected id directly instead of posting WM_COMMAND, and
     // TPM_NONOTIFY suppresses WM_MENUCOMMAND for the same reason. 0 means click-outside.
+    #[cfg(test)]
+    let modal = super::tests::ModalMarker::enter();
     let cmd = unsafe {
         TrackPopupMenu(
             menu,
@@ -59,6 +61,8 @@ pub(super) fn show_context_menu(hwnd: HWND, entries: &[MenuEntry]) -> Option<u32
         )
     }
     .0 as u32;
+    #[cfg(test)]
+    drop(modal);
 
     // TrackPopupMenu docs recommend posting a dummy message so the menu dismisses cleanly
     // if the user right-clicks the tray twice in a row.

@@ -17,7 +17,7 @@ use super::{CaptureMessage, CaptureSender};
 use crate::core::{Dimension, Length};
 use crate::platform::macos::objc2_wrapper::dimension_to_cg_rect;
 
-pub(super) struct WindowCapture {
+pub(in crate::platform::macos) struct WindowCapture {
     stream: Retained<SCStream>,
     handler: Retained<StreamOutputHandler>,
     running: bool,

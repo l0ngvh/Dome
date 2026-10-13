@@ -1,7 +1,7 @@
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST};
 
-use crate::core::{Length, LimitObservation, Logical, Physical, PixelRect};
+use crate::core::LimitObservation;
 
 /// Opaque window identity.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -60,34 +60,6 @@ impl From<ZOrder> for Option<HWND> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum ShowCmd {
-    Restore,
-    Minimize,
-}
-
-/// Non-blocking writes on an external window (HWND messages that complete
-/// synchronously without round-tripping through another process). Stored as
-/// `Arc<dyn ManageExternalWindow>` inside `ManagedWindow`; called from the dome
-/// thread.
-pub(crate) trait ManageExternalWindow: Send + Sync {
-    fn id(&self) -> HwndId;
-    fn pid(&self) -> u32;
-    fn set_position(&self, z: ZOrder, rect: PixelRect<Physical>);
-    /// Changes the z-order without moving the window, so no owned child moves.
-    fn set_z_order(&self, z: ZOrder);
-    fn move_offscreen(&self);
-    fn show_cmd(&self, cmd: ShowCmd);
-    fn close(&self);
-    fn set_foreground_window(&self);
-    fn is_maximized(&self) -> bool;
-    fn recover(&self, was_maximized: bool);
-    /// Predicted, because Windows has no public API for the radius DWM draws.
-    /// The reads behind it send no message to the window, so a hung app cannot
-    /// stall them.
-    fn corner_radius(&self) -> Length<Logical>;
-}
-
 pub(crate) trait ManageOverlay: Send + Sync {
     fn set_z_order(&self, z: ZOrder);
     fn focus(&self);
@@ -100,6 +72,8 @@ pub(crate) trait ManageOverlay: Send + Sync {
 /// writes because `AXWindow` caches an `AXUIElement` and cannot be cheaply
 /// re-fabricated.
 pub(crate) trait InspectExternalWindow: Send + Sync {
+    fn process_id(&self) -> u32;
+    fn is_maximized(&self) -> bool;
     fn check_unmanageable(&self) -> bool;
     /// Live `IsIconic` query against the OS.
     fn is_minimized(&self) -> bool;
@@ -108,10 +82,8 @@ pub(crate) trait InspectExternalWindow: Send + Sync {
     /// Sibling of `get_process_name`. Returns the full path from
     /// `QueryFullProcessImageNameW` without splitting the basename off.
     fn get_process_path(&self) -> anyhow::Result<String>;
-    fn get_size_constraints(&self) -> LimitObservation;
-    /// Excludes invisible window borders, unlike `get_pixel_rect`.
-    /// Same coordinate space as `set_position`.
-    fn get_visible_rect(&self) -> PixelRect<Physical>;
+    /// None means the native read failed, not that the app cleared its limits.
+    fn get_size_constraints(&self) -> Option<LimitObservation>;
     fn get_app_display_name(&self) -> Option<String>;
     /// Native OS monitor ownership. Non-blocking; safe on external HWNDs.
     fn get_monitor(&self) -> isize;

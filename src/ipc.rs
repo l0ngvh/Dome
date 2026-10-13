@@ -31,7 +31,17 @@ pub(crate) fn start_server<F>(layout_path: String, dispatch: F) -> anyhow::Resul
 where
     F: Fn(IpcEvent) -> anyhow::Result<()> + Send + Clone + 'static,
 {
-    let on_message = move |msg: IpcMessage| -> Response {
+    listen(message_handler(layout_path, dispatch))
+}
+
+fn message_handler<F>(
+    layout_path: String,
+    dispatch: F,
+) -> impl Fn(IpcMessage) -> Response + Send + Clone
+where
+    F: Fn(IpcEvent) -> anyhow::Result<()> + Send + Clone + 'static,
+{
+    move |msg: IpcMessage| -> Response {
         match msg {
             IpcMessage::Action { action } => {
                 match dispatch(IpcEvent::Action(Actions::new(vec![action]))) {
@@ -64,8 +74,25 @@ where
                 Err(e) => Response::error(ErrorCode::ActionFailed, e.to_string()),
             },
         }
-    };
-    listen(on_message)
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+pub(crate) fn serve_native_fixture<F>(
+    name: interprocess::local_socket::Name<'static>,
+    dispatch: F,
+) -> std::thread::JoinHandle<anyhow::Result<()>>
+where
+    F: Fn(IpcEvent) -> anyhow::Result<()> + Send + Clone + 'static,
+{
+    let listener = ListenerOptions::new()
+        .name(name)
+        .create_sync()
+        .expect("isolated fixture pipe");
+    std::thread::spawn(move || {
+        let stream = listener.accept()?;
+        handle_client(stream, &message_handler(String::new(), dispatch))
+    })
 }
 
 fn listen<F>(on_message: F) -> anyhow::Result<()>

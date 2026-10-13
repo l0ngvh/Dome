@@ -1,6 +1,8 @@
 mod display;
+mod internal_windows;
 mod scene;
 mod window;
+mod window_server;
 mod z_order;
 
 use std::sync::{Arc, Mutex};
@@ -11,8 +13,10 @@ use crate::platform::windows::external::HwndId;
 use crate::platform::windows::taskbar::ManageTaskbar;
 
 pub(crate) use display::MockDisplay;
-pub(crate) use scene::{MockSceneSender, OverlayReport};
+pub(crate) use internal_windows::MockInternalWindows;
+pub(crate) use scene::MockSceneSender;
 pub(crate) use window::MockExternalHwnd;
+pub(crate) use window_server::MockWindowServer;
 pub(crate) use z_order::ZOrderStack;
 
 /// The env state a mock writes into. The env hands it over once, at construction.

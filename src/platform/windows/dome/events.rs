@@ -1,77 +1,84 @@
+use std::collections::HashMap;
+
+use super::MonitorInfo;
 use crate::action::WorkspaceInfo;
 use crate::config::Appearance;
 use crate::core::{
     ContainerPlacement, FloatWindowPlacement, Length, Logical, MonitorId, Physical, PixelRect,
     Pixels, TilingWindowPlacement, WindowId,
 };
-use crate::platform::windows::external::ZOrder;
+use crate::platform::windows::external::HwndId;
 
 pub(in crate::platform::windows) enum HubMessage {
-    Scene(RenderScene),
-    MonitorsChanged(MonitorSetChange),
+    Scene(Scene),
+    Command(WindowCommand),
     AppearanceChanged(Appearance),
+    DisplayRefreshed(Vec<MonitorInfo>),
+    Shutdown,
 }
 
-/// The domain's only route to the window side.
 pub(in crate::platform::windows) trait SceneSender {
-    fn send(&mut self, msg: HubMessage);
+    fn send(&mut self, message: HubMessage);
 }
 
-/// The domain decides that an overlay exists, the window side owns the handle it gets.
-pub(in crate::platform::windows) struct MonitorSetChange {
-    pub(in crate::platform::windows) added: Vec<NewTilingOverlay>,
-    pub(in crate::platform::windows) removed: Vec<MonitorId>,
+#[derive(Clone)]
+pub(in crate::platform::windows) struct Scene {
+    pub windows: HashMap<HwndId, ExpectedWindow>,
+    pub monitors: Vec<MonitorScene>,
+    pub focused_window: Option<HwndId>,
+    pub focus_request: Option<FocusTarget>,
+    pub workspaces: Vec<WorkspaceInfo>,
 }
 
-pub(in crate::platform::windows) struct NewTilingOverlay {
-    pub(in crate::platform::windows) monitor_id: MonitorId,
-    pub(in crate::platform::windows) work_area: PixelRect,
-    pub(in crate::platform::windows) scale: f32,
+#[derive(Clone, Copy)]
+pub(in crate::platform::windows) struct ExpectedWindow {
+    pub id: WindowId,
+    pub placement: WindowPlacement,
 }
 
-pub(in crate::platform::windows) struct RenderScene {
-    pub(in crate::platform::windows) monitors: Vec<MonitorScene>,
-    pub(in crate::platform::windows) float_overlays: Vec<FloatOverlayAction>,
-    /// Tray label source, carried here because the tray lives with the windows.
-    pub(in crate::platform::windows) workspaces: Vec<WorkspaceInfo>,
-}
-
-pub(in crate::platform::windows) enum FloatOverlayAction {
-    /// The window thread creates the overlay, so it seeds the first z-order. Every later
-    /// z-order write comes from the domain through `ManageOverlay`.
-    Create {
-        window_id: WindowId,
-        placement: FloatWindowPlacement,
-        z_order: ZOrder,
-        scale: f32,
-        border_thickness: Pixels<Physical>,
-        corner_radius: Length<Logical>,
+#[derive(Clone, Copy)]
+pub(in crate::platform::windows) enum WindowPlacement {
+    Tiling {
+        monitor: MonitorId,
+        placement: TilingWindowPlacement,
     },
-    Update {
-        window_id: WindowId,
+    Float {
+        monitor: MonitorId,
         placement: FloatWindowPlacement,
-        scale: f32,
-        border_thickness: Pixels<Physical>,
-        corner_radius: Length<Logical>,
     },
-    /// Absent overlay is normal here, because a window leaving the float state can be hidden
-    /// before its overlay is retained away.
-    Hide(WindowId),
+    Fullscreen {
+        monitor: MonitorId,
+    },
+    Hidden,
+    Minimized,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::platform::windows) enum FocusTarget {
+    Window(HwndId),
+    Monitor(MonitorId),
+}
+
+pub(in crate::platform::windows) enum WindowCommand {
+    Close(HwndId),
+    Unminimize(HwndId),
+}
+
+#[derive(Clone)]
 pub(in crate::platform::windows) struct MonitorScene {
-    pub(in crate::platform::windows) monitor_id: MonitorId,
-    pub(in crate::platform::windows) work_area: PixelRect,
-    /// Resolved on the domain side, since the monitor registry does not cross the seam.
-    pub(in crate::platform::windows) scale: f32,
-    pub(in crate::platform::windows) border_thickness: Pixels<Physical>,
-    pub(in crate::platform::windows) tiling_windows: Vec<TilingWindowShow>,
-    pub(in crate::platform::windows) float_windows: Vec<FloatWindowPlacement>,
-    pub(in crate::platform::windows) containers: Vec<ContainerPlacement>,
+    pub id: MonitorId,
+    pub native: isize,
+    pub work_area: PixelRect<Physical>,
+    pub system_work_area: PixelRect<Physical>,
+    pub scale: f32,
+    pub border_thickness: Pixels<Physical>,
+    pub tiling_windows: Vec<TilingWindowPlacement>,
+    pub float_windows: Vec<FloatWindowPlacement>,
+    pub containers: Vec<ContainerPlacement>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(in crate::platform::windows) struct TilingWindowShow {
-    pub(in crate::platform::windows) placement: TilingWindowPlacement,
-    pub(in crate::platform::windows) corner_radius: Length<Logical>,
+    pub placement: TilingWindowPlacement,
+    pub corner_radius: Length<Logical>,
 }

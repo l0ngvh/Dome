@@ -15,13 +15,14 @@ use objc2_foundation::NSRect;
 use objc2_io_surface::IOSurface;
 use objc2_quartz_core::{CAAutoresizingMask, CALayer, CATransaction, kCAGravityResize};
 
-use super::super::dome::{ContainerShow, FloatShow, HubEvent, TilingWindowShow};
+use super::super::dome::events::HubEvent;
 use super::compositor::{MacOsCompositor, physical_size};
+use super::internal_windows::{ContainerShow, FloatShow, TilingWindowShow};
 use crate::config::Appearance;
 use crate::core::{ContainerId, Dimension, FloatWindowPlacement, Length, Logical};
 use crate::font::FontConfig;
 use crate::overlay::{self, BorderMetrics, LogicalTiledContainer, LogicalTiledWindow};
-use crate::platform::macos::objc2_wrapper::{kAXFrontmostAttribute, set_attribute_value};
+use crate::platform::macos::objc2_wrapper::kAXFrontmostAttribute;
 use crate::platform::render::{Renderer, WgpuContext};
 use crate::platform::tab_bar::{TabBarMessage, TabBarWidget};
 use crate::theme::Flavor;
@@ -507,8 +508,7 @@ impl TabBarOverlay {
 fn activate_self() {
     let pid = std::process::id() as i32;
     let ax_app = unsafe { AXUIElement::new_application(pid) };
-    set_attribute_value(&ax_app, &kAXFrontmostAttribute(), unsafe {
-        kCFBooleanTrue.unwrap()
-    })
-    .ok();
+    unsafe {
+        ax_app.set_attribute_value(&kAXFrontmostAttribute(), kCFBooleanTrue.unwrap());
+    }
 }

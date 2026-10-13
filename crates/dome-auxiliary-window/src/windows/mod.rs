@@ -5,8 +5,11 @@ mod tray;
 mod window;
 mod wnd_proc;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) use app::{App, Icon, Shell};
-pub(crate) use run_loop::{LoopHandle, LoopWaker};
+pub(crate) use run_loop::{LoopHandle, WakeTarget};
 pub use window::AuxiliaryWindowExtWindows;
 pub(crate) use window::Window;
 
@@ -16,7 +19,7 @@ use windows::core::{PCWSTR, w};
 /// Windows baseline DPI (100% scaling).
 const BASE_DPI: f32 = 96.0;
 
-/// Wakes the crate's window pump. A thread message, so it never reaches a wnd-proc.
+/// Payload-free notification to the owned message-only window.
 const WM_APP_WAKE: u32 = WM_APP;
 
 /// The tray icon's callback message, posted by the shell to the owner window. The crate

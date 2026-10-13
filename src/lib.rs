@@ -24,6 +24,9 @@ pub use dome_ipc::{
 #[cfg(target_os = "macos")]
 pub use platform::macos::run_app;
 
+#[cfg(all(target_os = "macos", feature = "native-ui-test"))]
+pub use platform::macos::run_native_ui_loop_test;
+
 #[cfg(target_os = "windows")]
 pub use platform::windows::run_app;
 

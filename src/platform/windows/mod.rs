@@ -11,18 +11,25 @@ mod process;
 mod runner;
 mod spawn;
 mod taskbar;
-mod throttle;
-mod timer_registry;
 mod ui;
+mod window_server;
 
+#[cfg(test)]
+mod native_ui;
+#[cfg(test)]
+mod startup_tests;
 #[cfg(test)]
 mod tests;
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use std::time::Instant;
 
 use crate::logging::Logger;
 use anyhow::Result;
@@ -38,19 +45,17 @@ use windows::Win32::UI::HiDpi::{
     GetDpiAwarenessContextForProcess, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, MSG, PostThreadMessageW, TranslateMessage, WM_APP, WM_QUIT,
-    WM_TIMER,
+    DispatchMessageW, GetMessageW, MSG, PM_NOREMOVE, PeekMessageW, PostThreadMessageW,
+    TranslateMessage, WM_APP, WM_QUIT,
 };
 use windows::core::BOOL;
 
-use crate::action::{Actions, WorkspaceInfo};
+use crate::action::Actions;
 use crate::config::watch::start_file_watcher;
 use crate::config::{
     Appearance, LuaRuntime, PreferredLayouts, bootstrap::resolve_config_path, paths,
 };
-use crate::core::MonitorId;
 use crate::core::TilingConfig;
-use crate::core::WindowId;
 use crate::ipc;
 use crate::platform::render::WgpuContext;
 use crate::platform::shell_menu::{build_menu, focused_tooltip, id_to_action};
@@ -59,15 +64,14 @@ use dome::{Dome, HubEvent};
 use dome_auxiliary_window::{App, AppHandler, Icon, LoopWaker, MenuEntry, Shell};
 use event_listener::install_event_hooks;
 use external::HwndId;
-use external::ManageOverlay;
-use ui::WindowThread;
 use ui::overlay::WgpuOverlayFactory;
+use ui::{AuxiliaryWindows, UiState};
+use window_server::{NativeEvent, NativeEventSender, WindowServer, WindowsWindowServer};
 
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
 use taskbar::Taskbar;
 
 pub(super) const WM_APP_HUBEVENT: u32 = WM_APP;
-pub(super) const WM_APP_DISPATCH_RESULT: u32 = WM_APP + 1;
 
 /// The tray icon compiled into the executable's resources. Matches the id in the resource
 /// script the build embeds.
@@ -75,87 +79,187 @@ const TRAY_ICON_RESOURCE_ID: u16 = 1;
 
 static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Wake {
+    Ui,
+    WindowServer,
+    FocusRequest,
+}
+
 #[derive(Clone)]
 struct HubSender {
     thread_id: u32,
+    events: Sender<HubEvent>,
 }
-
 impl HubSender {
     fn send(&self, event: HubEvent) {
-        let ptr = Box::into_raw(Box::new(event)) as usize;
-        unsafe {
-            PostThreadMessageW(self.thread_id, WM_APP_HUBEVENT, WPARAM(ptr), LPARAM(0)).ok();
-        }
-    }
-
-    fn tiling_overlay_ready(&self, monitor: MonitorId, overlay: Arc<dyn ManageOverlay>) {
-        self.send(HubEvent::TilingOverlayReady { monitor, overlay });
-    }
-
-    fn float_overlay_ready(&self, window: WindowId, overlay: Arc<dyn ManageOverlay>) {
-        self.send(HubEvent::FloatOverlayReady { window, overlay });
-    }
-}
-
-/// The window thread's `App` owns the receiver, so a failed send means it is
-/// gone during shutdown and there is nothing to wake.
-struct SceneThreadSender {
-    scenes: Sender<HubMessage>,
-    waker: LoopWaker,
-}
-
-impl SceneSender for SceneThreadSender {
-    fn send(&mut self, msg: HubMessage) {
-        if self.scenes.send(msg).is_ok() {
-            self.waker.wake();
-        }
-    }
-}
-
-/// Handed from the window thread to the domain thread once the window loop is built.
-struct WindowThreadReady {
-    scenes: Sender<HubMessage>,
-    waker: LoopWaker,
-    thread_id: u32,
-}
-
-/// Drives `WindowThread` and the shell from the auxiliary window crate's loop.
-struct WindowLoopHandler {
-    window_thread: WindowThread,
-    scenes: Receiver<HubMessage>,
-    workspaces: Vec<WorkspaceInfo>,
-    hub_sender: HubSender,
-}
-
-impl AppHandler for WindowLoopHandler {
-    fn on_wake(&mut self, shell: &Shell) {
-        while let Ok(msg) = self.scenes.try_recv() {
-            if let HubMessage::Scene(scene) = &msg {
-                self.workspaces = scene.workspaces.clone();
-                shell.set_tooltip(&focused_tooltip(&scene.workspaces));
+        if self.events.send(event).is_ok() {
+            unsafe {
+                PostThreadMessageW(self.thread_id, WM_APP_HUBEVENT, WPARAM(0), LPARAM(0)).ok();
             }
-            self.window_thread.send(msg);
         }
     }
+}
 
-    fn menu(&mut self) -> Vec<MenuEntry> {
-        build_menu(&self.workspaces, false)
+#[derive(Clone)]
+struct UiSender {
+    scenes: Sender<HubMessage>,
+    waker: LoopWaker<Wake>,
+}
+impl SceneSender for UiSender {
+    fn send(&mut self, message: HubMessage) {
+        if self.scenes.send(message).is_ok() {
+            self.waker.wake(Wake::Ui);
+        }
+    }
+}
+struct UiThreadReady {
+    ui: UiSender,
+    native: NativeEventSender,
+}
+struct StartupReady {
+    hub: HubSender,
+    native: NativeEventSender,
+    acknowledged: Sender<bool>,
+}
+
+struct WindowLoopCallbacks {
+    wake: Box<dyn Fn(Wake)>,
+    wake_at: Box<dyn Fn(Wake, Option<Instant>)>,
+    stop_wakes: Box<dyn Fn()>,
+    terminate: Box<dyn Fn()>,
+}
+struct WindowLoopHandler {
+    ui: UiState,
+    windows: Box<dyn WindowServer>,
+    callbacks: Rc<OnceCell<WindowLoopCallbacks>>,
+    hub_sender: HubSender,
+    observe_foreground: Box<dyn Fn()>,
+    stopping: bool,
+}
+impl WindowLoopHandler {
+    fn callbacks(&self) -> &WindowLoopCallbacks {
+        self.callbacks
+            .get()
+            .expect("loop callbacks bound before delivery")
+    }
+    fn process_window_server_at(&mut self, now: Instant) {
+        if self.stopping {
+            return;
+        }
+        self.windows.ingest_native_events(now);
+        self.windows.ingest_read_results(now);
+        self.windows.read_settled_windows(now);
+        (self.callbacks().wake_at)(Wake::WindowServer, self.windows.next_deadline());
+        if self.windows.has_observations() {
+            (self.callbacks().wake)(Wake::Ui);
+        }
+    }
+    fn process_ui_at(&mut self, now: Instant) -> ControlFlow<()> {
+        if self.stopping {
+            return ControlFlow::Break(());
+        }
+        for observation in self.windows.take_observations() {
+            self.ui.observe(self.windows.as_mut(), observation, now);
+        }
+        let ControlFlow::Continue((scene, commands)) = self.ui.drain_intake(self.windows.as_mut())
+        else {
+            self.stop();
+            (self.callbacks().terminate)();
+            return ControlFlow::Break(());
+        };
+        if let Some(scene) = &scene {
+            self.ui.apply_placements(self.windows.as_mut(), scene, now);
+        }
+        for command in commands {
+            self.ui.apply_command(self.windows.as_mut(), command);
+        }
+        if let Some(scene) = &scene {
+            let keys: Vec<_> = scene.windows.keys().copied().collect();
+            for observation in self.windows.read_corner_radii(&keys) {
+                self.ui.observe(self.windows.as_mut(), observation, now);
+            }
+            self.ui.show_internal_windows(scene);
+        }
+        self.ui.apply_overlay_focus(self.windows.as_mut());
+        if let Some(scene) = &scene {
+            self.ui.restack(self.windows.as_mut(), scene);
+        }
+        (self.callbacks().wake_at)(Wake::FocusRequest, self.ui.focus_deadline(now));
+        ControlFlow::Continue(())
+    }
+    fn process_focus_request_at(&mut self, now: Instant) {
+        if self.stopping {
+            return;
+        }
+        self.ui.submit_pending_focus(self.windows.as_mut(), now);
+        (self.callbacks().wake_at)(Wake::FocusRequest, self.ui.focus_deadline(now));
+    }
+    fn process_wake_at(&mut self, wake: Wake, now: Instant) -> ControlFlow<()> {
+        match wake {
+            Wake::WindowServer => self.process_window_server_at(now),
+            Wake::Ui => return self.process_ui_at(now),
+            Wake::FocusRequest => self.process_focus_request_at(now),
+        }
+        ControlFlow::Continue(())
     }
 
+    fn stop(&mut self) {
+        if self.stopping {
+            return;
+        }
+        self.stopping = true;
+        (self.callbacks().stop_wakes)();
+        self.ui.recover(self.windows.as_mut());
+    }
+}
+impl AppHandler for WindowLoopHandler {
+    type Wake = Wake;
+    fn on_wake(&mut self, shell: &Shell, wake: Wake) {
+        let now = Instant::now();
+        if self.process_wake_at(wake, now).is_continue() && wake == Wake::Ui {
+            shell.set_tooltip(&focused_tooltip(&self.ui.workspaces));
+        }
+    }
+    fn on_stopping(&mut self) {
+        self.stop();
+    }
+    fn menu(&mut self) -> Vec<MenuEntry> {
+        build_menu(&self.ui.workspaces, false)
+    }
     fn on_menu_selected(&mut self, id: u32) {
-        if let Some(action) = id_to_action(id, &self.workspaces) {
+        if let Some(action) = id_to_action(id, &self.ui.workspaces) {
             self.hub_sender
                 .send(HubEvent::Action(Actions::new(vec![action])));
         }
     }
-
     fn on_display_changed(&mut self) {
+        (self.observe_foreground)();
         self.hub_sender.send(HubEvent::DisplayChanged);
     }
-
     fn on_work_area_changed(&mut self) {
         self.hub_sender.send(HubEvent::WorkAreaChanged);
     }
+}
+
+struct DomainExitGuard {
+    ui: UiSender,
+    thread: Option<thread::JoinHandle<()>>,
+}
+impl Drop for DomainExitGuard {
+    fn drop(&mut self) {
+        self.ui.send(HubMessage::Shutdown);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+fn finish_domain_thread(main_thread_id: u32, panicked: bool) {
+    if panicked {
+        tracing::error!("Domain thread panicked");
+    }
+    unsafe { PostThreadMessageW(main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
 }
 
 pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Result<()> {
@@ -193,11 +297,15 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
         tracing::warn!("Failed to install console control handler");
     }
 
+    let mut message = MSG::default();
+    unsafe {
+        let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
+    }
     let (keymap_tx, keymap_rx) = mpsc::channel::<KeymapView>();
 
-    // Only the dome thread may touch the VM.
-    let (init_tx, init_rx) = mpsc::channel::<u32>();
-    let dome_thread = thread::spawn({
+    // Only the domain thread may touch the VM.
+    let (init_tx, init_rx) = mpsc::channel::<StartupReady>();
+    let domain_thread = thread::spawn({
         let logger = logger.clone();
         let config_path = config_path.clone();
         let layout = layout.clone();
@@ -220,7 +328,15 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
                 logger.set_level(config.log_level);
                 login_item::sync_login_item(config.start_at_login);
                 let tid = unsafe { GetCurrentThreadId() };
-                init_tx.send(tid).ok();
+                let mut message = MSG::default();
+                unsafe {
+                    let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
+                }
+                let (events, intake) = mpsc::channel();
+                let hub_sender = HubSender {
+                    thread_id: tid,
+                    events,
+                };
                 run_dome(
                     DomeConfig {
                         appearance: config.appearance,
@@ -232,27 +348,43 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
                     runtime,
                     keymap,
                     logger,
+                    hub_sender,
+                    intake,
+                    init_tx,
                 );
             }));
-            if result.is_err() {
-                tracing::error!("Dome thread panicked");
-            }
-            unsafe { PostThreadMessageW(main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+            finish_domain_thread(main_thread_id, result.is_err());
         }
     });
 
-    let dome_tid = init_rx
-        .recv()
-        .map_err(|_| anyhow::anyhow!("dome thread exited before the initial config load"))?;
-
-    let hub_sender = HubSender {
-        thread_id: dome_tid,
+    let ready = match init_rx.recv() {
+        Ok(ready) => ready,
+        Err(_) => {
+            let _ = domain_thread.join();
+            anyhow::bail!("domain or UI thread exited before readiness");
+        }
     };
+    let hub_sender = ready.hub;
+    let keyboard_hook = match install_keyboard_hook(keymap_rx, hub_sender.clone()) {
+        Ok(hook) => hook,
+        Err(error) => {
+            let _ = ready.acknowledged.send(false);
+            let _ = domain_thread.join();
+            return Err(error);
+        }
+    };
+    let _event_hooks = match install_event_hooks(ready.native) {
+        Ok(hooks) => hooks,
+        Err(error) => {
+            let _ = ready.acknowledged.send(false);
+            let _ = domain_thread.join();
+            uninstall_keyboard_hook(keyboard_hook);
+            return Err(error);
+        }
+    };
+    let _ = ready.acknowledged.send(true);
 
-    let keyboard_hook = install_keyboard_hook(keymap_rx, hub_sender.clone())?;
-    let _event_hooks = install_event_hooks(hub_sender.clone())?;
-
-    ipc::start_server(layout_path.clone(), {
+    if let Err(error) = ipc::start_server(layout_path.clone(), {
         let sender = hub_sender.clone();
         move |ev| {
             match ev {
@@ -266,7 +398,12 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
             }
             Ok(())
         }
-    })?;
+    }) {
+        hub_sender.send(HubEvent::Shutdown);
+        let _ = domain_thread.join();
+        uninstall_keyboard_hook(keyboard_hook);
+        return Err(error);
+    }
 
     let _config_watcher = start_file_watcher(&config_path, {
         let hub_sender = hub_sender.clone();
@@ -287,7 +424,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
     }
 
     hub_sender.send(HubEvent::Shutdown);
-    dome_thread.join().ok();
+    domain_thread.join().ok();
     uninstall_keyboard_hook(keyboard_hook);
 
     Ok(())
@@ -358,6 +495,10 @@ struct DomeConfig {
     env: HashMap<String, String>,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "domain startup owns configuration and channel endpoints"
+)]
 fn run_dome(
     config: DomeConfig,
     workspace_overrides: PreferredLayouts,
@@ -365,99 +506,96 @@ fn run_dome(
     runtime: LuaRuntime,
     keymap_publisher: KeymapPublisher,
     logger: Logger,
+    hub_sender: HubSender,
+    intake: Receiver<HubEvent>,
+    startup: Sender<StartupReady>,
 ) {
-    let domain_thread_id = unsafe { GetCurrentThreadId() };
-
-    let (handshake_tx, handshake_rx) = std::sync::mpsc::channel::<WindowThreadReady>();
+    let domain_thread_id = hub_sender.thread_id;
+    let (handshake_tx, handshake_rx) = mpsc::channel::<UiThreadReady>();
     let appearance = config.appearance;
-    let window_thread = thread::spawn(move || {
+    let ui_hub = hub_sender.clone();
+    let ui_thread = thread::spawn(move || {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            run_window_thread(domain_thread_id, handshake_tx, appearance);
+            run_ui_thread(ui_hub, handshake_tx, appearance);
         }));
         if result.is_err() {
-            tracing::error!("Window thread panicked");
+            tracing::error!("UI thread panicked");
         }
-        // Bring the domain thread down so recovery runs and the process exits.
-        unsafe { PostThreadMessageW(domain_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+        unsafe {
+            PostThreadMessageW(domain_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok();
+        }
     });
-
-    // Blocks until the window thread has built its windows and loop. The window exists by
-    // then, so the thread's message queue exists and the first waker post is not dropped.
-    let ready = match handshake_rx.recv() {
-        Ok(ready) => ready,
-        Err(_) => {
-            // The window thread exited before signaling ready, e.g. wgpu init panicked. It
-            // already posted WM_QUIT to bring us down, so there is nothing left to run.
-            window_thread.join().ok();
-            return;
+    coordinate_ui_startup(ui_thread, handshake_rx, startup, hub_sender, move |ready| {
+        let taskbar = Taskbar::new().expect("Failed to create Taskbar");
+        let dome = Dome::new(
+            config.tiling,
+            workspace_overrides,
+            Rc::new(taskbar),
+            Box::new(dome::Win32Display),
+            Box::new(ready.ui),
+            runtime,
+            keymap_publisher,
+            config.env,
+        )
+        .expect("Failed to initialize Dome");
+        let mut runner = runner::DomeRunner::new(dome, main_thread_id, logger);
+        ready.native.observe_foreground(None);
+        if let Err(error) = handle::enum_windows(|hwnd| {
+            ready.native.send(NativeEvent::Discover(HwndId::from(hwnd)))
+        }) {
+            tracing::warn!(%error, "Failed to enumerate windows");
         }
-    };
-    let window_thread_id = ready.thread_id;
-
-    let taskbar = Taskbar::new().expect("Failed to create Taskbar");
-
-    let dome = Dome::new(
-        config.tiling,
-        workspace_overrides,
-        Rc::new(taskbar),
-        Box::new(dome::Win32Display),
-        Box::new(SceneThreadSender {
-            scenes: ready.scenes,
-            waker: ready.waker,
-        }),
-        runtime,
-        keymap_publisher,
-        config.env,
-    )
-    .expect("Failed to initialize Dome");
-
-    let mut initial_hwnds = Vec::new();
-    if let Err(e) = handle::enum_windows(|hwnd| {
-        initial_hwnds.push(HwndId::from(hwnd));
-    }) {
-        tracing::warn!("Failed to enumerate windows: {e}");
-    }
-
-    let mut runner = runner::Runner::new(dome, domain_thread_id, main_thread_id, logger);
-
-    for hwnd_id in initial_hwnds {
-        runner.dispatch_window_created(hwnd_id);
-    }
-
-    let mut msg = MSG::default();
-    unsafe {
-        while GetMessageW(&mut msg, None, 0, 0).into() {
-            match msg.message {
-                WM_APP_HUBEVENT => {
-                    let event = *Box::from_raw(msg.wParam.0 as *mut HubEvent);
-                    runner.handle_event(event);
-                }
-                WM_APP_DISPATCH_RESULT => {
-                    let apply = *Box::from_raw(msg.wParam.0 as *mut runner::ApplyFn);
-                    apply(&mut runner);
-                }
-                WM_TIMER => {
-                    runner.handle_timer(msg.wParam.0);
-                }
-                _ => {
-                    let _ = TranslateMessage(&msg);
-                    DispatchMessageW(&msg);
+        let mut message = MSG::default();
+        unsafe {
+            while GetMessageW(&mut message, None, 0, 0).into() {
+                if message.message == WM_APP_HUBEVENT {
+                    while let Ok(event) = intake.try_recv() {
+                        runner.handle_event(event);
+                    }
+                } else {
+                    let _ = TranslateMessage(&message);
+                    DispatchMessageW(&message);
                 }
             }
         }
-    }
-
-    // Domain pump exited on shutdown. Quit the window thread and wait for it to
-    // destroy its overlays on its own thread before recovery runs at scope exit.
-    unsafe { PostThreadMessageW(window_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
-    window_thread.join().ok();
+    });
 }
 
-fn run_window_thread(
-    domain_thread_id: u32,
-    handshake: Sender<WindowThreadReady>,
-    appearance: Appearance,
+fn coordinate_ui_startup(
+    ui_thread: thread::JoinHandle<()>,
+    readiness: Receiver<UiThreadReady>,
+    startup: Sender<StartupReady>,
+    hub: HubSender,
+    start: impl FnOnce(UiThreadReady),
 ) {
+    let ready = match readiness.recv() {
+        Ok(ready) => ready,
+        Err(_) => {
+            let _ = ui_thread.join();
+            return;
+        }
+    };
+    let _exit = DomainExitGuard {
+        ui: ready.ui.clone(),
+        thread: Some(ui_thread),
+    };
+    let (acknowledged, acknowledgment) = mpsc::channel();
+    if startup
+        .send(StartupReady {
+            hub,
+            native: ready.native.clone(),
+            acknowledged,
+        })
+        .is_err()
+    {
+        return;
+    }
+    if acknowledgment.recv() == Ok(true) {
+        start(ready);
+    }
+}
+
+fn run_ui_thread(hub_sender: HubSender, handshake: Sender<UiThreadReady>, appearance: Appearance) {
     unsafe {
         CoInitializeEx(None, COINIT_APARTMENTTHREADED)
             .ok()
@@ -479,38 +617,62 @@ fn run_window_thread(
     let device = Arc::new(device);
     let queue = Arc::new(queue);
 
-    let hub_sender = HubSender {
-        thread_id: domain_thread_id,
-    };
-
     let overlay_factory = WgpuOverlayFactory::new(
         WgpuContext::new(instance, adapter, device, queue),
         hub_sender.clone(),
     )
     .expect("DirectComposition device init");
 
-    let window_thread = WindowThread::new(appearance, overlay_factory, hub_sender.clone());
-
-    let (scene_tx, scene_rx) = std::sync::mpsc::channel::<HubMessage>();
+    let internal = AuxiliaryWindows::new(appearance, overlay_factory);
+    let (scene_tx, scene_rx) = mpsc::channel::<HubMessage>();
+    let ui = UiState::new(scene_rx, hub_sender.clone(), Box::new(internal));
+    let wake_binding: Arc<OnceLock<LoopWaker<Wake>>> = Arc::new(OnceLock::new());
+    let binding = wake_binding.clone();
+    let windows = WindowsWindowServer::new(Arc::new(move || {
+        if let Some(waker) = binding.get() {
+            waker.wake(Wake::WindowServer);
+        }
+    }))
+    .expect("window server init");
+    let native = windows.native_sender();
+    let callbacks = Rc::new(OnceCell::new());
     let app = App::new(
         Icon::from_resource_id(TRAY_ICON_RESOURCE_ID).expect("tray icon loads"),
         Box::new(WindowLoopHandler {
-            window_thread,
-            scenes: scene_rx,
-            workspaces: Vec::new(),
-            hub_sender: hub_sender.clone(),
+            ui,
+            windows: Box::new(windows),
+            callbacks: callbacks.clone(),
+            hub_sender,
+            observe_foreground: Box::new({
+                let native = native.clone();
+                move || native.observe_foreground(None)
+            }),
+            stopping: false,
         }),
     )
     .expect("app init");
-    // The domain can post scenes the moment it holds these. The window already exists, so
-    // the queue exists and a waker post cannot be dropped.
-    handshake
-        .send(WindowThreadReady {
-            scenes: scene_tx,
-            waker: app.waker(),
-            thread_id: unsafe { GetCurrentThreadId() },
+    let _ = wake_binding.set(app.waker());
+    let waker = app.waker();
+    let deadline = app.handle();
+    let stop = app.handle();
+    let terminate = app.handle();
+    let _ = callbacks.set(WindowLoopCallbacks {
+        wake: Box::new(move |wake| waker.wake(wake)),
+        wake_at: Box::new(move |wake, at| deadline.wake_at(wake, at)),
+        stop_wakes: Box::new(move || stop.stop_wakes()),
+        terminate: Box::new(move || terminate.terminate()),
+    });
+    if handshake
+        .send(UiThreadReady {
+            ui: UiSender {
+                scenes: scene_tx,
+                waker: app.waker(),
+            },
+            native,
         })
-        .ok();
-
+        .is_err()
+    {
+        app.handle().terminate();
+    }
     app.run();
 }

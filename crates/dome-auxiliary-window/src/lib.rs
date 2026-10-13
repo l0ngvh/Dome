@@ -1,7 +1,11 @@
 //! Window creation and the window event loop for Dome and its status-bar
 //! subprocess. Names no Dome domain type.
 
+use std::hash::Hash;
 use std::marker::PhantomData;
+use std::sync::mpsc;
+
+mod delivery;
 
 mod menu;
 pub use menu::{MenuEntry, MenuItem};
@@ -170,9 +174,10 @@ pub trait AuxiliaryWindowHandler {
 /// shell's menu and display notifications. The menu is pulled on each open. Every method
 /// defaults to a no-op.
 pub trait AppHandler {
+    type Wake: Clone + Eq + Hash + Send + 'static;
     fn on_started(&mut self, _shell: &Shell) {}
     fn on_stopping(&mut self) {}
-    fn on_wake(&mut self, _shell: &Shell) {}
+    fn on_wake(&mut self, _shell: &Shell, _wake: Self::Wake) {}
     fn menu(&mut self) -> Vec<MenuEntry> {
         Vec::new()
     }
@@ -222,24 +227,22 @@ impl Shell {
 /// The app: the event loop that owns the main thread, holding the desktop-shell presence
 /// (the menu-bar status item on macOS, the system-tray icon on Windows). `run` blocks the
 /// calling thread until the loop stops.
-pub struct App {
-    inner: imp::App,
+pub struct App<W: Clone + Eq + Hash + Send + 'static> {
+    inner: imp::App<W>,
 }
 
-impl App {
-    pub fn new(icon: Icon, handler: Box<dyn AppHandler>) -> anyhow::Result<Self> {
+impl<W: Clone + Eq + Hash + Send + 'static> App<W> {
+    pub fn new(icon: Icon, handler: Box<dyn AppHandler<Wake = W>>) -> anyhow::Result<Self> {
         Ok(Self {
             inner: imp::App::new(icon.inner, handler)?,
         })
     }
 
-    pub fn waker(&self) -> LoopWaker {
-        LoopWaker {
-            inner: self.inner.waker(),
-        }
+    pub fn waker(&self) -> LoopWaker<W> {
+        self.inner.waker()
     }
 
-    pub fn handle(&self) -> LoopHandle {
+    pub fn handle(&self) -> LoopHandle<W> {
         LoopHandle {
             inner: self.inner.handle(),
         }
@@ -288,25 +291,36 @@ impl AuxiliaryWindow {
 
 /// Controls the loop from the thread that owns it. Neither `Send` nor callable from a
 /// foreign thread, a property the inner handle enforces by construction.
-#[derive(Clone, Copy)]
-pub struct LoopHandle {
-    inner: imp::LoopHandle,
+#[derive(Clone)]
+pub struct LoopHandle<W: Clone + Eq + Hash + Send + 'static> {
+    inner: imp::LoopHandle<W>,
 }
 
-impl LoopHandle {
+impl<W: Clone + Eq + Hash + Send + 'static> LoopHandle<W> {
+    pub fn wake_at(&self, wake: W, deadline: Option<std::time::Instant>) {
+        self.inner.wake_at(wake, deadline);
+    }
+
+    pub fn stop_wakes(&self) {
+        self.inner.stop_wakes();
+    }
+
     pub fn terminate(&self) {
         self.inner.terminate();
     }
 }
 
-/// Wakes the loop from any thread. Carries no payload, so the consumer owns its own queue.
+/// Sends every value, including duplicates. Successful sends may be discarded at shutdown.
 #[derive(Clone)]
-pub struct LoopWaker {
-    inner: imp::LoopWaker,
+pub struct LoopWaker<W> {
+    sender: mpsc::Sender<W>,
+    target: imp::WakeTarget,
 }
 
-impl LoopWaker {
-    pub fn wake(&self) {
-        self.inner.wake();
+impl<W> LoopWaker<W> {
+    pub fn wake(&self, wake: W) {
+        if self.sender.send(wake).is_ok() {
+            self.target.signal_nonblocking();
+        }
     }
 }
