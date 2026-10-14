@@ -20,19 +20,19 @@ use crate::platform::windows::external::HwndId;
 use crate::platform::windows::handle;
 
 #[derive(Clone)]
-pub(in crate::platform::windows) struct MonitorInfo {
-    pub(in crate::platform::windows) handle: isize,
+pub(crate) struct MonitorInfo {
+    pub(crate) handle: isize,
     /// EDID friendly name (e.g. "DELL U2720Q") when one is available, else the
     /// GDI device string (`\\.\DISPLAY1`) as a last-resort human-usable label.
-    pub(in crate::platform::windows) name: String,
+    pub(crate) name: String,
     /// GDI device string (`\\.\DISPLAY1`). Join key for the EDID friendly name
     /// lookup after enumeration, and published on `dome query monitors`. Not a
     /// display label.
-    pub(in crate::platform::windows) gdi_device: String,
-    pub(in crate::platform::windows) work_area: PixelRect,
-    pub(in crate::platform::windows) is_primary: bool,
+    pub(crate) gdi_device: String,
+    pub(crate) work_area: PixelRect,
+    pub(crate) is_primary: bool,
     /// Always > 0.
-    pub(in crate::platform::windows) scale: f32,
+    pub(crate) scale: f32,
 }
 
 impl From<&MonitorInfo> for ReportedMonitor {
@@ -47,7 +47,7 @@ impl From<&MonitorInfo> for ReportedMonitor {
     }
 }
 
-pub(in crate::platform::windows) trait QueryDisplay {
+pub(crate) trait QueryDisplay {
     fn get_all_monitors(&self) -> anyhow::Result<Vec<MonitorInfo>>;
     /// Returns the hwnd of the foreground window if D3D exclusive fullscreen is active.
     fn get_exclusive_fullscreen_hwnd(&self) -> Option<HwndId>;

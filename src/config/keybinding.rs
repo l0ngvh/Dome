@@ -1,5 +1,3 @@
-//! The keystroke grammar and the keymap tables it keys.
-
 use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 use std::fmt;
@@ -200,59 +198,4 @@ fn read_binding(
     let keystroke = Keystroke::from_lua_value(key, cx)?;
     let function = mlua::Function::from_lua_value(action, cx)?;
     Ok((keystroke, function))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parsing_reads_the_modifiers_and_the_key_name() {
-        for (input, modifiers) in [
-            ("meta+t", Modifiers::META),
-            ("cmd+t", Modifiers::META),
-            ("win+t", Modifiers::META),
-            ("cmd+shift+t", Modifiers::META | Modifiers::SHIFT),
-        ] {
-            let key: Keystroke = input.parse().unwrap();
-            assert_eq!(key.modifiers, modifiers, "{input}");
-            assert_eq!(key.key, "t", "{input}");
-        }
-    }
-
-    #[test]
-    fn parsing_ignores_case_in_the_key_and_the_modifiers() {
-        for input in ["Meta+H", "META+h", "Cmd+Shift+T", "Option+t", "Control+t"] {
-            let key: Keystroke = input.parse().unwrap_or_else(|e| panic!("{input}: {e}"));
-            assert_eq!(key.key, key.key.to_ascii_lowercase(), "{input}");
-        }
-        assert_eq!(
-            "Meta+H".parse::<Keystroke>().unwrap(),
-            "meta+h".parse::<Keystroke>().unwrap()
-        );
-        assert_eq!(
-            "Option+t".parse::<Keystroke>().unwrap(),
-            "alt+t".parse::<Keystroke>().unwrap()
-        );
-    }
-
-    #[test]
-    fn parsing_rejects_a_malformed_keystroke() {
-        for input in ["", "meta+", "hyper+t", "meta+shift+"] {
-            assert!(input.parse::<Keystroke>().is_err(), "{input}");
-        }
-    }
-
-    #[test]
-    fn display_round_trips_through_parsing() {
-        for input in ["t", "meta+t", "meta+ctrl+alt+shift+t"] {
-            let key: Keystroke = input.parse().unwrap();
-            assert_eq!(key.to_string(), input, "{input}");
-            assert_eq!(
-                key.to_string().parse::<Keystroke>().unwrap(),
-                key,
-                "{input}"
-            );
-        }
-    }
 }

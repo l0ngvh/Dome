@@ -18,16 +18,6 @@ pub(crate) struct ColumnConfig {
     pub(crate) children: Vec<WindowMatcher>,
 }
 
-impl ColumnConfig {
-    #[cfg(test)]
-    pub(crate) fn bare(matcher: WindowMatcher) -> Self {
-        Self {
-            width: None,
-            children: vec![matcher],
-        }
-    }
-}
-
 /// Accepts either a window matcher or a table carrying `width` and `children`.
 impl FromLuaValue for ColumnConfig {
     fn from_lua_value(value: &mlua::Value, cx: &mut LoadContext) -> mlua::Result<Self> {

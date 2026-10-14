@@ -48,6 +48,16 @@ pub(super) fn read_config(
     })
 }
 
+/// `name` in uppercase on Windows, where a name is case-insensitive, and
+/// unchanged elsewhere.
+pub(crate) fn environment_variable_name(name: &str) -> String {
+    if cfg!(target_os = "windows") {
+        name.to_uppercase()
+    } else {
+        name.to_string()
+    }
+}
+
 /// Fails the load when default.lua does not set `key` either.
 fn user_or_default<T: FromLuaValue>(
     cx: &mut LoadContext,
@@ -271,16 +281,6 @@ fn env_entry_error(name: &str, value: &str) -> Option<&'static str> {
     }
 }
 
-/// `name` in uppercase on Windows, where a name is case-insensitive, and
-/// unchanged elsewhere.
-pub(crate) fn environment_variable_name(name: &str) -> String {
-    if cfg!(target_os = "windows") {
-        name.to_uppercase()
-    } else {
-        name.to_string()
-    }
-}
-
 /// A zero maximum means unlimited, so only a positive maximum can conflict. The
 /// pair is what is inconsistent, so both ends revert rather than one being
 /// picked as the wrong one.
@@ -322,22 +322,4 @@ fn reconcile_pair(
     cx.pop();
     *min = default_min;
     *max = default_max;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_missing_default_key_is_an_error() {
-        let vm = crate::config::lua::new_vm().expect("the VM should build");
-        let user: mlua::Value = vm.load("return {}").eval().expect("the user chunk");
-        let defaults: mlua::Value = vm
-            .load("local c = dome.defaults() c.border_size = nil return c")
-            .eval()
-            .expect("the defaults chunk");
-        let error = read_config(&user, &defaults, &mut LoadContext::new())
-            .expect_err("a missing default should fail the read");
-        assert!(error.to_string().contains("border_size"), "{error}");
-    }
 }

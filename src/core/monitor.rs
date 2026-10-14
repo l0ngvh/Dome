@@ -299,26 +299,6 @@ impl Hub {
         }
     }
 
-    fn compute_monitor_placements(&mut self, monitor_id: MonitorId) {
-        let host = self.access.monitors.get(monitor_id);
-        let (work_area, scale) = (host.work_area, host.scale);
-        let ws_ids: Vec<WorkspaceId> = self
-            .access
-            .workspaces
-            .sorted_ids()
-            .into_iter()
-            .filter(|&ws_id| self.access.workspaces.get(ws_id).monitor == monitor_id)
-            .collect();
-        for ws_id in ws_ids {
-            self.strategies.for_workspace_mut(ws_id).update_work_area(
-                &self.access,
-                ws_id,
-                work_area,
-                scale,
-            );
-        }
-    }
-
     pub(crate) fn remove_monitor(&mut self, monitor_id: MonitorId) {
         let primary = self.access.primary_monitor;
 
@@ -353,8 +333,6 @@ impl Hub {
         // own name.
         for ws_id in ws_on_this {
             let ws = self.access.workspaces.get_mut(ws_id);
-            // A monitor stays detached for long essentially only on a laptop
-            // undock, so the primary is the display in front of the user.
             ws.monitor = primary;
             ws.attachment = Attachment::Parked {
                 origin: this_origin.clone(),
@@ -420,12 +398,32 @@ impl Hub {
         }
     }
 
-    pub(super) fn monitor_id_by_disambiguated_name(&self, name: &str) -> Option<MonitorId> {
+    pub(crate) fn monitor_id_by_disambiguated_name(&self, name: &str) -> Option<MonitorId> {
         self.access
             .monitors
             .sorted_ids()
             .into_iter()
             .find(|&id| self.access.monitors.get(id).unique_name == *name)
+    }
+
+    fn compute_monitor_placements(&mut self, monitor_id: MonitorId) {
+        let host = self.access.monitors.get(monitor_id);
+        let (work_area, scale) = (host.work_area, host.scale);
+        let ws_ids: Vec<WorkspaceId> = self
+            .access
+            .workspaces
+            .sorted_ids()
+            .into_iter()
+            .filter(|&ws_id| self.access.workspaces.get(ws_id).monitor == monitor_id)
+            .collect();
+        for ws_id in ws_ids {
+            self.strategies.for_workspace_mut(ws_id).update_work_area(
+                &self.access,
+                ws_id,
+                work_area,
+                scale,
+            );
+        }
     }
 
     fn find_monitor_by_target(&self, target: &MonitorSelector) -> Option<MonitorId> {
@@ -472,51 +470,5 @@ impl Hub {
                     .map(|(id, _)| id)
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const WORK_AREA: PixelRect = PixelRect::new(100, 50, 1000, 800);
-
-    fn insets(top: i32, bottom: i32, left: i32, right: i32) -> ReservedArea {
-        ReservedArea {
-            top: Pixels::new(top),
-            bottom: Pixels::new(bottom),
-            left: Pixels::new(left),
-            right: Pixels::new(right),
-        }
-    }
-
-    #[test]
-    fn zero_leaves_the_work_area_unchanged() {
-        assert_eq!(ReservedArea::ZERO.subtract_from(WORK_AREA, 1.0), WORK_AREA);
-    }
-
-    #[test]
-    fn each_inset_moves_only_its_own_edge() {
-        assert_eq!(
-            insets(30, 10, 20, 5).subtract_from(WORK_AREA, 1.0),
-            PixelRect::new(120, 80, 975, 760)
-        );
-    }
-
-    #[test]
-    fn an_inset_wider_than_the_work_area_collapses_it_inside() {
-        assert_eq!(
-            insets(900, 0, 1200, 0).subtract_from(WORK_AREA, 1.0),
-            PixelRect::new(1100, 850, 0, 0)
-        );
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn a_scaled_inset_rounds_inward() {
-        assert_eq!(
-            insets(25, 25, 0, 0).subtract_from(PixelRect::new(0, 0, 1920, 1080), 1.5),
-            PixelRect::new(0, 38, 1920, 1004)
-        );
     }
 }

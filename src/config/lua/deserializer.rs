@@ -1,11 +1,3 @@
-//! Reads a loaded `mlua::Value` into Dome's config types.
-//!
-//! A field that fails to convert does not fail the load. `LoadContext::field`
-//! logs the field's path and substitutes the default, so one bad value costs
-//! that value rather than the whole config. Only a structural failure, such as
-//! a chunk that returns something other than a table, reaches the caller as an
-//! error.
-
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
@@ -13,8 +5,8 @@ use std::collections::HashMap;
 /// otherwise recurse until the stack runs out.
 const MAX_DEPTH: usize = 64;
 
-/// The largest whole number an f64 holds exactly, 2^53 - 1. Lua stores every
-/// number as an f64, so a count above this arrives already rounded.
+/// Conservative safe-integer limit, 2^53 - 1. Above this range, f64 can no
+/// longer distinguish every pair of adjacent integers.
 const MAX_WHOLE_NUMBER: f64 = 9_007_199_254_740_991.0;
 
 pub(crate) trait FromLuaValue: Sized {
@@ -37,6 +29,9 @@ impl LoadContext {
         self.field_or_else(table, key, T::default)
     }
 
+    /// Missing fields take the default silently. A field that cannot be read
+    /// or converted logs a warning with its path and takes the default rather
+    /// than failing the load.
     pub(crate) fn field_or_else<T: FromLuaValue>(
         &mut self,
         table: &mlua::Table,
@@ -52,8 +47,6 @@ impl LoadContext {
                 return default();
             }
         };
-        // An absent key takes the default silently. Only a present, unusable
-        // value is worth a warning.
         if value.is_nil() {
             return default();
         }
@@ -211,8 +204,6 @@ impl FromLuaValue for f32 {
 impl FromLuaValue for usize {
     fn from_lua_value(value: &mlua::Value, _cx: &mut LoadContext) -> mlua::Result<Self> {
         let n = as_f64(value, "a whole number")?;
-        // An `as usize` cast saturates, so an out-of-range value would arrive as
-        // `usize::MAX` and pass every later bound check.
         if n.fract() != 0.0 || !(0.0..=MAX_WHOLE_NUMBER).contains(&n) {
             return Err(mlua::Error::runtime(format!(
                 "expected a non-negative whole number no greater than {MAX_WHOLE_NUMBER}"
@@ -345,132 +336,3 @@ macro_rules! string_enum {
 }
 
 pub(crate) use string_enum;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::{TreeLayoutNode, WindowMatcher};
-
-    fn read<T: FromLuaValue>(src: &str) -> (mlua::Result<T>, LoadContext) {
-        let lua = mlua::Lua::new();
-        let value: mlua::Value = lua.load(src).eval().expect("the chunk should evaluate");
-        let mut cx = LoadContext::new();
-        let out = T::from_lua_value(&value, &mut cx);
-        (out, cx)
-    }
-
-    fn ok<T: FromLuaValue>(src: &str) -> T {
-        read(src).0.expect("the value should convert")
-    }
-
-    #[test]
-    fn reads_scalar_leaves() {
-        assert!(ok::<bool>("return true"));
-        assert!(!ok::<bool>("return false"));
-        assert_eq!(ok::<String>("return 'dome'"), "dome");
-        assert_eq!(ok::<f64>("return 0.5"), 0.5);
-        assert_eq!(ok::<f32>("return 3"), 3.0);
-        assert_eq!(ok::<usize>("return 7"), 7);
-    }
-
-    /// Lua would read "24" as a number, which would hide a quoted config value.
-    #[test]
-    fn refuses_to_coerce_a_string_into_a_number() {
-        assert!(read::<f64>("return '24'").0.is_err());
-        assert!(read::<usize>("return '24'").0.is_err());
-    }
-
-    #[test]
-    fn refuses_a_non_finite_number() {
-        for src in ["return 0/0", "return math.huge", "return -math.huge"] {
-            assert!(read::<f64>(src).0.is_err(), "{src}");
-            assert!(read::<f32>(src).0.is_err(), "{src}");
-            assert!(read::<usize>(src).0.is_err(), "{src}");
-        }
-    }
-
-    #[test]
-    fn refuses_a_fractional_or_negative_whole_number() {
-        assert!(read::<usize>("return 1.5").0.is_err());
-        assert!(read::<usize>("return -1").0.is_err());
-    }
-
-    #[test]
-    fn reads_a_list_of_structs_and_an_empty_table() {
-        let rules: Vec<WindowMatcher> = ok("return { { app = 'a' }, { app = 'b' } }");
-        let names: Vec<_> = rules.iter().map(|r| r.app.clone().unwrap()).collect();
-        assert_eq!(names, ["a", "b"]);
-        assert!(ok::<Vec<WindowMatcher>>("return {}").is_empty());
-    }
-
-    #[test]
-    fn reads_a_callable_function() {
-        // The VM has to outlive the call, because a stored `Function` holds only
-        // a weak reference and panics once its VM drops.
-        let lua = mlua::Lua::new();
-        let value: mlua::Value = lua
-            .load("return function() return 7 end")
-            .eval()
-            .expect("the chunk should evaluate");
-        let mut cx = LoadContext::new();
-        let function =
-            mlua::Function::from_lua_value(&value, &mut cx).expect("a function should convert");
-        let result: i64 = function.call(()).expect("the function should call");
-        assert_eq!(result, 7);
-    }
-
-    #[test]
-    fn refuses_a_function_where_a_scalar_belongs() {
-        assert!(read::<f64>("return function() end").0.is_err());
-    }
-
-    #[test]
-    fn refuses_a_number_where_a_function_belongs() {
-        assert!(read::<mlua::Function>("return 7").0.is_err());
-    }
-
-    #[test]
-    fn ignores_an_unknown_key() {
-        let matcher: WindowMatcher = ok("return { app = 'a', extra = function() end }");
-        assert_eq!(matcher.app.as_deref(), Some("a"));
-    }
-
-    #[test]
-    fn keeps_reading_a_list_after_a_bad_element() {
-        let rules: Vec<WindowMatcher> = ok("return { { app = 'a' }, 5, { app = 'c' } }");
-        let names: Vec<_> = rules.iter().map(|r| r.app.clone().unwrap()).collect();
-        assert_eq!(names, ["a", "c"]);
-    }
-
-    #[test]
-    fn keeps_reading_a_map_after_a_bad_entry() {
-        let entries: HashMap<String, String> =
-            ok("return { keep = 'yes', drop = 5, also = 'yes' }");
-        let mut kept: Vec<_> = entries.keys().cloned().collect();
-        kept.sort();
-        assert_eq!(kept, ["also", "keep"]);
-    }
-
-    #[test]
-    fn a_table_on_two_fields_is_not_a_cycle() {
-        let rules: Vec<WindowMatcher> =
-            ok("local shared = { app = 'a' } return { shared, shared }");
-        assert_eq!(rules.len(), 2);
-        assert_eq!(rules[0], rules[1]);
-    }
-
-    #[test]
-    fn a_self_referential_table_stops_at_the_depth_cap() {
-        let node: TreeLayoutNode = ok("local t = { children = {} } t.children[1] = t return t");
-        assert!(tree_depth(&node) <= MAX_DEPTH);
-    }
-
-    fn tree_depth(node: &TreeLayoutNode) -> usize {
-        match node {
-            TreeLayoutNode::Leaf(_) => 1,
-            TreeLayoutNode::Container { children, .. } => {
-                1 + children.iter().map(tree_depth).max().unwrap_or(0)
-            }
-        }
-    }
-}

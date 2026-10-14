@@ -13,14 +13,16 @@ mod preferred_layout;
 mod scrolling;
 mod slot;
 mod strategy;
-#[cfg(test)]
-mod tests;
 mod tiling;
 mod workspace;
 
+#[cfg(test)]
+pub(crate) use allocator::NodeId;
 pub(crate) use hub::Hub;
-#[cfg(target_os = "macos")]
+#[cfg(any(test, target_os = "macos"))]
 pub(crate) use hub::MonitorPlacements;
+#[cfg(test)]
+pub(crate) use hub::VisiblePlacements;
 pub(crate) use hub::{
     ContainerPlacement, FloatWindowPlacement, MonitorLayout, TilingWindowPlacement,
 };
@@ -30,6 +32,8 @@ pub(crate) use monitor::MonitorSelector;
 pub(crate) use monitor::ReportedMonitor;
 pub(crate) use monitor::ReservedArea;
 pub(crate) use node::Direction;
+#[cfg(test)]
+pub(crate) use node::MinimizedWindowEntry;
 #[cfg(target_os = "windows")]
 pub(crate) use node::Physical;
 pub(crate) use node::PixelRect;

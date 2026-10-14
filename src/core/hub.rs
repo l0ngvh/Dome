@@ -35,8 +35,8 @@ pub(crate) struct TilingWindowPlacement {
 }
 
 impl TilingWindowPlacement {
-    /// Part of `content_box` lies outside the work area. Also true when `content_box` has no
-    /// area, because its visible part is then `PixelRect::ZERO`.
+    /// Whether clipping to the work area changes `content_box`. An empty content box
+    /// differs from its visible part unless it is already `PixelRect::ZERO`.
     pub(crate) fn is_partially_off_screen(&self) -> bool {
         self.visible_content_box != self.content_box
     }
@@ -101,29 +101,8 @@ pub(super) enum RestrictedAction {
     /// and Windows, fullscreen windows can freely move across workspaces.
     WorkspaceMove,
     /// Move the window to a different monitor's active workspace.
-    /// Blocked by: BlockAll, ProtectFullscreen. Fullscreen windows are bound to their
-    /// monitor -- moving them cross-monitor would break the fullscreen association.
+    /// Blocked by: BlockAll, ProtectFullscreen.
     MonitorMove,
-}
-
-fn restriction_of(action: &StrategyAction) -> RestrictedAction {
-    match action {
-        StrategyAction::ToggleFloat | StrategyAction::ToggleFullscreen => {
-            RestrictedAction::DisplayModeChange
-        }
-        StrategyAction::FocusDirection { .. }
-        | StrategyAction::MoveDirection { .. }
-        | StrategyAction::ToggleSpawnMode
-        | StrategyAction::ToggleDirection
-        | StrategyAction::ToggleContainerLayout
-        | StrategyAction::FocusParent
-        | StrategyAction::FocusTab { .. }
-        | StrategyAction::TabClicked { .. }
-        | StrategyAction::Grow
-        | StrategyAction::Shrink
-        | StrategyAction::MoreMaster
-        | StrategyAction::FewerMaster => RestrictedAction::TilingNavigation,
-    }
 }
 
 /// Non-strategy fields of Hub, extracted so that `TilingStrategy` methods can
@@ -213,10 +192,9 @@ impl HubAccess {
 }
 
 impl HubAccess {
-    /// Rounding here rather than at the call sites is what makes
-    /// `border_box - content_box` exactly the thickness on every edge: a
-    /// thickness ending in `.5` would otherwise round the two opposite edges
-    /// apart by a pixel.
+    /// Rounding here rather than at the call sites keeps the inset equal to the thickness
+    /// on every edge when no extent is clamped to zero. A thickness ending in `.5` would
+    /// otherwise round the two opposite edges apart by a pixel.
     pub(super) fn border(&self, monitor: MonitorId) -> Pixels<Unit> {
         self.border_for_scale(self.monitors.get(monitor).scale)
     }
@@ -349,8 +327,9 @@ impl Hub {
             .active_workspace
     }
 
-    /// The window that has keyboard focus on the workspace, in any display mode. `None` when the
-    /// workspace is empty or a container has focus.
+    /// The window that has keyboard focus on the workspace, in any display mode. `None` when
+    /// the workspace is empty, a container has focus, or tiling focus is still uninitialized
+    /// and no float or fullscreen window has focus.
     pub(crate) fn focused_window(&self, ws_id: WorkspaceId) -> Option<WindowId> {
         match self.strategies.for_workspace(ws_id).focused_child(ws_id)? {
             Child::Window(id) => Some(id),
@@ -556,29 +535,6 @@ impl Hub {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn validate(&self) {
-        let owners = self.strategies.validate(&self.access);
-        for window_id in self.access.windows.sorted_ids() {
-            let window = self.access.windows.get(window_id);
-            assert_eq!(
-                owners.get(&window_id).copied(),
-                window.workspace(),
-                "{window_id} records workspace {:?} but sits in the strategy of {:?}",
-                window.workspace(),
-                owners.get(&window_id)
-            );
-        }
-        for &(window_id, mode) in &self.minimized_windows {
-            assert!(
-                self.access.windows.get(window_id).restrictions == WindowRestrictions::None
-                    || mode == DisplayMode::Fullscreen,
-                "{window_id} has restrictions but was minimized as {mode}"
-            );
-        }
-        self.validate_slots();
-    }
-
     #[tracing::instrument(skip(self))]
     pub(crate) fn insert_window(
         &mut self,
@@ -656,7 +612,6 @@ impl Hub {
                 let monitor_id = self.access.workspaces.get(ws_id).monitor;
                 let screen = self.access.monitors.get(monitor_id).work_area;
 
-                // A work area with zero width or height fits no window.
                 if screen.is_empty() {
                     return MonitorPlacements {
                         monitor_id,
@@ -742,5 +697,25 @@ impl Hub {
                 .apply_observation(observed),
         }
         tracing::debug!("Window constraint set");
+    }
+}
+
+fn restriction_of(action: &StrategyAction) -> RestrictedAction {
+    match action {
+        StrategyAction::ToggleFloat | StrategyAction::ToggleFullscreen => {
+            RestrictedAction::DisplayModeChange
+        }
+        StrategyAction::FocusDirection { .. }
+        | StrategyAction::MoveDirection { .. }
+        | StrategyAction::ToggleSpawnMode
+        | StrategyAction::ToggleDirection
+        | StrategyAction::ToggleContainerLayout
+        | StrategyAction::FocusParent
+        | StrategyAction::FocusTab { .. }
+        | StrategyAction::TabClicked { .. }
+        | StrategyAction::Grow
+        | StrategyAction::Shrink
+        | StrategyAction::MoreMaster
+        | StrategyAction::FewerMaster => RestrictedAction::TilingNavigation,
     }
 }

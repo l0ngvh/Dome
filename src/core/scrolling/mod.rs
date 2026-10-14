@@ -8,8 +8,6 @@ mod placement;
 mod preferred_layout;
 mod resize;
 mod scroll;
-#[cfg(test)]
-mod validate;
 
 use rustc_hash::FxHashMap;
 

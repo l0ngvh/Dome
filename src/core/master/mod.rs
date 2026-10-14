@@ -7,8 +7,6 @@ mod pane;
 mod placement;
 mod preferred_layout;
 mod scroll;
-#[cfg(test)]
-mod validate;
 
 use rustc_hash::FxHashMap;
 
@@ -29,7 +27,7 @@ use crate::core::slot::SlotId;
 use crate::core::strategy::{FocusedChild, StrategyAction, TilingStrategy};
 use crate::core::{PreferredTiling, PreferredWorkspace, SizeConstraints};
 
-/// XMonad-style tiling: a master area on the left and a stack on the right.
+/// XMonad-style tiling with a master area on the left and a stack on the right.
 /// Each pane scrolls vertically and independently when per-window min heights push the
 /// pane's total content past the screen height. Horizontal scroll does not exist in master,
 /// so per-window min width is not honored. The split follows master_ratio and each pane

@@ -118,11 +118,6 @@ impl FloatWindows {
         std::mem::take(&mut self.windows)
     }
 
-    #[cfg(test)]
-    pub(super) fn windows(&self) -> impl Iterator<Item = WindowId> + '_ {
-        self.windows.iter().map(|&(id, _)| id)
-    }
-
     fn position(&self, window_id: WindowId) -> Option<usize> {
         self.windows.iter().position(|&(id, _)| id == window_id)
     }
