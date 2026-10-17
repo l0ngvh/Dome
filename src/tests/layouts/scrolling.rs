@@ -7388,6 +7388,7 @@ fn save_layout_writes_live_columns_and_reapplies_unchanged() {
     }
     "#);
     dome.apply_layout(&saved);
+    assert_eq!(dome.save_layout(), saved);
     assert_eq!(dome.snapshot(), before);
 }
 

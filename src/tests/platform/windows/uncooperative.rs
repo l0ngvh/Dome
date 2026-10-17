@@ -242,8 +242,6 @@ fn borderless_minimized_resurface_loop_caps_with_other_workspace_unaffected() {
     assert!(!env.is_minimized(w1));
     assert!(env.is_minimized(w2));
 
-    // w2 is uncooperative: it resurfaces every iteration. After
-    // MAX_DRIFT_RETRIES + 2 attempts Dome gives up on it.
     for _ in 0..7 {
         env.unminimize_window(w2);
     }

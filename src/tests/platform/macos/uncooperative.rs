@@ -63,11 +63,6 @@ fn offscreen_window_fights_hide() {
     macos.set_override_frame(cg1, Some((100, 100, 800, 600)));
     macos.simulate_external_move(&mut dome, cg1, 100, 100, 800, 600);
 
-    // Dome retries hiding up to MAX_ENFORCEMENT_RETRIES times, then gives up.
-    // report_move incremented retries to 1 and issued hide_at.
-    // Each flush_moves round: window fights back → record_drift increments retries → hide_at.
-    // After 4 flush rounds: retries = 5, should_retry() still true (5 <= 5).
-    // 5th flush round: retries = 6, should_retry() false, just_gave_up() true → no hide_at.
     for _ in 0..4 {
         assert!(
             !macos.moves().is_empty(),

@@ -37,9 +37,13 @@ cargo +nightly llvm-cov report --package '*' --ignore-filename-regex '/tests/'
 
 [tasks.coverage-html]
 clear = true
-command = "cargo"
-toolchain = "nightly"
-args = ["llvm-cov", "test", "--lib", "--branch", "--html", "--open"]
+workspace = false
+script_runner = "@shell"
+script = '''
+cargo +nightly llvm-cov clean --workspace
+cargo +nightly llvm-cov test --workspace --lib --bins --branch --no-report -- --skip tests::smoke
+cargo +nightly llvm-cov report --package '*' --ignore-filename-regex '/tests/' --html --open
+'''
 
 [tasks.leak-check]
 description = "Run leak check"

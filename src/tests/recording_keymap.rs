@@ -3,9 +3,9 @@ use crate::config::lua::KeymapEffects;
 
 #[derive(Default)]
 pub(crate) struct RecordingKeymap {
-    pub switched: Vec<String>,
+    pub(crate) switched: Vec<String>,
     /// The last published bindings, sorted as `mode keystroke`.
-    pub published: Vec<String>,
+    pub(crate) published: Vec<String>,
 }
 
 impl KeymapEffects for RecordingKeymap {

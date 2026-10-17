@@ -12,10 +12,6 @@ use crate::core::{WindowMatcher, pattern_matches};
 use crate::platform::windows::external::{ManageExternalWindow, ShowCmd, ZOrder};
 use crate::platform::windows::handle::OFFSCREEN_POS;
 
-/// Per-window metadata gathered by the inspection worker that travels
-/// together through `add_window` and the per-mode `insert_*_window`
-/// helpers. Exists to keep those signatures from accumulating ~five
-/// always-co-occurring scalars apiece.
 pub(crate) struct NewWindow {
     pub(crate) ext: Arc<dyn ManageExternalWindow>,
     pub(crate) metadata: WindowsMetadata,
@@ -31,12 +27,12 @@ impl std::fmt::Display for NewWindow {
 
 #[derive(Debug, Clone)]
 pub(crate) struct WindowsMetadata {
-    pub title: Option<String>,
-    pub process: String,
-    pub process_path: Option<String>,
-    pub class: Option<String>,
-    pub aumid: Option<String>,
-    pub app_name: Option<String>,
+    pub(crate) title: Option<String>,
+    pub(crate) process: String,
+    pub(crate) process_path: Option<String>,
+    pub(crate) class: Option<String>,
+    pub(crate) aumid: Option<String>,
+    pub(crate) app_name: Option<String>,
 }
 
 impl std::fmt::Display for WindowsMetadata {

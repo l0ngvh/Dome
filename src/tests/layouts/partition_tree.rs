@@ -1721,6 +1721,53 @@ fn set_constraint_on_partition_tree_window_keeps_even_split() {
     }
 
     let mut dome = TestDome::new("return {}");
+    let w0 = dome.open(window("w0"));
+    dome.run("toggle spawn");
+    dome.open(window("w1"));
+    let before = dome.snapshot();
+    assert_snapshot!(before, @"
+    focused w1 on primary
+    workspaces: 0 on primary (focused)
+    primary 0,0 100x20 border 1
+      w0 0,0 100x10
+      w1 0,10 100x10 highlighted spawn=bottom
+    +--------------------------------------------------------------------------------------------------+
+    |                                                                                                  |
+    |                                                                                                  |
+    |                                                                                                  |
+    |                                                w0                                                |
+    |                                                                                                  |
+    |                                                                                                  |
+    |                                                                                                  |
+    |                                                                                                  |
+    +--------------------------------------------------------------------------------------------------+
+    ****************************************************************************************************
+    *                                                                                                  *
+    *                                                                                                  *
+    *                                                                                                  *
+    *                                                w1                                                *
+    *                                                                                                  *
+    *                                                                                                  *
+    *                                                                                                  *
+    *                                                                                                  *
+    ****************************************************************************************************
+    ");
+    for min_height in [LimitUpdate::Set(Length::new(60.0)), LimitUpdate::Cleared] {
+        dome.set_constraint(
+            w0,
+            LimitObservation {
+                min_height,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            dome.snapshot(),
+            before,
+            "vertical split with {min_height:?}"
+        );
+    }
+
+    let mut dome = TestDome::new("return {}");
     dome.open(window("w0"));
     let w1 = dome.open(window("w1"));
     dome.run("toggle layout");
