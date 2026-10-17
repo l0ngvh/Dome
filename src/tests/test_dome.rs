@@ -162,6 +162,14 @@ impl TestDome {
         self.hub.apply_preferred_layouts(layouts);
     }
 
+    pub(crate) fn apply_preferred_layouts(&mut self, layouts: PreferredLayouts) {
+        self.hub.apply_preferred_layouts(layouts);
+    }
+
+    pub(crate) fn capture_live_layouts(&self) -> PreferredLayouts {
+        self.hub.capture_live_layouts()
+    }
+
     pub(crate) fn save_layout(&mut self) -> String {
         let path = self.directory.path("layout.lua");
         self.hub.save_layout(&path).expect("the layout should save");

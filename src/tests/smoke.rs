@@ -12,18 +12,16 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::action::{Action, FocusTarget, MonitorTarget, MoveTarget};
 use crate::core::{
-    Length, LimitObservation, LimitUpdate, MasterConfig, MonitorId, PartitionTreeConfig, PixelRect,
-    Pixels, ScrollingConfig, SizeConstraint, SizeConstraints, SplitMode, Strategy, TilingConfig,
-    TreeLayoutNode, WindowId, WindowMatcher, WindowRestrictions,
+    ColumnConfig, Length, LimitObservation, LimitUpdate, MasterConfig, MonitorId, PaneConfig,
+    PartitionTreeConfig, PixelRect, Pixels, PreferredLayouts, PreferredMaster, PreferredScrolling,
+    PreferredTiling, PreferredWorkspace, ScrollingConfig, SizeConstraint, SizeConstraints,
+    SplitMode, Strategy, TilingConfig, TreeLayoutNode, WindowId, WindowMatcher, WindowRestrictions,
 };
 use crate::tests::test_dome::{TestDome, monitor, window};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
-use support::{
-    lua_string, save_then_apply, setup_logger_with_level, strategy_name, tiling_source,
-    title_matchers, tree_source,
-};
+use support::{export_then_apply, setup_logger_with_level, tiling_source, title_matchers};
 use workload::Workload;
 
 const RUNS: usize = 200;
@@ -1040,10 +1038,10 @@ fn apply_op(
         }
         RecordedOp::ApplyPreferredLayouts { .. } => {
             let layouts = preferred_layout_everywhere(dome, op);
-            dome.apply_layout(&layouts);
+            dome.apply_preferred_layouts(layouts);
         }
         RecordedOp::ExportLayout => {
-            save_then_apply(dome);
+            export_then_apply(dome);
         }
     }
 }
@@ -1427,10 +1425,10 @@ fn replay_without_capture(ops: &[RecordedOp], make_dome: impl FnOnce() -> TestDo
             }
             RecordedOp::ApplyPreferredLayouts { .. } => {
                 let layouts = preferred_layout_everywhere(&dome, op);
-                dome.apply_layout(&layouts);
+                dome.apply_preferred_layouts(layouts);
             }
             RecordedOp::ExportLayout => {
-                save_then_apply(&mut dome);
+                export_then_apply(&mut dome);
             }
         }
     }
@@ -1646,24 +1644,16 @@ fn reconstruct_tree(ops: &[PrefTreeBuildOp]) -> Option<TreeLayoutNode> {
     build_node_recursive(root_id, &leaves, &containers)
 }
 
-fn preferred_layout_everywhere(dome: &TestDome, op: &RecordedOp) -> String {
-    let (name, workspace) = preferred_workspace_source(op);
-    let entries = dome
-        .monitor_names()
-        .iter()
-        .map(|monitor| {
-            format!(
-                "[{}] = {{ [{}] = {workspace} }}",
-                lua_string(monitor),
-                lua_string(name)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("return {{ {entries} }}")
+fn preferred_layout_everywhere(dome: &TestDome, op: &RecordedOp) -> PreferredLayouts {
+    let (name, workspace) = preferred_workspace(op);
+    let mut layouts = PreferredLayouts::default();
+    for monitor in dome.monitor_names() {
+        layouts.insert(&monitor, name, workspace.clone());
+    }
+    layouts
 }
 
-fn preferred_workspace_source(op: &RecordedOp) -> (&str, String) {
+fn preferred_workspace(op: &RecordedOp) -> (&str, PreferredWorkspace) {
     let RecordedOp::ApplyPreferredLayouts {
         workspace_name,
         strategy,
@@ -1675,34 +1665,41 @@ fn preferred_workspace_source(op: &RecordedOp) -> (&str, String) {
         fullscreen,
     } = op
     else {
-        panic!("preferred_workspace_source takes an ApplyPreferredLayouts op, got {op:?}");
+        panic!("preferred_workspace takes an ApplyPreferredLayouts op, got {op:?}");
     };
     let tiling = match strategy {
-        Strategy::PartitionTree => reconstruct_tree(tree_ops)
-            .map(|tree| format!("tree = {},", tree_source(&tree)))
-            .unwrap_or_default(),
-        Strategy::Master => format!(
-            "master = {}, secondary = {},",
-            title_matchers(master),
-            title_matchers(secondary)
-        ),
-        Strategy::Scrolling => {
-            let columns = columns
+        Strategy::PartitionTree => PreferredTiling::PartitionTree {
+            tree: reconstruct_tree(tree_ops),
+        },
+        Strategy::Master => PreferredTiling::Master(PreferredMaster {
+            master: PaneConfig {
+                children: title_matchers(master),
+                ..PaneConfig::default()
+            },
+            secondary: PaneConfig {
+                children: title_matchers(secondary),
+                ..PaneConfig::default()
+            },
+            ..PreferredMaster::default()
+        }),
+        Strategy::Scrolling => PreferredTiling::Scrolling(PreferredScrolling {
+            columns: columns
                 .iter()
-                .map(|titles| format!("{{ children = {} }}", title_matchers(titles)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("columns = {{ {columns} }},")
-        }
+                .map(|titles| ColumnConfig {
+                    width: None,
+                    children: title_matchers(titles),
+                })
+                .collect(),
+            ..PreferredScrolling::default()
+        }),
     };
     (
         workspace_name,
-        format!(
-            "{{ layout = '{}', {tiling} float = {}, fullscreen = {} }}",
-            strategy_name(*strategy),
-            title_matchers(float),
-            title_matchers(fullscreen)
-        ),
+        PreferredWorkspace {
+            tiling,
+            float: title_matchers(float),
+            fullscreen: title_matchers(fullscreen),
+        },
     )
 }
 
@@ -1781,7 +1778,6 @@ fn shrink_op_payloads(
 
 mod tests {
     use super::*;
-    use crate::core::{PaneDisplay, PreferredLayouts, PreferredTiling};
     use crate::tests::configuration::load_config;
 
     #[test]
@@ -1829,11 +1825,9 @@ mod tests {
     }
 
     #[test]
-    fn load_preferred_layouts_preserves_recorded_payloads() {
-        let mut dome = SmokeStrategy::PartitionTree.build_dome();
-        dome.add_monitor(monitor("display\"\\\n\x007", [150, 0, 150, 30]));
+    fn apply_recorded_layouts_on_each_monitor_matches_file_layout_behavior() {
         let title = "title\"\\\n\r\t\0\u{7f}7 日本語".to_owned();
-        let titles = vec![title.clone(), title.clone()];
+        let monitor_name = "display\"\\\n\x007";
         let tree_ops = vec![
             PrefTreeBuildOp::InsertLeaf {
                 leaf_id: 0,
@@ -1853,67 +1847,118 @@ mod tests {
                 anchor: Some(1),
                 split: SplitMode::Tabbed,
             },
+            PrefTreeBuildOp::InsertLeaf {
+                leaf_id: 3,
+                title: title.clone(),
+                anchor: Some(CONTAINER_BASE),
+                split: SplitMode::Horizontal,
+            },
         ];
-        for strategy in [
-            Strategy::PartitionTree,
-            Strategy::Master,
-            Strategy::Scrolling,
+        for (strategy, tiling) in [
+            (
+                Strategy::PartitionTree,
+                "layout = 'partition_tree', tree = { split = 'vertical', children = {
+                    { title = title },
+                    { split = 'tabbed', children = {{ title = 'second' }, { title = 'third' }} },
+                    { title = title },
+                } }",
+            ),
+            (
+                Strategy::Master,
+                "layout = 'master', master = {{ title = title }, { title = title }},
+                 secondary = {{ title = 'second' }, { title = 'third' }}",
+            ),
+            (
+                Strategy::Scrolling,
+                "layout = 'scrolling', columns = {
+                    { children = {{ title = title }, { title = title }} },
+                    { children = {} },
+                    { children = {{ title = 'second' }, { title = 'third' }} },
+                }",
+            ),
         ] {
+            let mut dome = SmokeStrategy::PartitionTree.build_dome();
+            let mut reference = SmokeStrategy::PartitionTree.build_dome();
+            for instance in [&mut dome, &mut reference] {
+                instance.add_monitor(monitor(monitor_name, [150, 0, 150, 30]));
+            }
             let op = RecordedOp::ApplyPreferredLayouts {
                 workspace_name: title.clone(),
                 strategy,
                 tree_ops: tree_ops.clone(),
-                master: titles.clone(),
-                secondary: vec!["secondary".into()],
-                columns: vec![titles.clone(), Vec::new(), vec!["column".into()]],
-                float: titles.clone(),
-                fullscreen: titles.clone(),
+                master: vec![title.clone(), title.clone()],
+                secondary: vec!["second".into(), "third".into()],
+                columns: vec![
+                    vec![title.clone(), title.clone()],
+                    Vec::new(),
+                    vec!["second".into(), "third".into()],
+                ],
+                float: vec!["floating".into(), "shared".into()],
+                fullscreen: vec!["fullscreen".into(), "shared".into()],
             };
-            let source = preferred_layout_everywhere(&dome, &op);
-            let loaded = PreferredLayouts::from_lua("recorded.lua", &source).unwrap();
-            for monitor in dome.monitor_names() {
-                let workspace = loaded.workspace(&monitor, &title).unwrap();
-                let matcher_titles = |matchers: &[WindowMatcher]| {
-                    matchers
-                        .iter()
-                        .map(|matcher| matcher.title.clone().unwrap())
-                        .collect::<Vec<_>>()
-                };
-                assert_eq!(matcher_titles(&workspace.float), titles);
-                assert_eq!(matcher_titles(&workspace.fullscreen), titles);
-                match &workspace.tiling {
-                    PreferredTiling::PartitionTree { tree } => {
-                        assert_eq!(strategy, Strategy::PartitionTree);
-                        assert_eq!(*tree, reconstruct_tree(&tree_ops));
+            dome.apply_preferred_layouts(preferred_layout_everywhere(&dome, &op));
+            reference.apply_layout(&format!(
+                r#"
+                local title = "title\"\\\n\r\t\000\1277 日本語"
+                local workspace = {{ {tiling},
+                    float = {{{{ title = 'floating' }}, {{ title = 'shared' }}}},
+                    fullscreen = {{{{ title = 'fullscreen' }}, {{ title = 'shared' }}}},
+                }}
+                return {{
+                    primary = {{ [title] = workspace }},
+                    ["display\"\\\n\0007"] = {{ [title] = workspace }},
+                }}
+                "#
+            ));
+            for (monitor_index, monitor_name) in ["primary", monitor_name].into_iter().enumerate() {
+                for instance in [&mut dome, &mut reference] {
+                    instance.run_action(Action::Focus {
+                        target: FocusTarget::Workspace {
+                            name: title.clone(),
+                            monitor: Some(monitor_name.to_owned()),
+                        },
+                    });
+                }
+                for (index, window_title) in [
+                    "third",
+                    "second",
+                    &title,
+                    &title,
+                    "unmatched",
+                    "floating",
+                    "floating",
+                    "fullscreen",
+                    "shared",
+                    "shared",
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let label = format!("monitor-{monitor_index}-window-{index}");
+                    for instance in [&mut dome, &mut reference] {
+                        instance.open(window(window_title).label(&label).frame([
+                            150 * monitor_index as i32 + 10,
+                            2,
+                            30,
+                            8,
+                        ]));
                     }
-                    PreferredTiling::Master(master) => {
-                        assert_eq!(strategy, Strategy::Master);
-                        assert_eq!(master.master_count, None);
-                        assert_eq!(master.master_ratio, None);
-                        assert_eq!(master.master.display, PaneDisplay::Tiled);
-                        assert_eq!(master.secondary.display, PaneDisplay::Tiled);
-                        assert_eq!(matcher_titles(&master.master.children), titles);
-                        assert_eq!(matcher_titles(&master.secondary.children), ["secondary"]);
-                    }
-                    PreferredTiling::Scrolling(scrolling) => {
-                        assert_eq!(strategy, Strategy::Scrolling);
-                        assert_eq!(scrolling.column_width, None);
-                        assert_eq!(scrolling.columns.len(), 3);
-                        assert_eq!(matcher_titles(&scrolling.columns[0].children), titles);
-                        assert!(scrolling.columns[1].children.is_empty());
-                        assert_eq!(matcher_titles(&scrolling.columns[2].children), ["column"]);
-                        assert!(
-                            scrolling
-                                .columns
-                                .iter()
-                                .all(|column| column.width.is_none())
-                        );
-                    }
+                    assert_eq!(
+                        dome.snapshot(),
+                        reference.snapshot(),
+                        "{strategy:?} on {monitor_name:?} after opening {label}"
+                    );
+                }
+                for command in ["focus left", "focus right", "focus up", "focus down"] {
+                    dome.run(command);
+                    reference.run(command);
+                    assert_eq!(
+                        dome.snapshot(),
+                        reference.snapshot(),
+                        "{strategy:?}: {command}"
+                    );
                 }
             }
-            dome.apply_layout(&source);
-            let saved = dome.save_layout();
-            dome.apply_layout(&saved);
         }
     }
 

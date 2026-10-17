@@ -4792,61 +4792,101 @@ fn open_window_matching_float_rule_floats_at_reported_frame() {
 }
 
 #[test]
-fn open_window_matching_several_rules_prefers_fullscreen_then_float() {
-    let mut dome = TestDome::with_layout(
-        "return {}",
-        r#"return { primary = { ["0"] = {
-        layout = "partition_tree", tree = { { title = "both" }, { title = "all" } },
-        float = { { title = "both" }, { title = "all" } },
-        fullscreen = { { title = "all" } },
-    } } }"#,
-    );
-    dome.open(window("both").frame([10, 3, 40, 10]));
-    assert_snapshot!(dome.snapshot(), @"
-    focused both on primary
-    workspaces: 0 on primary (focused)
-    primary 0,0 100x20 border 1
-      both 10,3 40x10 float highlighted
-                                                                                                        
-                                                                                                        
-                                                                                                        
-              ****************************************                                                  
-              *                                      *                                                  
-              *                                      *                                                  
-              *                                      *                                                  
-              *                 both                 *                                                  
-              *                                      *                                                  
-              *                                      *                                                  
-              *                                      *                                                  
-              *                                      *                                                  
-              ****************************************
-    ");
-    dome.open(window("all").frame([30, 6, 40, 10]));
-    assert_snapshot!(dome.snapshot(), @"
-    focused all on primary
-    workspaces: 0 on primary (focused)
-    primary 0,0 100x20 border 1 fullscreen all
-    +--------------------------------------------------------------------------------------------------+
-    |                                                                                                  |
-    |                                                                                                  |
-    |                                                                                                  |
-    |                                                                                                  |
-    |                                                                                                  |
-    |                                                                                                  |
-    |                                                                                                  |
-    |                                                                                                  |
-    |                                                all                                               |
-    |                                                                                                  |
-    |                                                                                                  |
-    |                                                                                                  |
-    |                                                                                                  |
-    |                                                                                                  |
-    |                                                                                                  |
-    |                                                                                                  |
-    |                                                                                                  |
-    |                                                                                                  |
-    +--------------------------------------------------------------------------------------------------+
-    ");
+fn open_overlapping_mode_matches_consumes_each_eligible_slot_before_tiling_fallback() {
+    for (prefix, count) in [("both", 2), ("all", 3)] {
+        for open_fallback in [false, true] {
+            let mut dome = TestDome::with_layout(
+                "return {}",
+                r#"return { primary = { ["0"] = {
+                    layout = "partition_tree", tree = { { title = "/^both/" }, { title = "/^all/" } },
+                    float = { { title = "/^both/" }, { title = "/^all/" } },
+                    fullscreen = { { title = "/^all/" } },
+                } } }"#,
+            );
+            let titles: Vec<_> = (0..count).map(|index| format!("{prefix}{index}")).collect();
+            let windows: Vec<_> = titles
+                .iter()
+                .map(|title| dome.open(window(title).frame([10, 3, 40, 10])))
+                .collect();
+            let layouts = dome.capture_live_layouts();
+            let workspace = layouts.workspace("primary", "0").unwrap();
+            assert_eq!(workspace.float.len(), 1);
+            assert_eq!(workspace.fullscreen.len(), count - 2);
+            let floating = workspace.float[0].title.as_deref().unwrap();
+            let fullscreen = workspace
+                .fullscreen
+                .first()
+                .map(|matcher| matcher.title.as_deref().unwrap());
+            let tiled: Vec<_> = titles
+                .iter()
+                .filter(|title| title.as_str() != floating && Some(title.as_str()) != fullscreen)
+                .collect();
+            assert_eq!(tiled.len(), 1);
+            let mut placed = vec![tiled[0].as_str(), floating];
+            placed.extend(fullscreen);
+            placed.sort();
+            assert_eq!(placed, titles);
+
+            let fallback = format!("{prefix}{count}");
+            if open_fallback {
+                dome.open(window(&fallback).frame([10, 3, 40, 10]));
+                let layouts = dome.capture_live_layouts();
+                let after = layouts.workspace("primary", "0").unwrap();
+                assert_eq!(after.float, workspace.float);
+                assert_eq!(after.fullscreen, workspace.fullscreen);
+            }
+            if let Some(title) = fullscreen {
+                let snapshot = dome.snapshot();
+                assert!(
+                    snapshot
+                        .lines()
+                        .any(|line| line
+                            == format!("primary 0,0 100x20 border 1 fullscreen {title}")),
+                    "{snapshot}"
+                );
+                let index = titles
+                    .iter()
+                    .position(|candidate| candidate == title)
+                    .unwrap();
+                dome.close(windows[index]);
+            }
+            let snapshot = dome.snapshot();
+            let placements: Vec<Vec<_>> = snapshot
+                .lines()
+                .filter_map(|line| line.strip_prefix("  "))
+                .map(|line| line.split_whitespace().collect())
+                .collect();
+            assert_eq!(
+                placements.len(),
+                if open_fallback { 3 } else { 2 },
+                "{snapshot}"
+            );
+            let floating_placement = placements
+                .iter()
+                .find(|fields| fields[0] == floating)
+                .unwrap();
+            assert_eq!(
+                &floating_placement[..4],
+                &[floating, "10,3", "40x10", "float"],
+                "{snapshot}"
+            );
+            let mut rectangles = Vec::new();
+            for title in
+                std::iter::once(tiled[0].as_str()).chain(open_fallback.then_some(fallback.as_str()))
+            {
+                let placement = placements.iter().find(|fields| fields[0] == title).unwrap();
+                assert!(!placement.contains(&"float"), "{snapshot}");
+                rectangles.push((placement[1], placement[2]));
+            }
+            rectangles.sort();
+            let expected = if open_fallback {
+                vec![("0,0", "50x20"), ("50,0", "50x20")]
+            } else {
+                vec![("0,0", "100x20")]
+            };
+            assert_eq!(rectangles, expected, "{snapshot}");
+        }
+    }
 }
 
 #[test]
@@ -6552,7 +6592,13 @@ fn apply_layout_focuses_topmost_fullscreen_then_topmost_float() {
     dome.set_fullscreen(first, WindowRestrictions::None);
     dome.set_fullscreen(second, WindowRestrictions::None);
     dome.focus(tiling);
-    dome.apply_layout("return {}");
+    dome.apply_layout(
+        r#"return { primary = { ["0"] = {
+        layout = "partition_tree",
+        float = { { title = "w3" } },
+        fullscreen = { { title = "w1" }, { title = "w2" } },
+    } } }"#,
+    );
     assert_snapshot!(dome.snapshot(), @"
     focused w2 on primary
     workspaces: 0 on primary (focused)

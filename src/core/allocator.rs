@@ -29,6 +29,10 @@ impl<T: std::fmt::Debug + Node> Allocator<T> {
         self.storage.remove(&id);
     }
 
+    pub(super) fn clear(&mut self) {
+        self.storage.clear();
+    }
+
     pub(super) fn get(&self, id: T::Id) -> &T {
         self.storage
             .get(&id)
@@ -57,10 +61,6 @@ impl<T: std::fmt::Debug + Node> Allocator<T> {
             .iter()
             .find(|(_, node)| f(node))
             .map(|(id, _)| *id)
-    }
-
-    pub(super) fn retain(&mut self, keep: impl Fn(&T) -> bool) {
-        self.storage.retain(|_, node| keep(node));
     }
 }
 

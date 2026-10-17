@@ -6,7 +6,7 @@ use super::PartitionTreeStrategy;
 
 impl PartitionTreeStrategy {
     /// The border box of the window's tile in screen coordinates.
-    fn tile_border_box(&self, ws_id: WorkspaceId, window_id: WindowId) -> PixelRect {
+    pub(super) fn tile_border_box(&self, ws_id: WorkspaceId, window_id: WindowId) -> PixelRect {
         let work_area = self.workspaces.get(&ws_id).unwrap().work_area;
         let dimension = self.tiling_windows.get(&window_id).unwrap().dimension;
         translate(

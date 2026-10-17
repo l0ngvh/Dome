@@ -6,7 +6,12 @@ use super::ScrollingStrategy;
 
 impl ScrollingStrategy {
     /// The border box the window's tile shows, in screen coordinates.
-    fn tile_border_box(&self, hub: &HubAccess, ws_id: WorkspaceId, id: WindowId) -> PixelRect {
+    pub(super) fn tile_border_box(
+        &self,
+        hub: &HubAccess,
+        ws_id: WorkspaceId,
+        id: WindowId,
+    ) -> PixelRect {
         let state = &self.workspaces[&ws_id];
         let column = self
             .column_index_of(hub, ws_id, id)

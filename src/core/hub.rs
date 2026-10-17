@@ -7,7 +7,7 @@ use super::node::{
 };
 use super::partition_tree::Child;
 use super::preferred_layout::{PreferredLayouts, PreferredWorkspace};
-use super::slot::{Slot, find_free_slot};
+use super::slot::{SlotId, Slots};
 use super::strategy::{StrategyAction, StrategySet, TilingAction};
 use super::tiling::TilingConfig;
 use super::workspace::{Attachment, Workspace};
@@ -118,7 +118,7 @@ pub(crate) struct HubAccess {
     pub(super) workspaces: Allocator<Workspace>,
     pub(super) windows: Allocator<Window>,
     pub(super) containers: Allocator<Container>,
-    pub(super) slots: Allocator<Slot>,
+    pub(super) slots: Slots,
 }
 
 impl HubAccess {
@@ -233,7 +233,7 @@ impl Hub {
                 workspaces: Allocator::new(),
                 windows: Allocator::new(),
                 containers: Allocator::new(),
-                slots: Allocator::new(),
+                slots: Slots::new(),
             },
             strategies,
             minimized_windows: Vec::new(),
@@ -529,10 +529,24 @@ impl Hub {
     #[tracing::instrument(skip(self))]
     pub(crate) fn apply_preferred_layouts(&mut self, preferred_layouts: PreferredLayouts) {
         self.access.preferred_layouts = preferred_layouts;
-        self.create_named_workspaces();
-        for ws_id in self.access.workspaces.sorted_ids() {
-            self.reset_workspace(ws_id);
+        let workspaces: Vec<_> = self
+            .access
+            .workspaces
+            .sorted_ids()
+            .into_iter()
+            .map(|workspace_id| {
+                let windows = self
+                    .strategies
+                    .for_workspace_mut(workspace_id)
+                    .clear_workspace(&mut self.access, workspace_id);
+                (workspace_id, windows)
+            })
+            .collect();
+        self.access.slots.clear();
+        for (workspace_id, windows) in workspaces {
+            self.rebuild_workspace(workspace_id, windows);
         }
+        self.create_named_workspaces();
     }
 
     #[tracing::instrument(skip(self))]
@@ -552,24 +566,33 @@ impl Hub {
             tracing::debug!("Window ignored by rule {r:?}");
             return None;
         }
-        let slot = find_free_slot(&self.access.slots, &*metadata, None);
-        let (target_ws, slot_mode) = match slot {
-            Some(id) => {
-                let slot = self.access.slots.get(id);
-                (slot.workspace, slot.mode)
-            }
-            None => (self.current_workspace(), WindowMode::Tiling),
-        };
-        let mode = if restrictions == WindowRestrictions::None {
-            slot_mode
-        } else {
-            WindowMode::Fullscreen
-        };
-
+        let slot = self.access.slots.find_free_slot(&*metadata);
+        let target_workspace = slot
+            .map(|id| self.access.slots.get(id).workspace)
+            .unwrap_or_else(|| self.current_workspace());
         let window_id =
             self.access
                 .windows
-                .allocate(Window::new(target_ws, restrictions, metadata));
+                .allocate(Window::new(target_workspace, restrictions, metadata));
+        self.attach_window_to_layout(window_id, target_workspace, rect, slot);
+        self.set_focus(window_id);
+
+        Some(window_id)
+    }
+
+    pub(super) fn attach_window_to_layout(
+        &mut self,
+        window_id: WindowId,
+        workspace_id: WorkspaceId,
+        rect: PixelRect,
+        slot: Option<SlotId>,
+    ) {
+        let mode = if self.access.windows.get(window_id).restrictions == WindowRestrictions::None {
+            slot.map(|id| self.access.slots.get(id).mode)
+                .unwrap_or(WindowMode::Tiling)
+        } else {
+            WindowMode::Fullscreen
+        };
         let (mode, tiling_slot) = match mode {
             WindowMode::Tiling => (DisplayMode::Tiling, slot),
             WindowMode::Float => {
@@ -578,19 +601,12 @@ impl Hub {
             }
             WindowMode::Fullscreen => (DisplayMode::Fullscreen, None),
         };
-        self.strategies.for_workspace_mut(target_ws).attach_window(
-            &mut self.access,
-            window_id,
-            target_ws,
-            mode,
-            tiling_slot,
-        );
+        self.strategies
+            .for_workspace_mut(workspace_id)
+            .attach_window(&mut self.access, window_id, workspace_id, mode, tiling_slot);
         if let Some(id) = slot {
-            self.access.slots.get_mut(id).hold(window_id);
+            self.access.slots.hold(id, window_id);
         }
-        self.set_focus(window_id);
-
-        Some(window_id)
     }
 
     pub(crate) fn set_window_title(&mut self, window_id: WindowId, title: String) -> bool {
@@ -673,7 +689,7 @@ impl Hub {
                 .detach_window(&mut self.access, id);
         }
 
-        self.release_slot(id);
+        self.access.slots.release(id);
         self.access.windows.delete(id);
     }
 

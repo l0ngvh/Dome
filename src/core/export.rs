@@ -14,7 +14,7 @@ impl Hub {
     /// Returns the in-memory layouts with each monitor that has a live workspace
     /// rewritten from the live state. A monitor with no live workspace keeps its
     /// entries, so a file written on the laptop still carries the desktop's layout.
-    pub(super) fn capture_live_layouts(&self) -> PreferredLayouts {
+    pub(crate) fn capture_live_layouts(&self) -> PreferredLayouts {
         let mut layouts = self.access.preferred_layouts.clone();
         let ws_ids: Vec<WorkspaceId> = self.access.workspaces.sorted_ids();
         // Clearing first is what drops a workspace that no longer exists.

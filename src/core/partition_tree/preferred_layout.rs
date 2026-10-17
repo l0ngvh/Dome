@@ -16,7 +16,7 @@ use crate::core::matcher::WindowMode;
 use crate::core::node::{Child, ContainerId, WindowId, WorkspaceId};
 use crate::core::partition_tree::PartitionTreeStrategy;
 use crate::core::partition_tree::SplitMode;
-use crate::core::slot::{Slot, SlotId, held_tiling_slot};
+use crate::core::slot::{SlotId, Slots};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum TreeLayoutNode {
@@ -65,23 +65,9 @@ impl PartitionTreeStrategy {
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
         tree: &TreeLayoutNode,
+        slots: &mut Vec<SlotId>,
     ) -> PreferredSlot {
-        self.build_preferred_layout_subtree(hub, ws_id, tree, None)
-    }
-
-    fn first_held_ancestor(&self, slot: SlotId) -> Option<PreferredContainerSlotId> {
-        let mut current = self.leaf_parents[&slot];
-        for _ in crate::core::bounded_loop() {
-            let Some(parent_id) = current else {
-                break;
-            };
-            let cs = self.container_slots.get(parent_id);
-            if cs.container.is_some() {
-                return Some(parent_id);
-            }
-            current = cs.parent;
-        }
-        None
+        self.build_preferred_layout_subtree(hub, ws_id, tree, None, slots)
     }
 
     /// The first slot in a preorder walk of the preferred layout that a live window or
@@ -108,23 +94,6 @@ impl PartitionTreeStrategy {
             }
         }
         None
-    }
-
-    /// The live window or container that holds `slot`, or `None` when the slot is free or its
-    /// window does not tile on the slot's workspace.
-    fn child_of_preferred_slot(&self, hub: &HubAccess, slot: PreferredSlot) -> Option<Child> {
-        match slot {
-            PreferredSlot::Window(id) => {
-                let leaf = hub.slots.get(id);
-                let window_id = leaf.window?;
-                let tiles_on_leaf_workspace = self.tiling_windows.contains_key(&window_id)
-                    && hub.windows.get(window_id).workspace() == Some(leaf.workspace);
-                tiles_on_leaf_workspace.then_some(Child::Window(window_id))
-            }
-            PreferredSlot::Container(id) => {
-                self.container_slots.get(id).container.map(Child::Container)
-            }
-        }
     }
 
     /// The live tree grows toward the preferred layout one matched window at a time. A new
@@ -155,6 +124,84 @@ impl PartitionTreeStrategy {
             self.attach_window_to_free_ancestor(hub, window_id, ws_id, slot_id, root_slot);
         } else {
             self.attach_child_according_to_spawn_direction(hub, Child::Window(window_id), ws_id);
+        }
+    }
+
+    pub(super) fn release_container_slots_in(&mut self, hub: &HubAccess, subtree: Child) {
+        for node in hub.children_dfs(subtree) {
+            if let Child::Container(cid) = node {
+                self.release_container_slot(cid);
+            }
+        }
+    }
+
+    pub(super) fn free_preferred_subtree(&mut self, root: PreferredSlot) {
+        let mut stack = vec![root];
+        for _ in crate::core::bounded_loop() {
+            let Some(slot) = stack.pop() else { break };
+            match slot {
+                PreferredSlot::Window(id) => {
+                    self.leaf_parents.remove(&id);
+                }
+                PreferredSlot::Container(id) => {
+                    let children = self.container_slots.get(id).children.clone();
+                    self.container_slots.delete(id);
+                    for &c in children.iter().rev() {
+                        stack.push(c);
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) fn release_container_slot(&mut self, container_id: ContainerId) {
+        let data = self.tiling_containers.get_mut(&container_id).unwrap();
+        let Some(slot) = data.held_slot.take() else {
+            return;
+        };
+        self.container_slots.get_mut(slot).container = None;
+    }
+
+    pub(super) fn export_tree(
+        &self,
+        hub: &HubAccess,
+        ws_id: WorkspaceId,
+    ) -> Option<TreeLayoutNode> {
+        self.workspaces
+            .get(&ws_id)
+            .and_then(|ws| ws.root)
+            .map(|root| self.live_layout_node(hub, root))
+    }
+
+    fn first_held_ancestor(&self, slot: SlotId) -> Option<PreferredContainerSlotId> {
+        let mut current = self.leaf_parents[&slot];
+        for _ in crate::core::bounded_loop() {
+            let Some(parent_id) = current else {
+                break;
+            };
+            let cs = self.container_slots.get(parent_id);
+            if cs.container.is_some() {
+                return Some(parent_id);
+            }
+            current = cs.parent;
+        }
+        None
+    }
+
+    /// The live window or container that holds `slot`, or `None` when the slot is free or its
+    /// window does not tile on the slot's workspace.
+    fn child_of_preferred_slot(&self, hub: &HubAccess, slot: PreferredSlot) -> Option<Child> {
+        match slot {
+            PreferredSlot::Window(id) => {
+                let leaf = hub.slots.get(id);
+                let window_id = leaf.window()?;
+                let tiles_on_leaf_workspace = self.tiling_windows.contains_key(&window_id)
+                    && hub.windows.get(window_id).workspace() == Some(leaf.workspace);
+                tiles_on_leaf_workspace.then_some(Child::Window(window_id))
+            }
+            PreferredSlot::Container(id) => {
+                self.container_slots.get(id).container.map(Child::Container)
+            }
         }
     }
 
@@ -213,7 +260,7 @@ impl PartitionTreeStrategy {
         let mut insert_pos = 0;
 
         for (i, &child) in live_children.iter().enumerate() {
-            let Some(child_slot) = self.preferred_slot_of_child(hub, ws_id, child) else {
+            let Some(child_slot) = self.preferred_slot_of_child(&hub.slots, ws_id, child) else {
                 continue;
             };
             let (lca, ordering) =
@@ -241,52 +288,6 @@ impl PartitionTreeStrategy {
         );
 
         self.compute_placement(hub, ws_id);
-    }
-
-    pub(super) fn release_container_slots_in(&mut self, hub: &HubAccess, subtree: Child) {
-        for node in hub.children_dfs(subtree) {
-            if let Child::Container(cid) = node {
-                self.release_container_slot(cid);
-            }
-        }
-    }
-
-    pub(super) fn free_preferred_subtree(&mut self, root: PreferredSlot) {
-        let mut stack = vec![root];
-        for _ in crate::core::bounded_loop() {
-            let Some(slot) = stack.pop() else { break };
-            match slot {
-                PreferredSlot::Window(id) => {
-                    self.leaf_parents.remove(&id);
-                }
-                PreferredSlot::Container(id) => {
-                    let children = self.container_slots.get(id).children.clone();
-                    self.container_slots.delete(id);
-                    for &c in children.iter().rev() {
-                        stack.push(c);
-                    }
-                }
-            }
-        }
-    }
-
-    pub(super) fn release_container_slot(&mut self, container_id: ContainerId) {
-        let data = self.tiling_containers.get_mut(&container_id).unwrap();
-        let Some(slot) = data.held_slot.take() else {
-            return;
-        };
-        self.container_slots.get_mut(slot).container = None;
-    }
-
-    pub(super) fn export_tree(
-        &self,
-        hub: &HubAccess,
-        ws_id: WorkspaceId,
-    ) -> Option<TreeLayoutNode> {
-        self.workspaces
-            .get(&ws_id)
-            .and_then(|ws| ws.root)
-            .map(|root| self.live_layout_node(hub, root))
     }
 
     fn live_layout_node(&self, hub: &HubAccess, root: Child) -> TreeLayoutNode {
@@ -332,12 +333,14 @@ impl PartitionTreeStrategy {
         ws_id: WorkspaceId,
         node: &TreeLayoutNode,
         parent: Option<PreferredContainerSlotId>,
+        slots: &mut Vec<SlotId>,
     ) -> PreferredSlot {
         match node {
             TreeLayoutNode::Leaf(matcher) => {
                 let id = hub
                     .slots
-                    .allocate(Slot::new(matcher.clone(), ws_id, WindowMode::Tiling));
+                    .allocate(matcher.clone(), ws_id, WindowMode::Tiling);
+                slots.push(id);
                 self.leaf_parents.insert(id, parent);
                 PreferredSlot::Window(id)
             }
@@ -350,7 +353,8 @@ impl PartitionTreeStrategy {
                     parent,
                 });
                 for c in children {
-                    let child_slot = self.build_preferred_layout_subtree(hub, ws_id, c, Some(id));
+                    let child_slot =
+                        self.build_preferred_layout_subtree(hub, ws_id, c, Some(id), slots);
                     child_slots.push(child_slot);
                 }
                 self.container_slots.get_mut(id).children = child_slots;
@@ -361,14 +365,18 @@ impl PartitionTreeStrategy {
 
     fn preferred_slot_of_child(
         &self,
-        hub: &HubAccess,
+        slots: &Slots,
         ws_id: WorkspaceId,
         child: Child,
     ) -> Option<PreferredSlot> {
         match child {
-            Child::Window(wid) => {
-                held_tiling_slot(&hub.slots, wid, ws_id).map(PreferredSlot::Window)
-            }
+            Child::Window(wid) => slots
+                .held_slot(wid)
+                .filter(|&id| {
+                    let slot = slots.get(id);
+                    slot.workspace == ws_id && matches!(slot.mode, WindowMode::Tiling)
+                })
+                .map(PreferredSlot::Window),
             Child::Container(cid) => self
                 .tiling_containers
                 .get(&cid)

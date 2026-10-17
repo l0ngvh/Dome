@@ -1,6 +1,4 @@
-use crate::core::{
-    SizeConstraint, SplitMode, Strategy, TilingConfig, TreeLayoutNode, WindowMatcher,
-};
+use crate::core::{SizeConstraint, Strategy, TilingConfig, WindowMatcher};
 use crate::tests::test_dome::TestDome;
 
 pub(super) fn setup_logger_with_level(level: &str) {
@@ -9,9 +7,9 @@ pub(super) fn setup_logger_with_level(level: &str) {
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }
 
-pub(super) fn save_then_apply(dome: &mut TestDome) {
-    let layout = dome.save_layout();
-    dome.apply_layout(&layout);
+pub(super) fn export_then_apply(dome: &mut TestDome) {
+    let layouts = dome.capture_live_layouts();
+    dome.apply_preferred_layouts(layouts);
 }
 
 pub(super) fn lua_string(value: &str) -> String {
@@ -95,35 +93,12 @@ pub(super) fn tiling_source(tiling: &TilingConfig) -> String {
     )
 }
 
-pub(super) fn tree_source(tree: &TreeLayoutNode) -> String {
-    match tree {
-        TreeLayoutNode::Leaf(matcher) => matcher_source(matcher),
-        TreeLayoutNode::Container { split, children } => {
-            let children = children
-                .iter()
-                .map(tree_source)
-                .collect::<Vec<_>>()
-                .join(", ");
-            match split {
-                None => format!("{{ {children} }}"),
-                Some(split) => {
-                    let split = match split {
-                        SplitMode::Horizontal => "horizontal",
-                        SplitMode::Vertical => "vertical",
-                        SplitMode::Tabbed => "tabbed",
-                    };
-                    format!("{{ split = '{split}', children = {{ {children} }} }}")
-                }
-            }
-        }
-    }
-}
-
-pub(super) fn title_matchers(titles: &[String]) -> String {
-    let matchers = titles
+pub(super) fn title_matchers(titles: &[String]) -> Vec<WindowMatcher> {
+    titles
         .iter()
-        .map(|title| format!("{{ title = {} }}", lua_string(title)))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("{{ {matchers} }}")
+        .map(|title| WindowMatcher {
+            title: Some(title.clone()),
+            ..WindowMatcher::default()
+        })
+        .collect()
 }
