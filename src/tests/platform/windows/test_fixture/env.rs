@@ -451,7 +451,12 @@ impl WindowsFixture {
 
     pub(crate) fn run_unminimize(&mut self, hwnd: HwndId) {
         let window_id = self.only_minimized_window_id();
+        assert!(self.is_minimized(hwnd), "restore target must be minimized");
         self.send_action(&Action::UnminimizeWindow { id: window_id });
+        assert!(
+            !self.is_minimized(hwnd),
+            "unminimize action must restore the requested window"
+        );
         self.restore_reported(hwnd);
     }
 

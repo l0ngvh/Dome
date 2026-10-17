@@ -136,10 +136,6 @@ fn dont_correct_float_move() {
     env.assert_settled("two successive apply_layout rounds after float move should be no-ops");
 }
 
-/// distribute_space uses binary search and may produce fractional widths
-/// (e.g. 1920/3 ≈ 639.999). The f32→i32 conversion in show_tiling must
-/// round, not truncate, or the cumulative error pushes the last window's
-/// right edge away from the screen edge.
 #[test]
 fn positions_are_rounded_not_truncated() {
     let mut env = TestEnv::builder()

@@ -51,10 +51,16 @@ use crate::core::WindowId;
 use crate::ipc;
 use crate::platform::render::WgpuContext;
 use crate::platform::shell_menu::{build_menu, focused_tooltip, id_to_action};
+#[cfg(not(test))]
+use dome::Dome;
+#[cfg(test)]
 pub(crate) use dome::Dome;
 use dome::HubEvent;
 #[cfg(test)]
 pub(crate) use dome::events::{FloatOverlayAction, MonitorSetChange, RenderScene};
+#[cfg(not(test))]
+use dome::events::{HubMessage, SceneSender};
+#[cfg(test)]
 pub(crate) use dome::events::{HubMessage, SceneSender};
 #[cfg(test)]
 pub(crate) use dome::monitor::{MonitorInfo, QueryDisplay};
@@ -62,6 +68,9 @@ pub(crate) use dome::monitor::{MonitorInfo, QueryDisplay};
 pub(crate) use dome::window::{MAX_DRIFT_RETRIES, NewWindow, WindowsMetadata};
 use dome_auxiliary_window::{App, AppHandler, Icon, LoopWaker, MenuEntry, Shell};
 use event_listener::install_event_hooks;
+#[cfg(not(test))]
+use external::{HwndId, ManageOverlay};
+#[cfg(test)]
 pub(crate) use external::{HwndId, ManageOverlay};
 #[cfg(test)]
 pub(crate) use external::{ManageExternalWindow, ShowCmd, ZOrder};
@@ -75,95 +84,6 @@ use taskbar::Taskbar;
 
 pub(super) const WM_APP_HUBEVENT: u32 = WM_APP;
 pub(super) const WM_APP_DISPATCH_RESULT: u32 = WM_APP + 1;
-
-/// The tray icon compiled into the executable's resources. Matches the id in the resource
-/// script the build embeds.
-const TRAY_ICON_RESOURCE_ID: u16 = 1;
-
-static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-
-#[derive(Clone)]
-struct HubSender {
-    thread_id: u32,
-}
-
-impl HubSender {
-    fn send(&self, event: HubEvent) {
-        let ptr = Box::into_raw(Box::new(event)) as usize;
-        unsafe {
-            PostThreadMessageW(self.thread_id, WM_APP_HUBEVENT, WPARAM(ptr), LPARAM(0)).ok();
-        }
-    }
-
-    fn tiling_overlay_ready(&self, monitor: MonitorId, overlay: Arc<dyn ManageOverlay>) {
-        self.send(HubEvent::TilingOverlayReady { monitor, overlay });
-    }
-
-    fn float_overlay_ready(&self, window: WindowId, overlay: Arc<dyn ManageOverlay>) {
-        self.send(HubEvent::FloatOverlayReady { window, overlay });
-    }
-}
-
-/// The window thread's `App` owns the receiver, so a failed send means it is
-/// gone during shutdown and there is nothing to wake.
-struct SceneThreadSender {
-    scenes: Sender<HubMessage>,
-    waker: LoopWaker,
-}
-
-impl SceneSender for SceneThreadSender {
-    fn send(&mut self, msg: HubMessage) {
-        if self.scenes.send(msg).is_ok() {
-            self.waker.wake();
-        }
-    }
-}
-
-/// Handed from the window thread to the domain thread once the window loop is built.
-struct WindowThreadReady {
-    scenes: Sender<HubMessage>,
-    waker: LoopWaker,
-    thread_id: u32,
-}
-
-/// Drives `WindowThread` and the shell from the auxiliary window crate's loop.
-struct WindowLoopHandler {
-    window_thread: WindowThread,
-    scenes: Receiver<HubMessage>,
-    workspaces: Vec<WorkspaceInfo>,
-    hub_sender: HubSender,
-}
-
-impl AppHandler for WindowLoopHandler {
-    fn on_wake(&mut self, shell: &Shell) {
-        while let Ok(msg) = self.scenes.try_recv() {
-            if let HubMessage::Scene(scene) = &msg {
-                self.workspaces = scene.workspaces.clone();
-                shell.set_tooltip(&focused_tooltip(&scene.workspaces));
-            }
-            self.window_thread.send(msg);
-        }
-    }
-
-    fn menu(&mut self) -> Vec<MenuEntry> {
-        build_menu(&self.workspaces, false)
-    }
-
-    fn on_menu_selected(&mut self, id: u32) {
-        if let Some(action) = id_to_action(id, &self.workspaces) {
-            self.hub_sender
-                .send(HubEvent::Action(Actions::new(vec![action])));
-        }
-    }
-
-    fn on_display_changed(&mut self) {
-        self.hub_sender.send(HubEvent::DisplayChanged);
-    }
-
-    fn on_work_area_changed(&mut self) {
-        self.hub_sender.send(HubEvent::WorkAreaChanged);
-    }
-}
 
 pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Result<()> {
     ensure_per_monitor_v2_awareness()?;
@@ -298,6 +218,95 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
     uninstall_keyboard_hook(keyboard_hook);
 
     Ok(())
+}
+
+/// The tray icon compiled into the executable's resources. Matches the id in the resource
+/// script the build embeds.
+const TRAY_ICON_RESOURCE_ID: u16 = 1;
+
+static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+#[derive(Clone)]
+struct HubSender {
+    thread_id: u32,
+}
+
+impl HubSender {
+    fn send(&self, event: HubEvent) {
+        let ptr = Box::into_raw(Box::new(event)) as usize;
+        unsafe {
+            PostThreadMessageW(self.thread_id, WM_APP_HUBEVENT, WPARAM(ptr), LPARAM(0)).ok();
+        }
+    }
+
+    fn tiling_overlay_ready(&self, monitor: MonitorId, overlay: Arc<dyn ManageOverlay>) {
+        self.send(HubEvent::TilingOverlayReady { monitor, overlay });
+    }
+
+    fn float_overlay_ready(&self, window: WindowId, overlay: Arc<dyn ManageOverlay>) {
+        self.send(HubEvent::FloatOverlayReady { window, overlay });
+    }
+}
+
+/// The window thread's `App` owns the receiver, so a failed send means it is
+/// gone during shutdown and there is nothing to wake.
+struct SceneThreadSender {
+    scenes: Sender<HubMessage>,
+    waker: LoopWaker,
+}
+
+impl SceneSender for SceneThreadSender {
+    fn send(&mut self, msg: HubMessage) {
+        if self.scenes.send(msg).is_ok() {
+            self.waker.wake();
+        }
+    }
+}
+
+/// Handed from the window thread to the domain thread once the window loop is built.
+struct WindowThreadReady {
+    scenes: Sender<HubMessage>,
+    waker: LoopWaker,
+    thread_id: u32,
+}
+
+/// Drives `WindowThread` and the shell from the auxiliary window crate's loop.
+struct WindowLoopHandler {
+    window_thread: WindowThread,
+    scenes: Receiver<HubMessage>,
+    workspaces: Vec<WorkspaceInfo>,
+    hub_sender: HubSender,
+}
+
+impl AppHandler for WindowLoopHandler {
+    fn on_wake(&mut self, shell: &Shell) {
+        while let Ok(msg) = self.scenes.try_recv() {
+            if let HubMessage::Scene(scene) = &msg {
+                self.workspaces = scene.workspaces.clone();
+                shell.set_tooltip(&focused_tooltip(&scene.workspaces));
+            }
+            self.window_thread.send(msg);
+        }
+    }
+
+    fn menu(&mut self) -> Vec<MenuEntry> {
+        build_menu(&self.workspaces, false)
+    }
+
+    fn on_menu_selected(&mut self, id: u32) {
+        if let Some(action) = id_to_action(id, &self.workspaces) {
+            self.hub_sender
+                .send(HubEvent::Action(Actions::new(vec![action])));
+        }
+    }
+
+    fn on_display_changed(&mut self) {
+        self.hub_sender.send(HubEvent::DisplayChanged);
+    }
+
+    fn on_work_area_changed(&mut self) {
+        self.hub_sender.send(HubEvent::WorkAreaChanged);
+    }
 }
 
 /// Verifies the process runs at Per-Monitor V2 DPI awareness, aborting otherwise because

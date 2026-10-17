@@ -32,33 +32,6 @@ use self::registry::ManagedWindow;
 pub(in crate::platform::windows) use self::registry::WindowRegistry;
 use self::window::{PositionedState, WindowState};
 
-struct WinPlatformEffects<'a> {
-    registry: &'a mut WindowRegistry,
-    main_thread_id: u32,
-    env: &'a HashMap<String, String>,
-}
-
-impl PlatformEffects for WinPlatformEffects<'_> {
-    fn close(&mut self, id: WindowId) {
-        self.registry.close_window(id);
-    }
-
-    fn execute(&mut self, command: &str) {
-        if let Err(e) = crate::platform::windows::spawn::spawn(command, self.env) {
-            tracing::warn!(%command, "Failed to execute: {e:#}");
-        }
-    }
-
-    fn exit(&mut self) {
-        unsafe { PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
-        unsafe { PostQuitMessage(0) };
-    }
-
-    fn unminimize(&mut self, id: WindowId) {
-        self.registry.unminimize_window(id);
-    }
-}
-
 pub(super) use self::window::NewWindow;
 pub(super) use self::window::WindowsMetadata;
 
@@ -898,6 +871,33 @@ impl Dome {
 // FileDescription from version info when available.
 pub(super) fn display_from_process(process: &str) -> String {
     process.strip_suffix(".exe").unwrap_or(process).to_string()
+}
+
+struct WinPlatformEffects<'a> {
+    registry: &'a mut WindowRegistry,
+    main_thread_id: u32,
+    env: &'a HashMap<String, String>,
+}
+
+impl PlatformEffects for WinPlatformEffects<'_> {
+    fn close(&mut self, id: WindowId) {
+        self.registry.close_window(id);
+    }
+
+    fn execute(&mut self, command: &str) {
+        if let Err(e) = crate::platform::windows::spawn::spawn(command, self.env) {
+            tracing::warn!(%command, "Failed to execute: {e:#}");
+        }
+    }
+
+    fn exit(&mut self) {
+        unsafe { PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+        unsafe { PostQuitMessage(0) };
+    }
+
+    fn unminimize(&mut self, id: WindowId) {
+        self.registry.unminimize_window(id);
+    }
 }
 
 /// Whether a tile shows through a DWM thumbnail instead of as the window itself, which holds for
