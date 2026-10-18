@@ -50,15 +50,15 @@ impl TilingStrategy for PartitionTreeStrategy {
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
         entry: &PreferredWorkspace,
-    ) {
+    ) -> Vec<SlotId> {
         let PreferredTiling::PartitionTree { tree } = &entry.tiling else {
             unreachable!("partition tree got a {:?} entry", entry.tiling.strategy());
         };
-        FullscreenWindows::allocate_slots(hub, ws_id, &entry.fullscreen);
-        FloatWindows::allocate_slots(hub, ws_id, &entry.float);
+        let mut slots = FullscreenWindows::allocate_slots(hub, ws_id, &entry.fullscreen);
+        slots.extend(FloatWindows::allocate_slots(hub, ws_id, &entry.float));
         let preferred_root = tree
             .as_ref()
-            .map(|t| self.build_preferred_layout(hub, ws_id, t));
+            .map(|t| self.build_preferred_layout(hub, ws_id, t, &mut slots));
         let host = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
         self.workspaces.insert(
             ws_id,
@@ -73,35 +73,44 @@ impl TilingStrategy for PartitionTreeStrategy {
                 fullscreen_windows: FullscreenWindows::default(),
             },
         );
+        slots
     }
 
     fn clear_workspace(
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-    ) -> Vec<(WindowId, DisplayMode)> {
-        let Some(mut state) = self.workspaces.remove(&ws_id) else {
+    ) -> Vec<(WindowId, PixelRect)> {
+        let Some(state) = self.workspaces.get(&ws_id) else {
             return Vec::new();
         };
+        let preferred_root = state.preferred_root;
         let mut tiling = match state.root {
             Some(root) => self.free_container_subtree(hub, root),
             None => Vec::new(),
         };
-        if let Some(preferred_root) = state.preferred_root {
+        if let Some(preferred_root) = preferred_root {
             self.free_preferred_subtree(preferred_root);
         }
-        for wid in &tiling {
-            self.tiling_windows.remove(wid);
-        }
         tiling.reverse();
-        let floats = state.float_windows.clear().into_iter();
-        let fullscreen = state.fullscreen_windows.clear().into_iter();
-        tiling
+        let mut windows: Vec<_> = tiling
             .into_iter()
-            .map(|id| (id, DisplayMode::Tiling))
-            .chain(floats.map(|(id, border_box)| (id, DisplayMode::Float { border_box })))
-            .chain(fullscreen.map(|id| (id, DisplayMode::Fullscreen)))
-            .collect()
+            .map(|id| {
+                let border_box = self.tile_border_box(ws_id, id);
+                self.tiling_windows.remove(&id);
+                (id, border_box)
+            })
+            .collect();
+        let mut state = self.workspaces.remove(&ws_id).unwrap();
+        windows.extend(state.float_windows.clear());
+        windows.extend(
+            state
+                .fullscreen_windows
+                .clear()
+                .into_iter()
+                .map(|id| (id, state.work_area)),
+        );
+        windows
     }
 
     fn export_workspace(&self, hub: &HubAccess, ws_id: WorkspaceId) -> PreferredWorkspace {

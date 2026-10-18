@@ -4,7 +4,7 @@ use crate::config::lua::deserializer::{
 use crate::core::hub::HubAccess;
 use crate::core::matcher::WindowMode;
 use crate::core::node::{Child, WindowId, WorkspaceId};
-use crate::core::slot::{Slot, SlotId, held_tiling_slot};
+use crate::core::slot::SlotId;
 use crate::core::{PreferredScrolling, SizeConstraint, WindowMatcher};
 
 use super::ScrollingStrategy;
@@ -71,7 +71,7 @@ impl ScrollingStrategy {
                     .iter()
                     .map(|matcher| {
                         hub.slots
-                            .allocate(Slot::new(matcher.clone(), ws_id, WindowMode::Tiling))
+                            .allocate(matcher.clone(), ws_id, WindowMode::Tiling)
                     })
                     .collect(),
             })
@@ -127,7 +127,12 @@ impl ScrollingStrategy {
                 let Child::Window(window_id) = child else {
                     return false;
                 };
-                held_tiling_slot(&hub.slots, *window_id, ws_id)
+                hub.slots
+                    .held_slot(*window_id)
+                    .filter(|&id| {
+                        let slot = hub.slots.get(id);
+                        slot.workspace == ws_id && matches!(slot.mode, WindowMode::Tiling)
+                    })
                     .and_then(|held| slots.iter().position(|&s| s == held))
                     .is_some_and(|held_row| held_row > row)
             })

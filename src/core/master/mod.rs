@@ -48,16 +48,17 @@ impl TilingStrategy for MasterStrategy {
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
         entry: &PreferredWorkspace,
-    ) {
+    ) -> Vec<SlotId> {
         let PreferredTiling::Master(layout) = &entry.tiling else {
             unreachable!("master got a {:?} entry", entry.tiling.strategy());
         };
-        FullscreenWindows::allocate_slots(hub, ws_id, &entry.fullscreen);
-        FloatWindows::allocate_slots(hub, ws_id, &entry.float);
+        let mut slots = FullscreenWindows::allocate_slots(hub, ws_id, &entry.fullscreen);
+        slots.extend(FloatWindows::allocate_slots(hub, ws_id, &entry.float));
         let master_container = hub.allocate_container(Vec::new(), ws_id);
         let secondary_container = hub.allocate_container(Vec::new(), ws_id);
         let master_slots = Self::allocate_slots(hub, ws_id, &layout.master.children);
         let secondary_slots = Self::allocate_slots(hub, ws_id, &layout.secondary.children);
+        slots.extend(master_slots.iter().chain(&secondary_slots).copied());
         let host = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
         self.workspaces.insert(
             ws_id,
@@ -77,32 +78,40 @@ impl TilingStrategy for MasterStrategy {
                 fullscreen_windows: FullscreenWindows::default(),
             },
         );
+        slots
     }
 
     fn clear_workspace(
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-    ) -> Vec<(WindowId, DisplayMode)> {
-        let Some(mut state) = self.workspaces.remove(&ws_id) else {
+    ) -> Vec<(WindowId, PixelRect)> {
+        let Some(state) = self.workspaces.get(&ws_id) else {
             return Vec::new();
         };
-        let mut tiling = Vec::new();
-        for cid in [state.master.container, state.secondary.container] {
-            tiling.extend(Self::pane_windows(hub, cid));
-            hub.free_container(cid);
+        let containers = [state.master.container, state.secondary.container];
+        let mut windows = Vec::new();
+        for container in containers {
+            for id in Self::pane_windows(hub, container) {
+                windows.push((id, self.tile_border_box(hub, ws_id, id)));
+            }
         }
-        for &wid in &tiling {
-            self.window_states.remove(&wid);
+        for &(id, _) in &windows {
+            self.window_states.remove(&id);
         }
-        let floats = state.float_windows.clear().into_iter();
-        let fullscreen = state.fullscreen_windows.clear().into_iter();
-        tiling
-            .into_iter()
-            .map(|id| (id, DisplayMode::Tiling))
-            .chain(floats.map(|(id, border_box)| (id, DisplayMode::Float { border_box })))
-            .chain(fullscreen.map(|id| (id, DisplayMode::Fullscreen)))
-            .collect()
+        for container in containers {
+            hub.free_container(container);
+        }
+        let mut state = self.workspaces.remove(&ws_id).unwrap();
+        windows.extend(state.float_windows.clear());
+        windows.extend(
+            state
+                .fullscreen_windows
+                .clear()
+                .into_iter()
+                .map(|id| (id, state.work_area)),
+        );
+        windows
     }
 
     fn export_workspace(&self, hub: &HubAccess, ws_id: WorkspaceId) -> PreferredWorkspace {

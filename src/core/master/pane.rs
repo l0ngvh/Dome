@@ -1,8 +1,9 @@
 use serde::Serialize;
 
 use crate::core::hub::HubAccess;
+use crate::core::matcher::WindowMode;
 use crate::core::node::{Child, ContainerId, Dimension, Length, WindowId, WorkspaceId};
-use crate::core::slot::{SlotId, held_tiling_slot};
+use crate::core::slot::SlotId;
 
 use super::{MasterStrategy, WindowState, WorkspaceState};
 
@@ -31,43 +32,6 @@ impl MasterStrategy {
             .unwrap_or_else(|| panic!("master: detaching {id:?} but window_states has no entry"));
         self.reconcile_master_count(hub, ws_id);
         self.compute_placement(hub, ws_id);
-    }
-
-    fn track_window(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId, id: WindowId) {
-        hub.windows.get_mut(id).set_workspace(Some(ws_id));
-        self.window_states.insert(
-            id,
-            WindowState {
-                dimension: Dimension::default(),
-            },
-        );
-        self.workspaces.get_mut(&ws_id).unwrap().add_to_history(id);
-    }
-
-    /// Focus repair needs no ladder here. Dropping `window_id` from the history leaves the head
-    /// on the surviving window focused before it, whichever pane that window lives in.
-    fn remove_window(
-        &mut self,
-        hub: &mut HubAccess,
-        ws_id: WorkspaceId,
-        window_id: WindowId,
-    ) -> Length {
-        let (container, y_offset, idx) = {
-            let state = self.workspaces.get(&ws_id).unwrap();
-            let (kind, idx) = Self::locate(
-                hub,
-                state.master.container,
-                state.secondary.container,
-                window_id,
-            );
-            (state.pane(kind).container, state.pane(kind).y_offset, idx)
-        };
-        Self::remove_from_pane(hub, container, idx);
-        self.workspaces
-            .get_mut(&ws_id)
-            .unwrap()
-            .drop_from_history(window_id);
-        y_offset
     }
 
     pub(super) fn push_unmatched_window(
@@ -108,7 +72,11 @@ impl MasterStrategy {
                     // A window that overflowed from master to secondary still holds its master
                     // slot. This filter accepts that window too.
                     matches!(c, Child::Window(w)
-                    if held_tiling_slot(&hub.slots, *w, ws_id)
+                    if hub.slots.held_slot(*w)
+                        .filter(|&id| {
+                            let slot = hub.slots.get(id);
+                            slot.workspace == ws_id && matches!(slot.mode, WindowMode::Tiling)
+                        })
                         .is_none_or(|s| !secondary_slots.contains(&s)))
                 });
             let Some(pos) = pos else {
@@ -208,10 +176,44 @@ impl MasterStrategy {
             .unwrap_or_else(|| panic!("window {id:?} is in neither master nor secondary pane"));
         (PaneKind::Secondary, i)
     }
+
+    fn track_window(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId, id: WindowId) {
+        hub.windows.get_mut(id).set_workspace(Some(ws_id));
+        self.window_states.insert(
+            id,
+            WindowState {
+                dimension: Dimension::default(),
+            },
+        );
+        self.workspaces.get_mut(&ws_id).unwrap().add_to_history(id);
+    }
+
+    /// Removal leaves focus on the most recently focused surviving window, regardless of pane.
+    fn remove_window(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        window_id: WindowId,
+    ) -> Length {
+        let (container, y_offset, idx) = {
+            let state = self.workspaces.get(&ws_id).unwrap();
+            let (kind, idx) = Self::locate(
+                hub,
+                state.master.container,
+                state.secondary.container,
+                window_id,
+            );
+            (state.pane(kind).container, state.pane(kind).y_offset, idx)
+        };
+        Self::remove_from_pane(hub, container, idx);
+        self.workspaces
+            .get_mut(&ws_id)
+            .unwrap()
+            .drop_from_history(window_id);
+        y_offset
+    }
 }
 
-/// One side of the master-stack split. Windows live in `container`, a flat `Container`
-/// of `Child::Window` that never nests.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum PaneDisplay {
@@ -227,6 +229,7 @@ crate::config::lua::deserializer::string_enum!(
     "tabbed" => PaneDisplay::Tabbed,
 );
 
+/// One side of the master-stack split. Its window container never nests other containers.
 #[derive(Debug)]
 pub(super) struct Pane {
     pub(super) container: ContainerId,

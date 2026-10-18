@@ -2,14 +2,11 @@ use crate::core::{
     Hub, PreferredWorkspace,
     allocator::Node,
     hub::RestrictedAction,
-    node::{Child, DisplayMode, MonitorId, WorkspaceId},
-    slot::{Slot, find_free_slot},
+    node::{Child, MonitorId, PixelRect, WindowId, WorkspaceId},
+    slot::SlotId,
 };
 
-/// Lifecycle state of a workspace relative to its origin monitor. The enum
-/// carries no monitor id: the always-live `Workspace.monitor` field holds the
-/// present id, and the `origin` string in the non-Attached variants is a
-/// monitor's stored `unique_name`, frozen at unplug time.
+/// Lifecycle state of a workspace relative to its origin monitor.
 #[derive(Debug, Clone)]
 pub(super) enum Attachment {
     /// `monitor` is the workspace's origin and present. Normal state.
@@ -24,6 +21,7 @@ pub(super) enum Attachment {
 #[derive(Debug, Clone)]
 pub(super) struct Workspace {
     pub(super) name: String,
+    /// Always identifies a live monitor, even while the origin monitor is unplugged.
     pub(super) monitor: MonitorId,
     pub(super) attachment: Attachment,
 }
@@ -119,15 +117,6 @@ impl Hub {
         self.move_focused_across_workspaces(current_ws, target_ws);
     }
 
-    // A parked workspace keeps its origin monitor's name frozen in its origin
-    // field, which is how a detached monitor selector is resolved after the
-    // monitor itself is gone from the live list.
-    fn parked_workspace_by_origin(&self, name: &str, origin: &str) -> Option<WorkspaceId> {
-        self.access
-            .workspaces
-            .find(|w| w.name == name && w.origin() == Some(origin))
-    }
-
     /// Creates each workspace that the layout file names under a connected monitor.
     pub(super) fn create_named_workspaces(&mut self) {
         let named: Vec<(MonitorId, String)> = self
@@ -177,38 +166,22 @@ impl Hub {
         ws_id
     }
 
-    /// Rebuilds the workspace from its current layout entry, which can name another strategy,
-    /// and attaches its windows again in every mode.
-    pub(super) fn reset_workspace(&mut self, ws_id: WorkspaceId) {
-        let windows = self
-            .strategies
-            .for_workspace_mut(ws_id)
-            .clear_workspace(&mut self.access, ws_id);
-        self.remove_slots(ws_id);
-        self.load_layout_entry(ws_id);
-        for (window_id, mode) in windows {
-            let slot = if matches!(mode, DisplayMode::Tiling) {
-                // A window that moved here can still hold a slot on the workspace it came from,
-                // so the hold below would give it two slots.
-                self.release_slot(window_id);
-                let metadata = self.access.windows.get(window_id).metadata.as_ref();
-                find_free_slot(
-                    &self.access.slots,
-                    metadata,
-                    Some(&|slot: &Slot| slot.is_tiling_on(ws_id)),
-                )
-            } else {
-                None
-            };
-            self.strategies.for_workspace_mut(ws_id).attach_window(
-                &mut self.access,
-                window_id,
-                ws_id,
-                mode,
-                slot,
-            );
-            if let Some(id) = slot {
-                self.access.slots.get_mut(id).hold(window_id);
+    /// Expects the old strategy state and slots to be cleared.
+    pub(super) fn rebuild_workspace(
+        &mut self,
+        ws_id: WorkspaceId,
+        windows: Vec<(WindowId, PixelRect)>,
+    ) {
+        let mut free_slots = self.load_layout_entry(ws_id);
+        for (window_id, border_box) in windows {
+            let metadata = self.access.windows.get(window_id).metadata.as_ref();
+            let slot_position = free_slots.iter().position(|&id| {
+                metadata.matches_window_matcher(&self.access.slots.get(id).matcher)
+            });
+            let slot = slot_position.map(|position| free_slots[position]);
+            self.attach_window_to_layout(window_id, ws_id, border_box, slot);
+            if let Some(position) = slot_position {
+                free_slots.swap_remove(position);
             }
         }
         self.strategies
@@ -216,24 +189,7 @@ impl Hub {
             .reset_focus(&mut self.access, ws_id);
     }
 
-    /// Loads the workspace's entry in the layout file, or an empty entry for the default
-    /// strategy when the file does not name the workspace. Expects a workspace with no
-    /// strategy state and no slots, either new or just cleared.
-    fn load_layout_entry(&mut self, ws_id: WorkspaceId) {
-        let monitor = self.access.origin_monitor_name(ws_id);
-        let name = &self.access.workspaces.get(ws_id).name;
-        let entry = self
-            .access
-            .preferred_layouts
-            .workspace(&monitor, name)
-            .cloned()
-            .unwrap_or_else(|| PreferredWorkspace::empty(self.access.tiling.layout));
-        self.strategies
-            .prepare_workspace(&mut self.access, ws_id, &entry);
-    }
-
-    /// Moves the focused child of `from` to `to`, a window in its display mode. A child already on
-    /// `to` stays where it is.
+    /// Moves the focused child of `from` to `to`, preserving display mode for windows.
     #[tracing::instrument(skip(self))]
     pub(super) fn move_focused_across_workspaces(&mut self, from: WorkspaceId, to: WorkspaceId) {
         if from == to {
@@ -271,5 +227,28 @@ impl Hub {
                 );
             }
         }
+    }
+
+    fn parked_workspace_by_origin(&self, name: &str, origin: &str) -> Option<WorkspaceId> {
+        self.access
+            .workspaces
+            .find(|w| w.name == name && w.origin() == Some(origin))
+    }
+
+    /// Loads the workspace's entry in the layout file, or an empty entry for the default
+    /// strategy when the file does not name the workspace. Expects a workspace with no
+    /// strategy state and no slots, either new or just cleared. Returns its newly allocated
+    /// window slots for matching before any windows attach.
+    fn load_layout_entry(&mut self, ws_id: WorkspaceId) -> Vec<SlotId> {
+        let monitor = self.access.origin_monitor_name(ws_id);
+        let name = &self.access.workspaces.get(ws_id).name;
+        let entry = self
+            .access
+            .preferred_layouts
+            .workspace(&monitor, name)
+            .cloned()
+            .unwrap_or_else(|| PreferredWorkspace::empty(self.access.tiling.layout));
+        self.strategies
+            .prepare_workspace(&mut self.access, ws_id, &entry)
     }
 }

@@ -3,7 +3,7 @@ use crate::core::{
     hub::{FloatWindowPlacement, HubAccess},
     matcher::{WindowMatcher, WindowMode},
     node::{MonitorId, PixelRect, WorkspaceId},
-    slot::Slot,
+    slot::SlotId,
 };
 
 /// The float windows of one workspace, each with its border box.
@@ -16,16 +16,18 @@ pub(super) struct FloatWindows {
 }
 
 impl FloatWindows {
-    /// Allocates one free float slot per matcher in the hub's arena, in matcher order.
     pub(super) fn allocate_slots(
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
         matchers: &[WindowMatcher],
-    ) {
-        for matcher in matchers {
-            hub.slots
-                .allocate(Slot::new(matcher.clone(), ws_id, WindowMode::Float));
-        }
+    ) -> Vec<SlotId> {
+        matchers
+            .iter()
+            .map(|matcher| {
+                hub.slots
+                    .allocate(matcher.clone(), ws_id, WindowMode::Float)
+            })
+            .collect()
     }
 
     /// Pushes the window on top without selecting float focus.

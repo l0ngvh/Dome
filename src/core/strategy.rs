@@ -177,21 +177,23 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Builds state and allocates free slots in the hub's arena, fullscreen slots first, then
     /// float slots, then tiling slots, each in layout order. Initializes the layout work area and
     /// scale from the workspace's host monitor. Allocates optional-mode slots only for supported
-    /// modes. Panics on another strategy's tiling variant.
+    /// modes. Returns all newly allocated window slots, unheld and belonging to this workspace,
+    /// for the caller to match. Panics on another strategy's tiling variant.
     fn prepare_workspace(
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
         entry: &PreferredWorkspace,
-    );
+    ) -> Vec<SlotId>;
 
-    /// Removes all windows and drops workspace state. Returns modes in reattachment order, each
-    /// float and fullscreen stack bottom to top. The hub deletes the slots.
+    /// Removes all windows and drops workspace state. Returns each window's border box for
+    /// reattachment, even when hidden behind another window. Fullscreen uses the workspace's
+    /// work area.
     fn clear_workspace(
         &mut self,
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
-    ) -> Vec<(WindowId, DisplayMode)>;
+    ) -> Vec<(WindowId, PixelRect)>;
 
     /// Exports live windows rather than slot matchers, with this strategy's tiling variant.
     fn export_workspace(&self, hub: &HubAccess, ws_id: WorkspaceId) -> PreferredWorkspace;
@@ -556,10 +558,10 @@ impl StrategySet {
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
         entry: &PreferredWorkspace,
-    ) {
+    ) -> Vec<SlotId> {
         let kind = entry.tiling.strategy();
         self.kinds.insert(ws_id, kind);
-        self.get_mut(kind).prepare_workspace(hub, ws_id, entry);
+        self.get_mut(kind).prepare_workspace(hub, ws_id, entry)
     }
 
     pub(super) fn kind_of(&self, ws_id: WorkspaceId) -> Strategy {

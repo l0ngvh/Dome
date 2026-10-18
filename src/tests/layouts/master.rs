@@ -845,7 +845,7 @@ fn open_master_match_into_master_of_slot_holders_raises_master_count() {
     let mut dome = TestDome::with_layout(
         MASTER,
         &layout(
-            "master = { { title = 'w0' }, { title = 'w1' } }, secondary = { { title = 'w1' } }",
+            "master = { { title = 'w0' }, { title = 'w1' } }, secondary = { { title = 'w3' } }",
         ),
     );
     for title in ["w0", "w1", "w2"] {
@@ -1227,6 +1227,48 @@ fn open_match_after_move_lands_before_first_later_slot_holder() {
 }
 
 #[test]
+fn open_match_before_reordered_later_holders_uses_pane_order() {
+    let mut dome = TestDome::with_layout(
+        MASTER,
+        &layout("secondary = { { title = 'w1' }, { title = 'w2' }, { title = 'w3' } }"),
+    );
+    for title in ["w0", "w2", "w3"] {
+        dome.open(window(title));
+    }
+    dome.run("move up");
+    dome.open(window("w1"));
+    assert_snapshot!(dome.snapshot(), @"
+    focused w1 on primary
+    workspaces: 0 on primary (focused)
+    primary 0,0 100x20 border 1
+      w0 0,0 50x20
+      w1 50,0 50x7 highlighted
+      w2 50,13 50x7
+      w3 50,7 50x6
+    +------------------------------------------------+**************************************************
+    |                                                |*                                                *
+    |                                                |*                                                *
+    |                                                |*                       w1                       *
+    |                                                |*                                                *
+    |                                                |*                                                *
+    |                                                |**************************************************
+    |                                                |+------------------------------------------------+
+    |                                                ||                                                |
+    |                       w0                       ||                       w3                       |
+    |                                                ||                                                |
+    |                                                ||                                                |
+    |                                                |+------------------------------------------------+
+    |                                                |+------------------------------------------------+
+    |                                                ||                                                |
+    |                                                ||                                                |
+    |                                                ||                       w2                       |
+    |                                                ||                                                |
+    |                                                ||                                                |
+    +------------------------------------------------++------------------------------------------------+
+    ");
+}
+
+#[test]
 fn move_slot_holders_across_panes_keeps_both_slots_held() {
     let mut dome = TestDome::with_layout(
         MASTER,
@@ -1518,7 +1560,7 @@ fn save_layout_writes_each_window_as_own_matcher_in_its_pane() {
 }
 
 #[test]
-fn save_and_apply_layout_keeps_tabbed_pane() {
+fn save_and_apply_layout_restores_tabbed_pane() {
     let mut dome = TestDome::new("return { layout = 'master', master = { master_count = 2 } }");
     let first = dome.open(window("w0"));
     dome.open(window("w1"));
@@ -1553,6 +1595,8 @@ fn save_and_apply_layout_keeps_tabbed_pane() {
     ****************************************************************************************************
     ");
     let saved = dome.save_layout();
+    dome.run("toggle layout");
+    assert_ne!(dome.snapshot(), before);
     dome.apply_layout(&saved);
     assert_eq!(dome.snapshot(), before);
 }

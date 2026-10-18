@@ -3,7 +3,7 @@ use crate::core::{
     hub::HubAccess,
     matcher::{WindowMatcher, WindowMode},
     node::{WindowRestrictions, WorkspaceId},
-    slot::Slot,
+    slot::SlotId,
 };
 
 /// The fullscreen windows of one workspace. Only the topmost one shows.
@@ -14,16 +14,18 @@ pub(super) struct FullscreenWindows {
 }
 
 impl FullscreenWindows {
-    /// Allocates one free fullscreen slot per matcher in the hub's arena, in matcher order.
     pub(super) fn allocate_slots(
         hub: &mut HubAccess,
         ws_id: WorkspaceId,
         matchers: &[WindowMatcher],
-    ) {
-        for matcher in matchers {
-            hub.slots
-                .allocate(Slot::new(matcher.clone(), ws_id, WindowMode::Fullscreen));
-        }
+    ) -> Vec<SlotId> {
+        matchers
+            .iter()
+            .map(|matcher| {
+                hub.slots
+                    .allocate(matcher.clone(), ws_id, WindowMode::Fullscreen)
+            })
+            .collect()
     }
 
     /// Pushes the window on top. The caller handles a window that is already fullscreen.

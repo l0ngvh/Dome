@@ -5,7 +5,7 @@ use crate::core::hub::HubAccess;
 use crate::core::master::{MasterStrategy, PaneDisplay, PaneKind};
 use crate::core::matcher::WindowMode;
 use crate::core::node::{Child, WindowId, WorkspaceId};
-use crate::core::slot::{Slot, SlotId, held_tiling_slot};
+use crate::core::slot::SlotId;
 use crate::core::{PreferredMaster, WindowMatcher};
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -59,7 +59,12 @@ impl MasterStrategy {
         let (master, secondary) = (state.master.container, state.secondary.container);
         if Self::pane_len(hub, master) >= effective_count {
             let evict = hub.containers.get(master).children().iter().rposition(|c| {
-                matches!(c, Child::Window(w) if held_tiling_slot(&hub.slots, *w, ws_id).is_none())
+                matches!(c, Child::Window(w) if hub.slots.held_slot(*w)
+                    .filter(|&id| {
+                        let slot = hub.slots.get(id);
+                        slot.workspace == ws_id && matches!(slot.mode, WindowMode::Tiling)
+                    })
+                    .is_none())
             });
             match evict {
                 Some(evict_pos) => {
@@ -82,10 +87,7 @@ impl MasterStrategy {
     ) -> Vec<SlotId> {
         matchers
             .iter()
-            .map(|m| {
-                hub.slots
-                    .allocate(Slot::new(m.clone(), ws_id, WindowMode::Tiling))
-            })
+            .map(|m| hub.slots.allocate(m.clone(), ws_id, WindowMode::Tiling))
             .collect()
     }
 
@@ -119,25 +121,14 @@ impl MasterStrategy {
     ) {
         let pane = self.workspaces.get(&ws_id).unwrap().pane(kind);
         let slot_position = pane.slots.iter().position(|&x| x == slot).unwrap();
+        let children = hub.containers.get(pane.container).children();
         // Moved windows may no longer follow preferred-layout order.
-        let insert_position = hub
-            .containers
-            .get(pane.container)
-            .children()
+        let insert_position = pane.slots[slot_position + 1..]
             .iter()
-            .position(|c| {
-                let Child::Window(w) = c else {
-                    return false;
-                };
-                let Some(held) = held_tiling_slot(&hub.slots, *w, ws_id) else {
-                    return false;
-                };
-                pane.slots
-                    .iter()
-                    .position(|&s| s == held)
-                    .is_some_and(|s| s > slot_position)
-            })
-            .unwrap_or_else(|| hub.containers.get(pane.container).children().len());
+            .filter_map(|&id| hub.slots.get(id).window())
+            .filter_map(|holder| children.iter().position(|c| *c == Child::Window(holder)))
+            .min()
+            .unwrap_or(children.len());
         hub.containers
             .get_mut(pane.container)
             .children

@@ -26,6 +26,8 @@ pub(crate) use hub::VisiblePlacements;
 pub(crate) use hub::{
     ContainerPlacement, FloatWindowPlacement, MonitorLayout, TilingWindowPlacement,
 };
+#[cfg(test)]
+pub(crate) use master::PaneConfig;
 pub(crate) use master::{MasterConfig, read_master_count_override, read_master_ratio_override};
 pub(crate) use matcher::{WindowMatcher, pattern_matches};
 pub(crate) use monitor::MonitorSelector;

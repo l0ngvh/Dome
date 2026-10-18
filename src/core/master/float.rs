@@ -6,7 +6,12 @@ use super::MasterStrategy;
 
 impl MasterStrategy {
     /// The border box of the window's tile in screen coordinates.
-    fn tile_border_box(&self, hub: &HubAccess, ws_id: WorkspaceId, id: WindowId) -> PixelRect {
+    pub(super) fn tile_border_box(
+        &self,
+        hub: &HubAccess,
+        ws_id: WorkspaceId,
+        id: WindowId,
+    ) -> PixelRect {
         let state = self.workspaces.get(&ws_id).unwrap();
         let (kind, _) = Self::locate(hub, state.master.container, state.secondary.container, id);
         let y_offset = state.pane(kind).y_offset;
