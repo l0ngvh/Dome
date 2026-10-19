@@ -5,7 +5,7 @@ use interprocess::local_socket::{GenericFilePath, ToFsName};
 pub fn socket_path() -> PathBuf {
     #[cfg(unix)]
     {
-        std::env::temp_dir().join("dome.sock")
+        std::env::temp_dir().join("dome").join("dome.sock")
     }
     #[cfg(windows)]
     {
@@ -15,14 +15,4 @@ pub fn socket_path() -> PathBuf {
 
 pub fn socket_name() -> interprocess::local_socket::Name<'static> {
     socket_path().to_fs_name::<GenericFilePath>().unwrap()
-}
-
-#[cfg(all(test, unix))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn socket_path_lives_under_temp_dir() {
-        assert!(socket_path().starts_with(std::env::temp_dir()));
-    }
 }

@@ -123,7 +123,7 @@ jobs:
           set -euo pipefail
           cargo build --release --target ${{matrix.target}}
           cargo make bundle
-          CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+          CARGO_VERSION=$(grep -m1 '^version' crates/dome/Cargo.toml | sed 's/.*"\(.*\)"/\1/')
           mv "target/Dome-${CARGO_VERSION}.dmg" "${{matrix.artifact}}"
 
       - name: verify-codesign

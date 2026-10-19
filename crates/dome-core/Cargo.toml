@@ -1,0 +1,23 @@
+[package]
+name = "dome-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dome-ipc = { path = "../dome-ipc" }
+anyhow = { workspace = true }
+serde = { workspace = true }
+tracing = "0.1.41"
+mlua = { version = "0.10", features = ["luau"] }
+bitflags = "2.10.0"
+regex = "1.12.2"
+rustc-hash = "2"
+which = "8.0.6"
+tempfile = "3"
+
+[dev-dependencies]
+insta = "1.44.3"
+rand = "0.9.3"
+rand_chacha = "0.9.0"
+rayon = "1.10"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }

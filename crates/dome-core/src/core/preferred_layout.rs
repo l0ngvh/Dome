@@ -1,0 +1,171 @@
+use std::collections::BTreeMap;
+
+use crate::config::lua::deserializer::{FromLuaValue, LoadContext, as_table};
+use crate::core::master::{PaneConfig, read_master_count_override, read_master_ratio_override};
+use crate::core::matcher::WindowMatcher;
+use crate::core::partition_tree::TreeLayoutNode;
+use crate::core::scrolling::ColumnConfig;
+use crate::core::{SizeConstraint, Strategy};
+
+/// The `layout.lua` file root. Every workspace entry sits under a monitor key,
+/// which is that monitor's `unique_name`. Both levels are sorted maps, so
+/// repeated exports of one state produce the same bytes.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PreferredLayouts {
+    monitor: BTreeMap<String, PreferredMonitor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PreferredMonitor {
+    workspace: BTreeMap<String, PreferredWorkspace>,
+}
+
+impl FromLuaValue for PreferredLayouts {
+    fn from_lua_value(value: &mlua::Value, cx: &mut LoadContext) -> mlua::Result<Self> {
+        Ok(PreferredLayouts {
+            monitor: BTreeMap::from_lua_value(value, cx)?,
+        })
+    }
+}
+
+impl FromLuaValue for PreferredMonitor {
+    fn from_lua_value(value: &mlua::Value, cx: &mut LoadContext) -> mlua::Result<Self> {
+        Ok(PreferredMonitor {
+            workspace: BTreeMap::from_lua_value(value, cx)?,
+        })
+    }
+}
+
+impl PreferredLayouts {
+    pub fn workspace(&self, monitor: &str, workspace: &str) -> Option<&PreferredWorkspace> {
+        self.monitor.get(monitor)?.workspace.get(workspace)
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = (&str, &str, &PreferredWorkspace)> {
+        self.monitor.iter().flat_map(|(monitor, entries)| {
+            entries
+                .workspace
+                .iter()
+                .map(move |(name, entry)| (monitor.as_str(), name.as_str(), entry))
+        })
+    }
+
+    pub fn monitors(&self) -> impl Iterator<Item = (&str, &PreferredMonitor)> {
+        self.monitor
+            .iter()
+            .map(|(name, entries)| (name.as_str(), entries))
+    }
+
+    pub fn insert(&mut self, monitor: &str, workspace: &str, entry: PreferredWorkspace) {
+        self.monitor
+            .entry(monitor.to_string())
+            .or_default()
+            .workspace
+            .insert(workspace.to_string(), entry);
+    }
+
+    pub fn clear_monitor(&mut self, monitor: &str) {
+        if let Some(entries) = self.monitor.get_mut(monitor) {
+            entries.workspace.clear();
+        }
+    }
+}
+
+impl PreferredMonitor {
+    pub fn workspaces(&self) -> impl Iterator<Item = (&str, &PreferredWorkspace)> {
+        self.workspace
+            .iter()
+            .map(|(name, entry)| (name.as_str(), entry))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreferredWorkspace {
+    pub tiling: PreferredTiling,
+    pub float: Vec<WindowMatcher>,
+    pub fullscreen: Vec<WindowMatcher>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PreferredTiling {
+    PartitionTree { tree: Option<TreeLayoutNode> },
+    Master(PreferredMaster),
+    Scrolling(PreferredScrolling),
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PreferredMaster {
+    pub master_ratio: Option<f64>,
+    pub master_count: Option<usize>,
+    pub master: PaneConfig,
+    pub secondary: PaneConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PreferredScrolling {
+    /// Width of a column that sets none. `None` takes `scrolling.column_width`.
+    pub column_width: Option<SizeConstraint>,
+    pub(crate) columns: Vec<ColumnConfig>,
+}
+
+impl PreferredTiling {
+    pub fn strategy(&self) -> Strategy {
+        match self {
+            PreferredTiling::PartitionTree { .. } => Strategy::PartitionTree,
+            PreferredTiling::Master(_) => Strategy::Master,
+            PreferredTiling::Scrolling(_) => Strategy::Scrolling,
+        }
+    }
+}
+
+impl PreferredWorkspace {
+    pub fn empty(strategy: Strategy) -> Self {
+        let tiling = match strategy {
+            Strategy::PartitionTree => PreferredTiling::PartitionTree { tree: None },
+            Strategy::Master => PreferredTiling::Master(PreferredMaster::default()),
+            Strategy::Scrolling => PreferredTiling::Scrolling(PreferredScrolling::default()),
+        };
+        Self {
+            tiling,
+            float: Vec::new(),
+            fullscreen: Vec::new(),
+        }
+    }
+}
+
+impl FromLuaValue for PreferredWorkspace {
+    fn from_lua_value(value: &mlua::Value, cx: &mut LoadContext) -> mlua::Result<Self> {
+        let table = as_table(value, "a workspace table")?;
+        let layout: String = cx.field_or_else(table, "layout", String::new);
+        let tiling = match layout.as_str() {
+            "" => {
+                return Err(mlua::Error::runtime(
+                    "layout is required, and must be \"partition_tree\", \"master\" or \"scrolling\"",
+                ));
+            }
+            "partition_tree" => PreferredTiling::PartitionTree {
+                tree: cx.field(table, "tree"),
+            },
+            "master" => PreferredTiling::Master(PreferredMaster {
+                master_ratio: read_master_ratio_override(table, cx),
+                master_count: read_master_count_override(table, cx),
+                master: cx.field(table, "master"),
+                secondary: cx.field(table, "secondary"),
+            }),
+            "scrolling" => PreferredTiling::Scrolling(PreferredScrolling {
+                column_width: cx.field(table, "column_width"),
+                columns: cx.field(table, "columns"),
+            }),
+            other => {
+                return Err(mlua::Error::runtime(format!(
+                    "layout must be \"partition_tree\", \"master\" or \"scrolling\", got \"{other}\""
+                )));
+            }
+        };
+        Ok(PreferredWorkspace {
+            tiling,
+            float: cx.field(table, "float"),
+            fullscreen: cx.field(table, "fullscreen"),
+        })
+    }
+}

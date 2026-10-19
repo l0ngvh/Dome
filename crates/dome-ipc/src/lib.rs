@@ -1,5 +1,4 @@
 pub mod action;
-pub mod event;
 pub mod response;
 pub mod socket;
 
@@ -10,6 +9,5 @@ pub use action::{
     MoveTarget, Query, TabDirection, ToggleTarget, WindowId, WorkspaceInfo,
 };
 pub use client::DomeClient;
-pub use event::ServerEvent;
 pub use response::{ErrorCode, Response, RpcError};
 pub use socket::{socket_name, socket_path};

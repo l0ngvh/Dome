@@ -1,16 +1,19 @@
 [tasks.fmt]
+workspace = false
 command = "cargo"
-args = ["fmt", "--", "--check"]
+args = ["fmt", "--all", "--", "--check"]
 
 [tasks.clippy]
+workspace = false
 clear = true
 command = "cargo"
-args = ["clippy", "--tests"]
+args = ["clippy", "--workspace", "--tests", "--examples"]
 
 [tasks.test]
+workspace = false
 clear = true
 command = "cargo"
-args = ["test", "--lib"]
+args = ["test", "--workspace", "--tests"]
 
 [tasks.audit]
 command = "cargo"
@@ -30,7 +33,7 @@ script_runner = "@shell"
 script = '''
 # --no-report keeps earlier profiles, so clean them before measuring a deleted test's effect.
 cargo +nightly llvm-cov clean --workspace
-cargo +nightly llvm-cov test --workspace --lib --bins --branch --no-report -- --skip tests::smoke
+cargo +nightly llvm-cov test --workspace --tests --bins --branch --no-report -- --skip tests::smoke
 cargo +nightly llvm-cov report --package '*' --ignore-filename-regex '/tests/' --lcov --output-path lcov.info
 cargo +nightly llvm-cov report --package '*' --ignore-filename-regex '/tests/'
 '''
@@ -41,7 +44,7 @@ workspace = false
 script_runner = "@shell"
 script = '''
 cargo +nightly llvm-cov clean --workspace
-cargo +nightly llvm-cov test --workspace --lib --bins --branch --no-report -- --skip tests::smoke
+cargo +nightly llvm-cov test --workspace --tests --bins --branch --no-report -- --skip tests::smoke
 cargo +nightly llvm-cov report --package '*' --ignore-filename-regex '/tests/' --html --open
 '''
 
@@ -139,7 +142,7 @@ else
   cargo build --release
   BIN_SRC="target/release/dome"
 fi
-VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+VERSION=$(grep -m1 '^version' crates/dome/Cargo.toml | sed 's/.*"\(.*\)"/\1/')
 BUNDLE_DIR="target/bundle/Dome.app/Contents"
 rm -rf target/bundle/Dome.app
 mkdir -p "$BUNDLE_DIR/MacOS" "$BUNDLE_DIR/Resources"
@@ -167,5 +170,5 @@ script_runner = "@shell"
 script = '''
 set -euo pipefail
 cargo build --release
-cargo wix --no-build --nocapture
+cargo wix --package dome --include resources/windows/main.wxs --no-build --nocapture
 '''

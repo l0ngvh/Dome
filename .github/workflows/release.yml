@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check tag matches Cargo.toml version
         run: |
-          CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/dome/Cargo.toml | head -1)
           TAG_VERSION=${GITHUB_REF_NAME#v}
           if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
             echo "::error::Tag $TAG_VERSION does not match Cargo.toml version $CARGO_VERSION"
@@ -158,9 +158,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: dome-windows
-        path: |
-          ${{ env.MSI_NAME }}
-          ${{ env.ZIP_NAME }}
+          path: |
+            ${{ env.MSI_NAME }}
+            ${{ env.ZIP_NAME }}
 
   build-raycast-extension:
     needs: validate

@@ -21,7 +21,7 @@ Or build from source with a [Rust toolchain](https://rustup.rs/):
 ```bash
 git clone https://github.com/l0ngvh/Dome
 cd Dome
-cargo install --path .
+cargo install --path crates/dome
 ```
 
 Once installed, start Dome from your system launcher, or run `dome` from the

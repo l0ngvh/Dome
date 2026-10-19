@@ -1,0 +1,587 @@
+use crate::geometry::{Coordinate, FractionalOffset};
+use rustc_hash::FxHashMap;
+
+use crate::core::MonitorSelector;
+use crate::core::TilingConfig;
+use crate::core::hub::{HubAccess, MonitorLayout};
+use crate::core::master::MasterStrategy;
+use crate::core::node::{
+    Child, Constraints, ContainerId, Dimension, Direction, DisplayMode, FractionalLength, Length,
+    LimitObservation, PixelRect, Unit, WindowId, WorkspaceId,
+};
+use crate::core::partition_tree::PartitionTreeStrategy;
+use crate::core::scrolling::ScrollingStrategy;
+use crate::core::slot::SlotId;
+use crate::core::{PreferredWorkspace, SizeConstraints, Strategy};
+
+/// An action on the focused tiling child does nothing while a float or fullscreen window has
+/// focus, and an action on the workspace layout or a clicked container does nothing while a
+/// fullscreen window has focus.
+#[derive(Debug)]
+pub(crate) enum StrategyAction {
+    /// Moves focus from the focused tiling child to the nearest child in `direction`.
+    FocusDirection { direction: Direction, forward: bool },
+    /// Moves the focused tiling child one place in `direction`.
+    MoveDirection { direction: Direction, forward: bool },
+    /// Flips the direction in which the focused tiling child places the next window.
+    ToggleSpawnMode,
+    /// Flips the split direction of the containers around the focused tiling child.
+    ToggleDirection,
+    /// Switches the container around the focused tiling child between split and tabbed.
+    ToggleContainerLayout,
+    /// Highlights the container around the focused tiling child, so that a move to another
+    /// workspace takes the whole container. Does nothing at the workspace root.
+    FocusParent,
+    /// Activates the next or previous tab of the tabbed container around the focused tiling
+    /// child.
+    FocusTab { forward: bool },
+    /// Activates tab `index` of `container_id` and focuses it, taking focus from a float.
+    TabClicked {
+        container_id: ContainerId,
+        index: usize,
+    },
+    /// Widens the pane or column of the focused tiling child, within the strategy's limits.
+    Grow,
+    /// Narrows the pane or column of the focused tiling child, within the strategy's limits.
+    Shrink,
+    /// Raises the number of windows the master pane of the workspace holds.
+    MoreMaster,
+    /// Lowers the number of windows the master pane of the workspace holds, down to its minimum.
+    FewerMaster,
+    /// Floats the focused tiling window at its tile rectangle, or tiles the focused float.
+    ToggleFloat,
+    /// Makes the focused window fullscreen, or tiles the focused fullscreen window.
+    ToggleFullscreen,
+}
+
+#[derive(Debug)]
+pub(crate) enum TilingAction {
+    Strategy(StrategyAction),
+    FocusWorkspace {
+        name: String,
+        monitor: Option<String>,
+    },
+    MoveToWorkspace {
+        name: String,
+        monitor: Option<String>,
+    },
+    FocusMonitor {
+        selector: MonitorSelector,
+    },
+    MoveToMonitor {
+        selector: MonitorSelector,
+    },
+}
+
+impl From<StrategyAction> for TilingAction {
+    fn from(action: StrategyAction) -> Self {
+        Self::Strategy(action)
+    }
+}
+
+impl From<&crate::action::FocusTarget> for TilingAction {
+    fn from(target: &crate::action::FocusTarget) -> Self {
+        use crate::action::{FocusTarget, TabDirection};
+
+        let directional =
+            |direction, forward| StrategyAction::FocusDirection { direction, forward }.into();
+        match target {
+            FocusTarget::Up => directional(Direction::Vertical, false),
+            FocusTarget::Down => directional(Direction::Vertical, true),
+            FocusTarget::Left => directional(Direction::Horizontal, false),
+            FocusTarget::Right => directional(Direction::Horizontal, true),
+            FocusTarget::Parent => StrategyAction::FocusParent.into(),
+            FocusTarget::Tab { direction } => StrategyAction::FocusTab {
+                forward: matches!(direction, TabDirection::Next),
+            }
+            .into(),
+            FocusTarget::Workspace { name, monitor } => Self::FocusWorkspace {
+                name: name.clone(),
+                monitor: monitor.clone(),
+            },
+            FocusTarget::Monitor { target } => Self::FocusMonitor {
+                selector: target.into(),
+            },
+        }
+    }
+}
+
+impl From<&crate::action::MoveTarget> for TilingAction {
+    fn from(target: &crate::action::MoveTarget) -> Self {
+        use crate::action::MoveTarget;
+
+        let directional =
+            |direction, forward| StrategyAction::MoveDirection { direction, forward }.into();
+        match target {
+            MoveTarget::Up => directional(Direction::Vertical, false),
+            MoveTarget::Down => directional(Direction::Vertical, true),
+            MoveTarget::Left => directional(Direction::Horizontal, false),
+            MoveTarget::Right => directional(Direction::Horizontal, true),
+            MoveTarget::Workspace { name, monitor } => Self::MoveToWorkspace {
+                name: name.clone(),
+                monitor: monitor.clone(),
+            },
+            MoveTarget::Monitor { target } => Self::MoveToMonitor {
+                selector: target.into(),
+            },
+        }
+    }
+}
+
+impl From<&crate::action::ToggleTarget> for TilingAction {
+    fn from(target: &crate::action::ToggleTarget) -> Self {
+        use crate::action::ToggleTarget;
+
+        match target {
+            ToggleTarget::Spawn => StrategyAction::ToggleSpawnMode.into(),
+            ToggleTarget::Direction => StrategyAction::ToggleDirection.into(),
+            ToggleTarget::Layout => StrategyAction::ToggleContainerLayout.into(),
+            ToggleTarget::Float => StrategyAction::ToggleFloat.into(),
+            ToggleTarget::Fullscreen => StrategyAction::ToggleFullscreen.into(),
+        }
+    }
+}
+
+impl From<&crate::action::MasterTarget> for TilingAction {
+    fn from(target: &crate::action::MasterTarget) -> Self {
+        use crate::action::MasterTarget;
+
+        match target {
+            MasterTarget::More => StrategyAction::MoreMaster.into(),
+            MasterTarget::Fewer => StrategyAction::FewerMaster.into(),
+        }
+    }
+}
+
+/// The focus a strategy selects on one workspace, with its display mode.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum FocusedChild {
+    Fullscreen(WindowId),
+    Float(WindowId),
+    Tiling(Child),
+}
+
+impl FocusedChild {
+    pub(super) fn child(self) -> Child {
+        match self {
+            Self::Fullscreen(id) | Self::Float(id) => Child::Window(id),
+            Self::Tiling(child) => child,
+        }
+    }
+}
+
+/// Owns all non-minimized windows on its workspaces, including their modes, stacking and focus.
+/// Float support and the fullscreen toggle are optional. App-controlled fullscreen is required.
+/// A method changing layout computes placement before returning. No method selects a free
+/// matching window slot or holds or releases one. Held slots may be inspected for placement.
+pub(super) trait TilingStrategy: std::fmt::Debug {
+    /// Builds state and allocates free slots in the hub's arena, fullscreen slots first, then
+    /// float slots, then tiling slots, each in layout order. Initializes the layout work area and
+    /// scale from the workspace's host monitor. Allocates optional-mode slots only for supported
+    /// modes. Returns all newly allocated window slots, unheld and belonging to this workspace,
+    /// for the caller to match. Panics on another strategy's tiling variant.
+    fn prepare_workspace(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        entry: &PreferredWorkspace,
+    ) -> Vec<SlotId>;
+
+    /// Removes all windows and drops workspace state. Returns each window's border box for
+    /// reattachment, even when hidden behind another window. Fullscreen uses the workspace's
+    /// work area.
+    fn clear_workspace(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+    ) -> Vec<(WindowId, PixelRect)>;
+
+    /// Exports live windows rather than slot matchers, with this strategy's tiling variant.
+    fn export_workspace(&self, hub: &HubAccess, ws_id: WorkspaceId) -> PreferredWorkspace;
+
+    /// Inserts and records the destination workspace. Unsupported float or Dome-controlled
+    /// fullscreen becomes tiling. App-controlled fullscreen remains fullscreen. The caller passes
+    /// a slot only for tiling and holds it after this call. `Some(slot)` supplies the layout
+    /// position, while `None` uses default placement. Tiling focus can remain uninitialized
+    /// after attachment until a focus request or reset. Nonempty modes retain remembered
+    /// targets once initialized. Makes no explicit focus request.
+    fn attach_window(
+        &mut self,
+        hub: &mut HubAccess,
+        window_id: WindowId,
+        ws_id: WorkspaceId,
+        mode: DisplayMode,
+        slot: Option<SlotId>,
+    );
+
+    /// Inserts a detached group and gives it tiling focus, even when a float had focus. The
+    /// strategy chooses whether the group itself or one of its windows holds that focus.
+    fn attach_container(
+        &mut self,
+        hub: &mut HubAccess,
+        container_id: ContainerId,
+        ws_id: WorkspaceId,
+    ) {
+        let windows = hub.take_windows(Child::Container(container_id));
+        for &window_id in &windows {
+            self.attach_window(hub, window_id, ws_id, DisplayMode::Tiling, None);
+        }
+        if let Some(&first) = windows.first() {
+            self.set_focus(hub, first);
+        }
+    }
+
+    /// Removes a window in any mode, returning its mode and a float's border box. Does not alter
+    /// its held slot.
+    fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> DisplayMode;
+
+    /// Leaves the detached group and its windows in the hub arenas for attachment. Only a
+    /// strategy reporting a focused container receives this call and must override the panic.
+    fn detach_container(
+        &mut self,
+        _hub: &mut HubAccess,
+        _container_id: ContainerId,
+        _ws_id: WorkspaceId,
+    ) {
+        unreachable!("this strategy never reports a focused container");
+    }
+
+    /// Accepts app-controlled fullscreen even without toggle support. A window entering
+    /// fullscreen becomes topmost and focused. An already-fullscreen window is unchanged.
+    fn set_fullscreen(&mut self, hub: &mut HubAccess, window_id: WindowId);
+
+    /// Ends app-controlled fullscreen and tiles with default placement. The other fullscreen
+    /// windows keep their stack order, so the topmost of them keeps focus, and the window leaving
+    /// fullscreen takes focus once no fullscreen window remains. A non-fullscreen window is
+    /// unchanged. Required without toggle support.
+    fn unset_fullscreen(&mut self, hub: &mut HubAccess, window_id: WindowId);
+
+    /// Accepts the rectangle only for a current float.
+    fn update_float_rect(
+        &mut self,
+        _hub: &mut HubAccess,
+        _window_id: WindowId,
+        _border_box: PixelRect,
+    ) -> bool {
+        false
+    }
+
+    /// Unsupported actions do nothing, and so does an action whose target does not have focus,
+    /// as `StrategyAction` describes. For a tab click, `ws_id` is the workspace of the clicked
+    /// container, which can be on a monitor without focus.
+    fn handle_action(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId, action: StrategyAction);
+
+    /// Requests focus in any mode. Raises a float or fullscreen target in its own stack, or
+    /// updates remembered tiling focus. A target that fullscreen covers does not take keyboard
+    /// focus from the topmost fullscreen window.
+    fn set_focus(&mut self, hub: &mut HubAccess, window_id: WindowId);
+
+    /// Called once a reset has attached every window. Focuses the topmost fullscreen window,
+    /// otherwise the topmost float, otherwise selects tiling focus, then recomputes placement.
+    fn reset_focus(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId);
+
+    /// Returns effective focus in any mode, including a container representing a group. `None`
+    /// means the workspace is empty or its tiling focus has not yet been initialized and no
+    /// float or fullscreen window has focus.
+    fn focused_child(&self, ws_id: WorkspaceId) -> Option<Child>;
+
+    /// Updates this workspace's layout work area and scale, then recomputes placement
+    /// internally before returning. The caller has already recorded the monitor report
+    /// or reassigned the workspace to its new host.
+    fn update_work_area(
+        &mut self,
+        hub: &HubAccess,
+        ws_id: WorkspaceId,
+        work_area: PixelRect,
+        scale: f64,
+    );
+
+    /// Applies an observation to the window's existing limits, then recomputes its
+    /// workspace's placement before returning. The window can be in any display mode, but is
+    /// never minimized.
+    fn update_window_size_limits(
+        &mut self,
+        hub: &mut HubAccess,
+        window_id: WindowId,
+        observed: LimitObservation,
+    );
+
+    /// Reads computed placements. Fullscreen shows only its topmost window. `highlighted`
+    /// enables focus indicators and is true only for the current workspace.
+    fn collect_placements(
+        &self,
+        hub: &HubAccess,
+        ws_id: WorkspaceId,
+        highlighted: bool,
+    ) -> MonitorLayout;
+
+    /// Reads this strategy's config and recomputes placement for all its workspaces.
+    fn apply_config(&mut self, hub: &mut HubAccess, tiling: &TilingConfig);
+}
+
+/// Resolve one tiling window's effective constraints, in border-box space.
+///
+/// `Window::limits` records what the app asked for, which describes its content
+/// area, so each per-window limit gains `2 * border` here. The global
+/// `size_constraints` are already border-box and must not be outset, or what a
+/// percentage means would start depending on `border_size`.
+///
+/// A per-window max tightens the global max, it does not replace it. An app that
+/// declares a huge cap would otherwise escape the configured one.
+pub(super) fn window_constraints(
+    hub: &HubAccess,
+    size_constraints: &SizeConstraints,
+    wid: WindowId,
+    work_area: PixelRect,
+    scale: f64,
+) -> Constraints {
+    let window = hub.windows.get(wid);
+    let screen_width = FractionalLength::from_pixels(work_area.width());
+    let screen_height = FractionalLength::from_pixels(work_area.height());
+
+    let global_min_w = size_constraints.minimum_width.resolve(screen_width, scale);
+    let global_min_h = size_constraints
+        .minimum_height
+        .resolve(screen_height, scale);
+    let global_max_w = size_constraints.maximum_width.resolve(screen_width, scale);
+    let global_max_h = size_constraints
+        .maximum_height
+        .resolve(screen_height, scale);
+
+    let outset = FractionalLength::from_pixels(hub.border_for_scale(scale) * 2);
+    let limits = window.limits();
+    // Filter before the outset. A non-positive stored limit is not a limit at all, and outsetting
+    // it first would turn it into a spurious `2 * border` cap that collapses the slot.
+    let outset_limit = |v: Option<FractionalLength<Unit>>| {
+        v.filter(|v| *v > FractionalLength::ZERO)
+            .map_or(FractionalLength::ZERO, |v| v + outset)
+    };
+    let win_min_w = outset_limit(limits.min_width);
+    let win_min_h = outset_limit(limits.min_height);
+    let win_max_w = outset_limit(limits.max_width);
+    let win_max_h = outset_limit(limits.max_height);
+
+    let max_w = tighter_max(win_max_w, global_max_w);
+    let max_h = tighter_max(win_max_h, global_max_h);
+
+    let min_w = if max_w > FractionalLength::ZERO {
+        win_min_w.max(global_min_w).min(max_w)
+    } else {
+        win_min_w.max(global_min_w)
+    };
+    let min_h = if max_h > FractionalLength::ZERO {
+        win_min_h.max(global_min_h).min(max_h)
+    } else {
+        win_min_h.max(global_min_h)
+    };
+
+    Constraints {
+        min_width: min_w,
+        min_height: min_h,
+        max_width: max_w,
+        max_height: max_h,
+    }
+}
+
+/// `FractionalLength::ZERO` means no cap, so it cannot take part in a plain `min`.
+pub(super) fn tighter_max(a: FractionalLength, b: FractionalLength) -> FractionalLength {
+    if a > FractionalLength::ZERO && b > FractionalLength::ZERO {
+        a.min(b)
+    } else {
+        a.max(b)
+    }
+}
+
+/// The size a capped child takes in `slot_extent`, with the offset that centers it there.
+pub(super) fn apply_max_constraint(
+    max: FractionalLength,
+    slot_extent: FractionalLength,
+) -> (FractionalLength, FractionalOffset) {
+    let size = if max > FractionalLength::ZERO && max < slot_extent {
+        max
+    } else {
+        slot_extent
+    };
+    let offset = (slot_extent - size) / 2.0;
+    (size, offset.max(FractionalOffset::ZERO))
+}
+
+pub(crate) use crate::geometry::translate;
+
+/// Zero height when the container is not tabbed.
+pub(super) fn tab_bar_band(
+    border_box: PixelRect,
+    dim: Dimension,
+    screen: PixelRect,
+    tab_bar_length: FractionalLength,
+    is_tabbed: bool,
+) -> PixelRect {
+    let band_height = if is_tabbed {
+        let content_top = screen.y() + Coordinate::round(dim.y + tab_bar_length).offset();
+        (content_top - border_box.y()).to_length()
+    } else {
+        Length::ZERO
+    };
+    PixelRect::from_pixels(
+        border_box.x(),
+        border_box.y(),
+        border_box.width(),
+        band_height,
+    )
+}
+
+pub(super) fn visible_tab_bar_band(
+    tab_bar_band: PixelRect,
+    visible_border_box: PixelRect,
+) -> PixelRect {
+    tab_bar_band
+        .clip(visible_border_box)
+        .unwrap_or(PixelRect::ZERO)
+}
+
+pub(super) fn container_titles(hub: &HubAccess, id: ContainerId) -> Vec<String> {
+    hub.containers
+        .get(id)
+        .children()
+        .iter()
+        .map(|c| match c {
+            Child::Window(wid) => hub.windows.get(*wid).title().to_owned(),
+            Child::Container(_) => "Container".to_string(),
+        })
+        .collect()
+}
+
+/// Distribute `container_size` across `constraints` so every child whose
+/// (min, max) range straddles the result receives the same uniform size.
+pub(super) fn distribute_space(
+    constraints: &[(FractionalLength, FractionalLength)],
+    container_size: FractionalLength,
+) -> Vec<FractionalLength> {
+    let constraints: Vec<(FractionalLength, FractionalLength)> = constraints
+        .iter()
+        .map(|&(min, max)| {
+            let max = if max == FractionalLength::ZERO {
+                FractionalLength::new(f64::INFINITY)
+            } else {
+                max
+            };
+            (min, max)
+        })
+        .collect();
+
+    let sum_mins: FractionalLength = constraints.iter().map(|(min, _)| *min).sum();
+    if sum_mins >= container_size {
+        return constraints.iter().map(|(min, _)| *min).collect();
+    }
+
+    let all_finite = constraints.iter().all(|(_, max)| max.value().is_finite());
+    if all_finite {
+        let sum_maxes: FractionalLength = constraints.iter().map(|(_, max)| *max).sum();
+        if sum_maxes <= container_size {
+            return constraints.iter().map(|(_, max)| *max).collect();
+        }
+    }
+
+    let mut uniform_low = 0.0_f64;
+    let mut uniform_high = container_size.value();
+    const EPSILON: f64 = 0.001;
+
+    // Binary search converges in ~log2(container_size / EPSILON) iterations,
+    // typically ~24 for monitor-sized inputs.
+    for _ in 0..64 {
+        if uniform_high - uniform_low <= EPSILON {
+            break;
+        }
+        let uniform_candidate = (uniform_low + uniform_high) / 2.0;
+        let total: f64 = constraints
+            .iter()
+            .map(|(min, max)| uniform_candidate.clamp(min.value(), max.value()))
+            .sum();
+        if total > container_size.value() {
+            uniform_high = uniform_candidate;
+        } else {
+            uniform_low = uniform_candidate;
+        }
+    }
+
+    constraints
+        .iter()
+        .map(|(min, max)| FractionalLength::new(uniform_low.clamp(min.value(), max.value())))
+        .collect()
+}
+
+/// Owns one shared instance per tiling strategy and the per-workspace mapping
+/// from `WorkspaceId` to `Strategy`. Hub holds this as a single field disjoint
+/// from `HubAccess`, so dispatch (`for_workspace_mut`) borrows only this field
+/// and leaves `HubAccess` free for the strategy method to take by `&mut`.
+#[derive(Debug)]
+pub(super) struct StrategySet {
+    partition_tree: PartitionTreeStrategy,
+    master: MasterStrategy,
+    scrolling: ScrollingStrategy,
+    kinds: FxHashMap<WorkspaceId, Strategy>,
+}
+
+impl StrategySet {
+    pub(super) fn new(tiling: &TilingConfig) -> Self {
+        Self {
+            partition_tree: PartitionTreeStrategy::new(tiling),
+            master: MasterStrategy::new(tiling),
+            scrolling: ScrollingStrategy::new(tiling),
+            kinds: FxHashMap::default(),
+        }
+    }
+
+    /// Assigns the workspace to the strategy that its entry names, replacing any earlier
+    /// assignment, and has that strategy prepare the workspace.
+    pub(super) fn prepare_workspace(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        entry: &PreferredWorkspace,
+    ) -> Vec<SlotId> {
+        let kind = entry.tiling.strategy();
+        self.kinds.insert(ws_id, kind);
+        self.get_mut(kind).prepare_workspace(hub, ws_id, entry)
+    }
+
+    pub(super) fn kind_of(&self, ws_id: WorkspaceId) -> Strategy {
+        *self
+            .kinds
+            .get(&ws_id)
+            .unwrap_or_else(|| panic!("workspace {ws_id:?} not registered with StrategySet"))
+    }
+
+    pub(super) fn for_workspace(&self, ws_id: WorkspaceId) -> &dyn TilingStrategy {
+        self.get(self.kind_of(ws_id))
+    }
+
+    pub(super) fn for_workspace_mut(&mut self, ws_id: WorkspaceId) -> &mut dyn TilingStrategy {
+        let kind = self.kind_of(ws_id);
+        self.get_mut(kind)
+    }
+
+    /// A strategy that owns no workspace still takes the config, so a workspace
+    /// that later moves to it starts from the current values.
+    pub(super) fn apply_config(&mut self, hub: &mut HubAccess, tiling: &TilingConfig) {
+        self.partition_tree.apply_config(hub, tiling);
+        self.master.apply_config(hub, tiling);
+        self.scrolling.apply_config(hub, tiling);
+    }
+
+    fn get(&self, kind: Strategy) -> &dyn TilingStrategy {
+        match kind {
+            Strategy::PartitionTree => &self.partition_tree,
+            Strategy::Master => &self.master,
+            Strategy::Scrolling => &self.scrolling,
+        }
+    }
+
+    fn get_mut(&mut self, kind: Strategy) -> &mut dyn TilingStrategy {
+        match kind {
+            Strategy::PartitionTree => &mut self.partition_tree,
+            Strategy::Master => &mut self.master,
+            Strategy::Scrolling => &mut self.scrolling,
+        }
+    }
+}

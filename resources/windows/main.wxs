@@ -26,11 +26,11 @@
 
         <MediaTemplate EmbedCab="yes" />
 
-        <Icon Id="DomeIcon.ico" SourceFile="Dome.ico"/>
+        <Icon Id="DomeIcon.ico" SourceFile="resources/windows/Dome.ico"/>
         <Property Id="ARPPRODUCTICON" Value="DomeIcon.ico" />
 
-        <WixVariable Id="WixUIBannerBmp" Value="banner.bmp" />
-        <WixVariable Id="WixUIDialogBmp" Value="welcome.bmp" />
+        <WixVariable Id="WixUIBannerBmp" Value="resources/windows/banner.bmp" />
+        <WixVariable Id="WixUIDialogBmp" Value="resources/windows/welcome.bmp" />
 
         <UIRef Id="WixUI_FeatureTree" />
 
