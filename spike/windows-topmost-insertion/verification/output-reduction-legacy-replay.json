@@ -1,0 +1,114 @@
+{
+  "scope": "Read-only ordering diagnostic, not a native rerun or recovered treatment evidence",
+  "raw_sha256": "7a099ef85e9b50305ed30be4d9d13937dc934e0928e87a089f896b3430471894",
+  "schema_two_analysis_matches_preserved_analyzer": true,
+  "snapshots_validated_from_recorded_links": 550,
+  "snapshots_with_scrambled_enumeration": 550,
+  "attempts": 105,
+  "recorded_treatment_calls": 0,
+  "recorded_asynchronous_posts": 0,
+  "recorded_settling_samples": 0,
+  "legacy_eligible_observations": 0,
+  "diagnostic_setup_only": {
+    "normal_x_after_topmost_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "notopmost_x_then_after_topmost_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "topmost_x_then_after_topmost_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "topmost_x_after_normal_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "held_async_a_demotion_then_local_x_after_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "normal_x_after_sole_global_topmost_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 0,
+      "reasons": {
+        "another global topmost window exists, including hidden windows": 5
+      }
+    },
+    "normal_x_after_sole_controlled_topmost_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "already_topmost_x_after_topmost_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "demoted_topmost_x_then_after_topmost_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "normal_x_after_normal_reference": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "repeat_x_after_topmost_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "wait_for_async_a_demotion_then_x_after_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "held_async_a_promotion_then_local_x_after_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "wait_for_async_a_promotion_then_x_after_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "held_c_after_observed_normal_a_then_promote_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "held_c_after_observed_normal_a_keep_a_normal": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "held_c_after_observed_normal_a_promote_then_demote_a": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "topmost_a_after_normal_x_below_overlay_control": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 5,
+      "reasons": {}
+    },
+    "topmost_a_after_normal_predecessor_of_x": {
+      "recorded_before": 5,
+      "diagnostic_premise_pass": 0,
+      "reasons": {
+        "P is not the immediate predecessor of X": 5
+      }
+    }
+  },
+  "limitation": "Old finished_us excludes fixture reads. No timing bound or native outcome is repaired. Cases without before never reached their completed setup."
+}

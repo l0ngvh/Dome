@@ -1,0 +1,32 @@
+{
+  "build_capture": "Cargo builds before this process starts. Build logs and build timeout are not captured",
+  "build_number": "26200",
+  "cargo": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "cargo 1.96.0 (30a34c682 2026-05-25)\n"
+  },
+  "desktop": {
+    "handle": 228,
+    "name": "Default"
+  },
+  "display_version": "25H2",
+  "environment_case_count": 10,
+  "os_version_source": "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+  "process": 19180,
+  "process_session_id": 1,
+  "product_name": "Windows 10 Pro",
+  "protocol": "fresh-ownership-v7",
+  "repetitions": 5,
+  "rustc": {
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "rustc 1.96.0 (ac68faa20 2026-05-25)\nbinary: rustc\ncommit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96\ncommit-date: 2026-05-25\nhost: x86_64-pc-windows-msvc\nrelease: 1.96.0\nLLVM version: 22.1.2\n"
+  },
+  "scenario_count": 5,
+  "session_name": "Console",
+  "source_capture": "Bytes embedded at compilation, not the run-time working tree",
+  "toolchain_scope": "Tools on PATH at run time, not compiler provenance",
+  "update_build_revision": 9711,
+  "utc": "2026-10-27T11:50:42.400Z"
+}

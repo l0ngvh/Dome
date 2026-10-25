@@ -1,0 +1,2227 @@
+{
+  "generated": true,
+  "matrix": [
+    {
+      "number": 1,
+      "case": "normal_x_after_topmost_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-X-B-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            11,
+            1242,
+            2473,
+            3704,
+            4935
+          ]
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-X-B-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6177,
+            7066,
+            7955,
+            8844,
+            9733
+          ]
+        }
+      }
+    },
+    {
+      "number": 2,
+      "case": "notopmost_x_then_after_topmost_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-X-B-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            50,
+            1281,
+            2512,
+            3743,
+            4974
+          ]
+        },
+        "private": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        }
+      }
+    },
+    {
+      "number": 3,
+      "case": "topmost_x_then_after_topmost_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-X-B-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            91,
+            1322,
+            2553,
+            3784,
+            5015
+          ]
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-X-B-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6216,
+            7105,
+            7994,
+            8883,
+            9772
+          ]
+        }
+      }
+    },
+    {
+      "number": 4,
+      "case": "topmost_x_after_normal_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "X-A-B-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-B-P-X"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            132,
+            1363,
+            2594,
+            3825,
+            5056
+          ]
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "X-A-B-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-B-P-X"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6257,
+            7146,
+            8035,
+            8924,
+            9813
+          ]
+        }
+      }
+    },
+    {
+      "number": 5,
+      "case": "held_async_a_demotion_then_local_x_after_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-P-X",
+              "endpoint_bands": {
+                "A": false,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "X-B-A-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            171,
+            1402,
+            2633,
+            3864,
+            5095
+          ]
+        },
+        "private": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        }
+      }
+    },
+    {
+      "number": 6,
+      "case": "normal_x_after_sole_global_topmost_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": false,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-P-X",
+              "endpoint_bands": {
+                "A": true,
+                "B": false,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-X-B-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6296,
+            7185,
+            8074,
+            8963,
+            9852
+          ]
+        }
+      }
+    },
+    {
+      "number": 7,
+      "case": "normal_x_after_sole_controlled_topmost_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": false,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-X-B-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": false,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-X-B-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            219,
+            1450,
+            2681,
+            3912,
+            5143
+          ]
+        },
+        "private": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        }
+      }
+    },
+    {
+      "number": 8,
+      "case": "normal_x_after_clean_topmost_prefix_a_with_b_above_displaced_v6",
+      "environments": {
+        "ordinary": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "B-A-P-X",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "B-A-X-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6335,
+            7224,
+            8113,
+            9002,
+            9891
+          ]
+        }
+      }
+    },
+    {
+      "number": 9,
+      "case": "already_topmost_x_after_topmost_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "X-A-B-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-X-B-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            258,
+            1489,
+            2720,
+            3951,
+            5182
+          ]
+        },
+        "private": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        }
+      }
+    },
+    {
+      "number": 10,
+      "case": "demoted_topmost_x_then_after_topmost_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "X-A-B-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-X-B-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            297,
+            1528,
+            2759,
+            3990,
+            5221
+          ]
+        },
+        "private": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        }
+      }
+    },
+    {
+      "number": 11,
+      "case": "normal_x_after_normal_reference",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-B-P-X"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            338,
+            1569,
+            2800,
+            4031,
+            5262
+          ]
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-B-P-X"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6379,
+            7268,
+            8157,
+            9046,
+            9935
+          ]
+        }
+      }
+    },
+    {
+      "number": 12,
+      "case": "repeat_x_after_topmost_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-P-X",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-X-B-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            377,
+            1608,
+            2839,
+            4070,
+            5301
+          ]
+        },
+        "private": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        }
+      }
+    },
+    {
+      "number": 13,
+      "case": "wait_for_async_a_demotion_then_x_after_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-X-P",
+              "endpoint_bands": {
+                "A": false,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "B-A-X-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            440,
+            1671,
+            2902,
+            4133,
+            5364
+          ]
+        },
+        "private": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        }
+      }
+    },
+    {
+      "number": 14,
+      "case": "held_async_a_promotion_then_local_x_after_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": false,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "B-A-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-B-X-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            488,
+            1719,
+            2950,
+            4181,
+            5412
+          ]
+        },
+        "private": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        }
+      }
+    },
+    {
+      "number": 15,
+      "case": "wait_for_async_a_promotion_then_x_after_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": false,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "B-A-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-X-B-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            536,
+            1767,
+            2998,
+            4229,
+            5460
+          ]
+        },
+        "private": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        }
+      }
+    },
+    {
+      "number": 16,
+      "case": "held_c_after_observed_normal_a_then_promote_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": false,
+                "B": true,
+                "C": false,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "B-A-X-P-C",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "C": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-C-B-X-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            584,
+            1815,
+            3046,
+            4277,
+            5508
+          ]
+        },
+        "private": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        }
+      }
+    },
+    {
+      "number": 17,
+      "case": "held_c_after_observed_normal_a_keep_a_normal",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": false,
+                "B": true,
+                "C": false,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "B-A-X-P-C",
+              "endpoint_bands": {
+                "A": false,
+                "B": true,
+                "C": false,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "B-A-C-X-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            646,
+            1877,
+            3108,
+            4339,
+            5570
+          ]
+        },
+        "private": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        }
+      }
+    },
+    {
+      "number": 18,
+      "case": "held_c_after_observed_normal_a_promote_then_demote_a",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": false,
+                "B": true,
+                "C": false,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "B-A-X-P-C",
+              "endpoint_bands": {
+                "A": false,
+                "B": true,
+                "C": false,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "B-A-C-X-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            704,
+            1935,
+            3166,
+            4397,
+            5628
+          ]
+        },
+        "private": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        }
+      }
+    },
+    {
+      "number": 19,
+      "case": "topmost_a_after_normal_x_below_overlay_control",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-X-P",
+              "endpoint_bands": {
+                "A": false,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "B-X-A-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            769,
+            2000,
+            3231,
+            4462,
+            5693
+          ]
+        },
+        "private": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        }
+      }
+    },
+    {
+      "number": 20,
+      "case": "topmost_a_after_normal_predecessor_of_x",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-P-X",
+              "endpoint_bands": {
+                "A": false,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "B-P-A-X"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            810,
+            2041,
+            3272,
+            4503,
+            5734
+          ]
+        },
+        "private": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        }
+      }
+    },
+    {
+      "number": 21,
+      "case": "topmost_a_after_topmost_predecessor_of_x",
+      "environments": {
+        "ordinary": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": true,
+                "X": false
+              },
+              "before_fixture_order": "A-B-P-X",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": true,
+                "X": false
+              },
+              "endpoint_fixture_order": "B-P-A-X"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6418,
+            7307,
+            8196,
+            9085,
+            9974
+          ]
+        }
+      }
+    },
+    {
+      "number": 22,
+      "case": "owner_x_promotion_promotes_owned_o",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 5,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-P-O-X",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "O-A-B-P-X"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            853,
+            2084,
+            3315,
+            4546,
+            5777
+          ]
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 5,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-P-O-X",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "O-A-B-P-X"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6469,
+            7358,
+            8247,
+            9136,
+            10025
+          ]
+        }
+      }
+    },
+    {
+      "number": 23,
+      "case": "owner_x_demotion_demotes_owned_o",
+      "environments": {
+        "ordinary": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 5,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "O-A-B-P-X",
+              "endpoint_bands": null,
+              "endpoint_fixture_order": null
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6510,
+            7399,
+            8288,
+            9177,
+            10066
+          ]
+        }
+      }
+    },
+    {
+      "number": 24,
+      "case": "owned_o_promotion_keeps_owner_x_normal",
+      "environments": {
+        "ordinary": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-P-O-X",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "O-A-B-P-X"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6528,
+            7417,
+            8306,
+            9195,
+            10084
+          ]
+        }
+      }
+    },
+    {
+      "number": 25,
+      "case": "owned_o_demotion_demotes_owner_x",
+      "environments": {
+        "ordinary": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 5,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "O-A-B-P-X",
+              "endpoint_bands": null,
+              "endpoint_fixture_order": null
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6569,
+            7458,
+            8347,
+            9236,
+            10125
+          ]
+        }
+      }
+    },
+    {
+      "number": 26,
+      "case": "topmost_x_then_after_a_with_x_owned_o",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 5,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 5,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-P-O-X",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-O-B-P-X"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            894,
+            2125,
+            3356,
+            4587,
+            5818
+          ]
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 5,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 5,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-P-O-X",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-O-B-P-X"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6587,
+            7476,
+            8365,
+            9254,
+            10143
+          ]
+        }
+      }
+    },
+    {
+      "number": 27,
+      "case": "topmost_a_after_x_with_a_owned_o",
+      "environments": {
+        "ordinary": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "O-A-B-P-X",
+              "endpoint_bands": {
+                "A": false,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "B-P-X-O-A"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6631,
+            7520,
+            8409,
+            9298,
+            10187
+          ]
+        }
+      }
+    },
+    {
+      "number": 28,
+      "case": "normal_x_displaced_to_bottom",
+      "environments": {
+        "ordinary": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-B-P-X"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6678,
+            7567,
+            8456,
+            9345,
+            10234
+          ]
+        }
+      }
+    },
+    {
+      "number": 29,
+      "case": "topmost_x_to_bottom",
+      "environments": {
+        "ordinary": {
+          "scheduled": 0,
+          "not_scheduled": true,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [],
+          "raw_trial_begin_lines": []
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "X-A-B-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-B-P-X"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6722,
+            7611,
+            8500,
+            9389,
+            10278
+          ]
+        }
+      }
+    },
+    {
+      "number": 30,
+      "case": "owner_x_demotion_owner_topmost_before_o_creation",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "A-B-O-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-B-O-X-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            938,
+            2169,
+            3400,
+            4631,
+            5862
+          ]
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "A-B-O-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-B-O-X-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6762,
+            7651,
+            8540,
+            9429,
+            10318
+          ]
+        }
+      }
+    },
+    {
+      "number": 31,
+      "case": "owned_o_demotion_owner_topmost_before_o_creation",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "A-B-O-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-B-O-X-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            981,
+            2212,
+            3443,
+            4674,
+            5905
+          ]
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 5,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "A-B-O-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-B-X-O-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6805,
+            7694,
+            8583,
+            9472,
+            10361
+          ]
+        }
+      }
+    },
+    {
+      "number": 32,
+      "case": "topmost_x_after_a_owner_topmost_before_o_creation",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "A-B-O-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-O-X-B-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            1024,
+            2255,
+            3486,
+            4717,
+            5948
+          ]
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "A-B-O-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-O-X-B-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6848,
+            7737,
+            8626,
+            9515,
+            10404
+          ]
+        }
+      }
+    },
+    {
+      "number": 33,
+      "case": "owner_x_demotion_owner_then_owned_topmost",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "O-X-A-B-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-B-O-X-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            1067,
+            2298,
+            3529,
+            4760,
+            5991
+          ]
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "O-X-A-B-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-B-O-X-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6891,
+            7780,
+            8669,
+            9558,
+            10447
+          ]
+        }
+      }
+    },
+    {
+      "number": 34,
+      "case": "owner_x_demotion_owned_then_owner_topmost",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "O-A-B-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-B-O-X-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            1112,
+            2343,
+            3574,
+            4805,
+            6036
+          ]
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 0,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": true,
+                "P": false,
+                "X": true
+              },
+              "before_fixture_order": "O-A-B-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "endpoint_fixture_order": "A-B-O-X-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6936,
+            7825,
+            8714,
+            9603,
+            10492
+          ]
+        }
+      }
+    },
+    {
+      "number": 35,
+      "case": "owner_x_promotion_noownerzorder",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 5,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-O-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "X-A-B-O-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            1157,
+            2388,
+            3619,
+            4850,
+            6081
+          ]
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 0,
+          "question_observed": 5,
+          "reference_expectation_contradicted": 5,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-O-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "X-A-B-O-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            6981,
+            7870,
+            8759,
+            9648,
+            10537
+          ]
+        }
+      }
+    },
+    {
+      "number": 36,
+      "case": "topmost_x_then_after_a_with_x_owned_o_noownerzorder",
+      "environments": {
+        "ordinary": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 5,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 5,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-O-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-X-B-O-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            1198,
+            2429,
+            3660,
+            4891,
+            6122
+          ]
+        },
+        "private": {
+          "scheduled": 5,
+          "not_scheduled": false,
+          "setup_not_run": 0,
+          "protocol_invalid": 0,
+          "measured_operation_failed_prefix": 5,
+          "question_observed": 0,
+          "reference_expectation_contradicted": 5,
+          "outcomes": [
+            {
+              "count": 5,
+              "before_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": false
+              },
+              "before_fixture_order": "A-B-O-X-P",
+              "endpoint_bands": {
+                "A": true,
+                "B": true,
+                "O": false,
+                "P": false,
+                "X": true
+              },
+              "endpoint_fixture_order": "A-X-B-O-P"
+            }
+          ],
+          "raw_trial_begin_lines": [
+            7022,
+            7911,
+            8800,
+            9689,
+            10578
+          ]
+        }
+      }
+    }
+  ]
+}

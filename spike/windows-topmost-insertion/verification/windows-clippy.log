@@ -1,0 +1,15 @@
+    Checking windows-topmost-insertion v0.1.0 (/Users/longvh/oss/dome-one-overlay-perwindow-windows/spike/windows-topmost-insertion)
+error: unused `windows_result::bool::BOOL` that must be used
+   --> src/native.rs:109:13
+    |
+109 |             TranslateMessage(&message);
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `-D unused-must-use` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(unused_must_use)]`
+help: use `let _ = ...` to ignore the resulting value
+    |
+109 |             let _ = TranslateMessage(&message);
+    |             +++++++
+
+error: could not compile `windows-topmost-insertion` (bin "windows-topmost-insertion") due to 1 previous error

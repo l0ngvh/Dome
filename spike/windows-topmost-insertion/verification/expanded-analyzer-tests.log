@@ -1,0 +1,23 @@
+test_api_success_without_reference_transition_is_rejected (test_analyze.AnalyzerTests.test_api_success_without_reference_transition_is_rejected) ... ok
+test_below_b_case_does_not_require_an_empty_desktop (test_analyze.AnalyzerTests.test_below_b_case_does_not_require_an_empty_desktop) ... ok
+test_boundary_is_checked_again_immediately_before_insertion (test_analyze.AnalyzerTests.test_boundary_is_checked_again_immediately_before_insertion) ... ok
+test_collector_and_analyzer_enumerate_the_same_cases (test_analyze.AnalyzerTests.test_collector_and_analyzer_enumerate_the_same_cases) ... ok
+test_collector_eligible_flag_cannot_override_inconsistent_chain (test_analyze.AnalyzerTests.test_collector_eligible_flag_cannot_override_inconsistent_chain) ... ok
+test_each_synthetic_protocol_is_accepted_without_native_claim (test_analyze.AnalyzerTests.test_each_synthetic_protocol_is_accepted_without_native_claim) ... ok
+test_empty_missing_duplicate_and_malformed_runs_fail_closed (test_analyze.AnalyzerTests.test_empty_missing_duplicate_and_malformed_runs_fail_closed) ... ok
+test_failed_control_is_not_reported_as_a_passing_observation (test_analyze.AnalyzerTests.test_failed_control_is_not_reported_as_a_passing_observation) ... ok
+test_hidden_topmost_below_a_invalidates_bottom_boundary (test_analyze.AnalyzerTests.test_hidden_topmost_below_a_invalidates_bottom_boundary) ... ok
+test_hidden_topmost_invalidates_global_sole_but_not_controlled_sole (test_analyze.AnalyzerTests.test_hidden_topmost_invalidates_global_sole_but_not_controlled_sole) ... ok
+test_incomplete_settling_and_native_failures_are_rejected (test_analyze.AnalyzerTests.test_incomplete_settling_and_native_failures_are_rejected) ... ok
+test_nonobject_json_and_invalid_trial_identity_fail_closed (test_analyze.AnalyzerTests.test_nonobject_json_and_invalid_trial_identity_fail_closed) ... ok
+test_queued_c_cannot_release_before_promotion (test_analyze.AnalyzerTests.test_queued_c_cannot_release_before_promotion) ... ok
+test_race_requires_observed_promotion_not_only_api_success (test_analyze.AnalyzerTests.test_race_requires_observed_promotion_not_only_api_success) ... ok
+test_repeat_requires_first_convergence (test_analyze.AnalyzerTests.test_repeat_requires_first_convergence) ... ok
+test_unknown_insertion_result_is_an_observation_not_a_failed_control (test_analyze.AnalyzerTests.test_unknown_insertion_result_is_an_observation_not_a_failed_control) ... ok
+test_wrong_async_target_and_unheld_call_are_rejected (test_analyze.AnalyzerTests.test_wrong_async_target_and_unheld_call_are_rejected) ... ok
+test_wrong_predecessor_does_not_prove_above_overlay_arrangement (test_analyze.AnalyzerTests.test_wrong_predecessor_does_not_prove_above_overlay_arrangement) ... ok
+
+----------------------------------------------------------------------
+Ran 18 tests in 0.177s
+
+OK

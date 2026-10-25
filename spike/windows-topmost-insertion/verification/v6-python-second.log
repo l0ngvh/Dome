@@ -1,0 +1,65 @@
+...FFFFF.....
+======================================================================
+FAIL: test_every_setup_write_is_permitted_and_bounded (test_analyze_v6.ProtocolTests.test_every_setup_write_is_permitted_and_bounded) (case='owner_x_demotion_owner_topmost_before_o_creation', mutation='wrong_target')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/longvh/oss/dome-one-overlay-perwindow-windows/spike/windows-topmost-insertion/test_analyze_v6.py", line 246, in test_every_setup_write_is_permitted_and_bounded
+    self.assertEqual(trial.result()["status"], "protocol_invalid")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'eligible_observation' != 'protocol_invalid'
+- eligible_observation
++ protocol_invalid
+
+
+======================================================================
+FAIL: test_every_setup_write_is_permitted_and_bounded (test_analyze_v6.ProtocolTests.test_every_setup_write_is_permitted_and_bounded) (case='owned_o_demotion_owner_topmost_before_o_creation', mutation='wrong_target')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/longvh/oss/dome-one-overlay-perwindow-windows/spike/windows-topmost-insertion/test_analyze_v6.py", line 246, in test_every_setup_write_is_permitted_and_bounded
+    self.assertEqual(trial.result()["status"], "protocol_invalid")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'eligible_observation' != 'protocol_invalid'
+- eligible_observation
++ protocol_invalid
+
+
+======================================================================
+FAIL: test_every_setup_write_is_permitted_and_bounded (test_analyze_v6.ProtocolTests.test_every_setup_write_is_permitted_and_bounded) (case='topmost_x_after_a_owner_topmost_before_o_creation', mutation='wrong_target')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/longvh/oss/dome-one-overlay-perwindow-windows/spike/windows-topmost-insertion/test_analyze_v6.py", line 246, in test_every_setup_write_is_permitted_and_bounded
+    self.assertEqual(trial.result()["status"], "protocol_invalid")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'eligible_observation' != 'protocol_invalid'
+- eligible_observation
++ protocol_invalid
+
+
+======================================================================
+FAIL: test_every_setup_write_is_permitted_and_bounded (test_analyze_v6.ProtocolTests.test_every_setup_write_is_permitted_and_bounded) (case='owner_x_demotion_owner_then_owned_topmost', mutation='wrong_target')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/longvh/oss/dome-one-overlay-perwindow-windows/spike/windows-topmost-insertion/test_analyze_v6.py", line 246, in test_every_setup_write_is_permitted_and_bounded
+    self.assertEqual(trial.result()["status"], "protocol_invalid")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'eligible_observation' != 'protocol_invalid'
+- eligible_observation
++ protocol_invalid
+
+
+======================================================================
+FAIL: test_every_setup_write_is_permitted_and_bounded (test_analyze_v6.ProtocolTests.test_every_setup_write_is_permitted_and_bounded) (case='owner_x_demotion_owned_then_owner_topmost', mutation='wrong_target')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/longvh/oss/dome-one-overlay-perwindow-windows/spike/windows-topmost-insertion/test_analyze_v6.py", line 246, in test_every_setup_write_is_permitted_and_bounded
+    self.assertEqual(trial.result()["status"], "protocol_invalid")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'eligible_observation' != 'protocol_invalid'
+- eligible_observation
++ protocol_invalid
+
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.318s
+
+FAILED (failures=5)

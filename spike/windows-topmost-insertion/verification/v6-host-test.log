@@ -1,0 +1,18 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running unittests src/main.rs (target/debug/deps/windows_topmost_insertion-b2fd90d648ffbb51)
+
+running 11 tests
+test observation::tests::check_prefix_with_normal_above_or_hidden_flag_below_rejects ... ok
+test observation::tests::validate_scheduled_owner_sharing_keeps_baseline_strict ... ok
+test protocol::tests::fixed_coverage_includes_comparison_controls_and_every_scenario ... ok
+test observation::tests::validate_owned_pair_with_wrong_flags_or_owner_identity_rejects ... ok
+test observation::tests::validate_local_with_recorded_paths_roundtrips_without_claiming_global_coverage ... ok
+test observation::tests::validate_local_with_full_fixture_field_changed_after_traversal_rejects ... ok
+test observation::tests::validate_order_with_broken_graphs_or_partial_reads_returns_error ... ok
+test observation::tests::validate_order_with_detached_cycle_returns_error ... ok
+test observation::tests::validate_order_with_changed_or_nonindependent_fixtures_returns_error ... ok
+test observation::tests::derive_order_from_recorded_neighbors_not_enumeration ... ok
+test observation::tests::validate_local_with_bad_identity_style_cycles_and_nonreciprocal_links_rejects ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+

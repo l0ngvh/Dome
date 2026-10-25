@@ -1,0 +1,10 @@
+{
+  "scope": "Serialized shape example from preserved snapshot fields, not new native evidence or a full-run measurement",
+  "source_snapshot_sha256": "f472c6203298a8c92653b77adfc35e9729453b0953d804664f31bd088acca30c",
+  "source_windows": 245,
+  "local_neighbor_nodes": 56,
+  "schema_three_duplicate_array_record_bytes": 88744,
+  "schema_four_local_record_bytes": 6752,
+  "schema_four_global_record_bytes": 44793,
+  "limitations": "No classes were recorded in the source snapshot. New class diagnostics and native timing costs are not measured. The unavailable 261 MB run was not inspected."
+}

@@ -1,0 +1,13 @@
+{
+  "asynchronous_posts": 35,
+  "attempted": 105,
+  "collected_pending_analysis": 90,
+  "reasons": {
+    "P is not the actual immediate predecessor of normal X": 10,
+    "another global topmost window exists, including hidden windows": 5
+  },
+  "rejected_or_failed": 15,
+  "settling_samples": 1890,
+  "setup_accepted": 90,
+  "synchronous_treatment_calls": 80
+}

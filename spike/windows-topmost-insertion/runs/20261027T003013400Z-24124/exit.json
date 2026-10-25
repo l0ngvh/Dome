@@ -1,0 +1,13 @@
+{
+  "collection": {
+    "error": null,
+    "exit_code": 0,
+    "finished_within_limit": true,
+    "limit_seconds": 2400,
+    "process": 24360
+  },
+  "ended_utc": "2026-10-27T00:31:48.161Z",
+  "error": null,
+  "exit_code": 0,
+  "started_utc": "2026-10-27T00:30:13.401Z"
+}

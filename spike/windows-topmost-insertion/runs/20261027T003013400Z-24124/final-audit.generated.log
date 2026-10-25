@@ -1,0 +1,24 @@
+{
+  "all_original_files_unchanged": true,
+  "identity_checks_passed": true,
+  "all_inventory_enumerations_complete": true,
+  "unexpected_companions": 0,
+  "inventory_counts": {
+    "creation_inventory": 2,
+    "before": 165,
+    "failure_inventory": 10,
+    "bottom_global_endpoint": 10
+  },
+  "post_read_and_hold_interval_checks_passed": true,
+  "final_five_full_fixture_equality": true,
+  "snapshot_scopes": {
+    "local": 4737,
+    "global": 40
+  },
+  "hold_span_min_us": 2055,
+  "hold_span_max_us": 105646,
+  "report_word_count": 1666,
+  "recorded_native_api_failures": 0,
+  "eligible": 150,
+  "failed_controls": 5
+}

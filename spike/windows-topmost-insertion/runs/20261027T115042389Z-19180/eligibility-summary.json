@@ -1,0 +1,12 @@
+{
+  "asynchronous_posts": 0,
+  "attempted": 50,
+  "collected_pending_analysis": 50,
+  "not_run": 0,
+  "reasons": {},
+  "rejected_or_failed": 0,
+  "scheduled": 50,
+  "settling_samples": 1050,
+  "setup_accepted": 50,
+  "synchronous_treatment_calls": 50
+}

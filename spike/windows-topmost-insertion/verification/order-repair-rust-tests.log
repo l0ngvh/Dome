@@ -1,0 +1,11 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running unittests src/main.rs (target/debug/deps/windows_topmost_insertion-b2fd90d648ffbb51)
+
+running 4 tests
+test observation::tests::derive_order_from_recorded_neighbors_not_enumeration ... ok
+test observation::tests::validate_order_with_detached_cycle_returns_error ... ok
+test observation::tests::validate_order_with_broken_graphs_or_partial_reads_returns_error ... ok
+test observation::tests::validate_order_with_changed_or_nonindependent_fixtures_returns_error ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

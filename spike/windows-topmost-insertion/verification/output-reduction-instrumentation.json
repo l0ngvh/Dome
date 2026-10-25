@@ -1,0 +1,33 @@
+{
+  "scope": "Source-based instrumentation checks, not Windows execution or runtime timing proof",
+  "checks": {
+    "enumeration_guarded_by_global_or_diagnostics": true,
+    "global_order_not_serialized": true,
+    "raw_desktop_styles_only_for_global": true,
+    "poll_retains_successful_observation": true,
+    "local_call_observation_before_emit": true,
+    "async_observation_before_emit": true,
+    "received_reply_observed_before_raw_serialization": true,
+    "settle_local_no_diagnostics": true,
+    "single_buffered_raw_write": true,
+    "bounded_neighbor_path": true,
+    "streamed_launcher_summary": true,
+    "streamed_analyzer_main": true,
+    "completed_trial_analyzed_before_next": true,
+    "no_rust_suppressions": true,
+    "embedded_src/native.rs": true,
+    "embedded_src/observation.rs": true,
+    "embedded_src/run_capture.rs": true,
+    "embedded_test_analyze.py": true,
+    "embedded_analyze.py": true,
+    "embedded_verify_output_reduction.py": true
+  },
+  "current_source_sha256": {
+    "src/native.rs": "ff9a767dec331c4862a91d8281e38173cd1cd4160d2559ca11c9ff426dbb9230",
+    "src/observation.rs": "55844e60683447e6259c1a1afbc24fef389134252ec52367bd23ce9f1095b21a",
+    "src/run_capture.rs": "a9fb7c78503d4a965dc7f7ce0956108cff631028319c8c1ac2067d12854d4fbe",
+    "test_analyze.py": "f061da13958847bc87a090042aa92d52a8254d983ddcd03b4273692813acf83f",
+    "analyze.py": "b54845128b29291b0f6cbcd200e86eaaac33d804d3b064879205332f9071c22d",
+    "verify_output_reduction.py": "fb1ead19f0eab83c2952a624faef994bc40cb8acb0d34285035a327a2aa1cd06"
+  }
+}

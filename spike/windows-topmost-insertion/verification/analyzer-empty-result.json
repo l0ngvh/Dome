@@ -1,0 +1,34 @@
+{
+  "cleanup_complete": false,
+  "expected_trials": 25,
+  "actual_trials": 0,
+  "malformed_lines": [],
+  "matrix": {
+    "normal_x_after_topmost_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "notopmost_x_then_after_topmost_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "topmost_x_then_after_topmost_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "topmost_x_after_normal_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "held_async_a_demotion_then_local_x_after_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    }
+  },
+  "trials": []
+}

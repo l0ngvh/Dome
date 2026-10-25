@@ -1,0 +1,14 @@
+{
+  "asynchronous_posts": 35,
+  "attempted": 165,
+  "collected_pending_analysis": 155,
+  "not_run": 0,
+  "reasons": {
+    "actual initial bands differ from requested bands": 10
+  },
+  "rejected_or_failed": 10,
+  "scheduled": 165,
+  "settling_samples": 3255,
+  "setup_accepted": 155,
+  "synchronous_treatment_calls": 145
+}

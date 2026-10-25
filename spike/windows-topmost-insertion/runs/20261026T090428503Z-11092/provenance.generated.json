@@ -1,0 +1,123 @@
+{
+  "raw_sha256": "62de6552ce92933a0ca37dcef2fd7eefe578457c995dc575cb98205a3abecb4f",
+  "executable_sha256": "3e4f502c199504c641c5677b480fe36acfffd733e148e4374c257e3392f36714",
+  "files": [
+    {
+      "file": "Cargo.toml",
+      "pulled_sha256": "40eac9857b9dd6a771895c8754fdca2c4c00be6d92a2f99180b794dd2ffbdc19",
+      "manifest_sha256": "e28a0a5546a5aba7cc2df4b8f2f6626b28b6c3528700d212eaf3bc5c92cd2419",
+      "crlf_sha256": "e28a0a5546a5aba7cc2df4b8f2f6626b28b6c3528700d212eaf3bc5c92cd2419",
+      "crlf_matches_manifest": true,
+      "crlf_bytes_present_in_executable": true,
+      "current_matches_pulled_source": true
+    },
+    {
+      "file": "Cargo.lock",
+      "pulled_sha256": "22d083ad73594db1aa0b4297f04bb58dcb38bf8ddcaa88ad1c0caa9a6276eb90",
+      "manifest_sha256": "c0a82a85398da10831bcb4eae36f0d3345b21a6d1f6188d097a23f5b6606bab7",
+      "crlf_sha256": "c0a82a85398da10831bcb4eae36f0d3345b21a6d1f6188d097a23f5b6606bab7",
+      "crlf_matches_manifest": true,
+      "crlf_bytes_present_in_executable": true,
+      "current_matches_pulled_source": true
+    },
+    {
+      "file": "src/main.rs",
+      "pulled_sha256": "144e6ceca3353c7bc38dac1632665e599daaae5c9faf52c9fb9379830ccc26d1",
+      "manifest_sha256": "3909fd28c435e2ea3a3cc611c8640c7b3ff0ea59ff1eeca81e46caa6b3200713",
+      "crlf_sha256": "3909fd28c435e2ea3a3cc611c8640c7b3ff0ea59ff1eeca81e46caa6b3200713",
+      "crlf_matches_manifest": true,
+      "crlf_bytes_present_in_executable": true,
+      "current_matches_pulled_source": true
+    },
+    {
+      "file": "src/native.rs",
+      "pulled_sha256": "d3a26fc046eea7fedd3b6e1c21565ce6ed9dd9d421a1c2fd7f54aff9b7e6236c",
+      "manifest_sha256": "6b426c276f1a493d518c39bf5ccc1b3a005bf38de2e0d066c8f49ef67a0654e6",
+      "crlf_sha256": "6b426c276f1a493d518c39bf5ccc1b3a005bf38de2e0d066c8f49ef67a0654e6",
+      "crlf_matches_manifest": true,
+      "crlf_bytes_present_in_executable": true,
+      "current_matches_pulled_source": true
+    },
+    {
+      "file": "src/observation.rs",
+      "pulled_sha256": "781e72ea5b178290043612476298c4534803494835020a165d023549af6bab60",
+      "manifest_sha256": "dbf29decd2e6f072f18b34adaef4520da18403dc5cf908d74868d2461a1b5e4c",
+      "crlf_sha256": "dbf29decd2e6f072f18b34adaef4520da18403dc5cf908d74868d2461a1b5e4c",
+      "crlf_matches_manifest": true,
+      "crlf_bytes_present_in_executable": true,
+      "current_matches_pulled_source": true
+    },
+    {
+      "file": "tests/scrambled-snapshot.json",
+      "pulled_sha256": "f472c6203298a8c92653b77adfc35e9729453b0953d804664f31bd088acca30c",
+      "manifest_sha256": "7a1ab9fe1f4c26eaceff2204f1e644ab91cb273c805aa6a02d43c2a36b605d66",
+      "crlf_sha256": "7a1ab9fe1f4c26eaceff2204f1e644ab91cb273c805aa6a02d43c2a36b605d66",
+      "crlf_matches_manifest": true,
+      "crlf_bytes_present_in_executable": true,
+      "current_matches_pulled_source": true
+    },
+    {
+      "file": "verify_saved_run.py",
+      "pulled_sha256": "335963f196b35024a76554ece6780c5d5257f8367a9cf10c5821119b50b8db1f",
+      "manifest_sha256": "d35bc3fada971731709c387da520ccc7ae4eb7e28b5585df05e7b9717b50f179",
+      "crlf_sha256": "d35bc3fada971731709c387da520ccc7ae4eb7e28b5585df05e7b9717b50f179",
+      "crlf_matches_manifest": true,
+      "crlf_bytes_present_in_executable": true,
+      "current_matches_pulled_source": true
+    },
+    {
+      "file": "src/run_capture.rs",
+      "pulled_sha256": "a9fb7c78503d4a965dc7f7ce0956108cff631028319c8c1ac2067d12854d4fbe",
+      "manifest_sha256": "a315969f95f301eb0a0f91ee0d1e3cc47a5ab2aa26670365c8c6e6ce76c3d213",
+      "crlf_sha256": "a315969f95f301eb0a0f91ee0d1e3cc47a5ab2aa26670365c8c6e6ce76c3d213",
+      "crlf_matches_manifest": true,
+      "crlf_bytes_present_in_executable": true,
+      "current_matches_pulled_source": true
+    },
+    {
+      "file": "analyze.py",
+      "pulled_sha256": "ba7a4731b1f83ee22039c78a990622c16b59df7b54c1e924b325e6222782d5dd",
+      "manifest_sha256": "afc21d55cd8dc5294a92ae3d55a9e63d461cffdd293f009a94b758006550e7c6",
+      "crlf_sha256": "afc21d55cd8dc5294a92ae3d55a9e63d461cffdd293f009a94b758006550e7c6",
+      "crlf_matches_manifest": true,
+      "crlf_bytes_present_in_executable": true,
+      "current_matches_pulled_source": true
+    },
+    {
+      "file": "test_analyze.py",
+      "pulled_sha256": "c4bed77ffb8f59d57caad3ba871961a10772f3de5d2d898569b985636d0a46cb",
+      "manifest_sha256": "52f832c1d08b3272e6e25bd87f69b8d4d1c4878f4448bede234e34c5ee5bd466",
+      "crlf_sha256": "52f832c1d08b3272e6e25bd87f69b8d4d1c4878f4448bede234e34c5ee5bd466",
+      "crlf_matches_manifest": true,
+      "crlf_bytes_present_in_executable": true,
+      "current_matches_pulled_source": true
+    },
+    {
+      "file": "verify_output_reduction.py",
+      "pulled_sha256": "7cba96cb1514c17024486d8858049e71328ea9c4e02af2ab8f6de57f26997449",
+      "manifest_sha256": "f02bafd7e25df581cb51d2d1ea099acf21111c6673b6fd3e4f03b2934a874794",
+      "crlf_sha256": "f02bafd7e25df581cb51d2d1ea099acf21111c6673b6fd3e4f03b2934a874794",
+      "crlf_matches_manifest": true,
+      "crlf_bytes_present_in_executable": true,
+      "current_matches_pulled_source": true
+    },
+    {
+      "file": "README.md",
+      "pulled_sha256": "eff5346b8e652d704f7aae4001a2af7a9ef8ccd595789a4b87283e64ca24156d",
+      "manifest_sha256": "03beb8777edb5ba58b35a8aa197fcc597953c9085604af99d6e8422cef772582",
+      "crlf_sha256": "03beb8777edb5ba58b35a8aa197fcc597953c9085604af99d6e8422cef772582",
+      "crlf_matches_manifest": true,
+      "crlf_bytes_present_in_executable": true,
+      "current_matches_pulled_source": true
+    },
+    {
+      "file": "REPORT.md",
+      "pulled_sha256": "d712f8907edeb72f44591818cbc076dd0224c1b0e7c44b81de52574c804021ac",
+      "manifest_sha256": "1c2544b5037a526f5626f2b6cc2b6dd4fd012f75a7d59f5b4da16f90ec34c342",
+      "crlf_sha256": "1c2544b5037a526f5626f2b6cc2b6dd4fd012f75a7d59f5b4da16f90ec34c342",
+      "crlf_matches_manifest": true,
+      "crlf_bytes_present_in_executable": true,
+      "current_matches_pulled_source": true
+    }
+  ]
+}

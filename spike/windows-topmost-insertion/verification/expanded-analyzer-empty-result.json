@@ -1,0 +1,118 @@
+{
+  "schema_version": 2,
+  "cleanup_complete": false,
+  "collection_complete": false,
+  "expected_trials": 105,
+  "actual_trials": 0,
+  "matrix_complete": false,
+  "malformed_or_protocol_errors": [],
+  "matrix": {
+    "normal_x_after_topmost_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "notopmost_x_then_after_topmost_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "topmost_x_then_after_topmost_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "topmost_x_after_normal_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "held_async_a_demotion_then_local_x_after_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "normal_x_after_sole_global_topmost_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "normal_x_after_sole_controlled_topmost_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "normal_x_after_bottommost_topmost_a_with_b_above": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "already_topmost_x_after_topmost_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "demoted_topmost_x_then_after_topmost_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "normal_x_after_normal_reference": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "repeat_x_after_topmost_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "wait_for_async_a_demotion_then_x_after_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "held_async_a_promotion_then_local_x_after_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "wait_for_async_a_promotion_then_x_after_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "held_c_after_observed_normal_a_then_promote_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "held_c_after_observed_normal_a_keep_a_normal": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "held_c_after_observed_normal_a_promote_then_demote_a": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "topmost_a_after_normal_x_below_overlay_control": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "topmost_a_after_normal_predecessor_of_x": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    },
+    "topmost_a_after_topmost_predecessor_of_x": {
+      "attempted": 0,
+      "eligible": 0,
+      "outcomes": []
+    }
+  },
+  "trials": [],
+  "all_trials_eligible_and_controls_passed": false
+}

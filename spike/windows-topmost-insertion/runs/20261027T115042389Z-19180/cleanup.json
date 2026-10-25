@@ -1,0 +1,8 @@
+{
+  "active_processes_after": 0,
+  "active_processes_before": 0,
+  "ended_utc": "2026-10-27T11:51:16.520Z",
+  "errors": [],
+  "method": "terminate owned collection job, kill on job close",
+  "native_destruction": "Inspect fixture stderr and stderr.log, zero processes is not proof of successful DestroyWindow"
+}

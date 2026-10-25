@@ -1,0 +1,75 @@
+{
+  "generated": true,
+  "errors": [],
+  "raw_bytes": 36552997,
+  "raw_lines": 10625,
+  "raw_sha256": "afb0d2692693951d2b5ba1e3f99305080cf80d126299f1f1d98d03ee7bfa97a3",
+  "calls_by_flags": {
+    "19": 1405,
+    "16403": 35,
+    "531": 30
+  },
+  "native_call_count": 1470,
+  "call_duration_us": [
+    5,
+    1797
+  ],
+  "settling_read_span_us": [
+    506210,
+    531077
+  ],
+  "settling_gap_us": [
+    25086,
+    29281
+  ],
+  "snapshot_duration_us": [
+    1,
+    1130
+  ],
+  "invalid_native_snapshots": [
+    {
+      "line": 196,
+      "kind": "after_release",
+      "case": 5,
+      "reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 461,
+      "kind": "after_release",
+      "case": 13,
+      "reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 513,
+      "kind": "after_release",
+      "case": 14,
+      "reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 1788,
+      "kind": "after_release",
+      "case": 15,
+      "reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 4206,
+      "kind": "after_release",
+      "case": 14,
+      "reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 4250,
+      "kind": "after_release",
+      "case": 15,
+      "reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 5670,
+      "kind": "immediate_after_release",
+      "case": 18,
+      "reason": "fixture changed after local traversal"
+    }
+  ],
+  "outside_trial_calls": [],
+  "reused_owned_identity_tuples": []
+}

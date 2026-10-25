@@ -1,0 +1,86 @@
+[
+  {
+    "file": "Cargo.toml",
+    "sha256": "277e0d075323614c44d21044dc6c55362aa1eeecf64159db199c81c4c3bb2880"
+  },
+  {
+    "file": "Cargo.lock",
+    "sha256": "c0a82a85398da10831bcb4eae36f0d3345b21a6d1f6188d097a23f5b6606bab7"
+  },
+  {
+    "file": "src/main.rs",
+    "sha256": "eb5127a60bfbb904554e3c549d812b582044d5d5f225d0e8198e62cebef3c8cb"
+  },
+  {
+    "file": "src/native.rs",
+    "sha256": "4d28ee32bfaed28e9a3b776814bd190257ad2037dda60048212f313c8b258388"
+  },
+  {
+    "file": "src/observation.rs",
+    "sha256": "bdc5ce8e1b3bffbe71de5cef97ae16795f8c6150aa3d499b5940b3a43b7071a2"
+  },
+  {
+    "file": "src/protocol.rs",
+    "sha256": "c625be9e0d77f8c95a4af0ae9cf7e3a4739cb7d34226ad90e7218aec9767ae15"
+  },
+  {
+    "file": "src/desktop.rs",
+    "sha256": "3e9083e11a7926d73f2fb5a330d385d1142efe0b95a57b1e1087bf34c51cff63"
+  },
+  {
+    "file": "analyze_v5.py",
+    "sha256": "44731582954883227bd40099078905e22dafc64350f80b40ad4e6360d6292185"
+  },
+  {
+    "file": "analyze_v6.py",
+    "sha256": "e41688af620a8a3992d8c657f6b3808220305316def2470448c44bc28edb2cff"
+  },
+  {
+    "file": "protocol_v6.py",
+    "sha256": "8d5095ae412370579bba70f5bc0fa51612034d88c06eca73361ee614c131961b"
+  },
+  {
+    "file": "test_analyze_v6.py",
+    "sha256": "10fa7eb91fc3f32a72829adc92cd99234d17b08a07dc71584715976a7f07c582"
+  },
+  {
+    "file": "test_analyze_v5.py",
+    "sha256": "065e17e10bb22a033f050719cc3d436e50e9f8ca72df7b745b4c8562b8545177"
+  },
+  {
+    "file": "tests/scrambled-snapshot.json",
+    "sha256": "7a1ab9fe1f4c26eaceff2204f1e644ab91cb273c805aa6a02d43c2a36b605d66"
+  },
+  {
+    "file": "verify_saved_run.py",
+    "sha256": "d35bc3fada971731709c387da520ccc7ae4eb7e28b5585df05e7b9717b50f179"
+  },
+  {
+    "file": "src/run_capture.rs",
+    "sha256": "90a21fbd7072b0fda9010a3d1f0a460c21e7b89bf6e2ea08710b8b43d6182ebd"
+  },
+  {
+    "file": "analyze.py",
+    "sha256": "218e322a0477e50f7782130429f4ad307c9ae25c08a45604e56f1798d0de3a7c"
+  },
+  {
+    "file": "test_analyze.py",
+    "sha256": "1528dc1e956b8e7f1f764df6ff8b5045d7e3d0bce4fd1695f204cbe94ed39696"
+  },
+  {
+    "file": "verify_output_reduction.py",
+    "sha256": "f02bafd7e25df581cb51d2d1ea099acf21111c6673b6fd3e4f03b2934a874794"
+  },
+  {
+    "file": "README.md",
+    "sha256": "1d17036e4fa8dc3f50fc84c639d98b549f53fe63caebdba316d3a5a2ecac1f0e"
+  },
+  {
+    "file": "REPORT.md",
+    "sha256": "8599788845e4a2309ba882403b80049e41b7cf192c74bcd93e838d1d97761cd0"
+  },
+  {
+    "file": "windows-topmost-insertion.exe",
+    "sha256": "d5f79b35fe979578e3eed0c3c9047bfd1f8523419654a227773bdb9610cce39f"
+  }
+]

@@ -1,0 +1,74 @@
+[
+  {
+    "file": "Cargo.toml",
+    "sha256": "277e0d075323614c44d21044dc6c55362aa1eeecf64159db199c81c4c3bb2880"
+  },
+  {
+    "file": "Cargo.lock",
+    "sha256": "c0a82a85398da10831bcb4eae36f0d3345b21a6d1f6188d097a23f5b6606bab7"
+  },
+  {
+    "file": "src/main.rs",
+    "sha256": "eb5127a60bfbb904554e3c549d812b582044d5d5f225d0e8198e62cebef3c8cb"
+  },
+  {
+    "file": "src/native.rs",
+    "sha256": "364cb247467e566125cdf354a68b63283f4575db1a6c32157fbe0f356ce2195a"
+  },
+  {
+    "file": "src/observation.rs",
+    "sha256": "ac87e517a98c8c911ce5c7bbc138e06784d82b7da947bd4aff25906bab703861"
+  },
+  {
+    "file": "src/protocol.rs",
+    "sha256": "4f0fe348dcc99628b290b8842424d0dcdb0b44416c6e2591c25d9bd0f37c3cb6"
+  },
+  {
+    "file": "src/desktop.rs",
+    "sha256": "3e9083e11a7926d73f2fb5a330d385d1142efe0b95a57b1e1087bf34c51cff63"
+  },
+  {
+    "file": "analyze_v5.py",
+    "sha256": "44731582954883227bd40099078905e22dafc64350f80b40ad4e6360d6292185"
+  },
+  {
+    "file": "test_analyze_v5.py",
+    "sha256": "64a8a3c89586143d55dd24888a4927e1fd1e66c66abe5ef8db21352812906f2c"
+  },
+  {
+    "file": "tests/scrambled-snapshot.json",
+    "sha256": "7a1ab9fe1f4c26eaceff2204f1e644ab91cb273c805aa6a02d43c2a36b605d66"
+  },
+  {
+    "file": "verify_saved_run.py",
+    "sha256": "d35bc3fada971731709c387da520ccc7ae4eb7e28b5585df05e7b9717b50f179"
+  },
+  {
+    "file": "src/run_capture.rs",
+    "sha256": "5548779070e443b6965cbd85327099069555eaa768416dba116aac540216afd6"
+  },
+  {
+    "file": "analyze.py",
+    "sha256": "de791e14e89d8cd9456d352f8ed81b4141b941792d2545a92af3827af72e9e45"
+  },
+  {
+    "file": "test_analyze.py",
+    "sha256": "1528dc1e956b8e7f1f764df6ff8b5045d7e3d0bce4fd1695f204cbe94ed39696"
+  },
+  {
+    "file": "verify_output_reduction.py",
+    "sha256": "f02bafd7e25df581cb51d2d1ea099acf21111c6673b6fd3e4f03b2934a874794"
+  },
+  {
+    "file": "README.md",
+    "sha256": "04185b7326d090f1ed7a22568f1dbf185a239c384b77fc7fc64fa8747642e040"
+  },
+  {
+    "file": "REPORT.md",
+    "sha256": "dc70dc50bc8b260784d3268e47d24f86e0a56fbb6be419626f9869cb6cbea211"
+  },
+  {
+    "file": "windows-topmost-insertion.exe",
+    "sha256": "39064479978860dd778ee422c3e59f8fdca3465910a878eddb1ed48531aa40d4"
+  }
+]

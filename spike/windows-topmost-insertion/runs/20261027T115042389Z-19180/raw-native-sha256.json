@@ -1,0 +1,6 @@
+{
+  "file": "raw.jsonl",
+  "sha256": "9ceb550ee2f62533d28f0d7344e0262b2a42aef788802a350ae259bc828f3c77",
+  "source": "native supervisor after collector exit and job cleanup",
+  "utc": "2026-10-27T11:51:16.527Z"
+}

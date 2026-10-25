@@ -1,0 +1,10 @@
+Initial local Windows-target cargo check failed before the import correction.
+
+error[E0432]: unresolved import `windows::Win32::Foundation::BOOL`
+  --> src/native.rs:16:13
+   |
+16 |             BOOL, GetLastError, HWND, LPARAM, LRESULT, SetLastError, WIN32_ERROR, WPARAM,
+   |             ^^^^ no `BOOL` in `Win32::Foundation`
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `windows-topmost-insertion` (bin "windows-topmost-insertion") due to 1 previous error

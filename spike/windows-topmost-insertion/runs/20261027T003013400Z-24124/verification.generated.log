@@ -1,0 +1,179 @@
+{
+  "raw_sha256": "07190550967db31935c341061c0caff5ffc97509f190226770ee8dd304eba431",
+  "schedule_complete": true,
+  "original_file_count": 53,
+  "original_total_bytes": 25318047,
+  "counters": {
+    "session": 1,
+    "environment_ready": 2,
+    "spawn": 21,
+    "fixture_reply": 691,
+    "overlay_identity": 2,
+    "creation_inventory": 2,
+    "trial_begin": 165,
+    "fixture_command": 670,
+    "setup_normal_reference": 165,
+    "setup_b": 165,
+    "setup_a": 165,
+    "local_overlay_call": 220,
+    "setup_x": 165,
+    "before": 165,
+    "setup_eligibility": 165,
+    "before_insert": 140,
+    "immediate_after_local_write": 140,
+    "treatment_call": 145,
+    "settling": 3255,
+    "trial_end": 165,
+    "after_explicit_notopmost": 10,
+    "after_explicit_topmost": 15,
+    "held_before_post": 20,
+    "external_async_call": 35,
+    "after_async_post_while_held": 35,
+    "held_after_100ms": 10,
+    "after_release": 20,
+    "first_settling": 105,
+    "before_repeated_insert": 5,
+    "immediate_after_repeated_write": 5,
+    "reference_transition_observed": 20,
+    "setup_c": 15,
+    "setup_race_x_after_a": 15,
+    "setup_race_p_after_x": 15,
+    "setup_race_c_after_p": 15,
+    "queried_normal_a_before_c_post": 15,
+    "after_a_promotion_while_c_held": 10,
+    "before_c_release": 15,
+    "immediate_after_release": 15,
+    "after_a_demotion_while_c_held": 5,
+    "setup_normal_predecessor": 5,
+    "environment_cleanup": 2,
+    "environment_end": 2,
+    "setup_clean_prefix_a": 5,
+    "setup_topmost_predecessor": 5,
+    "setup_clean_prefix_p": 5,
+    "setup_boundary_overlay_promote": 5,
+    "setup_boundary_overlay": 5,
+    "owned_identity": 30,
+    "failure_inventory": 10,
+    "bottom_global_endpoint": 10,
+    "collection_complete": 1,
+    "cleanup_complete": 1
+  },
+  "unique_native_call_count": 970,
+  "measured_call_count": 220,
+  "all_call_schedule_and_timing_checks_passed": true,
+  "snapshot_count": 4777,
+  "invalid_snapshots": [
+    {
+      "line": 461,
+      "kind": "after_release",
+      "sample": null,
+      "reason": "fixture changed across traversal",
+      "native_reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 746,
+      "kind": "immediate_after_release",
+      "sample": null,
+      "reason": "fixture changed across traversal",
+      "native_reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 1588,
+      "kind": "immediate_after_release",
+      "sample": null,
+      "reason": "fixture changed across traversal",
+      "native_reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 1880,
+      "kind": "after_release",
+      "sample": null,
+      "reason": "fixture changed across traversal",
+      "native_reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 2987,
+      "kind": "after_release",
+      "sample": null,
+      "reason": "fixture changed across traversal",
+      "native_reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 3039,
+      "kind": "after_release",
+      "sample": null,
+      "reason": "fixture changed across traversal",
+      "native_reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 3083,
+      "kind": "after_release",
+      "sample": null,
+      "reason": "fixture changed across traversal",
+      "native_reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 3564,
+      "kind": "after_release",
+      "sample": null,
+      "reason": "fixture changed across traversal",
+      "native_reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 3829,
+      "kind": "after_release",
+      "sample": null,
+      "reason": "fixture changed across traversal",
+      "native_reason": "fixture changed after local traversal"
+    },
+    {
+      "line": 4114,
+      "kind": "immediate_after_release",
+      "sample": null,
+      "reason": "fixture changed across traversal",
+      "native_reason": "fixture changed after local traversal"
+    }
+  ],
+  "timing": {
+    "settling_groups": 160,
+    "gap_min_us": 25072,
+    "gap_max_us": 27776,
+    "span_min_us": 506148,
+    "span_max_us": 526000,
+    "read_min_us": 1,
+    "read_max_us": 416
+  }
+}
+1 ordinary REP0 {'bands': 'TTNN', 'neighbors': {'A': ['263702', 'B'], 'B': ['A', '65968'], 'P': ['X', '393398'], 'X': ['393760', 'P']}, 'order': ['A', 'B', 'X', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNT", "global_chain": null, "neighbors": {"A": ["263702", "X"], "B": ["X", "65968"], "P": ["393760", "393398"], "X": ["A", "B"]}, "order": ["A", "X", "B", "P"]}': 5} ANCHORS {'before': [23], 'setup_eligibility': [24], 'before_insert': [25], 'treatment_call': [27], 'trial_end': [49]}
+1 private REP0 {'bands': 'TTNN', 'neighbors': {'A': ['0', 'B'], 'B': ['A', 'X'], 'P': ['X', '0'], 'X': ['B', 'P']}, 'order': ['A', 'B', 'X', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNT", "global_chain": null, "neighbors": {"A": ["0", "X"], "B": ["X", "P"], "P": ["B", "0"], "X": ["A", "B"]}, "order": ["A", "X", "B", "P"]}': 5} ANCHORS {'before': [4244], 'setup_eligibility': [4245], 'before_insert': [4246], 'treatment_call': [4248], 'trial_end': [4270]}
+2 ordinary REP0 {'bands': 'TTNN', 'neighbors': {'A': ['263702', 'B'], 'B': ['A', '65968'], 'P': ['X', '393398'], 'X': ['393760', 'P']}, 'order': ['A', 'B', 'X', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNT", "global_chain": null, "neighbors": {"A": ["263702", "X"], "B": ["X", "65968"], "P": ["393760", "393398"], "X": ["A", "B"]}, "order": ["A", "X", "B", "P"]}': 5} ANCHORS {'before': [62], 'setup_eligibility': [63], 'before_insert': [66], 'treatment_call': [68], 'trial_end': [90]}
+3 ordinary REP0 {'bands': 'TTNN', 'neighbors': {'A': ['263702', 'B'], 'B': ['A', '65968'], 'P': ['X', '393398'], 'X': ['393760', 'P']}, 'order': ['A', 'B', 'X', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNT", "global_chain": null, "neighbors": {"A": ["263702", "X"], "B": ["X", "65968"], "P": ["393760", "393398"], "X": ["A", "B"]}, "order": ["A", "X", "B", "P"]}': 5} ANCHORS {'before': [103], 'setup_eligibility': [104], 'before_insert': [107], 'treatment_call': [109], 'trial_end': [131]}
+3 private REP0 {'bands': 'TTNN', 'neighbors': {'A': ['0', 'B'], 'B': ['A', 'X'], 'P': ['X', '0'], 'X': ['B', 'P']}, 'order': ['A', 'B', 'X', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNT", "global_chain": null, "neighbors": {"A": ["0", "X"], "B": ["X", "P"], "P": ["B", "0"], "X": ["A", "B"]}, "order": ["A", "X", "B", "P"]}': 5} ANCHORS {'before': [4283], 'setup_eligibility': [4284], 'before_insert': [4287], 'treatment_call': [4289], 'trial_end': [4311]}
+4 ordinary REP0 {'bands': 'TTNT', 'neighbors': {'A': ['X', 'B'], 'B': ['A', '65968'], 'P': ['393760', '393398'], 'X': ['263702', 'A']}, 'order': ['X', 'A', 'B', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNN", "global_chain": null, "neighbors": {"A": ["263702", "B"], "B": ["A", "65968"], "P": ["393760", "X"], "X": ["P", "393398"]}, "order": ["A", "B", "P", "X"]}': 5} ANCHORS {'before': [144], 'setup_eligibility': [145], 'before_insert': [146], 'treatment_call': [148], 'trial_end': [170]}
+4 private REP0 {'bands': 'TTNT', 'neighbors': {'A': ['X', 'B'], 'B': ['A', 'P'], 'P': ['B', '0'], 'X': ['0', 'A']}, 'order': ['X', 'A', 'B', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNN", "global_chain": null, "neighbors": {"A": ["0", "B"], "B": ["A", "P"], "P": ["B", "X"], "X": ["P", "0"]}, "order": ["A", "B", "P", "X"]}': 5} ANCHORS {'before': [4324], 'setup_eligibility': [4325], 'before_insert': [4326], 'treatment_call': [4328], 'trial_end': [4350]}
+5 ordinary REP0 {'bands': 'TTNN', 'neighbors': {'A': ['263702', 'B'], 'B': ['A', '65968'], 'P': ['393760', 'X'], 'X': ['P', '393398']}, 'order': ['A', 'B', 'P', 'X'], 'global_chain': None} ENDPOINTS {'{"bands": "NTNT", "global_chain": null, "neighbors": {"A": ["393760", "P"], "B": ["X", "65968"], "P": ["A", "393398"], "X": ["263702", "B"]}, "order": ["X", "B", "A", "P"]}': 5} ANCHORS {'before': [183], 'setup_eligibility': [184], 'before_insert': [190], 'treatment_call': [192], 'trial_end': [218]}
+6 private REP0 {'bands': 'TNNN', 'neighbors': {'A': ['0', 'B'], 'B': ['A', 'P'], 'P': ['B', 'X'], 'X': ['P', '0']}, 'order': ['A', 'B', 'P', 'X'], 'global_chain': ['AT', 'BN', 'PN', 'XN']} ENDPOINTS {'{"bands": "TNNN", "global_chain": null, "neighbors": {"A": ["0", "X"], "B": ["X", "P"], "P": ["B", "0"], "X": ["A", "B"]}, "order": ["A", "X", "B", "P"]}': 5} ANCHORS {'before': [4363], 'setup_eligibility': [4364], 'before_insert': [4365], 'treatment_call': [4367], 'trial_end': [4389]}
+7 ordinary REP0 {'bands': 'TNNN', 'neighbors': {'A': ['263702', '65968'], 'B': ['X', 'P'], 'P': ['B', '393398'], 'X': ['393760', 'B']}, 'order': ['A', 'X', 'B', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TNNT", "global_chain": null, "neighbors": {"A": ["263702", "X"], "B": ["393760", "P"], "P": ["B", "393398"], "X": ["A", "65968"]}, "order": ["A", "X", "B", "P"]}': 5} ANCHORS {'before': [231], 'setup_eligibility': [232], 'before_insert': [233], 'treatment_call': [235], 'trial_end': [257]}
+8 private REP0 {'bands': 'TTNN', 'neighbors': {'A': ['B', 'X'], 'B': ['0', 'A'], 'P': ['X', '0'], 'X': ['A', 'P']}, 'order': ['B', 'A', 'X', 'P'], 'global_chain': ['BT', 'AT', 'XN', 'PN']} ENDPOINTS {'{"bands": "TTNN", "global_chain": null, "neighbors": {"A": ["B", "X"], "B": ["0", "A"], "P": ["X", "0"], "X": ["A", "P"]}, "order": ["B", "A", "X", "P"]}': 5} ANCHORS {'before': [4405], 'setup_eligibility': [4406], 'before_insert': [4407], 'treatment_call': [4409], 'trial_end': [4431]}
+9 ordinary REP0 {'bands': 'TTNT', 'neighbors': {'A': ['X', 'B'], 'B': ['A', '65968'], 'P': ['393760', '393398'], 'X': ['263702', 'A']}, 'order': ['X', 'A', 'B', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNT", "global_chain": null, "neighbors": {"A": ["263702", "X"], "B": ["X", "65968"], "P": ["393760", "393398"], "X": ["A", "B"]}, "order": ["A", "X", "B", "P"]}': 5} ANCHORS {'before': [270], 'setup_eligibility': [271], 'before_insert': [272], 'treatment_call': [274], 'trial_end': [296]}
+10 ordinary REP0 {'bands': 'TTNT', 'neighbors': {'A': ['X', 'B'], 'B': ['A', '65968'], 'P': ['393760', '393398'], 'X': ['263702', 'A']}, 'order': ['X', 'A', 'B', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNT", "global_chain": null, "neighbors": {"A": ["263702", "X"], "B": ["X", "65968"], "P": ["393760", "393398"], "X": ["A", "B"]}, "order": ["A", "X", "B", "P"]}': 5} ANCHORS {'before': [309], 'setup_eligibility': [310], 'before_insert': [313], 'treatment_call': [315], 'trial_end': [337]}
+11 ordinary REP0 {'bands': 'TTNN', 'neighbors': {'A': ['263702', 'B'], 'B': ['A', '65968'], 'P': ['X', '393398'], 'X': ['393760', 'P']}, 'order': ['A', 'B', 'X', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNN", "global_chain": null, "neighbors": {"A": ["263702", "B"], "B": ["A", "65968"], "P": ["393760", "X"], "X": ["P", "393398"]}, "order": ["A", "B", "P", "X"]}': 5} ANCHORS {'before': [350], 'setup_eligibility': [351], 'before_insert': [352], 'treatment_call': [354], 'trial_end': [376]}
+11 private REP0 {'bands': 'TTNN', 'neighbors': {'A': ['0', 'B'], 'B': ['A', 'X'], 'P': ['X', '0'], 'X': ['B', 'P']}, 'order': ['A', 'B', 'X', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNN", "global_chain": null, "neighbors": {"A": ["0", "B"], "B": ["A", "P"], "P": ["B", "X"], "X": ["P", "0"]}, "order": ["A", "B", "P", "X"]}': 5} ANCHORS {'before': [4444], 'setup_eligibility': [4445], 'before_insert': [4446], 'treatment_call': [4448], 'trial_end': [4470]}
+12 ordinary REP0 {'bands': 'TTNN', 'neighbors': {'A': ['263702', 'B'], 'B': ['A', '65968'], 'P': ['393760', 'X'], 'X': ['P', '393398']}, 'order': ['A', 'B', 'P', 'X'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNT", "global_chain": null, "neighbors": {"A": ["263702", "X"], "B": ["X", "65968"], "P": ["393760", "393398"], "X": ["A", "B"]}, "order": ["A", "X", "B", "P"]}': 5} ANCHORS {'before': [389], 'setup_eligibility': [390], 'before_insert': [391], 'treatment_call': [393, 417], 'trial_end': [439]}
+13 ordinary REP0 {'bands': 'TTNN', 'neighbors': {'A': ['263702', 'B'], 'B': ['A', '65968'], 'P': ['X', '393398'], 'X': ['393760', 'P']}, 'order': ['A', 'B', 'X', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "NTNN", "global_chain": null, "neighbors": {"A": ["393760", "X"], "B": ["263702", "65968"], "P": ["X", "393398"], "X": ["A", "P"]}, "order": ["B", "A", "X", "P"]}': 5} ANCHORS {'before': [452], 'setup_eligibility': [453], 'before_insert': [463], 'treatment_call': [465], 'trial_end': [487]}
+14 ordinary REP0 {'bands': 'NTNN', 'neighbors': {'A': ['393760', 'X'], 'B': ['263702', '65968'], 'P': ['X', '393398'], 'X': ['A', 'P']}, 'order': ['B', 'A', 'X', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNN", "global_chain": null, "neighbors": {"A": ["263702", "B"], "B": ["A", "65968"], "P": ["X", "393398"], "X": ["393760", "P"]}, "order": ["A", "B", "X", "P"]}': 5} ANCHORS {'before': [500], 'setup_eligibility': [501], 'before_insert': [507], 'treatment_call': [509], 'trial_end': [535]}
+15 ordinary REP0 {'bands': 'NTNN', 'neighbors': {'A': ['393760', 'X'], 'B': ['263702', '65968'], 'P': ['X', '393398'], 'X': ['A', 'P']}, 'order': ['B', 'A', 'X', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNT", "global_chain": null, "neighbors": {"A": ["263702", "X"], "B": ["X", "65968"], "P": ["393760", "393398"], "X": ["A", "B"]}, "order": ["A", "X", "B", "P"]}': 5} ANCHORS {'before': [548], 'setup_eligibility': [549], 'before_insert': [559], 'treatment_call': [561], 'trial_end': [583]}
+16 ordinary REP0 {'bands': 'NTNNN', 'neighbors': {'A': ['393760', 'X'], 'B': ['263702', '65968'], 'P': ['X', 'C'], 'X': ['A', 'P'], 'C': ['P', '393398']}, 'order': ['B', 'A', 'X', 'P', 'C'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNNT", "global_chain": null, "neighbors": {"A": ["263702", "C"], "B": ["C", "65968"], "C": ["A", "B"], "P": ["X", "393398"], "X": ["393760", "P"]}, "order": ["A", "C", "B", "X", "P"]}': 5} ANCHORS {'before': [609], 'setup_eligibility': [610], 'before_insert': None, 'treatment_call': None, 'trial_end': [645]}
+17 ordinary REP0 {'bands': 'NTNNN', 'neighbors': {'A': ['393760', 'X'], 'B': ['263702', '65968'], 'P': ['X', 'C'], 'X': ['A', 'P'], 'C': ['P', '393398']}, 'order': ['B', 'A', 'X', 'P', 'C'], 'global_chain': None} ENDPOINTS {'{"bands": "NTNNN", "global_chain": null, "neighbors": {"A": ["393760", "C"], "B": ["263702", "65968"], "C": ["A", "X"], "P": ["X", "393398"], "X": ["C", "P"]}, "order": ["B", "A", "C", "X", "P"]}': 5} ANCHORS {'before': [671], 'setup_eligibility': [672], 'before_insert': None, 'treatment_call': None, 'trial_end': [703]}
+18 ordinary REP0 {'bands': 'NTNNN', 'neighbors': {'A': ['393760', 'X'], 'B': ['263702', '65968'], 'P': ['X', 'C'], 'X': ['A', 'P'], 'C': ['P', '393398']}, 'order': ['B', 'A', 'X', 'P', 'C'], 'global_chain': None} ENDPOINTS {'{"bands": "NTNNN", "global_chain": null, "neighbors": {"A": ["393760", "C"], "B": ["263702", "65968"], "C": ["A", "X"], "P": ["X", "393398"], "X": ["C", "P"]}, "order": ["B", "A", "C", "X", "P"]}': 5} ANCHORS {'before': [729], 'setup_eligibility': [730], 'before_insert': None, 'treatment_call': None, 'trial_end': [768]}
+19 ordinary REP0 {'bands': 'TTNN', 'neighbors': {'A': ['263702', 'B'], 'B': ['A', '65968'], 'P': ['X', '393398'], 'X': ['393760', 'P']}, 'order': ['A', 'B', 'X', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "NTNN", "global_chain": null, "neighbors": {"A": ["X", "P"], "B": ["263702", "65968"], "P": ["A", "393398"], "X": ["393760", "A"]}, "order": ["B", "X", "A", "P"]}': 5} ANCHORS {'before': [781], 'setup_eligibility': [782], 'before_insert': [783], 'treatment_call': [787], 'trial_end': [809]}
+20 ordinary REP0 {'bands': 'TTNN', 'neighbors': {'A': ['263702', 'B'], 'B': ['A', '65968'], 'P': ['393760', 'X'], 'X': ['P', '393398']}, 'order': ['A', 'B', 'P', 'X'], 'global_chain': None} ENDPOINTS {'{"bands": "NTNN", "global_chain": null, "neighbors": {"A": ["P", "X"], "B": ["263702", "65968"], "P": ["393760", "A"], "X": ["A", "393398"]}, "order": ["B", "P", "A", "X"]}': 5} ANCHORS {'before': [824], 'setup_eligibility': [825], 'before_insert': [826], 'treatment_call': [830], 'trial_end': [852]}
+21 private REP0 {'bands': 'TTTN', 'neighbors': {'A': ['0', 'B'], 'B': ['A', 'P'], 'P': ['B', 'X'], 'X': ['P', '0']}, 'order': ['A', 'B', 'P', 'X'], 'global_chain': ['AT', 'BT', 'PT', 'XN']} ENDPOINTS {'{"bands": "TTTN", "global_chain": null, "neighbors": {"A": ["P", "X"], "B": ["0", "P"], "P": ["B", "A"], "X": ["A", "0"]}, "order": ["B", "P", "A", "X"]}': 5} ANCHORS {'before': [4493], 'setup_eligibility': [4494], 'before_insert': [4495], 'treatment_call': [4499], 'trial_end': [4521]}
+22 private REP0 {'bands': 'TTNNN', 'neighbors': {'A': ['0', 'B'], 'B': ['A', 'P'], 'P': ['B', 'O'], 'X': ['O', '0'], 'O': ['P', 'X']}, 'order': ['A', 'B', 'P', 'O', 'X'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNNT", "global_chain": null, "neighbors": {"A": ["O", "B"], "B": ["A", "P"], "O": ["0", "A"], "P": ["B", "X"], "X": ["P", "0"]}, "order": ["O", "A", "B", "P", "X"]}': 5} ANCHORS {'before': [4535], 'setup_eligibility': [4536], 'before_insert': [4537], 'treatment_call': [4539], 'trial_end': [4561]}
+23 private REP0 {'bands': 'TTNNT', 'neighbors': {'A': ['O', 'B'], 'B': ['A', 'P'], 'P': ['B', 'X'], 'X': ['P', '0'], 'O': ['0', 'A']}, 'order': ['O', 'A', 'B', 'P', 'X'], 'global_chain': None} ENDPOINTS {'null': 5} ANCHORS {'before': [4575], 'setup_eligibility': [4576], 'before_insert': None, 'treatment_call': None, 'trial_end': [4578]}
+24 private REP0 {'bands': 'TTNNN', 'neighbors': {'A': ['0', 'B'], 'B': ['A', 'P'], 'P': ['B', 'O'], 'X': ['O', '0'], 'O': ['P', 'X']}, 'order': ['A', 'B', 'P', 'O', 'X'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNNT", "global_chain": null, "neighbors": {"A": ["O", "B"], "B": ["A", "P"], "O": ["0", "A"], "P": ["B", "X"], "X": ["P", "0"]}, "order": ["O", "A", "B", "P", "X"]}': 5} ANCHORS {'before': [4592], 'setup_eligibility': [4593], 'before_insert': [4594], 'treatment_call': [4596], 'trial_end': [4618]}
+25 private REP0 {'bands': 'TTNNT', 'neighbors': {'A': ['O', 'B'], 'B': ['A', 'P'], 'P': ['B', 'X'], 'X': ['P', '0'], 'O': ['0', 'A']}, 'order': ['O', 'A', 'B', 'P', 'X'], 'global_chain': None} ENDPOINTS {'null': 5} ANCHORS {'before': [4632], 'setup_eligibility': [4633], 'before_insert': None, 'treatment_call': None, 'trial_end': [4635]}
+26 private REP0 {'bands': 'TTNNN', 'neighbors': {'A': ['0', 'B'], 'B': ['A', 'P'], 'P': ['B', 'O'], 'X': ['O', '0'], 'O': ['P', 'X']}, 'order': ['A', 'B', 'P', 'O', 'X'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNNT", "global_chain": null, "neighbors": {"A": ["0", "O"], "B": ["O", "P"], "O": ["A", "B"], "P": ["B", "X"], "X": ["P", "0"]}, "order": ["A", "O", "B", "P", "X"]}': 5} ANCHORS {'before': [4649], 'setup_eligibility': [4650], 'before_insert': [4653], 'treatment_call': [4655], 'trial_end': [4677]}
+27 private REP0 {'bands': 'TTNNT', 'neighbors': {'A': ['O', 'B'], 'B': ['A', 'P'], 'P': ['B', 'X'], 'X': ['P', '0'], 'O': ['0', 'A']}, 'order': ['O', 'A', 'B', 'P', 'X'], 'global_chain': None} ENDPOINTS {'{"bands": "NTNNN", "global_chain": null, "neighbors": {"A": ["O", "0"], "B": ["0", "P"], "O": ["X", "A"], "P": ["B", "X"], "X": ["P", "O"]}, "order": ["B", "P", "X", "O", "A"]}': 5} ANCHORS {'before': [4693], 'setup_eligibility': [4694], 'before_insert': [4695], 'treatment_call': [4699], 'trial_end': [4723]}
+28 private REP0 {'bands': 'TTNN', 'neighbors': {'A': ['0', 'B'], 'B': ['A', 'P'], 'P': ['B', 'X'], 'X': ['P', '0']}, 'order': ['A', 'B', 'P', 'X'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNN", "global_chain": null, "neighbors": {"A": ["0", "B"], "B": ["A", "P"], "P": ["B", "X"], "X": ["P", "0"]}, "order": ["A", "B", "P", "X"]}': 5} ANCHORS {'before': [4736], 'setup_eligibility': [4737], 'before_insert': [4738], 'treatment_call': [4740], 'trial_end': [4763]}
+29 private REP0 {'bands': 'TTNT', 'neighbors': {'A': ['X', 'B'], 'B': ['A', 'P'], 'P': ['B', '0'], 'X': ['0', 'A']}, 'order': ['X', 'A', 'B', 'P'], 'global_chain': None} ENDPOINTS {'{"bands": "TTNN", "global_chain": null, "neighbors": {"A": ["0", "B"], "B": ["A", "P"], "P": ["B", "X"], "X": ["P", "0"]}, "order": ["A", "B", "P", "X"]}': 5} ANCHORS {'before': [4776], 'setup_eligibility': [4777], 'before_insert': [4778], 'treatment_call': [4780], 'trial_end': [4803]}

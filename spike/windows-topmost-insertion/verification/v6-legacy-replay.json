@@ -1,0 +1,20 @@
+[
+  {
+    "run": "20261026T090428503Z-11092",
+    "raw_sha256": "62de6552ce92933a0ca37dcef2fd7eefe578457c995dc575cb98205a3abecb4f",
+    "captured_and_current_stdout_byte_identical": true,
+    "exit_code": 2,
+    "schema_version": 4,
+    "eligible": 89,
+    "control_failed": 25
+  },
+  {
+    "run": "20261027T003013400Z-24124",
+    "raw_sha256": "07190550967db31935c341061c0caff5ffc97509f190226770ee8dd304eba431",
+    "captured_and_current_stdout_byte_identical": true,
+    "exit_code": 2,
+    "schema_version": 5,
+    "eligible": 150,
+    "control_failed": 5
+  }
+]

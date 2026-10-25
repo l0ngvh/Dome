@@ -1,0 +1,58 @@
+[
+  {
+    "file": "Cargo.toml",
+    "sha256": "e28a0a5546a5aba7cc2df4b8f2f6626b28b6c3528700d212eaf3bc5c92cd2419"
+  },
+  {
+    "file": "Cargo.lock",
+    "sha256": "c0a82a85398da10831bcb4eae36f0d3345b21a6d1f6188d097a23f5b6606bab7"
+  },
+  {
+    "file": "src/main.rs",
+    "sha256": "3909fd28c435e2ea3a3cc611c8640c7b3ff0ea59ff1eeca81e46caa6b3200713"
+  },
+  {
+    "file": "src/native.rs",
+    "sha256": "6b426c276f1a493d518c39bf5ccc1b3a005bf38de2e0d066c8f49ef67a0654e6"
+  },
+  {
+    "file": "src/observation.rs",
+    "sha256": "dbf29decd2e6f072f18b34adaef4520da18403dc5cf908d74868d2461a1b5e4c"
+  },
+  {
+    "file": "tests/scrambled-snapshot.json",
+    "sha256": "7a1ab9fe1f4c26eaceff2204f1e644ab91cb273c805aa6a02d43c2a36b605d66"
+  },
+  {
+    "file": "verify_saved_run.py",
+    "sha256": "d35bc3fada971731709c387da520ccc7ae4eb7e28b5585df05e7b9717b50f179"
+  },
+  {
+    "file": "src/run_capture.rs",
+    "sha256": "a315969f95f301eb0a0f91ee0d1e3cc47a5ab2aa26670365c8c6e6ce76c3d213"
+  },
+  {
+    "file": "analyze.py",
+    "sha256": "afc21d55cd8dc5294a92ae3d55a9e63d461cffdd293f009a94b758006550e7c6"
+  },
+  {
+    "file": "test_analyze.py",
+    "sha256": "52f832c1d08b3272e6e25bd87f69b8d4d1c4878f4448bede234e34c5ee5bd466"
+  },
+  {
+    "file": "verify_output_reduction.py",
+    "sha256": "f02bafd7e25df581cb51d2d1ea099acf21111c6673b6fd3e4f03b2934a874794"
+  },
+  {
+    "file": "README.md",
+    "sha256": "03beb8777edb5ba58b35a8aa197fcc597953c9085604af99d6e8422cef772582"
+  },
+  {
+    "file": "REPORT.md",
+    "sha256": "1c2544b5037a526f5626f2b6cc2b6dd4fd012f75a7d59f5b4da16f90ec34c342"
+  },
+  {
+    "file": "windows-topmost-insertion.exe",
+    "sha256": "3e4f502c199504c641c5677b480fe36acfffd733e148e4374c257e3392f36714"
+  }
+]
